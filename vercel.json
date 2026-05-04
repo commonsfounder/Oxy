@@ -1,17 +1,23 @@
 {
+  "functions": {
+    "api/index.js": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
-    { "source": "/chat", "destination": "/server.js" },
-    { "source": "/process-audio", "destination": "/server.js" },
-    { "source": "/memory", "destination": "/server.js" },
-    { "source": "/memory/:path*", "destination": "/server.js" },
-    { "source": "/history/:path*", "destination": "/server.js" },
-    { "source": "/action-log", "destination": "/server.js" },
-    { "source": "/action-log/:path*", "destination": "/server.js" },
-    { "source": "/connectors", "destination": "/server.js" },
-    { "source": "/connectors/:path*", "destination": "/server.js" },
-    { "source": "/briefing/:path*", "destination": "/server.js" },
-    { "source": "/install-shortcut", "destination": "/server.js" },
-    { "source": "/preferences/:path*", "destination": "/server.js" },
-    { "source": "/health", "destination": "/server.js" }
+    { "source": "/chat", "destination": "/api/index" },
+    { "source": "/process-audio", "destination": "/api/index" },
+    { "source": "/memory", "destination": "/api/index" },
+    { "source": "/memory/:path*", "destination": "/api/index" },
+    { "source": "/history/:path*", "destination": "/api/index" },
+    { "source": "/action-log", "destination": "/api/index" },
+    { "source": "/action-log/:path*", "destination": "/api/index" },
+    { "source": "/connectors", "destination": "/api/index" },
+    { "source": "/connectors/:path*", "destination": "/api/index" },
+    { "source": "/briefing/:path*", "destination": "/api/index" },
+    { "source": "/install-shortcut", "destination": "/api/index" },
+    { "source": "/preferences/:path*", "destination": "/api/index" },
+    { "source": "/health", "destination": "/api/index" }
   ]
 }
