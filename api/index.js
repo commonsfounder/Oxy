@@ -658,4 +658,10 @@ app.get('/install-shortcut', (_req, res) => {
   }
 });
 
+const _indexHtml = require('fs').readFileSync(path.resolve(__dirname, '..', 'index.html'), 'utf8');
+app.get('/', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(_indexHtml);
+});
+
 module.exports = app;
