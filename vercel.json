@@ -1,62 +1,7 @@
 {
-  "functions": {
-    "api.js": {
-      "memory": 512,
-      "maxDuration": 30
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/chat",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/process-audio",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/memory",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/health",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/memory/:path",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/history/:userId",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/action-log",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/action-log/:userId",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/connectors",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/connectors/:userId",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/briefing/:userId",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/install-shortcut",
-      "destination": "/api/index.js"
-    },
-    {
-      "source": "/preferences/:userId",
-      "destination": "/api/index.js"
-    }
-  ]
+  "buildCommand": "npm install",
+  "serverless": {
+    "memory": 512,
+    "maxDuration": 30
+  }
 }
