@@ -10,6 +10,7 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REFRESH_TOKEN = process.env.SPOTIFY_REFRESH_TOKEN;
 const GOOGLE_CALENDAR_CREDENTIALS = process.env.GOOGLE_CALENDAR_CREDENTIALS;
+const GMAIL_CREDENTIALS = process.env.GMAIL_CREDENTIALS || process.env.GOOGLE_CALENDAR_CREDENTIALS;
 const HOME_ASSISTANT_URL = process.env.HOME_ASSISTANT_URL;
 const HOME_ASSISTANT_TOKEN = process.env.HOME_ASSISTANT_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -27,6 +28,21 @@ async function getSpotifyToken() {
   );
   spotifyToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
   return spotifyToken.access_token;
+}
+
+// --- Gmail token cache ---
+let gmailToken = null;
+async function getGmailToken() {
+  if (gmailToken && gmailToken.expires > Date.now()) return gmailToken.access_token;
+  const credentials = JSON.parse(GMAIL_CREDENTIALS);
+  const resp = await axios.post('https://oauth2.googleapis.com/token', {
+    grant_type: 'refresh_token',
+    refresh_token: credentials.refresh_token,
+    client_id: credentials.client_id,
+    client_secret: credentials.client_secret
+  });
+  gmailToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
+  return gmailToken.access_token;
 }
 
 // --- Google Calendar token cache ---
@@ -161,6 +177,19 @@ const tools = {
       { headers: { Authorization: `Bearer ${token}` } }
     );
     return { success: true, text: `Calendar event created: ${title}` };
+  },
+
+  send_email: async (args) => {
+    const { to, subject, body } = args;
+    const token = await getGmailToken();
+    const raw = Buffer.from(
+      `To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+    ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+      { raw },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return { success: true, text: `Email sent to ${to}` };
   },
 
   smart_home: async (args) => {
