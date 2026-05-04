@@ -10,7 +10,9 @@ const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID;
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET;
 const SPOTIFY_REFRESH_TOKEN = process.env.SPOTIFY_REFRESH_TOKEN;
 const GOOGLE_CALENDAR_CREDENTIALS = process.env.GOOGLE_CALENDAR_CREDENTIALS;
-const GMAIL_CREDENTIALS = process.env.GMAIL_CREDENTIALS || process.env.GOOGLE_CALENDAR_CREDENTIALS;
+const GMAIL_CLIENT_ID = process.env.GMAIL_CLIENT_ID;
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET;
+const GMAIL_REFRESH_TOKEN = process.env.GMAIL_REFRESH_TOKEN;
 const HOME_ASSISTANT_URL = process.env.HOME_ASSISTANT_URL;
 const HOME_ASSISTANT_TOKEN = process.env.HOME_ASSISTANT_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -34,12 +36,11 @@ async function getSpotifyToken() {
 let gmailToken = null;
 async function getGmailToken() {
   if (gmailToken && gmailToken.expires > Date.now()) return gmailToken.access_token;
-  const credentials = JSON.parse(GMAIL_CREDENTIALS);
   const resp = await axios.post('https://oauth2.googleapis.com/token', {
     grant_type: 'refresh_token',
-    refresh_token: credentials.refresh_token,
-    client_id: credentials.client_id,
-    client_secret: credentials.client_secret
+    refresh_token: GMAIL_REFRESH_TOKEN,
+    client_id: GMAIL_CLIENT_ID,
+    client_secret: GMAIL_CLIENT_SECRET
   });
   gmailToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
   return gmailToken.access_token;
