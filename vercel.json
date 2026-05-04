@@ -1,5 +1,9 @@
 {
   "functions": {
+    "api/index.js": {
+      "memory": 512,
+      "maxDuration": 30
+    },
     "api/chat.js": {
       "memory": 512,
       "maxDuration": 30
