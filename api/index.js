@@ -7,6 +7,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const OpenAI = require('openai');
 const FormData = require('form-data');
 const axios = require('axios');
+const { executeTool } = require('./tools');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -27,21 +28,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-const MCP_SERVER_URL = process.env.MCP_SERVER_URL;
-
+// Execute tools directly (no external MCP server)
 async function callMcpTool(tool, args) {
-  if (!MCP_SERVER_URL) {
-    return { success: false, error: 'MCP server not configured' };
-  }
-  try {
-    const resp = await axios.post(MCP_SERVER_URL, {
-      name: tool,
-      arguments: args
-    }, { timeout: 15000 });
-    return resp.data;
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  return await executeTool(tool, args);
 }
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Intelligent personal assistant.
