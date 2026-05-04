@@ -1,0 +1,47 @@
+### Health check
+GET http://localhost:3000/health
+
+###
+
+### Text chat (no audio)
+POST http://localhost:3000/chat
+Content-Type: application/json
+
+{
+  "message": "Hey Oxcy, what's good?",
+  "userId": "test-user"
+}
+
+###
+
+### Text chat with TTS audio
+POST http://localhost:3000/chat?tts=true
+Content-Type: application/json
+
+{
+  "message": "Set a reminder to call mum at 6pm",
+  "userId": "test-user"
+}
+
+###
+
+### Save a memory manually
+POST http://localhost:3000/memory
+Content-Type: application/json
+
+{
+  "userId": "test-user",
+  "content": "User's name is Somto. Works in tech. Lives in London."
+}
+
+###
+
+### Read memories
+GET http://localhost:3000/memory/test-user
+
+###
+
+### Audio upload (use curl — see README)
+# curl -X POST http://localhost:3000/process-audio \
+#   -H "user-id: test-user" \
+#   -F "audio=@/path/to/test.wav"

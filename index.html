@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Oxy">
+<meta name="theme-color" content="#0c0c0e">
+<title>Oxcy</title>
+<link rel="manifest" href="/manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0c0c0e;
+    --surface: #131316;
+    --surface2: #1a1a1f;
+    --border: #222228;
+    --teal: #2ABFBF;
+    --teal-dim: rgba(42,191,191,0.12);
+    --teal-mid: rgba(42,191,191,0.25);
+    --amber: #F4A261;
+    --cream: #F7F5F0;
+    --text: #e8e4dc;
+    --muted: #555560;
+    --muted2: #888894;
+  }
+
+  html, body, #root {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    overflow: hidden;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  .app {
+    display: flex;
+    height: 100vh;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  .sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 28px 0;
+    background: var(--surface);
+  }
+
+  .logo {
+    padding: 0 24px 32px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .logo-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    color: var(--cream);
+    text-transform: uppercase;
+  }
+  .logo-sub {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-top: 3px;
+  }
+
+  .nav {
+    flex: 1;
+    padding: 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted2);
+    transition: all 0.15s;
+    border: 1px solid transparent;
+    background: none;
+    width: 100%;
+    text-align: left;
+  }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active {
+    color: var(--teal);
+    background: var(--teal-dim);
+    border-color: rgba(42,191,191,0.15);
+  }
+  .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+
+  .sidebar-bottom {
+    padding: 16px 12px 0;
+    border-top: 1px solid var(--border);
+    margin-top: auto;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+  .status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--teal);
+    box-shadow: 0 0 6px var(--teal);
+    animation: pulse-dot 2s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pulse-dot {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .topbar {
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 28px;
+    gap: 12px;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+  .topbar-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--cream);
+    text-transform: uppercase;
+    flex: 1;
+  }
+  .topbar-badge {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--teal);
+    background: var(--teal-dim);
+    border: 1px solid rgba(42,191,191,0.2);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+
+  .chat-page {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .message { display: flex; flex-direction: column; max-width: 75%; }
+  .message.user { align-self: flex-end; align-items: flex-end; }
+  .message.oxcy { align-self: flex-start; align-items: flex-start; }
+
+  .msg-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+    padding: 0 4px;
+  }
+
+  .msg-bubble {
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.6;
+    position: relative;
+  }
+
+  .message.user .msg-bubble {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 14px 14px 4px 14px;
+  }
+
+  .message.oxcy .msg-bubble {
+    background: var(--teal-dim);
+    border: 1px solid rgba(42,191,191,0.2);
+    color: var(--cream);
+    border-radius: 14px 14px 14px 4px;
+    font-size: 14px;
+  }
+
+  .msg-time {
+    font-size: 9px;
+    color: var(--muted);
+    margin-top: 4px;
+    padding: 0 4px;
+  }
+
+  .msg-play-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--teal);
+    border: none;
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    font-size: 10px;
+    color: var(--bg);
+    cursor: pointer;
+    margin-left: 8px;
+    vertical-align: top;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  .msg-play-btn:hover { transform: scale(1.1); background: #22a8a8; }
+
+  .action-card {
+    background: var(--surface);
+    border: 1px solid var(--amber);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-top: 8px;
+  }
+  .action-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--amber);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .action-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .action-run-btn {
+    background: var(--amber);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Syne', sans-serif;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .action-run-btn:hover { opacity: 0.85; }
+  .action-run-btn.executed {
+    background: var(--border);
+    color: var(--muted2);
+    cursor: default;
+  }
+
+  .typing {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    padding: 14px 16px;
+    background: var(--teal-dim);
+    border: 1px solid rgba(42,191,191,0.2);
+    border-radius: 14px 14px 14px 4px;
+    width: fit-content;
+  }
+  .typing span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--teal);
+    animation: typing-bounce 1.2s ease-in-out infinite;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typing-bounce {
+    0%,60%,100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-6px); opacity: 1; }
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    opacity: 0.5;
+  }
+  .empty-orb {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: 2px solid var(--teal);
+    box-shadow: 0 0 20px rgba(42,191,191,0.2);
+    animation: pulse-dot 3s ease-in-out infinite;
+  }
+  .empty-text {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted2);
+  }
+
+  .chat-input-area {
+    border-top: 1px solid var(--border);
+    padding: 20px 28px;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  .chat-input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    resize: none;
+    min-height: 46px;
+    max-height: 120px;
+    transition: border-color 0.15s;
+    line-height: 1.5;
+  }
+  .chat-input:focus { border-color: rgba(42,191,191,0.4); }
+  .chat-input::placeholder { color: var(--muted); }
+
+  .send-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    background: var(--teal);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    font-size: 18px;
+  }
+  .send-btn:hover { background: #22a8a8; transform: scale(1.04); }
+  .send-btn:disabled { background: var(--border); cursor: not-allowed; transform: none; }
+
+  .mic-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    font-size: 18px;
+    color: var(--muted2);
+  }
+  .mic-btn:hover { background: var(--teal-dim); color: var(--teal); border-color: var(--teal); }
+  .mic-btn.recording {
+    background: rgba(255,80,80,0.15);
+    border-color: rgba(255,80,80,0.5);
+    color: #ff6b6b;
+    animation: mic-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes mic-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,80,80,0.3); }
+    50% { box-shadow: 0 0 0 8px rgba(255,80,80,0); }
+  }
+
+  .page-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 28px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .section {
+    margin-bottom: 28px;
+  }
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--muted2);
+    margin-bottom: 12px;
+  }
+
+  .memory-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .memory-textarea {
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 16px;
+    font-size: 13px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    resize: none;
+    min-height: 100px;
+    line-height: 1.6;
+  }
+  .memory-textarea::placeholder { color: var(--muted); }
+
+  .memory-footer {
+    border-top: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .save-btn {
+    background: var(--teal);
+    color: #0c0c0e;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 18px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'Syne', sans-serif;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .save-btn:hover { background: #22a8a8; }
+
+  .person-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .person-row:last-child { border-bottom: none; }
+  .person-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--teal-dim);
+    border: 1px solid rgba(42,191,191,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    color: var(--teal);
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .person-info { flex: 1; }
+  .person-name { font-size: 13px; color: var(--text); font-weight: 500; }
+  .person-rel { font-size: 11px; color: var(--muted2); margin-top: 1px; }
+  .person-delete {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 4px;
+    transition: color 0.15s;
+  }
+  .person-delete:hover { color: #ff6b6b; }
+
+  .add-person-row {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+  }
+  .mini-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-size: 12px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+  }
+  .mini-input::placeholder { color: var(--muted); }
+  .mini-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 14px;
+    font-size: 11px;
+    color: var(--teal);
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .mini-btn:hover { background: var(--teal-dim); }
+
+  .settings-group {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .setting-row {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 16px;
+  }
+  .setting-row:last-child { border-bottom: none; }
+
+  .setting-info { flex: 1; }
+  .setting-label {
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
+    margin-bottom: 2px;
+  }
+  .setting-desc { font-size: 11px; color: var(--muted2); line-height: 1.4; }
+
+  .setting-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    width: 160px;
+    transition: border-color 0.15s;
+  }
+  .setting-input:focus { border-color: rgba(42,191,191,0.4); }
+
+  .setting-select {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    width: 160px;
+    cursor: pointer;
+  }
+  .setting-select option { background: var(--surface2); }
+
+  .toggle {
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
+    background: var(--border);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--teal); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    top: 3px;
+    left: 3px;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  .toggle.on::after { transform: translateX(20px); }
+
+  .autonomy-options {
+    display: flex;
+    gap: 6px;
+  }
+  .autonomy-opt {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted2);
+    transition: all 0.15s;
+  }
+  .autonomy-opt.active {
+    background: var(--teal-dim);
+    border-color: rgba(42,191,191,0.3);
+    color: var(--teal);
+  }
+
+  .danger-btn {
+    background: rgba(255,80,80,0.08);
+    border: 1px solid rgba(255,80,80,0.2);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #ff6b6b;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.15s;
+  }
+  .danger-btn:hover { background: rgba(255,80,80,0.15); }
+
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(0);
+    background: var(--teal);
+    color: #0c0c0e;
+    padding: 10px 20px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    letter-spacing: 1px;
+    z-index: 1000;
+    animation: toast-in 0.3s ease;
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  .speaking-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(42,191,191,0.06);
+    border-top: 1px solid rgba(42,191,191,0.15);
+    font-size: 11px;
+    color: var(--teal);
+    letter-spacing: 1px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .speaking-waves {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+  }
+  .speaking-waves span {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--teal);
+    animation: wave 0.8s ease-in-out infinite;
+  }
+  .speaking-waves span:nth-child(1) { height: 8px; animation-delay: 0s; }
+  .speaking-waves span:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+  .speaking-waves span:nth-child(3) { height: 10px; animation-delay: 0.2s; }
+  .speaking-waves span:nth-child(4) { height: 16px; animation-delay: 0.15s; }
+  .speaking-waves span:nth-child(5) { height: 8px; animation-delay: 0.05s; }
+  @keyframes wave {
+    0%,100% { transform: scaleY(0.5); opacity: 0.5; }
+    50% { transform: scaleY(1); opacity: 1; }
+  }
+
+  .stop-btn {
+    margin-left: auto;
+    background: none;
+    border: 1px solid rgba(42,191,191,0.3);
+    border-radius: 6px;
+    padding: 3px 10px;
+    font-size: 10px;
+    color: var(--teal);
+    cursor: pointer;
+    font-family: 'Syne', sans-serif;
+    font-weight: 600;
+    letter-spacing: 1px;
+    transition: all 0.15s;
+  }
+  .stop-btn:hover { background: var(--teal-dim); }
+
+  .msg-actions-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .msg-action-status {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    padding: 3px 8px;
+    border-radius: 6px;
+  }
+  .msg-action-status.ok {
+    color: #4ade80;
+    background: rgba(74,222,128,0.12);
+    border: 1px solid rgba(74,222,128,0.3);
+  }
+  .msg-action-status.fail {
+    color: #f87171;
+    background: rgba(248,113,113,0.12);
+    border: 1px solid rgba(248,113,113,0.3);
+  }
+
+  .install-btn {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--teal);
+    background: var(--teal-dim);
+    border: 1px solid rgba(42,191,191,0.3);
+    padding: 6px 14px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .install-btn:hover { background: var(--teal-mid); }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .connectors-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .connector-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: all 0.15s;
+  }
+  .connector-card:hover { border-color: var(--teal-mid); }
+  .connector-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .connector-icon {
+    font-size: 24px;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface2);
+    border-radius: 8px;
+  }
+  .connector-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--cream);
+  }
+  .connector-cat {
+    font-size: 11px;
+    color: var(--muted2);
+    margin-top: 2px;
+  }
+
+  .conn-toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .conn-toggle.on {
+    background: var(--teal-mid);
+    border-color: var(--teal);
+  }
+  .conn-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: all 0.2s;
+  }
+  .conn-toggle.on::after {
+    left: 22px;
+    background: var(--teal);
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .history-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .history-time {
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 60px;
+  }
+  .history-action {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .history-status {
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .status-executed {
+    color: var(--teal);
+    background: var(--teal-dim);
+  }
+  .status-pending {
+    color: var(--amber);
+    background: rgba(244,162,97,0.12);
+  }
+
+  .briefing-banner {
+    margin: 0 28px 16px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, var(--surface), var(--surface2));
+    border: 1px solid var(--teal-mid);
+    border-radius: 12px;
+    animation: slide-down 0.3s ease;
+  }
+  @keyframes slide-down {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .briefing-label {
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--teal);
+    margin-bottom: 8px;
+  }
+  .briefing-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .briefing-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .briefing-dismiss {
+    margin-top: 12px;
+    background: none;
+    border: none;
+    color: var(--muted2);
+    font-size: 12px;
+    cursor: pointer;
+    padding: 4px 0;
+  }
+  .briefing-dismiss:hover { color: var(--text); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useRef, useEffect, useCallback } = React;
+
+const USER_ID = 'user123';
+
+function formatTime(date) {
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function AutoRunActions({ actions }) {
+  const [ran, setRan] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+
+  useEffect(() => {
+    if (!actions || actions.length === 0) return;
+
+    const run = () => {
+      actions.forEach((action, i) => {
+        setTimeout(() => {
+          const shortcutUrl = `shortcuts://run-shortcut?name=Oxy&input=${encodeURIComponent(JSON.stringify(action))}`;
+          const link = document.createElement('a');
+          link.href = shortcutUrl;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          const result = link.click();
+          document.body.removeChild(link);
+          
+          fetch('/action-log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: USER_ID, action, status: 'executed' })
+          }).catch(() => {});
+        }, i * 800);
+      });
+      setRan(true);
+    };
+
+    run();
+
+    setTimeout(() => {
+      if (document.hidden) {
+        setRan(true);
+      } else {
+        setBlocked(true);
+      }
+    }, 5000);
+  }, [actions]);
+
+  if (ran) return null;
+  if (blocked) return (
+    <div className="action-hint" style={{ fontSize:'11px', color:'var(--muted)', padding:'4px 0', fontStyle:'italic' }}>
+      If the shortcut didn't run, tap the "Run" link below to approve it once. After that, it'll work automatically.
+    </div>
+  );
+  return null;
+}
+
+function ChatPage({ settings, memory, people, initialQuery }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
+  const audioRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+
+  useEffect(() => {
+    fetch('/history/' + USER_ID)
+      .then(r => r.json())
+      .then(data => {
+        if (data.history && data.history.length > 0) {
+          const msgs = data.history.map(m => ({
+            role: m.role,
+            content: m.content,
+            time: new Date()
+          }));
+          setMessages(msgs);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const autoSend = useRef(false);
+  useEffect(() => {
+    if (initialQuery && !autoSend.current && messages.length === 0) {
+      autoSend.current = true;
+      sendMessage(initialQuery);
+    }
+  }, [initialQuery]);
+
+  const stopSpeaking = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setSpeaking(false);
+  };
+
+  const playAudioFromBase64 = useCallback(async (base64Audio) => {
+    if (!base64Audio) return;
+    try {
+      setSpeaking(true);
+      const binaryString = atob(base64Audio);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: 'audio/mp3' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => { setSpeaking(false); audioRef.current = null; };
+      audio.onerror = () => { setSpeaking(false); audioRef.current = null; };
+      audio.play();
+    } catch (err) {
+      console.error('Audio play error:', err);
+      setSpeaking(false);
+    }
+  }, []);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        await sendAudio();
+      };
+
+      mediaRecorder.start();
+      setRecording(true);
+      stopSpeaking();
+    } catch (err) {
+      console.error('Mic error:', err);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+      setRecording(false);
+    }
+  };
+
+  const webmToWav = async (webmBlob) => {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const arrayBuffer = await webmBlob.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    
+    const wavBuffer = new ArrayBuffer(44 + length * 2);
+    const view = new DataView(wavBuffer);
+    
+    const writeString = (offset, string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, length * 2, true);
+    
+    const channelData = audioBuffer.getChannelData(0);
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      const sample = Math.max(-1, Math.min(1, channelData[i]));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+      offset += 2;
+    }
+    
+    return new Blob([wavBuffer], { type: 'audio/wav' });
+  };
+
+  const sendAudio = async () => {
+    setLoading(true);
+    try {
+      const webmBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+      const wavBlob = await webmToWav(webmBlob);
+      
+      const formData = new FormData();
+      formData.append('audio', wavBlob, 'audio.wav');
+      formData.append('userId', USER_ID);
+
+      const response = await fetch('/process-audio', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+      
+      if (data.transcription) {
+        const userMsg = { role: 'user', content: data.transcription, time: new Date() };
+        setMessages(prev => [...prev, userMsg]);
+      }
+
+      if (data.text) {
+        const msgData = { role: 'assistant', content: data.text, time: new Date() };
+        if (data.audio) msgData.audio = data.audio;
+        if (data.actions && data.actions.length > 0) {
+          msgData.actions = data.actions;
+        }
+        setMessages(prev => [...prev, msgData]);
+      }
+    } catch (err) {
+      console.error('Audio error:', err);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: "Couldn't process audio: " + err.message,
+        time: new Date()
+      }]);
+    }
+    setLoading(false);
+  };
+
+  const sendMessage = useCallback(async (overrideText) => {
+    const text = (overrideText || input).trim();
+    if (!text || loading) return;
+
+    const userMsg = { role: 'user', content: text, time: new Date() };
+    setMessages(prev => [...prev, userMsg]);
+    if (!overrideText) setInput('');
+    setLoading(true);
+    stopSpeaking();
+
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+
+    try {
+      const url = settings.voiceOn ? '/chat?tts=true' : '/chat';
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          userId: USER_ID,
+          settings: settings,
+          memory: memory,
+          people: people
+        })
+      });
+
+      const data = await response.json();
+      const reply = data.text || "Something went wrong.";
+
+      const msgData = { 
+        role: 'assistant', 
+        content: reply, 
+        time: new Date()
+      };
+      if (data.audio) msgData.audio = data.audio;
+      if (data.actions && data.actions.length > 0) {
+        msgData.actions = data.actions;
+      }
+
+      setMessages(prev => [...prev, msgData]);
+    } catch (err) {
+      console.error('Error:', err);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: "Backend connection failed: " + err.message,
+        time: new Date()
+      }]);
+    }
+
+    setLoading(false);
+  }, [input, loading, settings, memory, people]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  const handleInput = (e) => {
+    setInput(e.target.value);
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+  };
+
+  return (
+    <div className="chat-page">
+      <div className="messages">
+        {messages.length === 0 && !loading && (
+          <div className="empty-state">
+            <div className="empty-orb" />
+            <div className="empty-text">Press the mic and speak</div>
+          </div>
+        )}
+        {messages.map((msg, i) => (
+          <div key={i} className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
+            <div className="msg-label">{msg.role === 'user' ? 'You' : settings.name}</div>
+            <div className="msg-bubble">
+              {msg.content}
+              {msg.audio && (
+                <button
+                  className="msg-play-btn"
+                  onClick={() => playAudioFromBase64(msg.audio)}
+                  title="Play audio"
+                >
+                  ▶
+                </button>
+              )}
+            </div>
+            {msg.actions && msg.actions.length > 0 && (
+              <div className="msg-actions-bar">
+                {msg.actions.map((a, i) => {
+                  const ok = a.result?.success;
+                  return (
+                    <span key={i} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
+                      {ok ? '✓' : '✗'} {a.action} {ok ? 'done' : 'failed'}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <div className="msg-time">{formatTime(msg.time)}</div>
+          </div>
+        ))}
+        {loading && (
+          <div className="message oxcy">
+            <div className="msg-label">{settings.name}</div>
+            <div className="typing">
+              <span/><span/><span/>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {speaking && (
+        <div className="speaking-bar">
+          <div className="speaking-waves">
+            <span/><span/><span/><span/><span/>
+          </div>
+          {settings.name} is speaking
+          <button className="stop-btn" onClick={stopSpeaking}>Stop</button>
+        </div>
+      )}
+
+      <div className="chat-input-area">
+        <div className="input-row">
+          <textarea
+            ref={textareaRef}
+            className="chat-input"
+            placeholder={`Message ${settings.name}...`}
+            value={input}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            rows={1}
+          />
+          <button
+            className="mic-btn"
+            onMouseDown={startRecording}
+            onMouseUp={stopRecording}
+            onTouchStart={startRecording}
+            onTouchEnd={stopRecording}
+            title="Hold to record"
+          >
+            🎤
+          </button>
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            disabled={!input.trim() || loading}
+          >
+            ↑
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MemoryPage({ memory, setMemory, people, setPeople }) {
+  const [newName, setNewName] = useState('');
+  const [newRel, setNewRel] = useState('');
+  const [toast, setToast] = useState(false);
+
+  useEffect(() => {
+    fetch('/memory/' + USER_ID)
+      .then(r => r.json())
+      .then(data => {
+        if (data.memory) {
+          setMemory(data.memory);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const showToast = () => {
+    setToast(true);
+    setTimeout(() => setToast(false), 2000);
+  };
+
+  const saveMemory = async () => {
+    try {
+      await fetch('/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, content: memory })
+      });
+      showToast();
+    } catch (err) {
+      console.error('Save error:', err);
+    }
+  };
+
+  const addPerson = () => {
+    if (!newName.trim()) return;
+    setPeople(prev => [...prev, { name: newName.trim(), rel: newRel.trim() || 'Contact' }]);
+    setNewName('');
+    setNewRel('');
+  };
+
+  const removePerson = (i) => {
+    setPeople(prev => prev.filter((_, idx) => idx !== i));
+  };
+
+  return (
+    <div className="page-content">
+      <div className="section">
+        <div className="section-title">About You</div>
+        <div className="memory-card">
+          <textarea
+            className="memory-textarea"
+            placeholder="Tell Oxy about yourself..."
+            value={memory}
+            onChange={e => setMemory(e.target.value)}
+          />
+          <div className="memory-footer">
+            <button className="save-btn" onClick={saveMemory}>Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">People</div>
+        <div className="memory-card">
+          {people.map((p, i) => (
+            <div key={i} className="person-row">
+              <div className="person-avatar">{p.name[0].toUpperCase()}</div>
+              <div className="person-info">
+                <div className="person-name">{p.name}</div>
+                <div className="person-rel">{p.rel}</div>
+              </div>
+              <button className="person-delete" onClick={() => removePerson(i)}>×</button>
+            </div>
+          ))}
+          <div className="add-person-row">
+            <input
+              className="mini-input"
+              placeholder="Name"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+            />
+            <input
+              className="mini-input"
+              placeholder="Relationship"
+              value={newRel}
+              onChange={e => setNewRel(e.target.value)}
+            />
+            <button className="mini-btn" onClick={addPerson}>Add</button>
+          </div>
+        </div>
+      </div>
+
+      {toast && <div className="toast">Saved ✓</div>}
+    </div>
+  );
+}
+
+function ConnectorsPage() {
+  const [connectors, setConnectors] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/connectors/${USER_ID}`)
+      .then(r => r.json())
+      .then(d => { setConnectors(d.connectors || []); setLoading(false); });
+  }, []);
+
+  const toggle = async (id, enabled) => {
+    await fetch(`/connectors`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: USER_ID, connectorId: id, enabled: !enabled })
+    });
+    setConnectors(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
+  };
+
+  if (loading) return <div className="page-content" style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}><span style={{ color:'var(--muted)' }}>Loading...</span></div>;
+
+  const grouped = connectors.reduce((acc, c) => {
+    acc[c.category] = acc[c.category] || [];
+    acc[c.category].push(c);
+    return acc;
+  }, {});
+
+  return (
+    <div className="page-content">
+      <div className="section">
+        <div className="section-title">Connect your apps</div>
+        <p style={{ fontSize:'13px', color:'var(--muted2)', marginBottom:'20px', lineHeight:'1.6' }}>
+          Toggle the apps you want Oxy to have access to. These connect via iOS Shortcuts — enabling here tells Oxy it can use them.
+        </p>
+        {Object.entries(grouped).map(([cat, items]) => (
+          <div key={cat} style={{ marginBottom:'24px' }}>
+            <div style={{ fontSize:'11px', letterSpacing:'1.5px', textTransform:'uppercase', color:'var(--muted)', marginBottom:'10px' }}>{cat}</div>
+            <div className="connectors-grid">
+              {items.map(c => (
+                <div key={c.id} className="connector-card">
+                  <div className="connector-info">
+                    <div className="connector-icon">{c.icon}</div>
+                    <div>
+                      <div className="connector-name">{c.name}</div>
+                    </div>
+                  </div>
+                  <div className={`conn-toggle ${c.enabled ? 'on' : ''}`} onClick={() => toggle(c.id, c.enabled)} />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionHistoryPage() {
+  const [actions, setActions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/action-log/${USER_ID}`)
+      .then(r => r.json())
+      .then(d => { setActions(d.actions || []); setLoading(false); });
+  }, []);
+
+  const formatAction = (action) => {
+    if (!action) return '';
+    if (typeof action === 'string') return action;
+    const a = JSON.parse(action);
+    if (a.type === 'shortcut') return a.name;
+    return a.type || 'Unknown';
+  };
+
+  if (loading) return <div className="page-content" style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}><span style={{ color:'var(--muted)' }}>Loading...</span></div>;
+
+  if (actions.length === 0) {
+    return (
+      <div className="page-content">
+        <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'60vh', gap:'12px' }}>
+          <span style={{ fontSize:'32px' }}>📋</span>
+          <span style={{ fontSize:'14px', color:'var(--muted2)' }}>No actions yet. Start chatting and Oxy will suggest things to do.</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-content">
+      <div className="section">
+        <div className="section-title">Action History</div>
+        <p style={{ fontSize:'13px', color:'var(--muted2)', marginBottom:'20px', lineHeight:'1.6' }}>
+          Actions Oxy has suggested and you've run.
+        </p>
+        <div className="history-list">
+          {actions.map(a => (
+            <div key={a.id || a.created_at} className="history-item">
+              <div className="history-time">{new Date(a.created_at).toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' })}</div>
+              <div className="history-action">{formatAction(a.action)}</div>
+              <span className={`history-status status-${a.status}`}>{a.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPage({ settings, setSettings }) {
+  const [toast, setToast] = useState(false);
+
+  const update = (key, val) => setSettings(prev => ({ ...prev, [key]: val }));
+
+  const showToast = () => {
+    setToast(true);
+    setTimeout(() => setToast(false), 2000);
+  };
+
+  return (
+    <div className="page-content">
+      <div className="section">
+        <div className="section-title">Identity</div>
+        <div className="settings-group">
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Assistant Name</div>
+              <div className="setting-desc">What you call your assistant</div>
+            </div>
+            <input
+              className="setting-input"
+              value={settings.name}
+              onChange={e => update('name', e.target.value)}
+            />
+          </div>
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Wake Word</div>
+              <div className="setting-desc">Trigger word for hardware device</div>
+            </div>
+            <input
+              className="setting-input"
+              value={settings.wakeWord}
+              onChange={e => update('wakeWord', e.target.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">Voice</div>
+        <div className="settings-group">
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Voice Style</div>
+              <div className="setting-desc">Voice profile</div>
+            </div>
+            <select
+              className="setting-select"
+              value={settings.voice}
+              onChange={e => update('voice', e.target.value)}
+            >
+              <option>British Warm</option>
+              <option>British Cool</option>
+              <option>British Male</option>
+              <option>American Casual</option>
+            </select>
+          </div>
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Voice Playback</div>
+              <div className="setting-desc">Generate audio for responses</div>
+            </div>
+            <button
+              className={`toggle ${settings.voiceOn ? 'on' : ''}`}
+              onClick={() => update('voiceOn', !settings.voiceOn)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">Autonomy</div>
+        <div className="settings-group">
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Initiation Level</div>
+              <div className="setting-desc">How often your assistant speaks first</div>
+            </div>
+            <div className="autonomy-options">
+              {['Off','Light','Medium','Full'].map(opt => (
+                <button
+                  key={opt}
+                  className={`autonomy-opt ${settings.autonomy === opt ? 'active' : ''}`}
+                  onClick={() => update('autonomy', opt)}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title">Shortcut</div>
+        <div className="settings-group">
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Install iOS Shortcut</div>
+              <div className="setting-desc">Required for actions (messages, reminders, calls, music)</div>
+            </div>
+            <a href="/install-shortcut" className="install-btn">Download</a>
+          </div>
+        </div>
+      </div>
+
+      {toast && <div className="toast">Saved ✓</div>}
+    </div>
+  );
+}
+
+function App() {
+  const [page, setPage] = useState('chat');
+  const [memory, setMemory] = useState('');
+  const [people, setPeople] = useState([
+    { name: 'Alisa', rel: 'Close friend — Snapchat and iMessage' }
+  ]);
+  const [settings, setSettings] = useState({
+    name: 'Oxy',
+    wakeWord: 'Oxy',
+    voice: 'British Warm',
+    voiceOn: false,
+    autonomy: 'Medium'
+  });
+  const [briefing, setBriefing] = useState(null);
+  const [initialQuery, setInitialQuery] = useState(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get('q');
+    if (q) {
+      setInitialQuery(decodeURIComponent(q));
+    }
+  }, []);
+
+  const pages = [
+    { id: 'chat', label: 'Chat', icon: '💬' },
+    { id: 'history', label: 'History', icon: '📋' },
+    { id: 'connectors', label: 'Connectors', icon: '🔗' },
+    { id: 'memory', label: 'Memory', icon: '🧠' },
+    { id: 'settings', label: 'Settings', icon: '⚙️' },
+  ];
+
+  const pageTitles = { chat: 'Chat', history: 'History', connectors: 'Connectors', memory: 'Memory', settings: 'Settings' };
+
+  useEffect(() => {
+    if (settings.autonomy === 'Medium' || settings.autonomy === 'Full') {
+      fetch(`/briefing/${USER_ID}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d.text) {
+            setBriefing({ text: d.text, actions: d.actions || [] });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [settings.autonomy]);
+
+  return (
+    <div className="app">
+      <div className="sidebar">
+        <div className="logo">
+          <div className="logo-name">{settings.name}</div>
+          <div className="logo-sub">Personal AI</div>
+        </div>
+
+        <nav className="nav">
+          {pages.map(p => (
+            <button
+              key={p.id}
+              className={`nav-item ${page === p.id ? 'active' : ''}`}
+              onClick={() => setPage(p.id)}
+            >
+              <span className="nav-icon">{p.icon}</span>
+              {p.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="status">
+            <div className="status-dot" />
+          </div>
+        </div>
+      </div>
+
+      <div className="main">
+        <div className="topbar">
+          <div className="topbar-title">{pageTitles[page]}</div>
+          <div className="topbar-badge">Autonomy: {settings.autonomy}</div>
+        </div>
+
+        {page === 'chat' && (
+          <>
+            {briefing && (
+              <div className="briefing-banner">
+                <div className="briefing-label">☀️ Morning Briefing</div>
+                <div className="briefing-text">{briefing.text}</div>
+                {briefing.actions.length > 0 && (
+                  <AutoRunActions actions={briefing.actions} />
+                )}
+                <button className="briefing-dismiss" onClick={() => setBriefing(null)}>Dismiss</button>
+              </div>
+            )}
+            <ChatPage
+              settings={settings}
+              memory={memory}
+              people={people}
+              initialQuery={initialQuery}
+            />
+          </>
+        )}
+        {page === 'history' && <ActionHistoryPage />}
+        {page === 'connectors' && <ConnectorsPage />}
+        {page === 'memory' && (
+          <MemoryPage
+            memory={memory}
+            setMemory={setMemory}
+            people={people}
+            setPeople={setPeople}
+          />
+        )}
+        {page === 'settings' && (
+          <SettingsPage
+            settings={settings}
+            setSettings={setSettings}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>
