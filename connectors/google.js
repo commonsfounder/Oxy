@@ -65,71 +65,84 @@ function buildMime(to, subject, body) {
 }
 
 async function execute(userId, action, params) {
-  const token = await getAccessToken(userId);
+  let token;
+  try {
+    token = await getAccessToken(userId);
+  } catch (err) {
+    return { success: false, error: `Google not connected: ${err.message}` };
+  }
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-  switch (action) {
-    case 'send_email': {
-      const { to, subject, body } = params;
-      await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-        { raw: buildMime(to, subject, body) }, { headers });
-      return { success: true, text: `Email sent to ${to}` };
+  try {
+    switch (action) {
+      case 'send_email': {
+        const { to, subject, body } = params;
+        if (!to || !subject || !body) return { success: false, error: 'send_email requires to, subject, and body' };
+        await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+          { raw: buildMime(to, subject, body) }, { headers });
+        return { success: true, text: `Email sent to ${to}` };
+      }
+
+      case 'get_emails': {
+        const { max_results = 5 } = params;
+        const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
+          { headers, params: { maxResults: max_results } });
+        if (!list.data.messages?.length) return { success: true, emails: [], text: 'No emails found' };
+
+        const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
+          const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
+          const h = detail.data.payload?.headers || [];
+          const get = n => h.find(x => x.name === n)?.value || '';
+          return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
+        }));
+        return { success: true, emails, text: `Found ${emails.length} emails` };
+      }
+
+      case 'search_emails': {
+        const { query, max_results = 5 } = params;
+        if (!query) return { success: false, error: 'search_emails requires a query' };
+        const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
+          { headers, params: { q: query, maxResults: max_results } });
+        if (!list.data.messages?.length) return { success: true, emails: [], text: `No emails matching "${query}"` };
+
+        const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
+          const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
+            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
+          const h = detail.data.payload?.headers || [];
+          const get = n => h.find(x => x.name === n)?.value || '';
+          return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
+        }));
+        return { success: true, emails, text: `Found ${emails.length} emails matching "${query}"` };
+      }
+
+      case 'create_calendar_event': {
+        const { title, start_date, end_date, description = '' } = params;
+        if (!title || !start_date || !end_date) return { success: false, error: 'create_calendar_event requires title, start_date, end_date' };
+        const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
+          { summary: title, description, start: { dateTime: start_date }, end: { dateTime: end_date } },
+          { headers });
+        return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
+      }
+
+      case 'get_calendar_events': {
+        const { max_results = 5 } = params;
+        const resp = await axios.get('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+          headers,
+          params: { maxResults: max_results, orderBy: 'startTime', singleEvents: true, timeMin: new Date().toISOString() }
+        });
+        const events = (resp.data.items || []).map(e => ({
+          id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
+        }));
+        return { success: true, events, text: `Found ${events.length} upcoming events` };
+      }
+
+      default:
+        return { success: false, error: `Unknown action: ${action}` };
     }
-
-    case 'get_emails': {
-      const { max_results = 5 } = params;
-      const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-        { headers, params: { maxResults: max_results } });
-      if (!list.data.messages?.length) return { success: true, emails: [], text: 'No emails found' };
-
-      const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
-        const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-          { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
-        const h = detail.data.payload?.headers || [];
-        const get = n => h.find(x => x.name === n)?.value || '';
-        return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
-      }));
-      return { success: true, emails, text: `Found ${emails.length} emails` };
-    }
-
-    case 'search_emails': {
-      const { query, max_results = 5 } = params;
-      const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-        { headers, params: { q: query, maxResults: max_results } });
-      if (!list.data.messages?.length) return { success: true, emails: [], text: `No emails matching "${query}"` };
-
-      const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
-        const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-          { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
-        const h = detail.data.payload?.headers || [];
-        const get = n => h.find(x => x.name === n)?.value || '';
-        return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
-      }));
-      return { success: true, emails, text: `Found ${emails.length} emails matching "${query}"` };
-    }
-
-    case 'create_calendar_event': {
-      const { title, start_date, end_date, description = '' } = params;
-      const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
-        { summary: title, description, start: { dateTime: start_date }, end: { dateTime: end_date } },
-        { headers });
-      return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
-    }
-
-    case 'get_calendar_events': {
-      const { max_results = 5 } = params;
-      const resp = await axios.get('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-        headers,
-        params: { maxResults: max_results, orderBy: 'startTime', singleEvents: true, timeMin: new Date().toISOString() }
-      });
-      const events = (resp.data.items || []).map(e => ({
-        id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
-      }));
-      return { success: true, events, text: `Found ${events.length} upcoming events` };
-    }
-
-    default:
-      return { success: false, error: `Unknown action: ${action}` };
+  } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
+    return { success: false, error: `Google API error: ${detail}` };
   }
 }
 

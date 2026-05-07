@@ -209,23 +209,22 @@ async function getEnabledConnectors(userId) {
 
 function buildAvailableActions(enabled) {
   const actionMap = {
-    imessage: 'send_message via iMessage',
-    whatsapp: 'send_message via WhatsApp',
-    reminders: 'create_reminder',
-    spotify: 'play_music',
-    homekit: 'homekit_control',
-    gmail: 'send_email via Gmail',
-    calendar: 'create_calendar_event',
-    maps: 'get_directions',
-    uber: 'book_uber',
-    deliveroo: 'order_food',
-    monzo: 'check_balance',
-    betfair: 'place_bet',
-    notion: 'create_note',
-    trainline: 'search_trains'
+    google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'],
+    imessage: ['send_message'],
+    whatsapp: ['send_message'],
+    reminders: ['create_reminder'],
+    spotify: ['play_music'],
+    homekit: ['homekit_control'],
+    maps: ['get_directions'],
+    uber: ['book_uber'],
+    deliveroo: ['order_food'],
+    monzo: ['check_balance'],
+    betfair: ['place_bet'],
+    notion: ['create_note'],
+    trainline: ['search_trains']
   };
   if (enabled.length === 0) return 'No connectors enabled. Only return the action block when asked — the user will handle it manually.';
-  const active = enabled.map(id => actionMap[id] || id).filter(Boolean);
+  const active = enabled.flatMap(id => actionMap[id] || [id]);
   return `Available actions: ${active.join(', ')}. Only use these — don't suggest actions for connectors that aren't enabled.`;
 }
 
@@ -405,12 +404,11 @@ app.get('/action-log/:userId', async (req, res) => {
 });
 
 const CONNECTORS = [
+  { id: 'google', name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google' },
   { id: 'imessage', name: 'iMessage', icon: '💬', category: 'Messages' },
   { id: 'whatsapp', name: 'WhatsApp', icon: '💚', category: 'Messages' },
   { id: 'spotify', name: 'Spotify', icon: '🎵', category: 'Music' },
-  { id: 'calendar', name: 'Google Calendar', icon: '📅', category: 'Productivity' },
   { id: 'reminders', name: 'Apple Reminders', icon: '📝', category: 'Productivity' },
-  { id: 'gmail', name: 'Gmail', icon: '📧', category: 'Email' },
   { id: 'deliveroo', name: 'Deliveroo', icon: '🛵', category: 'Food' },
   { id: 'uber', name: 'Uber', icon: '🚗', category: 'Transport' },
   { id: 'monzo', name: 'Monzo', icon: '🏦', category: 'Finance' },
