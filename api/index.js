@@ -7,7 +7,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
 const FormData = require('form-data');
 const axios = require('axios');
-const { dispatch } = require('../connectors');
+const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -225,8 +225,9 @@ function buildAvailableActions(enabled) {
     notion: ['create_note'],
     trainline: ['search_trains']
   };
-  if (enabled.length === 0) return 'No connectors enabled. Only return the action block when asked — the user will handle it manually.';
-  const active = enabled.flatMap(id => actionMap[id] || [id]);
+  const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
+  if (live.length === 0) return 'No connectors enabled. Only return the action block when asked — the user will handle it manually.';
+  const active = live.flatMap(id => actionMap[id] || []);
   return `Available actions: ${active.join(', ')}. Only use these — don't suggest actions for connectors that aren't enabled.`;
 }
 
@@ -406,19 +407,19 @@ app.get('/action-log/:userId', async (req, res) => {
 });
 
 const CONNECTORS = [
-  { id: 'google', name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google' },
-  { id: 'imessage', name: 'iMessage', icon: '💬', category: 'Messages' },
-  { id: 'whatsapp', name: 'WhatsApp', icon: '💚', category: 'Messages' },
-  { id: 'spotify', name: 'Spotify', icon: '🎵', category: 'Music' },
-  { id: 'reminders', name: 'Apple Reminders', icon: '📝', category: 'Productivity' },
-  { id: 'deliveroo', name: 'Deliveroo', icon: '🛵', category: 'Food' },
-  { id: 'uber', name: 'Uber', icon: '🚗', category: 'Transport' },
-  { id: 'monzo', name: 'Monzo', icon: '🏦', category: 'Finance' },
-  { id: 'homekit', name: 'Apple HomeKit', icon: '🏠', category: 'Home' },
-  { id: 'trainline', name: 'Trainline', icon: '🚂', category: 'Transport' },
-  { id: 'maps', name: 'Google Maps', icon: '📍', category: 'Navigation' },
-  { id: 'notion', name: 'Notion', icon: '📓', category: 'Productivity' },
-  { id: 'betfair', name: 'Betfair', icon: '🎰', category: 'Finance' },
+  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google',       implemented: true },
+  { id: 'imessage',  name: 'iMessage',                  icon: '💬', category: 'Messages',     implemented: false },
+  { id: 'whatsapp',  name: 'WhatsApp',                  icon: '💚', category: 'Messages',     implemented: false },
+  { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',        implemented: false },
+  { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity', implemented: false },
+  { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',         implemented: false },
+  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: false },
+  { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
+  { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
+  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: false },
+  { id: 'maps',      name: 'Google Maps',               icon: '📍', category: 'Navigation',   implemented: false },
+  { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity', implemented: false },
+  { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',      implemented: false },
 ];
 
 app.get('/connectors/:userId', async (req, res) => {

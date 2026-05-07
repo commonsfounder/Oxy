@@ -1534,10 +1534,10 @@ function ConnectorsPage() {
           <div className="section-title">{cat}</div>
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:'12px'}}>
             {items.map(c => (
-              <div key={c.id} className="hub-item">
+              <div key={c.id} className="hub-item" style={!c.implemented ? {opacity:0.4, pointerEvents:'none'} : {}}>
                 <div className="connector-icon">{c.icon}</div>
-                <div className="connector-name">{c.name}</div>
-                <div className={`conn-toggle ${c.enabled ? 'on' : ''}`} onClick={() => toggle(c.id, c.enabled)} />
+                <div className="connector-name">{c.name}{!c.implemented ? <span style={{display:'block',fontSize:'10px',color:'var(--dim)',marginTop:'2px'}}>coming soon</span> : ''}</div>
+                {c.implemented && <div className={`conn-toggle ${c.enabled ? 'on' : ''}`} onClick={() => toggle(c.id, c.enabled)} />}
               </div>
             ))}
           </div>

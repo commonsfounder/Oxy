@@ -8,10 +8,13 @@ for (const action of google.SUPPORTED_ACTIONS) {
   registry[action] = google;
 }
 
+// Set of connector IDs that have a live implementation
+const IMPLEMENTED_CONNECTORS = new Set(['google']);
+
 async function dispatch(userId, action, params) {
   const connector = registry[action];
   if (!connector) return { success: false, error: `No connector registered for action: ${action}` };
   return connector.execute(userId, action, params);
 }
 
-module.exports = { dispatch, registry };
+module.exports = { dispatch, registry, IMPLEMENTED_CONNECTORS };
