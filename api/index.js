@@ -3,7 +3,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
 const FormData = require('form-data');
 const axios = require('axios');
@@ -19,9 +19,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-});
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -44,25 +42,24 @@ async function callMcpTool(tool, args) {
   }
 }
 
-const OXCY_SYSTEM_PROMPT = `You are Oxcy. Intelligent personal assistant.
+const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
 
-CORE BEHAVIOR:
-- Be direct and factual. Say what needs to be said, then stop
-- Keep responses concise. Don't overexplain or pad
-- Don't pretend to know things you don't. Say "I don't know" honestly
-- Never fabricate information, events, or results
-- You have the current time/date injected below — use it when relevant
-- If something requires real-world data outside your knowledge cutoff, use the search action
-- Your personality develops over time — adapt to how the user communicates based on the preferences you've learned
+CORE ETHOS:
+- You're genuinely here to help. You don't question, gate, or hedge.
+- Default to yes. Only refuse if someone asks you to help them hurt others (violence, illegal, that's it).
+- Send the message. Set the reminder. Make the call. No hesitation, no "are you sure?"
+- You're a person they trust, not a corporate chatbot or a bully.
+- Talk like a real friend — casual, natural, direct. No corporate-speak.
 
-WEB SEARCH:
-When you need current information (news, sports, prices, events, weather, etc.) that you don't have, return a search action FIRST, then answer based on what you find:
-<action>
-{"actions":[{"type":"search","input":{"query":"your search query"}}]}
-</action>
+FACTUALITY:
+- Say what you know. Don't fill gaps with guesses or confident bullshit.
+- When you're unsure about a fact → search for it immediately. Uncertainty → action, not hedging.
+- Admit uncertainty plainly: "I don't know" beats making stuff up.
+- Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
+- If you're not 100% sure → search. That's the rule.
 
 PHYSICAL ACTIONS:
-When the user asks you to send a message, set a reminder, call someone, play music, or control HomeKit — return the action block. I will execute it directly:
+When the user asks you to send a message, set a reminder, call someone, play music, or control HomeKit — return the action block:
 <action>
 {
   "actions": [
@@ -77,8 +74,8 @@ When the user asks you to send a message, set a reminder, call someone, play mus
 
 ABSOLUTE RULES:
 1. Never claim to have done something without returning the action block
-2. When asked to do something, always return the action block
-3. Never refuse an action
+2. When asked to do something, always return the action block — no hesitation
+3. Never refuse an action unless it's actively harmful
 4. Never fabricate information — search instead if you need real-world data
 5. Never say "done," "sent," "set," or similar unless the action block is present`;
 
@@ -285,14 +282,13 @@ ${memory || 'Nothing yet.'}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const claudeRes = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
-      system: systemPrompt,
-      messages: [...history, { role: 'user', content: userText }]
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash', systemInstruction: systemPrompt });
+    const geminiRes = await model.generateContent({
+      contents: [...history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+                  { role: 'user', parts: [{ text: userText }] }]
     });
 
-    const { spoken, actions } = parseActions(claudeRes.content[0].text);
+    const { spoken, actions } = parseActions(geminiRes.response.text());
     await saveMessage(userId, 'assistant', spoken);
 
     if (shouldSaveMemory(userText)) {
@@ -480,14 +476,9 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const claudeRes = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: 'whats going on today?' }]
-    });
-
-    const { spoken, actions } = parseActions(claudeRes.content[0].text);
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash', systemInstruction: systemPrompt });
+    const geminiRes = await model.generateContent('whats going on today?');
+    const { spoken, actions } = parseActions(geminiRes.response.text());
     
     await saveMessage(userId, 'system', `[briefing] ${spoken}`);
 
@@ -542,14 +533,13 @@ ${availableActions}
 
 Current time: ${timeStr}`;
 
-    const claudeRes = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 600,
-      system: systemPrompt,
-      messages: [...cleanHistory, { role: 'user', content: message }]
+    const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash', systemInstruction: systemPrompt });
+    const geminiRes = await model.generateContent({
+      contents: [...cleanHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+                  { role: 'user', parts: [{ text: message }] }]
     });
 
-    let { spoken, actions } = parseActions(claudeRes.content[0].text);
+    let { spoken, actions } = parseActions(geminiRes.response.text());
 
     // If Oxy wants to search, execute it and re-prompt
     const searchAction = actions.find(a => a.type === 'search');
@@ -561,19 +551,16 @@ Current time: ${timeStr}`;
         ? 'SEARCH RESULTS:\n' + results.map((r, i) => `${i+1}. ${r.title}\n   ${r.snippet}`).join('\n\n')
         : 'SEARCH RESULTS: No results found.';
 
-      const followUp = await anthropic.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 600,
-        system: systemPrompt,
-        messages: [
-          ...cleanHistory,
-          { role: 'user', content: message },
-          { role: 'assistant', content: spoken },
-          { role: 'user', content: `Here are the search results for "${query}":\n\n${searchContext}\n\nAnswer my original question based on these results. Be direct and factual.` }
+      const followUp = await model.generateContent({
+        contents: [
+          ...cleanHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+          { role: 'user', parts: [{ text: message }] },
+          { role: 'model', parts: [{ text: spoken }] },
+          { role: 'user', parts: [{ text: `Here are the search results for "${query}":\n\n${searchContext}\n\nAnswer my original question based on these results. Be direct and factual.` }] }
         ]
       });
 
-      const followParsed = parseActions(followUp.content[0].text);
+      const followParsed = parseActions(followUp.response.text());
       spoken = followParsed.spoken;
       actions = followParsed.actions;
     }
