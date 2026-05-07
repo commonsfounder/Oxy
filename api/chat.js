@@ -153,7 +153,7 @@ ${memory || 'Nothing yet.'}
 
 Current time: ${new Date().toLocaleString('en-GB')}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent({
       contents: [...history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
                   { role: 'user', parts: [{ text: message }] }]
