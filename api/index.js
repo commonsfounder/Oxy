@@ -658,6 +658,10 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar'
 ].join(' ');
 
+app.get('/auth/google/redirect-uri', (req, res) => {
+  res.json({ redirect_uri: `${req.protocol}://${req.get('host')}/auth/google/callback` });
+});
+
 app.get('/auth/google', (req, res) => {
   const userId = req.query.userId || 'default';
   const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
