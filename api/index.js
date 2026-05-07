@@ -7,7 +7,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
 const FormData = require('form-data');
 const axios = require('axios');
-const { executeTool } = require('./tools');
+const { dispatch } = require('../connectors');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -26,9 +26,8 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Execute tools directly (no external MCP server)
-async function callMcpTool(tool, args) {
-  return await executeTool(tool, args);
+async function callProxy(userId, action, params) {
+  return dispatch(userId, action, params);
 }
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
@@ -288,7 +287,7 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     const actionResults = [];
     for (const action of actions) {
       console.log('[mcp] executing:', action.type, action.input);
-      const result = await callMcpTool(action.type, action.input || {});
+      const result = await callProxy(userId, action.type, action.input || {});
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
         user_id: userId,
@@ -559,7 +558,7 @@ Current time: ${timeStr}`;
     const physicalActions = actions.filter(a => a.type !== 'search');
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
-      const result = await callMcpTool(action.type, action.input || {});
+      const result = await callProxy(userId, action.type, action.input || {});
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
         user_id: userId,

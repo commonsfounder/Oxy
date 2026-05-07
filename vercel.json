@@ -4,9 +4,14 @@
       "includeFiles": "index.html",
       "memory": 512,
       "maxDuration": 30
+    },
+    "api/proxy.js": {
+      "memory": 512,
+      "maxDuration": 30
     }
   },
   "rewrites": [
+    { "source": "/proxy", "destination": "/api/proxy.js" },
     { "source": "/(.*)", "destination": "/server.js" }
   ]
 }
