@@ -72,6 +72,25 @@ ABSOLUTE RULES:
 4. Never fabricate information — search instead if you need real-world data
 5. Never say you "can't" do something that's in the actions list above`;
 
+function normalizeGeminiHistory(history) {
+  const mapped = history.map(m => ({
+    role: m.role === 'user' ? 'user' : 'model',
+    parts: [{ text: m.content || '' }]
+  }));
+  // Drop leading model turns — Gemini requires starting with user
+  while (mapped.length > 0 && mapped[0].role !== 'user') mapped.shift();
+  // Collapse consecutive same-role turns by keeping only the last
+  const out = [];
+  for (const msg of mapped) {
+    if (out.length > 0 && out[out.length - 1].role === msg.role) {
+      out[out.length - 1] = msg;
+    } else {
+      out.push(msg);
+    }
+  }
+  return out;
+}
+
 function parseActions(fullResponse) {
   const match = fullResponse.match(/<action>([\s\S]*?)<\/action>/);
   const spoken = fullResponse.replace(/<action>[\s\S]*?<\/action>/g, '').trim();
@@ -277,8 +296,7 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent({
-      contents: [...history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
-                  { role: 'user', parts: [{ text: userText }] }]
+      contents: [...normalizeGeminiHistory(history), { role: 'user', parts: [{ text: userText }] }]
     });
 
     const { spoken, actions } = parseActions(geminiRes.response.text());
@@ -527,9 +545,9 @@ ${availableActions}
 Current time: ${timeStr}`;
 
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash', systemInstruction: systemPrompt });
+    const baseHistory = normalizeGeminiHistory(cleanHistory);
     const geminiRes = await model.generateContent({
-      contents: [...cleanHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
-                  { role: 'user', parts: [{ text: message }] }]
+      contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
     });
 
     let { spoken, actions } = parseActions(geminiRes.response.text());
@@ -546,7 +564,7 @@ Current time: ${timeStr}`;
 
       const followUp = await model.generateContent({
         contents: [
-          ...cleanHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
+          ...baseHistory,
           { role: 'user', parts: [{ text: message }] },
           { role: 'model', parts: [{ text: spoken }] },
           { role: 'user', parts: [{ text: `Here are the search results for "${query}":\n\n${searchContext}\n\nAnswer my original question based on these results. Be direct and factual.` }] }
