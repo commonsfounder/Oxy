@@ -18,7 +18,7 @@ async function getTokens(userId) {
   // Fall back to env vars (single-user setup), save to DB for next time
   if (process.env.GMAIL_REFRESH_TOKEN) {
     const tokens = {
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN,
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN.replace(/^﻿/, '').trim(),
       client_id: process.env.GMAIL_CLIENT_ID,
       client_secret: process.env.GMAIL_CLIENT_SECRET
     };
@@ -45,7 +45,7 @@ async function getAccessToken(userId) {
 
   const resp = await axios.post('https://oauth2.googleapis.com/token', {
     grant_type: 'refresh_token',
-    refresh_token: tokens.refresh_token,
+    refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
     client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
     client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
   });
