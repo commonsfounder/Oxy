@@ -313,11 +313,13 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     for (const action of actions) {
       console.log('[mcp] executing:', action.type, action.input);
       const result = await callProxy(userId, action.type, action.input || {});
+      console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
         user_id: userId,
         action: JSON.stringify(action),
         status: result.success ? 'executed' : 'failed',
+        error: result.success ? null : (result.error || null),
         created_at: new Date().toISOString()
       });
     }
@@ -586,11 +588,13 @@ Current time: ${timeStr}`;
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
       const result = await callProxy(userId, action.type, action.input || {});
+      console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
         user_id: userId,
         action: JSON.stringify(action),
         status: result.success ? 'executed' : 'failed',
+        error: result.success ? null : (result.error || null),
         created_at: new Date().toISOString()
       });
     }
