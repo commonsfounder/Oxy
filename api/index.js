@@ -275,7 +275,7 @@ ${memory || 'Nothing yet.'}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash', systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent({
       contents: [...history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
                   { role: 'user', parts: [{ text: userText }] }]
@@ -469,7 +469,7 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash', systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
     
@@ -526,7 +526,7 @@ ${availableActions}
 
 Current time: ${timeStr}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash', systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent({
       contents: [...cleanHistory.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.content }] })),
                   { role: 'user', parts: [{ text: message }] }]
