@@ -98,10 +98,12 @@ function parseActions(fullResponse) {
 
   if (match) {
     try {
-      const parsed = JSON.parse(match[1].trim());
+      // Strip markdown code fences Gemini sometimes wraps around JSON
+      const raw = match[1].trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+      const parsed = JSON.parse(raw);
       actions = parsed.actions || [];
     } catch (e) {
-      console.warn('Could not parse action block:', e.message);
+      console.warn('[parseActions] failed:', e.message, '| raw:', match[1].trim().slice(0, 200));
     }
   }
 
@@ -548,7 +550,10 @@ Current time: ${timeStr}`;
       contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
     });
 
-    let { spoken, actions } = parseActions(geminiRes.response.text());
+    const rawText = geminiRes.response.text();
+    console.log('[gemini raw]', rawText.slice(0, 400));
+    let { spoken, actions } = parseActions(rawText);
+    console.log('[actions parsed]', JSON.stringify(actions));
 
     // If Oxy wants to search, execute it and re-prompt
     const searchAction = actions.find(a => a.type === 'search');
@@ -713,6 +718,37 @@ app.get('/auth/google/callback', async (req, res) => {
         <script>window.opener?.postMessage('google_auth_error','*');setTimeout(()=>window.close(),3000);</script>
       </body></html>
     `);
+  }
+});
+
+app.get('/debug/:userId', async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const enabledConnectors = await getEnabledConnectors(userId);
+    const { data: connRow } = await supabase
+      .from('connectors').select('connector_id, enabled, tokens').eq('user_id', userId);
+
+    // Try a live Google token fetch to surface auth errors early
+    let googleTokenTest = null;
+    try {
+      const { getAccessToken: gat } = require('../connectors/google');
+      // Can't import internal fn — use dispatch with a lightweight action instead
+      const r = await dispatch(userId, 'get_emails', { max_results: 1 });
+      googleTokenTest = r;
+    } catch (e) {
+      googleTokenTest = { error: e.message };
+    }
+
+    res.json({
+      userId,
+      enabledConnectors,
+      connectorRows: connRow,
+      googleTest: googleTokenTest,
+      envHasGmailRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
+      envHasGeminiKey: !!process.env.GEMINI_API_KEY
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
