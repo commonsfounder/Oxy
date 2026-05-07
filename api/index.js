@@ -645,6 +645,77 @@ app.delete('/preferences/:userId', async (req, res) => {
   }
 });
 
+// ── Google OAuth ──────────────────────────────────────────────────────────────
+
+const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/gmail.modify',
+  'https://www.googleapis.com/auth/calendar'
+].join(' ');
+
+app.get('/auth/google', (req, res) => {
+  const userId = req.query.userId || 'default';
+  const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+  const params = new URLSearchParams({
+    client_id: process.env.GMAIL_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: GOOGLE_SCOPES,
+    access_type: 'offline',
+    prompt: 'consent',
+    state: userId
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+app.get('/auth/google/callback', async (req, res) => {
+  const { code, state: userId = 'default', error } = req.query;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('google_auth_error','*');window.close();</script>`);
+  }
+
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+    const resp = await axios.post('https://oauth2.googleapis.com/token', {
+      code,
+      client_id: process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GMAIL_CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code'
+    });
+
+    const tokens = {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + resp.data.expires_in * 1000,
+      client_id: process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GMAIL_CLIENT_SECRET
+    };
+
+    await supabase.from('connectors').upsert(
+      { user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,connector_id' }
+    );
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Google connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('google_auth_success','*');setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/google/callback error:', err.response?.data || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${err.response?.data?.error_description || err.message}</p>
+        <script>window.opener?.postMessage('google_auth_error','*');setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'Oxcy is alive',

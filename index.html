@@ -1452,13 +1452,35 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
 function ConnectorsPage() {
   const [connectors, setConnectors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [googleStatus, setGoogleStatus] = useState('idle'); // idle | connecting | connected | error
 
-  useEffect(() => {
+  const loadConnectors = () => {
     apiFetch(`/connectors/${USER_ID}`)
       .then(r => r.json())
-      .then(d => { setConnectors(d.connectors || []); setLoading(false); })
+      .then(d => {
+        const list = d.connectors || [];
+        setConnectors(list);
+        const g = list.find(c => c.id === 'google');
+        if (g?.enabled) setGoogleStatus('connected');
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadConnectors();
+    const onMsg = (e) => {
+      if (e.data === 'google_auth_success') { setGoogleStatus('connected'); loadConnectors(); }
+      if (e.data === 'google_auth_error')   { setGoogleStatus('error'); }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
   }, []);
+
+  const connectGoogle = () => {
+    setGoogleStatus('connecting');
+    window.open(`/auth/google?userId=${USER_ID}`, 'oxy_auth', 'width=500,height=600');
+  };
 
   const toggle = async (id, enabled) => {
     await apiFetch('/connectors', {
@@ -1475,11 +1497,17 @@ function ConnectorsPage() {
     </div>
   );
 
-  const grouped = connectors.reduce((acc, c) => {
+  const nonGoogle = connectors.filter(c => c.id !== 'google');
+  const grouped = nonGoogle.reduce((acc, c) => {
     acc[c.category] = acc[c.category] || [];
     acc[c.category].push(c);
     return acc;
   }, {});
+
+  const googleBtnLabel = { idle: 'Connect', connecting: 'Connecting…', connected: 'Reconnect', error: 'Retry' }[googleStatus];
+  const googleBtnStyle = googleStatus === 'connected'
+    ? { background: 'rgba(52,168,83,0.15)', color: '#34A853', border: '1px solid rgba(52,168,83,0.3)' }
+    : {};
 
   return (
     <div className="page-content">
@@ -1491,12 +1519,12 @@ function ConnectorsPage() {
               <span style={{fontSize:'18px',fontWeight:700,color:'#fff'}}>G</span>
             </div>
             <div>
-              <div className="hub-name">Google Cloud</div>
-              <div className="hub-desc">Gmail · Calendar</div>
+              <div className="hub-name">Google</div>
+              <div className="hub-desc">Gmail · Calendar{googleStatus === 'connected' ? ' · Connected ✓' : ''}</div>
             </div>
           </div>
-          <button className="save-btn" onClick={() => window.open(`/auth/google?userId=${USER_ID}`, 'oxy_auth', 'width=500,height=600')}>
-            Connect
+          <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting'}>
+            {googleBtnLabel}
           </button>
         </div>
       </div>
