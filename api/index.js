@@ -602,7 +602,7 @@ Current time: ${timeStr}`;
 
   } catch (err) {
     console.error('/chat error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, text: `Error: ${err.message}` });
   }
 });
 
