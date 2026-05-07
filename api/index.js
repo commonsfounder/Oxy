@@ -729,22 +729,17 @@ app.get('/debug/:userId', async (req, res) => {
     const { data: connRow } = await supabase
       .from('connectors').select('connector_id, enabled, tokens').eq('user_id', userId);
 
-    // Try a live Google token fetch to surface auth errors early
-    let googleTokenTest = null;
-    try {
-      const { getAccessToken: gat } = require('../connectors/google');
-      // Can't import internal fn — use dispatch with a lightweight action instead
-      const r = await dispatch(userId, 'get_emails', { max_results: 1 });
-      googleTokenTest = r;
-    } catch (e) {
-      googleTokenTest = { error: e.message };
-    }
+    const [emailTest, calendarTest] = await Promise.all([
+      dispatch(userId, 'get_emails', { max_results: 1 }).catch(e => ({ error: e.message })),
+      dispatch(userId, 'get_calendar_events', { max_results: 1 }).catch(e => ({ error: e.message }))
+    ]);
 
     res.json({
       userId,
       enabledConnectors,
       connectorRows: connRow,
-      googleTest: googleTokenTest,
+      googleEmailTest: emailTest,
+      googleCalendarTest: calendarTest,
       envHasGmailRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,
       envHasGeminiKey: !!process.env.GEMINI_API_KEY
     });

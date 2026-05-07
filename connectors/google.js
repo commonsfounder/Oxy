@@ -117,10 +117,15 @@ async function execute(userId, action, params) {
       }
 
       case 'create_calendar_event': {
-        const { title, start_date, end_date, description = '' } = params;
+        const { title, start_date, end_date, description = '', timezone = 'Europe/London' } = params;
         if (!title || !start_date || !end_date) return { success: false, error: 'create_calendar_event requires title, start_date, end_date' };
         const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
-          { summary: title, description, start: { dateTime: start_date }, end: { dateTime: end_date } },
+          {
+            summary: title,
+            description,
+            start: { dateTime: start_date, timeZone: timezone },
+            end:   { dateTime: end_date,   timeZone: timezone }
+          },
           { headers });
         return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
       }
