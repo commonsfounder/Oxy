@@ -659,12 +659,12 @@ const GOOGLE_SCOPES = [
 ].join(' ');
 
 app.get('/auth/google/redirect-uri', (req, res) => {
-  res.json({ redirect_uri: `${req.protocol}://${req.get('host')}/auth/google/callback` });
+  res.json({ redirect_uri: `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback` });
 });
 
 app.get('/auth/google', (req, res) => {
   const userId = req.query.userId || 'default';
-  const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
   const params = new URLSearchParams({
     client_id: process.env.GMAIL_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -685,7 +685,7 @@ app.get('/auth/google/callback', async (req, res) => {
   }
 
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/auth/google/callback`;
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
     const resp = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id: process.env.GMAIL_CLIENT_ID,
