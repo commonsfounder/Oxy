@@ -51,8 +51,7 @@ async function callProxy(userId, actionObj) {
     return dispatch(userId, actionObj, {});
   }
   if (actionObj.type === 'deeplink') {
-    // deeplinks are client-side only — backend just acknowledges
-    return { success: true, clientAction: true, url: actionObj.url };
+    return { success: true, clientAction: true, deeplink: actionObj.url };
   }
   if (actionObj.type === 'connector') {
     const key = `${actionObj.service}:${actionObj.action}`;
