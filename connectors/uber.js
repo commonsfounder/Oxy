@@ -16,15 +16,18 @@ async function execute(userId, action, params) {
           geocodeLocation(destination)
         ]);
 
-        const query = new URLSearchParams({
-          action: 'setPickup',
-          'pickup[latitude]': pickupCoords.lat,
-          'pickup[longitude]': pickupCoords.lng,
-          'pickup[formatted_address]': pickupCoords.formattedAddress,
-          'dropoff[latitude]': destCoords.lat,
-          'dropoff[longitude]': destCoords.lng,
-          'dropoff[formatted_address]': destCoords.formattedAddress
-        }).toString();
+        // URLSearchParams percent-encodes brackets, breaking Uber's deep link format.
+        // Build the query string manually so pickup[latitude] etc. stay literal.
+        const enc = encodeURIComponent;
+        const query = [
+          'action=setPickup',
+          `pickup[latitude]=${pickupCoords.lat}`,
+          `pickup[longitude]=${pickupCoords.lng}`,
+          `pickup[formatted_address]=${enc(pickupCoords.formattedAddress)}`,
+          `dropoff[latitude]=${destCoords.lat}`,
+          `dropoff[longitude]=${destCoords.lng}`,
+          `dropoff[formatted_address]=${enc(destCoords.formattedAddress)}`
+        ].join('&');
 
         return {
           success: true,
