@@ -1279,7 +1279,14 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       })).json();
       const m = { role: 'assistant', content: data.text || 'Something went wrong.', time: new Date() };
       if (data.audio)         m.audio   = data.audio;
-      if (data.actions?.length) m.actions = data.actions;
+      if (data.actions?.length) {
+        m.actions = data.actions;
+        data.actions.forEach(a => {
+          if (a.result?.deepLink) {
+            window.location.href = a.result.deepLink;
+          }
+        });
+      }
       setMessages(prev => [...prev, m]);
       if (data.audio) playAudioFromBase64(data.audio);
     } catch (err) {
@@ -1319,10 +1326,13 @@ function ChatPage({ settings, memory, people, initialQuery }) {
               <div className="msg-actions-bar">
                 {msg.actions.map((a, j) => {
                   const ok = a.result?.success !== false;
-                  const label = a.type === 'email_sent' ? `Email sent to ${a.to}`
-                              : a.type === 'memory_saved' ? 'Memory saved'
-                              : a.type === 'digital_briefing' ? 'Briefing retrieved'
-                              : a.type || 'Action';
+                  const type = a.action || a.type || 'action';
+                  const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
+                              : type === 'send_email' ? `Email sent`
+                              : type === 'create_calendar_event' ? 'Event created'
+                              : type === 'get_emails' ? 'Emails fetched'
+                              : type === 'get_calendar_events' ? 'Calendar fetched'
+                              : type;
                   return (
                     <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
                       {ok ? '✓' : '✗'} {label}
