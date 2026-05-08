@@ -10,10 +10,31 @@ const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function safeParseJSON(val) {
+  if (typeof val !== 'string') return val;
+  try { return JSON.parse(val); } catch { return val; }
+}
+
+const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+function isValidUserId(id) {
+  return typeof id === 'string' && USER_ID_RE.test(id);
+}
 
 app.use(cors());
 app.use(express.json());
+
+const audioRateLimit = new Map();
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -60,7 +81,8 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "get_calendar_events", "input": {"max_results": 5}},
     {"type": "send_email", "input": {"to": "email", "subject": "subject", "body": "body"}},
     {"type": "get_emails", "input": {"max_results": 5}},
-    {"type": "search_emails", "input": {"query": "search term", "max_results": 5}}
+    {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
+    {"type": "book_uber", "input": {"pickup": "current location or address", "destination": "destination address"}}
   ]
 }
 </action>
@@ -159,6 +181,28 @@ async function saveMemory(userId, content) {
   await supabase
     .from('memories')
     .insert({ user_id: userId, content, created_at: new Date().toISOString() });
+}
+
+async function extractMemoryFact(userId, text) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    const result = await model.generateContent(
+      `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
+    );
+    const fact = result.response.text().trim().replace(/^["']|["']$/g, '');
+    if (!fact) return null;
+
+    // Skip if we already know this
+    const { data: existing } = await supabase
+      .from('memories').select('content').eq('user_id', userId);
+    const alreadyKnown = (existing || []).some(m =>
+      m.content.toLowerCase().includes(fact.toLowerCase()) ||
+      fact.toLowerCase().includes(m.content.toLowerCase())
+    );
+    return alreadyKnown ? null : fact;
+  } catch {
+    return null;
+  }
 }
 
 function shouldSaveMemory(text) {
@@ -268,6 +312,13 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
     const userId = req.body.userId || 'default';
 
+    const now = Date.now();
+    const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
+    if (recentHits.length >= 10) {
+      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+    }
+    audioRateLimit.set(userId, [...recentHits, now]);
+
     console.log('[1/4] Transcribing audio...');
     const transcription = await openai.audio.transcriptions.create({
       file: new File([req.file.buffer], 'audio.wav', { type: 'audio/wav' }),
@@ -305,7 +356,8 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     await saveMessage(userId, 'assistant', spoken);
 
     if (shouldSaveMemory(userText)) {
-      await saveMemory(userId, `User: ${userText}`);
+      const fact = await extractMemoryFact(userId, userText);
+      if (fact) await saveMemory(userId, fact);
     }
 
     // Execute physical actions via MCP
@@ -346,9 +398,19 @@ app.post('/memory', async (req, res) => {
   try {
     const { userId = 'default', content } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
-    
-    await supabase.from('memories').delete().eq('user_id', userId);
-    await supabase.from('memories').insert({ user_id: userId, content, created_at: new Date().toISOString() });
+
+    // Insert new row first so data is never lost, then prune old rows
+    const { data: inserted } = await supabase
+      .from('memories')
+      .insert({ user_id: userId, content, created_at: new Date().toISOString() })
+      .select('id');
+
+    if (inserted?.[0]?.id) {
+      await supabase.from('memories').delete()
+        .eq('user_id', userId)
+        .neq('id', inserted[0].id);
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -356,6 +418,7 @@ app.post('/memory', async (req, res) => {
 });
 
 app.get('/memory/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const { data, error } = await supabase
       .from('memories')
@@ -389,6 +452,7 @@ app.post('/action-log', async (req, res) => {
 });
 
 app.get('/action-log/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const { data, error } = await supabase
       .from('action_log')
@@ -400,7 +464,7 @@ app.get('/action-log/:userId', async (req, res) => {
     if (error || !data) return res.json({ actions: [] });
     const parsed = data.map(a => ({
       ...a,
-      action: typeof a.action === 'string' ? JSON.parse(a.action) : a.action
+      action: safeParseJSON(a.action)
     }));
     res.json({ actions: parsed });
   } catch (err) {
@@ -415,7 +479,7 @@ const CONNECTORS = [
   { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',        implemented: false },
   { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity', implemented: false },
   { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',         implemented: false },
-  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: false },
+  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: true },
   { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
   { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
   { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: false },
@@ -425,6 +489,7 @@ const CONNECTORS = [
 ];
 
 app.get('/connectors/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const { data, error } = await supabase
       .from('connectors')
@@ -467,6 +532,7 @@ app.post('/connectors', async (req, res) => {
 });
 
 app.get('/briefing/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const userId = req.params.userId;
     const [memory, history] = await Promise.all([
@@ -504,6 +570,7 @@ The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' }
 });
 
 app.get('/history/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const history = await getHistory(req.params.userId);
     res.json({ history });
@@ -602,7 +669,8 @@ Current time: ${timeStr}`;
     await saveMessage(userId, 'assistant', spoken);
 
     if (shouldSaveMemory(message)) {
-      await saveMemory(userId, `User: ${message}`);
+      const fact = await extractMemoryFact(userId, message);
+      if (fact) await saveMemory(userId, fact);
     }
 
     // Check if user expressed preference about communication style
@@ -633,6 +701,7 @@ Current time: ${timeStr}`;
 });
 
 app.get('/preferences/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     const { data, error } = await supabase
       .from('preferences')
@@ -647,6 +716,7 @@ app.get('/preferences/:userId', async (req, res) => {
 });
 
 app.delete('/preferences/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   try {
     await supabase.from('preferences').delete().eq('user_id', req.params.userId);
     res.json({ success: true });
@@ -685,7 +755,8 @@ app.get('/auth/google/callback', async (req, res) => {
   const { code, state: userId = 'default', error } = req.query;
 
   if (error) {
-    return res.send(`<script>window.opener?.postMessage('google_auth_error','*');window.close();</script>`);
+    const appOrigin = process.env.APP_URL || '*';
+    return res.send(`<script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
   }
 
   try {
@@ -711,26 +782,30 @@ app.get('/auth/google/callback', async (req, res) => {
       { onConflict: 'user_id,connector_id' }
     );
 
+    const appOrigin = process.env.APP_URL || '*';
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
         <p style="font-size:18px">✓ Google connected</p>
         <p style="color:#888;font-size:13px">You can close this window</p>
-        <script>window.opener?.postMessage('google_auth_success','*');setTimeout(()=>window.close(),1500);</script>
+        <script>window.opener?.postMessage('google_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
       </body></html>
     `);
   } catch (err) {
     console.error('/auth/google/callback error:', err.response?.data || err.message);
+    const appOrigin = process.env.APP_URL || '*';
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
         <p style="font-size:18px">✗ Connection failed</p>
-        <p style="color:#888;font-size:13px">${err.response?.data?.error_description || err.message}</p>
-        <script>window.opener?.postMessage('google_auth_error','*');setTimeout(()=>window.close(),3000);</script>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
       </body></html>
     `);
   }
 });
 
 app.get('/debug/:userId', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
   const userId = req.params.userId;
   try {
     const enabledConnectors = await getEnabledConnectors(userId);

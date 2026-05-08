@@ -1,6 +1,9 @@
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
+const { randomUUID } = require('crypto');
+
+const E164_RE = /^\+[1-9]\d{1,14}$/;
 
 // --- Env vars ---
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -22,43 +25,61 @@ const REMINDERS_FILE = path.join(__dirname, 'reminders.json');
 
 // --- Spotify token cache ---
 let spotifyToken = null;
+let spotifyTokenPromise = null;
 async function getSpotifyToken() {
   if (spotifyToken && spotifyToken.expires > Date.now()) return spotifyToken.access_token;
-  const resp = await axios.post('https://accounts.spotify.com/api/token',
-    new URLSearchParams({ grant_type: 'refresh_token', refresh_token: SPOTIFY_REFRESH_TOKEN, client_id: SPOTIFY_CLIENT_ID, client_secret: SPOTIFY_CLIENT_SECRET }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  spotifyToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
-  return spotifyToken.access_token;
+  if (!spotifyTokenPromise) {
+    spotifyTokenPromise = axios.post('https://accounts.spotify.com/api/token',
+      new URLSearchParams({ grant_type: 'refresh_token', refresh_token: SPOTIFY_REFRESH_TOKEN, client_id: SPOTIFY_CLIENT_ID, client_secret: SPOTIFY_CLIENT_SECRET }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    ).then(resp => {
+      spotifyToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
+      spotifyTokenPromise = null;
+      return spotifyToken.access_token;
+    }).catch(err => { spotifyTokenPromise = null; throw err; });
+  }
+  return spotifyTokenPromise;
 }
 
 // --- Gmail token cache ---
 let gmailToken = null;
+let gmailTokenPromise = null;
 async function getGmailToken() {
   if (gmailToken && gmailToken.expires > Date.now()) return gmailToken.access_token;
-  const resp = await axios.post('https://oauth2.googleapis.com/token', {
-    grant_type: 'refresh_token',
-    refresh_token: GMAIL_REFRESH_TOKEN,
-    client_id: GMAIL_CLIENT_ID,
-    client_secret: GMAIL_CLIENT_SECRET
-  });
-  gmailToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
-  return gmailToken.access_token;
+  if (!gmailTokenPromise) {
+    gmailTokenPromise = axios.post('https://oauth2.googleapis.com/token', {
+      grant_type: 'refresh_token',
+      refresh_token: GMAIL_REFRESH_TOKEN,
+      client_id: GMAIL_CLIENT_ID,
+      client_secret: GMAIL_CLIENT_SECRET
+    }).then(resp => {
+      gmailToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
+      gmailTokenPromise = null;
+      return gmailToken.access_token;
+    }).catch(err => { gmailTokenPromise = null; throw err; });
+  }
+  return gmailTokenPromise;
 }
 
 // --- Google Calendar token cache ---
 let gcalToken = null;
+let gcalTokenPromise = null;
 async function getGoogleCalendarToken() {
   if (gcalToken && gcalToken.expires > Date.now()) return gcalToken.access_token;
-  const credentials = JSON.parse(GOOGLE_CALENDAR_CREDENTIALS);
-  const resp = await axios.post('https://oauth2.googleapis.com/token', {
-    grant_type: 'refresh_token',
-    refresh_token: credentials.refresh_token,
-    client_id: credentials.client_id,
-    client_secret: credentials.client_secret
-  });
-  gcalToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
-  return gcalToken.access_token;
+  if (!gcalTokenPromise) {
+    const credentials = JSON.parse(GOOGLE_CALENDAR_CREDENTIALS);
+    gcalTokenPromise = axios.post('https://oauth2.googleapis.com/token', {
+      grant_type: 'refresh_token',
+      refresh_token: credentials.refresh_token,
+      client_id: credentials.client_id,
+      client_secret: credentials.client_secret
+    }).then(resp => {
+      gcalToken = { access_token: resp.data.access_token, expires: Date.now() + (resp.data.expires_in * 1000) - 60000 };
+      gcalTokenPromise = null;
+      return gcalToken.access_token;
+    }).catch(err => { gcalTokenPromise = null; throw err; });
+  }
+  return gcalTokenPromise;
 }
 
 // --- Helpers ---
@@ -91,7 +112,7 @@ const tools = {
       return { success: true, text: `Message sent to ${contact} via Telegram` };
     }
     // Default: Twilio SMS
-    if (!contact.match(/^\+/)) {
+    if (!E164_RE.test(contact)) {
       return { success: false, error: 'Contact must be E.164 phone number for SMS (e.g. +447123456789)' };
     }
     await twilioRequest('/Messages.json', {
@@ -106,7 +127,7 @@ const tools = {
     const { title, due_date, notes } = args;
     const reminders = await loadReminders();
     reminders.push({
-      id: Date.now().toString(),
+      id: randomUUID(),
       title,
       due_date: due_date || null,
       notes: notes || '',
@@ -133,7 +154,7 @@ const tools = {
 
   make_call: async (args) => {
     const { contact } = args;
-    if (!contact.match(/^\+/)) {
+    if (!E164_RE.test(contact)) {
       return { success: false, error: 'Contact must be E.164 phone number (e.g. +447123456789)' };
     }
     await twilioRequest('/Calls.json', {

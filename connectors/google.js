@@ -6,14 +6,18 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 const SUPPORTED_ACTIONS = ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'];
 
 async function getTokens(userId) {
-  const { data } = await supabase
-    .from('connectors')
-    .select('tokens')
-    .eq('user_id', userId)
-    .eq('connector_id', 'google')
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('connectors')
+      .select('tokens')
+      .eq('user_id', userId)
+      .eq('connector_id', 'google')
+      .limit(1);
 
-  if (data?.tokens) return data.tokens;
+    if (!error && data?.length > 0 && data[0].tokens) return data[0].tokens;
+  } catch (err) {
+    console.error('[getTokens] DB error:', err.message);
+  }
 
   // Fall back to env vars (single-user setup), save to DB for next time
   if (process.env.GMAIL_REFRESH_TOKEN) {
@@ -22,7 +26,9 @@ async function getTokens(userId) {
       client_id: process.env.GMAIL_CLIENT_ID,
       client_secret: process.env.GMAIL_CLIENT_SECRET
     };
-    await saveTokens(userId, tokens);
+    try { await saveTokens(userId, tokens); } catch (err) {
+      console.error('[getTokens] failed to save env tokens:', err.message);
+    }
     return tokens;
   }
 
@@ -43,20 +49,24 @@ async function getAccessToken(userId) {
     return tokens.access_token;
   }
 
-  const resp = await axios.post('https://oauth2.googleapis.com/token', {
-    grant_type: 'refresh_token',
-    refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
-    client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
-    client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
-  });
+  try {
+    const resp = await axios.post('https://oauth2.googleapis.com/token', {
+      grant_type: 'refresh_token',
+      refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
+      client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
+      client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
+    }, { timeout: 10000 });
 
-  const updated = {
-    ...tokens,
-    access_token: resp.data.access_token,
-    expires_at: Date.now() + resp.data.expires_in * 1000
-  };
-  await saveTokens(userId, updated);
-  return updated.access_token;
+    const updated = {
+      ...tokens,
+      access_token: resp.data.access_token,
+      expires_at: Date.now() + resp.data.expires_in * 1000
+    };
+    await saveTokens(userId, updated);
+    return updated.access_token;
+  } catch (err) {
+    throw new Error(`Failed to refresh Google token: ${err.response?.data?.error_description || err.message}`);
+  }
 }
 
 function buildMime(to, subject, body) {
@@ -79,19 +89,19 @@ async function execute(userId, action, params) {
         const { to, subject, body } = params;
         if (!to || !subject || !body) return { success: false, error: 'send_email requires to, subject, and body' };
         await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-          { raw: buildMime(to, subject, body) }, { headers });
+          { raw: buildMime(to, subject, body) }, { headers, timeout: 15000 });
         return { success: true, text: `Email sent to ${to}` };
       }
 
       case 'get_emails': {
         const { max_results = 5 } = params;
         const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-          { headers, params: { maxResults: max_results } });
+          { headers, params: { maxResults: max_results }, timeout: 15000 });
         if (!list.data.messages?.length) return { success: true, emails: [], text: 'No emails found' };
 
         const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
           const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
+            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
           const h = detail.data.payload?.headers || [];
           const get = n => h.find(x => x.name === n)?.value || '';
           return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
@@ -103,12 +113,12 @@ async function execute(userId, action, params) {
         const { query, max_results = 5 } = params;
         if (!query) return { success: false, error: 'search_emails requires a query' };
         const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-          { headers, params: { q: query, maxResults: max_results } });
+          { headers, params: { q: query, maxResults: max_results }, timeout: 15000 });
         if (!list.data.messages?.length) return { success: true, emails: [], text: `No emails matching "${query}"` };
 
         const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
           const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] } });
+            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
           const h = detail.data.payload?.headers || [];
           const get = n => h.find(x => x.name === n)?.value || '';
           return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
@@ -128,7 +138,7 @@ async function execute(userId, action, params) {
             start: { dateTime: toLocal(start_date), timeZone: timezone },
             end:   { dateTime: toLocal(end_date),   timeZone: timezone }
           },
-          { headers });
+          { headers, timeout: 15000 });
         return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
       }
 
@@ -136,7 +146,8 @@ async function execute(userId, action, params) {
         const { max_results = 5 } = params;
         const resp = await axios.get('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
           headers,
-          params: { maxResults: max_results, orderBy: 'startTime', singleEvents: true, timeMin: new Date().toISOString() }
+          params: { maxResults: max_results, orderBy: 'startTime', singleEvents: true, timeMin: new Date().toISOString() },
+          timeout: 15000
         });
         const events = (resp.data.items || []).map(e => ({
           id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
