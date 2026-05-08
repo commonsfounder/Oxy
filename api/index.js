@@ -100,37 +100,32 @@ function parseActions(fullResponse) {
   return { spoken, actions };
 }
 
-const VOICE_MAP = {
-  'British Warm': 'EXAVITQu4vr4xnSDxMaL',
-  'British Cool': 'XB0fDUnXU5powFXDhCwa',
-  'British Male': 'onwK4e9ZLuTAKqWW03F9',
-  'American Casual': 'pNInz6obpgDQGcFmaJgB'
-};
-
-async function generateSpeech(text, voiceStyle) {
-  const voiceId = VOICE_MAP[voiceStyle] || process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
-  const response = await axios.post(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-    {
-      text,
-      model_id: 'eleven_flash_v2_5',
-      voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.75,
-        style: 0.3
-      }
-    },
-    {
-      headers: {
-        'xi-api-key': process.env.ELEVENLABS_API_KEY,
-        'Content-Type': 'application/json'
+async function generateSpeech(text) {
+  try {
+    const resp = await axios.post(
+      'https://texttospeech.googleapis.com/v1/text:synthesize',
+      {
+        input: { text },
+        voice: { languageCode: 'en-GB', name: 'en-GB-Neural2-B' },
+        audioConfig: { audioEncoding: 'MP3', speakingRate: 1.05 }
       },
-      responseType: 'arraybuffer',
-      timeout: 15000
-    }
-  );
-
-  return Buffer.from(response.data).toString('base64');
+      {
+        params: { key: process.env.GEMINI_API_KEY },
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 15000
+      }
+    );
+    return resp.data.audioContent;
+  } catch (err) {
+    console.warn('[tts] Google TTS failed, falling back to ElevenLabs:', err.response?.data?.error?.message || err.message);
+    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
+    const response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      { text, model_id: 'eleven_flash_v2_5', voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3 } },
+      { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY, 'Content-Type': 'application/json' }, responseType: 'arraybuffer', timeout: 15000 }
+    );
+    return Buffer.from(response.data).toString('base64');
+  }
 }
 
 async function getMemory(userId) {
@@ -286,7 +281,7 @@ ${memory || 'Nothing yet.'}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }] });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }], generationConfig: { temperature: 1.5, topP: 1.0 } });
     const geminiRes = await model.generateContent({
       contents: [...normalizeGeminiHistory(history), { role: 'user', parts: [{ text: userText }] }]
     });
@@ -315,7 +310,7 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     }
 
     console.log('[3/4] Generating voice...');
-    const audioBase64 = await generateSpeech(spoken, 'British Warm');
+    const audioBase64 = await generateSpeech(spoken);
 
     console.log('[4/4] Done:', spoken);
     res.json({
@@ -480,7 +475,7 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }] });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }], generationConfig: { temperature: 1.5, topP: 1.0 } });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
     
@@ -537,7 +532,7 @@ ${availableActions}
 
 Current time: ${timeStr}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }] });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt, tools: [{ googleSearch: {} }], generationConfig: { temperature: 1.5, topP: 1.0 } });
     const baseHistory = normalizeGeminiHistory(cleanHistory);
     const geminiRes = await model.generateContent({
       contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
@@ -610,7 +605,7 @@ Current time: ${timeStr}`;
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
-      result.audio = await generateSpeech(spoken, settings.voice);
+      result.audio = await generateSpeech(spoken);
       result.audioFormat = 'mp3';
     }
 

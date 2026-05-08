@@ -1650,9 +1650,19 @@ function App() {
   const [page,     setPage]     = useState('chat');
   const [memory,   setMemory]   = useState('');
   const [people,   setPeople]   = useState([]);
-  const [settings, setSettings] = useState({ name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' });
+  const [settings, setSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('oxy_settings');
+      const defaults = { name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' };
+      return saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
+    } catch { return { name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' }; }
+  });
   const [briefing, setBriefing] = useState(null);
   const [initialQuery, setInitialQuery] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem('oxy_settings', JSON.stringify(settings));
+  }, [settings]);
 
   useEffect(() => {
     if (!isAuth) return;
