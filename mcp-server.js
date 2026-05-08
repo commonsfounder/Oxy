@@ -3,6 +3,7 @@ const cors = require("cors");
 const { z } = require("zod");
 const axios = require("axios");
 const fs = require("fs").promises;
+const { randomUUID } = require("crypto");
 const path = require("path");
 
 const app = express();
@@ -84,7 +85,7 @@ app.post("/tools", async (req, res) => {
         const { title, due_date, notes } = args;
         const reminders = await loadReminders();
         reminders.push({
-          id: Date.now().toString(),
+          id: randomUUID(),
           title,
           due_date: due_date || null,
           notes: notes || "",
