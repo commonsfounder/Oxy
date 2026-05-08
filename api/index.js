@@ -40,6 +40,9 @@ const CONNECTOR_ACTION_MAP = {
   'calendar:get':                       'get_calendar_events',
   'calendar:get_events':                'get_calendar_events',
   'calendar:get_calendar_events':       'get_calendar_events',
+  'uber:book_uber':                     'book_uber',
+  'uber:request':                       'book_uber',
+  'uber:request_ride':                  'book_uber',
 };
 
 async function callProxy(userId, actionObj) {
@@ -400,7 +403,7 @@ const CONNECTORS = [
   { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',        implemented: false },
   { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity', implemented: false },
   { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',         implemented: false },
-  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: false },
+  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: true },
   { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
   { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
   { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: false },
