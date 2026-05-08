@@ -27,8 +27,31 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-async function callProxy(userId, action, params) {
-  return dispatch(userId, action, params);
+const CONNECTOR_ACTION_MAP = {
+  'gmail:send':        'send_email',
+  'gmail:get':         'get_emails',
+  'gmail:search':      'search_emails',
+  'calendar:create':   'create_calendar_event',
+  'calendar:get':      'get_calendar_events',
+};
+
+async function callProxy(userId, actionObj) {
+  if (typeof actionObj === 'string') {
+    // legacy call: callProxy(userId, 'send_email', params) — shouldn't happen after refactor but safe fallback
+    return dispatch(userId, actionObj, {});
+  }
+  if (actionObj.type === 'deeplink') {
+    // deeplinks are client-side only — backend just acknowledges
+    return { success: true, clientAction: true, url: actionObj.url };
+  }
+  if (actionObj.type === 'connector') {
+    const key = `${actionObj.service}:${actionObj.action}`;
+    const mappedAction = CONNECTOR_ACTION_MAP[key];
+    if (!mappedAction) return { success: false, error: `Unknown connector action: ${key}` };
+    return dispatch(userId, mappedAction, actionObj.input || {});
+  }
+  // legacy flat format: {type: 'send_email', input: {...}}
+  return dispatch(userId, actionObj.type, actionObj.input || {});
 }
 
 
@@ -272,7 +295,7 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     const actionResults = [];
     for (const action of actions) {
       console.log('[mcp] executing:', action.type, action.input);
-      const result = await callProxy(userId, action.type, action.input || {});
+      const result = await callProxy(userId, action);
       console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
@@ -547,7 +570,7 @@ Current time: ${timeStr}`;
     const physicalActions = actions.filter(a => a.type !== 'search');
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
-      const result = await callProxy(userId, action.type, action.input || {});
+      const result = await callProxy(userId, action);
       console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
       await supabase.from('action_log').insert({
