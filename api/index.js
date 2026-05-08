@@ -751,18 +751,6 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.get('/install-shortcut', (_req, res) => {
-  const fs = require('fs');
-  const path = require('path');
-  const filePath = path.join(__dirname, '..', 'Oxy.shortcut');
-  if (fs.existsSync(filePath)) {
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="Oxy.shortcut"');
-    res.sendFile(filePath);
-  } else {
-    res.status(404).json({ error: 'Shortcut file not found' });
-  }
-});
 
 const _indexHtml = require('fs').readFileSync(path.resolve(__dirname, '..', 'index.html'), 'utf8');
 app.get('/', (_req, res) => {

@@ -1110,39 +1110,17 @@ const Icons = {
   ),
 };
 
-function AutoRunActions({ actions }) {
-  const [ran, setRan] = useState(false);
-  const [blocked, setBlocked] = useState(false);
-
-  useEffect(() => {
-    if (!actions || actions.length === 0) return;
-    actions.forEach((action, i) => {
-      setTimeout(() => {
-        const shortcutUrl = `shortcuts://run-shortcut?name=Oxy&input=${encodeURIComponent(JSON.stringify(action))}`;
-        const link = document.createElement('a');
-        link.href = shortcutUrl;
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        apiFetch('/action-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: USER_ID, action, status: 'executed' })
-        }).catch(() => {});
-      }, i * 800);
-    });
-    setRan(true);
-    setTimeout(() => { if (document.hidden) setRan(true); else setBlocked(true); }, 5000);
-  }, [actions]);
-
-  if (ran) return null;
-  if (blocked) return (
-    <div className="action-hint">
-      If the shortcut didn't run, open it once from iOS to grant permission.
-    </div>
-  );
-  return null;
+function openDeeplinks(actionResults) {
+  (actionResults || []).forEach(ar => {
+    if (ar.result?.clientAction && ar.result?.deeplink) {
+      const link = document.createElement('a');
+      link.href = ar.result.deeplink;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  });
 }
 
 function ChatPage({ settings, memory, people, initialQuery }) {
@@ -1253,10 +1231,11 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       if (data.transcription) setMessages(prev => [...prev, { role: 'user', content: data.transcription, time: new Date() }]);
       if (data.text) {
         const m = { role: 'assistant', content: data.text, time: new Date() };
-        if (data.audio)   m.audio   = data.audio;
+        if (data.audio)          m.audio   = data.audio;
         if (data.actions?.length) m.actions = data.actions;
         setMessages(prev => [...prev, m]);
         if (data.audio) playAudioFromBase64(data.audio);
+        openDeeplinks(data.actions);
       }
     } catch (err) { console.error('Audio error:', err); }
     setLoading(false);
@@ -1278,10 +1257,11 @@ function ChatPage({ settings, memory, people, initialQuery }) {
         body: JSON.stringify({ message: text, userId: USER_ID, settings, memory, people })
       })).json();
       const m = { role: 'assistant', content: data.text || 'Something went wrong.', time: new Date() };
-      if (data.audio)         m.audio   = data.audio;
+      if (data.audio)           m.audio   = data.audio;
       if (data.actions?.length) m.actions = data.actions;
       setMessages(prev => [...prev, m]);
       if (data.audio) playAudioFromBase64(data.audio);
+      openDeeplinks(data.actions);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
@@ -1319,10 +1299,14 @@ function ChatPage({ settings, memory, people, initialQuery }) {
               <div className="msg-actions-bar">
                 {msg.actions.map((a, j) => {
                   const ok = a.result?.success !== false;
-                  const label = a.type === 'email_sent' ? `Email sent to ${a.to}`
-                              : a.type === 'memory_saved' ? 'Memory saved'
-                              : a.type === 'digital_briefing' ? 'Briefing retrieved'
-                              : a.type || 'Action';
+                  const name = a.action || a.type || 'action';
+                  const label = name === 'send_email'             ? 'Email sent'
+                              : name === 'get_emails'             ? 'Emails fetched'
+                              : name === 'search_emails'          ? 'Emails searched'
+                              : name === 'create_calendar_event'  ? 'Event created'
+                              : name === 'get_calendar_events'    ? 'Calendar checked'
+                              : name === 'book_uber'              ? 'Uber opening'
+                              : name;
                   return (
                     <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
                       {ok ? '✓' : '✗'} {label}
@@ -1558,11 +1542,6 @@ function ActionHistoryPage() {
       .catch(() => setLoading(false));
   }, []);
 
-  const formatAction = a => {
-    if (!a) return '';
-    if (typeof a === 'string') { try { const p = JSON.parse(a); return p.type === 'shortcut' ? p.name : p.type || a; } catch { return a; } }
-    return a;
-  };
 
   if (loading) return (
     <div className="page-content" style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>
@@ -1742,7 +1721,7 @@ function App() {
               <div className="briefing-banner">
                 <div className="briefing-label">Morning Briefing</div>
                 <div className="briefing-text">{briefing.text}</div>
-                {briefing.actions.length > 0 && <AutoRunActions actions={briefing.actions} />}
+
                 <button className="briefing-dismiss" onClick={() => setBriefing(null)}>Dismiss</button>
               </div>
             )}
