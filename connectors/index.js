@@ -18,8 +18,8 @@ const IMPLEMENTED_CONNECTORS = new Set(['google', 'uber']);
 
 async function dispatch(userId, action, params) {
   const connector = registry[action];
-  if (!connector) return { success: false, error: `No connector registered for action: ${action}` };
-  return connector.execute(userId, action, params);
+  if (connector) return connector.execute(userId, action, params);
+  return { success: false, error: `No connector registered for action: ${action}` };
 }
 
 module.exports = { dispatch, registry, IMPLEMENTED_CONNECTORS };
