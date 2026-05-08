@@ -81,7 +81,8 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "get_calendar_events", "input": {"max_results": 5}},
     {"type": "send_email", "input": {"to": "email", "subject": "subject", "body": "body"}},
     {"type": "get_emails", "input": {"max_results": 5}},
-    {"type": "search_emails", "input": {"query": "search term", "max_results": 5}}
+    {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
+    {"type": "book_uber", "input": {"pickup": "current location or address", "destination": "destination address"}}
   ]
 }
 </action>
