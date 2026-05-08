@@ -1,6 +1,9 @@
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
+const { randomUUID } = require('crypto');
+
+const E164_RE = /^\+[1-9]\d{1,14}$/;
 
 // --- Env vars ---
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -91,7 +94,7 @@ const tools = {
       return { success: true, text: `Message sent to ${contact} via Telegram` };
     }
     // Default: Twilio SMS
-    if (!contact.match(/^\+/)) {
+    if (!E164_RE.test(contact)) {
       return { success: false, error: 'Contact must be E.164 phone number for SMS (e.g. +447123456789)' };
     }
     await twilioRequest('/Messages.json', {
@@ -106,7 +109,7 @@ const tools = {
     const { title, due_date, notes } = args;
     const reminders = await loadReminders();
     reminders.push({
-      id: Date.now().toString(),
+      id: randomUUID(),
       title,
       due_date: due_date || null,
       notes: notes || '',
@@ -133,7 +136,7 @@ const tools = {
 
   make_call: async (args) => {
     const { contact } = args;
-    if (!contact.match(/^\+/)) {
+    if (!E164_RE.test(contact)) {
       return { success: false, error: 'Contact must be E.164 phone number (e.g. +447123456789)' };
     }
     await twilioRequest('/Calls.json', {
