@@ -9,7 +9,8 @@ const geocodeLocation = async (locationString) => {
           address: locationString,
           region: 'uk',
           key: process.env.GOOGLE_MAPS_API_KEY
-        }
+        },
+        timeout: 10000
       }
     );
 

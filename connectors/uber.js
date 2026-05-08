@@ -2,36 +2,56 @@ const { geocodeLocation } = require('../api/geocoding');
 
 const SUPPORTED_ACTIONS = ['book_uber'];
 
+const CURRENT_LOCATION_PHRASES = [
+  'current location', 'current address', 'my location', 'here', 'where i am',
+  'where i\'m at', 'my current location', 'my address', 'my place', 'home'
+];
+
+function isCurrentLocation(str) {
+  return CURRENT_LOCATION_PHRASES.some(p => str.trim().toLowerCase() === p);
+}
+
 async function execute(userId, action, params) {
   try {
     switch (action) {
       case 'book_uber': {
         const { pickup, destination } = params;
-        if (!pickup || !destination) {
-          return { success: false, error: 'book_uber requires pickup and destination' };
+        if (!destination) {
+          return { success: false, error: 'book_uber requires a destination' };
         }
 
-        const [pickupCoords, destCoords] = await Promise.all([
-          geocodeLocation(pickup),
-          geocodeLocation(destination)
-        ]);
+        const enc = encodeURIComponent;
+        const destCoords = await geocodeLocation(destination);
 
         // URLSearchParams percent-encodes brackets, breaking Uber's deep link format.
         // Build the query string manually so pickup[latitude] etc. stay literal.
-        const enc = encodeURIComponent;
-        const query = [
+        let queryParts = [
           'action=setPickup',
-          `pickup[latitude]=${pickupCoords.lat}`,
-          `pickup[longitude]=${pickupCoords.lng}`,
-          `pickup[formatted_address]=${enc(pickupCoords.formattedAddress)}`,
           `dropoff[latitude]=${destCoords.lat}`,
           `dropoff[longitude]=${destCoords.lng}`,
           `dropoff[formatted_address]=${enc(destCoords.formattedAddress)}`
-        ].join('&');
+        ];
+
+        let fromLabel;
+        if (!pickup || isCurrentLocation(pickup)) {
+          // Let Uber use device GPS for pickup
+          queryParts.splice(1, 0, 'pickup=my_location');
+          fromLabel = 'your location';
+        } else {
+          const pickupCoords = await geocodeLocation(pickup);
+          queryParts.splice(1, 0,
+            `pickup[latitude]=${pickupCoords.lat}`,
+            `pickup[longitude]=${pickupCoords.lng}`,
+            `pickup[formatted_address]=${enc(pickupCoords.formattedAddress)}`
+          );
+          fromLabel = pickupCoords.formattedAddress;
+        }
+
+        const query = queryParts.join('&');
 
         return {
           success: true,
-          text: `Opening Uber from ${pickupCoords.formattedAddress} to ${destCoords.formattedAddress} — confirm in the app`,
+          text: `Opening Uber from ${fromLabel} to ${destCoords.formattedAddress} — confirm in the app`,
           deepLink: `uber://?${query}`,
           webLink: `https://m.uber.com/ul/?${query}`
         };
