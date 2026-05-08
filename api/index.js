@@ -28,11 +28,18 @@ const openai = new OpenAI({
 });
 
 const CONNECTOR_ACTION_MAP = {
-  'gmail:send':        'send_email',
-  'gmail:get':         'get_emails',
-  'gmail:search':      'search_emails',
-  'calendar:create':   'create_calendar_event',
-  'calendar:get':      'get_calendar_events',
+  'gmail:send':                         'send_email',
+  'gmail:send_email':                   'send_email',
+  'gmail:get':                          'get_emails',
+  'gmail:get_emails':                   'get_emails',
+  'gmail:search':                       'search_emails',
+  'gmail:search_emails':                'search_emails',
+  'calendar:create':                    'create_calendar_event',
+  'calendar:create_event':              'create_calendar_event',
+  'calendar:create_calendar_event':     'create_calendar_event',
+  'calendar:get':                       'get_calendar_events',
+  'calendar:get_events':                'get_calendar_events',
+  'calendar:get_calendar_events':       'get_calendar_events',
 };
 
 async function callProxy(userId, actionObj) {
