@@ -333,10 +333,13 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       return res.json({ transcription: '', text: '', audio: null, actions: [] });
     }
 
-    const [memory, history] = await Promise.all([
+    const [memory, history, preferences] = await Promise.all([
       getMemory(userId),
-      getHistory(userId)
+      getHistory(userId),
+      getPreferences(userId)
     ]);
+    const enabledConnectors = await getEnabledConnectors(userId);
+    const availableActions = buildAvailableActions(enabledConnectors);
     await saveMessage(userId, 'user', userText);
 
     console.log('[2/4] Thinking...');
@@ -344,6 +347,12 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
 WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
+
+HOW THE USER LIKES THINGS (learned over time):
+${preferences || 'Still learning.'}
+
+CONNECTED APPS:
+${availableActions}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
