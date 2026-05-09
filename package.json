@@ -21,6 +21,7 @@
     "openai": "^4.100.0",
     "plist": "^5.0.0",
     "raw-body": "^3.0.2",
+    "telegram": "^2.26.22",
     "zod": "^3.23.8"
   },
   "devDependencies": {

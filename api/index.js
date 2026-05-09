@@ -8,6 +8,7 @@ const OpenAI = require('openai');
 const FormData = require('form-data');
 const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
+const telegram = require('../connectors/telegram');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -82,7 +83,9 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "send_email", "input": {"to": "email", "subject": "subject", "body": "body"}},
     {"type": "get_emails", "input": {"max_results": 5}},
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
-    {"type": "book_uber", "input": {"destination": "destination address"}}
+    {"type": "book_uber", "input": {"destination": "destination address"}},
+    {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
+    {"type": "get_telegram_contacts", "input": {}}
   ]
 }
 </action>
@@ -263,6 +266,7 @@ function buildAvailableActions(enabled) {
     homekit: ['homekit_control'],
     maps: ['get_directions'],
     uber: ['book_uber'],
+    telegram: ['send_telegram', 'get_telegram_contacts'],
     deliveroo: ['order_food'],
     monzo: ['check_balance'],
     betfair: ['place_bet'],
@@ -489,6 +493,7 @@ const CONNECTORS = [
   { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity', implemented: false },
   { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',         implemented: false },
   { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: true },
+  { id: 'telegram',  name: 'Telegram',                  icon: '✈️', category: 'Messages',     implemented: true },
   { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
   { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
   { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: false },
@@ -731,6 +736,41 @@ app.delete('/preferences/:userId', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Telegram Auth ─────────────────────────────────────────────────────────────
+
+app.post('/auth/telegram/start', async (req, res) => {
+  try {
+    const { userId = 'default', phone } = req.body;
+    if (!phone) return res.status(400).json({ error: 'phone is required' });
+    const result = await telegram.startAuth(userId, phone);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/auth/telegram/verify', async (req, res) => {
+  try {
+    const { userId = 'default', code } = req.body;
+    if (!code) return res.status(400).json({ error: 'code is required' });
+    const result = await telegram.verifyCode(userId, code);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/auth/telegram/2fa', async (req, res) => {
+  try {
+    const { userId = 'default', password } = req.body;
+    if (!password) return res.status(400).json({ error: 'password is required' });
+    const result = await telegram.verify2FA(userId, password);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
