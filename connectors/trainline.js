@@ -30,60 +30,35 @@ function toCRS(input) {
   return CRS_MAP[s.toLowerCase()] || null;
 }
 
-function stripNs(xml) {
-  return xml.replace(/<[a-zA-Z0-9]+:/g, '<').replace(/<\/[a-zA-Z0-9]+:/g, '</');
-}
-
-function tag(xml, name) {
-  const m = stripNs(xml).match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, 'i'));
-  return m ? m[1].trim() : null;
-}
-
-function allTags(xml, name) {
-  const stripped = stripNs(xml);
-  const re = new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`, 'gi');
-  const out = []; let m;
-  while ((m = re.exec(stripped)) !== null) out.push(m[1].trim());
-  return out;
-}
-
-function parseTrains(xml) {
-  return allTags(xml, 'service').map(svc => ({
-    scheduledDeparture: tag(svc, 'std'),
-    estimatedDeparture: tag(svc, 'etd'),
-    scheduledArrival:   tag(svc, 'sta'),
-    estimatedArrival:   tag(svc, 'eta'),
-    platform:           tag(svc, 'platform'),
-    destination:        tag(tag(svc, 'destination') || '', 'locationName'),
-    operator:           tag(svc, 'operator'),
-    cancelled:          /isCancelled>true/i.test(svc),
-  }));
-}
-
 async function getNextTrains(originCRS, destCRS) {
-  const soap = `<?xml version="1.0"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
-               xmlns:ldb="http://thalesgroup.com/RTTI/2017-10-01/ldb/"
-               xmlns:tok="http://thalesgroup.com/RTTI/2013-11-28/Token/types">
-  <soap:Header>
-    <tok:AccessToken><tok:TokenValue>${process.env.DARWIN_API_TOKEN}</tok:TokenValue></tok:AccessToken>
-  </soap:Header>
-  <soap:Body>
-    <ldb:GetDepBoardWithDetailsRequest>
-      <ldb:numRows>3</ldb:numRows>
-      <ldb:crs>${originCRS}</ldb:crs>
-      <ldb:filterCrs>${destCRS}</ldb:filterCrs>
-      <ldb:filterType>to</ldb:filterType>
-    </ldb:GetDepBoardWithDetailsRequest>
-  </soap:Body>
-</soap:Envelope>`;
+  const appId  = process.env.TRANSPORT_API_APP_ID;
+  const appKey = process.env.TRANSPORT_API_APP_KEY;
 
-  const resp = await axios.post(
-    'https://lite.realtime.nationalrail.co.uk/OpenLDBWS/ldb11.asmx',
-    soap,
-    { headers: { 'Content-Type': 'text/xml; charset=utf-8' }, timeout: 10000 }
+  const resp = await axios.get(
+    `https://transportapi.com/v3/uk/train/station/${originCRS}/live.json`,
+    {
+      params: {
+        app_id: appId,
+        app_key: appKey,
+        calling_at: destCRS,
+        darwin: true,
+        train_status: 'passenger',
+      },
+      timeout: 10000,
+    }
   );
-  return parseTrains(resp.data);
+
+  const departures = resp.data?.departures?.all || [];
+  return departures.slice(0, 3).map(d => ({
+    scheduledDeparture: d.aimed_departure_time,
+    estimatedDeparture: d.expected_departure_time,
+    scheduledArrival:   d.aimed_arrival_time,
+    estimatedArrival:   d.expected_arrival_time,
+    platform:           d.platform,
+    destination:        d.destination_name,
+    operator:           d.operator_name,
+    cancelled:          d.status === 'CANCELLED',
+  }));
 }
 
 function buildTrainlineURL(origin, destination) {
@@ -105,7 +80,7 @@ async function execute(userId, action, params) {
     if (!originCRS) return { success: false, error: `Unknown station: "${origin}". Try a full station name or 3-letter CRS code.` };
     if (!destCRS)   return { success: false, error: `Unknown station: "${destination}". Try a full station name or 3-letter CRS code.` };
 
-    if (!process.env.DARWIN_API_TOKEN) {
+    if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
       return { success: true, text: `No live times available right now, but here's Trainline for ${origin} to ${destination}`, bookingUrl };
     }
 
