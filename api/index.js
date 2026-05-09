@@ -43,6 +43,7 @@ const supabase = createClient(
 );
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const GEMINI_MODEL = 'gemini-2.0-flash';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -191,7 +192,7 @@ async function saveMemory(userId, content) {
 
 async function extractMemoryFact(userId, text) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
     const result = await model.generateContent(
       `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
@@ -206,7 +207,8 @@ async function extractMemoryFact(userId, text) {
       fact.toLowerCase().includes(m.content.toLowerCase())
     );
     return alreadyKnown ? null : fact;
-  } catch {
+  } catch (err) {
+    console.warn('[extractMemoryFact] failed:', err.message);
     return null;
   }
 }
@@ -225,8 +227,9 @@ function shouldSaveMemory(text) {
 async function getHistory(userId) {
   const { data, error } = await supabase
     .from('conversations')
-    .select('role, content')
+    .select('role, content, created_at')
     .eq('user_id', userId)
+    .neq('role', 'system')
     .order('created_at', { ascending: false })
     .limit(10);
 
@@ -306,7 +309,8 @@ async function duckDuckGoSearch(query) {
       if (title && snippet) results.push({ title, snippet, url });
     }
     return results.slice(0, 5);
-  } catch {
+  } catch (err) {
+    console.warn('[search] DuckDuckGo failed:', err.message);
     return [];
   }
 }
@@ -324,7 +328,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     if (recentHits.length >= 10) {
       return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
     }
-    audioRateLimit.set(userId, [...recentHits, now]);
+    recentHits.push(now);
+    audioRateLimit.set(userId, recentHits); // already pruned to window, no unbounded growth
 
     console.log('[1/4] Transcribing audio...');
     const transcription = await openai.audio.transcriptions.create({
@@ -347,7 +352,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     ]);
     const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
-    await saveMessage(userId, 'user', userText);
+    saveMessage(userId, 'user', userText); // fire-and-forget
 
     console.log('[2/4] Thinking...');
     const systemPrompt = `${OXCY_SYSTEM_PROMPT}
@@ -363,13 +368,13 @@ ${availableActions}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent({
       contents: [...normalizeGeminiHistory(history), { role: 'user', parts: [{ text: userText }] }]
     });
 
     const { spoken, actions } = parseActions(geminiRes.response.text());
-    await saveMessage(userId, 'assistant', spoken);
+    saveMessage(userId, 'assistant', spoken); // fire-and-forget
 
     if (shouldSaveMemory(userText)) {
       const fact = await extractMemoryFact(userId, userText);
@@ -415,16 +420,20 @@ app.post('/memory', async (req, res) => {
     const { userId = 'default', content } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
 
-    // Insert new row first so data is never lost, then prune old rows
-    const { data: inserted } = await supabase
+    await supabase
       .from('memories')
-      .insert({ user_id: userId, content, created_at: new Date().toISOString() })
-      .select('id');
+      .insert({ user_id: userId, content, created_at: new Date().toISOString() });
 
-    if (inserted?.[0]?.id) {
-      await supabase.from('memories').delete()
-        .eq('user_id', userId)
-        .neq('id', inserted[0].id);
+    // Prune oldest entries beyond 50 so the table doesn't grow unbounded
+    const { data: all } = await supabase
+      .from('memories')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (all && all.length > 50) {
+      const toDelete = all.slice(50).map(r => r.id);
+      await supabase.from('memories').delete().in('id', toDelete);
     }
 
     res.json({ success: true });
@@ -573,11 +582,9 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
-    
-    await saveMessage(userId, 'system', `[briefing] ${spoken}`);
 
     res.json({ text: spoken, actions });
   } catch (err) {
@@ -612,9 +619,9 @@ app.post('/chat', async (req, res) => {
     ]);
     const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
-    await saveMessage(userId, 'user', message);
+    saveMessage(userId, 'user', message); // fire-and-forget
 
-    const cleanHistory = history.filter(m => m.role !== 'system');
+    const cleanHistory = history;
 
     const now = new Date();
 const timeStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
@@ -631,7 +638,7 @@ ${availableActions}
 
 Current time: ${timeStr}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: systemPrompt });
     const baseHistory = normalizeGeminiHistory(cleanHistory);
     const geminiRes = await model.generateContent({
       contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
@@ -641,9 +648,6 @@ Current time: ${timeStr}`;
     console.log('[gemini raw]', rawText.slice(0, 400));
     let { spoken, actions } = parseActions(rawText);
     console.log('[actions parsed]', JSON.stringify(actions));
-
-    // Gemini sometimes returns only an action block with no spoken text — use action result text as fallback
-    if (!spoken && actions.length > 0) spoken = ''; // filled below after execution
 
     // If Oxy wants to search, execute it and re-prompt
     const searchAction = actions.find(a => a.type === 'search');
@@ -710,7 +714,7 @@ Current time: ${timeStr}`;
         .join(' ') || 'Done.';
     }
 
-    await saveMessage(userId, 'assistant', spoken);
+    saveMessage(userId, 'assistant', spoken); // fire-and-forget
 
     if (shouldSaveMemory(message)) {
       const fact = await extractMemoryFact(userId, message);

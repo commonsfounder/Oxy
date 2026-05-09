@@ -57,7 +57,7 @@ body::after {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
   opacity: 0.025;
   pointer-events: none;
-  z-index: 9999;
+  z-index: 500;
 }
 
 /* ── APP ── */
@@ -1132,11 +1132,12 @@ function AutoRunActions({ actions }) {
         }).catch(() => {});
       }, i * 800);
     });
+    // Show a hint if the page is visible after 5s (shortcut may not have triggered)
+    setTimeout(() => { if (!document.hidden) setBlocked(true); }, 5000);
     setRan(true);
-    setTimeout(() => { if (document.hidden) setRan(true); else setBlocked(true); }, 5000);
   }, [actions]);
 
-  if (ran) return null;
+  if (!ran) return null;
   if (blocked) return (
     <div className="action-hint">
       If the shortcut didn't run, open it once from iOS to grant permission.
@@ -1162,7 +1163,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       .then(r => r.json())
       .then(data => {
         if (data.history && data.history.length > 0) {
-          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date() })));
+          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: m.created_at ? new Date(m.created_at) : new Date() })));
         }
       })
       .catch(() => {});
@@ -1178,10 +1179,14 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       autoSend.current = true;
       sendMessage(initialQuery);
     }
-  }, [initialQuery]);
+  }, [initialQuery, sendMessage]);
 
   const stopSpeaking = () => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      if (audioRef.current._blobUrl) URL.revokeObjectURL(audioRef.current._blobUrl);
+      audioRef.current = null;
+    }
     setSpeaking(false);
   };
 
@@ -1192,9 +1197,11 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       const bytes = new Uint8Array(atob(base64Audio).split('').map(c => c.charCodeAt(0)));
       const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/mp3' }));
       const audio = new Audio(url);
+      audio._blobUrl = url;
       audioRef.current = audio;
-      audio.onended = () => { setSpeaking(false); audioRef.current = null; };
-      audio.onerror = () => { setSpeaking(false); audioRef.current = null; };
+      const cleanup = () => { URL.revokeObjectURL(url); setSpeaking(false); audioRef.current = null; };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
       audio.play();
     } catch (err) { setSpeaking(false); }
   }, []);
@@ -1210,7 +1217,11 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       mediaRecorder.start();
       setRecording(true);
       stopSpeaking();
-    } catch (err) { console.error('Mic error:', err); }
+    } catch (err) {
+      console.error('Mic error:', err);
+      const msg = err.name === 'NotAllowedError' ? 'Microphone permission denied' : 'Could not access microphone';
+      setMessages(prev => [...prev, { role: 'assistant', content: msg, time: new Date() }]);
+    }
   };
 
   const stopRecording = () => {
@@ -1302,7 +1313,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
   const handleInput = e => {
     setInput(e.target.value);
     e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+    e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
   };
 
   return (
