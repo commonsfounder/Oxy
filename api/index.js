@@ -85,7 +85,8 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
     {"type": "book_uber", "input": {"destination": "destination address"}},
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
-    {"type": "get_telegram_contacts", "input": {}}
+    {"type": "get_telegram_contacts", "input": {}},
+    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}}
   ]
 }
 </action>
@@ -496,7 +497,7 @@ const CONNECTORS = [
   { id: 'telegram',  name: 'Telegram',                  icon: '✈️', category: 'Messages',     implemented: true },
   { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
   { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
-  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: false },
+  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: true },
   { id: 'maps',      name: 'Google Maps',               icon: '📍', category: 'Navigation',   implemented: false },
   { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity', implemented: false },
   { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',      implemented: false },
