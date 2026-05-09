@@ -1328,10 +1328,12 @@ function ChatPage({ settings, memory, people, initialQuery }) {
                   const ok = a.result?.success !== false;
                   const type = a.action || a.type || 'action';
                   const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
-                              : type === 'send_email' ? `Email sent`
+                              : type === 'send_email' ? 'Email sent'
                               : type === 'create_calendar_event' ? 'Event created'
                               : type === 'get_emails' ? 'Emails fetched'
                               : type === 'get_calendar_events' ? 'Calendar fetched'
+                              : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
+                              : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
                               : type;
                   return (
                     <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
@@ -1459,10 +1461,101 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
   );
 }
 
+function TelegramAuthModal({ onSuccess, onClose }) {
+  const [step, setStep]   = useState('phone'); // phone | code | twofa
+  const [phone, setPhone] = useState('');
+  const [code, setCode]   = useState('');
+  const [pass, setPass]   = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [err,  setErr]    = useState('');
+
+  const submitPhone = async () => {
+    if (!phone.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await apiFetch('/auth/telegram/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, phone: phone.trim() })
+      });
+      const d = await r.json();
+      if (d.success) setStep('code');
+      else setErr(d.error || 'Failed to send code');
+    } catch { setErr('Network error'); }
+    setBusy(false);
+  };
+
+  const submitCode = async () => {
+    if (!code.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await apiFetch('/auth/telegram/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, code: code.trim() })
+      });
+      const d = await r.json();
+      if (d.success && !d.requires2FA) onSuccess();
+      else if (d.success && d.requires2FA) setStep('twofa');
+      else setErr(d.error || 'Invalid code');
+    } catch { setErr('Network error'); }
+    setBusy(false);
+  };
+
+  const submit2FA = async () => {
+    if (!pass.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await apiFetch('/auth/telegram/2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: USER_ID, password: pass })
+      });
+      const d = await r.json();
+      if (d.success) onSuccess();
+      else setErr(d.error || 'Wrong password');
+    } catch { setErr('Network error'); }
+    setBusy(false);
+  };
+
+  const stepConfig = {
+    phone: { title: 'Connect Telegram', sub: 'Enter your phone number in international format', label: 'Phone number', value: phone, onChange: setPhone, placeholder: '+447...', onSubmit: submitPhone, btnText: 'Send Code' },
+    code:  { title: 'Enter Code',       sub: 'Check your Telegram app for the verification code', label: 'Verification code', value: code, onChange: setCode, placeholder: '12345', onSubmit: submitCode, btnText: 'Verify' },
+    twofa: { title: 'Two-Factor Auth',  sub: 'Enter your Telegram 2FA password', label: 'Password', value: pass, onChange: setPass, placeholder: '••••••••', onSubmit: submit2FA, btnText: 'Confirm', type: 'password' },
+  }[step];
+
+  return (
+    <div className="auth-overlay" style={{zIndex:500}} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="auth-card">
+        <div style={{fontSize:'28px',marginBottom:'12px'}}>✈️</div>
+        <h2>{stepConfig.title}</h2>
+        <p>{stepConfig.sub}</p>
+        <input
+          className="auth-input"
+          type={stepConfig.type || 'text'}
+          placeholder={stepConfig.placeholder}
+          value={stepConfig.value}
+          onChange={e => stepConfig.onChange(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !busy && stepConfig.onSubmit()}
+          autoFocus
+        />
+        {err && <div style={{color:'var(--red)',fontSize:'12px',marginBottom:'8px'}}>{err}</div>}
+        <button className="auth-btn" onClick={stepConfig.onSubmit} disabled={busy}>
+          {busy ? 'Please wait…' : stepConfig.btnText}
+        </button>
+        <button onClick={onClose} style={{marginTop:'14px',background:'none',border:'none',color:'var(--dim)',fontSize:'12px',cursor:'pointer',fontFamily:'var(--font)'}}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ConnectorsPage() {
   const [connectors, setConnectors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [googleStatus, setGoogleStatus] = useState('idle'); // idle | connecting | connected | error
+  const [telegramModal, setTelegramModal] = useState(false);
 
   const loadConnectors = () => {
     apiFetch(`/connectors/${USER_ID}`)
@@ -1493,12 +1586,26 @@ function ConnectorsPage() {
   };
 
   const toggle = async (id, enabled) => {
+    if (id === 'telegram' && !enabled) {
+      setTelegramModal(true);
+      return;
+    }
     await apiFetch('/connectors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: USER_ID, connectorId: id, enabled: !enabled })
     });
     setConnectors(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
+  };
+
+  const onTelegramSuccess = async () => {
+    setTelegramModal(false);
+    await apiFetch('/connectors', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: USER_ID, connectorId: 'telegram', enabled: true })
+    });
+    loadConnectors();
   };
 
   if (loading) return (
@@ -1521,6 +1628,13 @@ function ConnectorsPage() {
 
   return (
     <div className="page-content">
+      {telegramModal && (
+        <TelegramAuthModal
+          onSuccess={onTelegramSuccess}
+          onClose={() => setTelegramModal(false)}
+        />
+      )}
+
       <div className="section">
         <div className="section-title">Google</div>
         <div className="hub-card">
