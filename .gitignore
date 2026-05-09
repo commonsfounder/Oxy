@@ -7,3 +7,4 @@ dist/
 build/
 .vercel/
 .next/
+.claude/settings.local.json
