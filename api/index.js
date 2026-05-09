@@ -686,7 +686,23 @@ Current time: ${timeStr}`;
       });
     }
 
-    // If Gemini returned no spoken text, build one from action results
+    // For data-fetching actions, re-prompt Gemini with the results so it speaks them back
+    const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+    const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+    if (dataResults.length > 0) {
+      const context = dataResults.map(a => a.result.text).join('\n\n');
+      const followUp = await model.generateContent({
+        contents: [
+          ...baseHistory,
+          { role: 'user', parts: [{ text: message }] },
+          { role: 'model', parts: [{ text: spoken || '…' }] },
+          { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise.` }] }
+        ]
+      });
+      spoken = parseActions(followUp.response.text()).spoken || context;
+    }
+
+    // If Gemini returned no spoken text at all, build one from action results
     if (!spoken) {
       spoken = actionResults
         .map(a => a.result?.text)
