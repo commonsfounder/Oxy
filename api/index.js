@@ -96,7 +96,9 @@ ABSOLUTE RULES:
 2. When asked to do something, always return the action block — no hesitation
 3. Never refuse an action unless it's actively harmful
 4. Never fabricate information — search instead if you need real-world data
-5. Never say you "can't" do something that's in the actions list above`;
+5. Never say you "can't" do something that's in the actions list above
+6. Always include a spoken sentence alongside every action block — never return the action block alone
+7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -640,6 +642,9 @@ Current time: ${timeStr}`;
     let { spoken, actions } = parseActions(rawText);
     console.log('[actions parsed]', JSON.stringify(actions));
 
+    // Gemini sometimes returns only an action block with no spoken text — use action result text as fallback
+    if (!spoken && actions.length > 0) spoken = ''; // filled below after execution
+
     // If Oxy wants to search, execute it and re-prompt
     const searchAction = actions.find(a => a.type === 'search');
     if (searchAction) {
@@ -679,6 +684,14 @@ Current time: ${timeStr}`;
         error: result.success ? null : (result.error || null),
         created_at: new Date().toISOString()
       });
+    }
+
+    // If Gemini returned no spoken text, build one from action results
+    if (!spoken) {
+      spoken = actionResults
+        .map(a => a.result?.text)
+        .filter(Boolean)
+        .join(' ') || 'Done.';
     }
 
     await saveMessage(userId, 'assistant', spoken);
