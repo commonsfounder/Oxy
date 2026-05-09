@@ -61,9 +61,40 @@ async function getNextTrains(originCRS, destCRS) {
   }));
 }
 
-function buildTrainlineURL(origin, destination) {
-  const slug = s => s.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-  return `https://www.thetrainline.com/trains/${slug(origin)}/${slug(destination)}`;
+// CRS → Trainline city slug for route URLs (thetrainline.com/trains/{from}/{to})
+const CITY_SLUG = {
+  'EUS': 'london', 'PAD': 'london', 'WAT': 'london', 'VIC': 'london',
+  'KGX': 'london', 'STP': 'london', 'CST': 'london', 'MOG': 'london',
+  'BHM': 'birmingham',
+  'MAN': 'manchester',
+  'LIV': 'liverpool',
+  'LDS': 'leeds',
+  'SHF': 'sheffield',
+  'NOT': 'nottingham',
+  'LEI': 'leicester',
+  'COV': 'coventry',
+  'WVH': 'wolverhampton',
+  'BRI': 'bristol',
+  'CDF': 'cardiff',
+  'EDB': 'edinburgh',
+  'GLC': 'glasgow',
+  'NCL': 'newcastle',
+  'YRK': 'york',
+  'CBG': 'cambridge',
+  'OXF': 'oxford',
+  'RDG': 'reading',
+  'BTN': 'brighton',
+  'SOT': 'southampton',
+  'NRW': 'norwich',
+  'EXD': 'exeter',
+  'PLY': 'plymouth',
+  'ABD': 'aberdeen',
+};
+
+function buildTrainlineURL(originCRS, destCRS) {
+  const from = CITY_SLUG[originCRS] || originCRS.toLowerCase();
+  const to   = CITY_SLUG[destCRS]   || destCRS.toLowerCase();
+  return `https://www.thetrainline.com/trains/${from}/${to}`;
 }
 
 async function execute(userId, action, params) {
@@ -75,10 +106,11 @@ async function execute(userId, action, params) {
 
     const originCRS  = toCRS(origin);
     const destCRS    = toCRS(destination);
-    const bookingUrl = buildTrainlineURL(origin, destination);
 
     if (!originCRS) return { success: false, error: `Unknown station: "${origin}". Try a full station name or 3-letter CRS code.` };
     if (!destCRS)   return { success: false, error: `Unknown station: "${destination}". Try a full station name or 3-letter CRS code.` };
+
+    const bookingUrl = buildTrainlineURL(originCRS, destCRS);
 
     if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
       return { success: true, text: `No live times available right now, but here's Trainline for ${origin} to ${destination}`, bookingUrl };
