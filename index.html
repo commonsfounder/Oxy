@@ -1334,10 +1334,17 @@ function ChatPage({ settings, memory, people, initialQuery }) {
                               : type === 'get_calendar_events' ? 'Calendar fetched'
                               : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
                               : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
+                              : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
                               : type;
                   return (
                     <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
                       {ok ? '✓' : '✗'} {label}
+                      {type === 'search_trains' && a.result?.bookingUrl && (
+                        <a href={a.result.bookingUrl} target="_blank" rel="noopener"
+                           style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
+                          Book on Trainline →
+                        </a>
+                      )}
                     </span>
                   );
                 })}
