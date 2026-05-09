@@ -30,6 +30,30 @@ function toCRS(input) {
   return CRS_MAP[s.toLowerCase()] || null;
 }
 
+async function lookupCRS(name) {
+  // Fast path — hardcoded common stations
+  const local = toCRS(name);
+  if (local) return local;
+
+  // Fallback — TransportAPI station search
+  if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) return null;
+  try {
+    const resp = await axios.get('https://transportapi.com/v3/uk/places.json', {
+      params: {
+        query: name,
+        type: 'train_station',
+        app_id: process.env.TRANSPORT_API_APP_ID,
+        app_key: process.env.TRANSPORT_API_APP_KEY,
+      },
+      timeout: 5000,
+    });
+    const match = resp.data?.results?.[0];
+    return match?.station_code || null;
+  } catch {
+    return null;
+  }
+}
+
 async function getNextTrains(originCRS, destCRS) {
   const appId  = process.env.TRANSPORT_API_APP_ID;
   const appKey = process.env.TRANSPORT_API_APP_KEY;
@@ -104,11 +128,10 @@ async function execute(userId, action, params) {
     const { origin, destination } = params;
     if (!origin || !destination) return { success: false, error: 'search_trains requires origin and destination' };
 
-    const originCRS  = toCRS(origin);
-    const destCRS    = toCRS(destination);
+    const [originCRS, destCRS] = await Promise.all([lookupCRS(origin), lookupCRS(destination)]);
 
-    if (!originCRS) return { success: false, error: `Unknown station: "${origin}". Try a full station name or 3-letter CRS code.` };
-    if (!destCRS)   return { success: false, error: `Unknown station: "${destination}". Try a full station name or 3-letter CRS code.` };
+    if (!originCRS) return { success: false, error: `Unknown station: "${origin}". Try a different spelling or 3-letter CRS code.` };
+    if (!destCRS)   return { success: false, error: `Unknown station: "${destination}". Try a different spelling or 3-letter CRS code.` };
 
     const bookingUrl = buildTrainlineURL(originCRS, destCRS);
 
