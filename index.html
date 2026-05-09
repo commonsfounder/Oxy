@@ -380,6 +380,48 @@ body::after {
   font-weight: 400;
 }
 
+.prompt-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  max-width: 360px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.prompt-chip {
+  background: var(--s1);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 13px 15px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font);
+  transition: border-color 0.13s, background 0.13s;
+  line-height: 1.4;
+}
+
+.prompt-chip:hover { border-color: var(--line2); background: var(--s2); }
+.prompt-chip-icon  { font-size: 15px; margin-bottom: 6px; display: block; }
+.prompt-chip-label { font-size: 12.5px; color: var(--text); display: block; font-weight: 500; }
+.prompt-chip-sub   { font-size: 11px; color: var(--dim); display: block; margin-top: 2px; }
+
+.new-chat-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--line2);
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font);
+  font-weight: 500;
+  color: var(--sub);
+  cursor: pointer;
+  transition: color 0.13s, border-color 0.13s;
+  white-space: nowrap;
+}
+.new-chat-btn:hover { color: var(--text); border-color: rgba(200,184,154,0.3); }
+
 /* Speaking bar */
 .speaking-bar {
   display: flex;
@@ -1145,12 +1187,14 @@ function AutoRunActions({ actions }) {
   return null;
 }
 
-function ChatPage({ settings, memory, people, initialQuery }) {
+function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, onProcessingChange }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
+  const setRecordingWithCb = v => { setRecording(v); onRecordingChange?.(v); };
+  const setLoadingWithCb   = v => { setLoading(v);   onProcessingChange?.(v); };
   const messagesEndRef    = useRef(null);
   const textareaRef       = useRef(null);
   const audioRef          = useRef(null);
@@ -1208,7 +1252,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mediaRecorder.onstop = async () => { stream.getTracks().forEach(t => t.stop()); await sendAudio(); };
       mediaRecorder.start();
-      setRecording(true);
+      setRecordingWithCb(true);
       stopSpeaking();
     } catch (err) { console.error('Mic error:', err); }
   };
@@ -1216,7 +1260,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
   const stopRecording = () => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
-      setRecording(false);
+      setRecordingWithCb(false);
     }
   };
 
@@ -1243,7 +1287,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
   };
 
   const sendAudio = async () => {
-    setLoading(true);
+    setLoadingWithCb(true);
     try {
       const wavBlob  = await webmToWav(new Blob(chunksRef.current, { type: 'audio/webm' }));
       const formData = new FormData();
@@ -1259,7 +1303,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
         if (data.audio) playAudioFromBase64(data.audio);
       }
     } catch (err) { console.error('Audio error:', err); }
-    setLoading(false);
+    setLoadingWithCb(false);
   };
 
   const sendMessage = useCallback(async (overrideText) => {
@@ -1267,7 +1311,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
     if (!text || loading) return;
     setMessages(prev => [...prev, { role: 'user', content: text, time: new Date() }]);
     if (!overrideText) setInput('');
-    setLoading(true);
+    setLoadingWithCb(true);
     stopSpeaking();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     try {
@@ -1292,7 +1336,7 @@ function ChatPage({ settings, memory, people, initialQuery }) {
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
-    setLoading(false);
+    setLoadingWithCb(false);
   }, [input, loading, settings, memory, people]);
 
   const handleKeyDown = e => {
@@ -1311,7 +1355,21 @@ function ChatPage({ settings, memory, people, initialQuery }) {
         {messages.length === 0 && !loading && (
           <div className="empty-state">
             <div className="empty-orb" />
-            <div className="empty-text">Hold mic or type to begin</div>
+            <div className="empty-text">{settings.name}</div>
+            <div className="prompt-chips">
+              {[
+                { icon: '📨', label: `Message ${people[0]?.name || 'a contact'}`, sub: 'Send via iMessage', prompt: `Send a message to ${people[0]?.name || 'someone'}` },
+                { icon: '⏰', label: 'Set a reminder',   sub: 'For any time or task',    prompt: 'Set a reminder for tomorrow' },
+                { icon: '🎵', label: 'Play music',        sub: 'Focus, chill, or hype',   prompt: 'Play something to help me focus' },
+                { icon: '☀️', label: 'Morning briefing', sub: "What's on today",          prompt: 'Give me my morning briefing' },
+              ].map((chip, i) => (
+                <button key={i} className="prompt-chip" onClick={() => sendMessage(chip.prompt)}>
+                  <span className="prompt-chip-icon">{chip.icon}</span>
+                  <span className="prompt-chip-label">{chip.label}</span>
+                  <span className="prompt-chip-sub">{chip.sub}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((msg, i) => (
@@ -1380,19 +1438,22 @@ function ChatPage({ settings, memory, people, initialQuery }) {
             onKeyDown={handleKeyDown}
             rows={1}
           />
-          <button
-            className={`mic-btn ${recording ? 'recording' : ''}`}
-            onMouseDown={startRecording}
-            onMouseUp={stopRecording}
-            onTouchStart={startRecording}
-            onTouchEnd={stopRecording}
-            title="Hold to record"
-          >
-            <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:14,height:14}}>{Icons.mic}</span>
-          </button>
-          <button className="send-btn" onClick={() => sendMessage()} disabled={!input.trim() || loading}>
-            <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:13,height:13}}>{Icons.send}</span>
-          </button>
+          {input.trim() ? (
+            <button className="send-btn" onClick={() => sendMessage()} disabled={loading}>
+              <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:13,height:13}}>{Icons.send}</span>
+            </button>
+          ) : (
+            <button
+              className={`mic-btn ${recording ? 'recording' : ''}`}
+              onMouseDown={startRecording}
+              onMouseUp={stopRecording}
+              onTouchStart={startRecording}
+              onTouchEnd={stopRecording}
+              title="Hold to record"
+            >
+              <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:14,height:14}}>{Icons.mic}</span>
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1777,11 +1838,15 @@ function SettingsPage({ settings, setSettings }) {
 }
 
 function App() {
-  const [isAuth,   setIsAuth]   = useState(!!API_SECRET);
-  const [page,     setPage]     = useState('chat');
-  const [memory,   setMemory]   = useState('');
-  const [people,   setPeople]   = useState([]);
-  const [settings, setSettings] = useState({ name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' });
+  const [isAuth,      setIsAuth]      = useState(!!API_SECRET);
+  const [page,        setPage]        = useState('chat');
+  const [chatKey,     setChatKey]     = useState(0);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing,setIsProcessing]= useState(false);
+  const [memory,      setMemory]      = useState('');
+  const [people,      setPeople]      = useState([]);
+  const [settings,    setSettings]    = useState({ name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' });
+  const handleNewChat = () => setChatKey(k => k + 1);
   const [briefing, setBriefing] = useState(null);
   const [initialQuery, setInitialQuery] = useState(null);
 
@@ -1831,8 +1896,8 @@ function App() {
         <div className="logo">
           <div className="logo-name">{settings.name}</div>
           <div className="logo-sub">
-            <span className="status-dot" />
-            Online
+            <span className="status-dot" style={isRecording ? {background:'var(--red)',boxShadow:'0 0 6px rgba(192,80,62,0.5)'} : {}} />
+            {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'Online'}
           </div>
         </div>
         <nav className="nav">
@@ -1854,7 +1919,7 @@ function App() {
       <div className="main">
         <div className="topbar">
           <span className="topbar-title">{titles[page]}</span>
-          {page === 'chat' && <span className="topbar-badge">Gemini Flash</span>}
+          {page === 'chat' && <button className="new-chat-btn" onClick={handleNewChat}>+ New Chat</button>}
         </div>
 
         {page === 'chat' && (
@@ -1867,7 +1932,7 @@ function App() {
                 <button className="briefing-dismiss" onClick={() => setBriefing(null)}>Dismiss</button>
               </div>
             )}
-            <ChatPage settings={settings} memory={memory} people={people} initialQuery={initialQuery} />
+            <ChatPage key={chatKey} settings={settings} memory={memory} people={people} initialQuery={initialQuery} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
           </>
         )}
         {page === 'history'    && <ActionHistoryPage />}
