@@ -332,6 +332,45 @@ body::after {
 .msg-action-status.ok  { color: var(--green); }
 .msg-action-status.fail { color: var(--red); }
 
+/* Search result cards */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.search-result-link {
+  display: block;
+  padding: 8px 10px;
+  background: var(--s2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-decoration: none;
+  transition: border-color 0.13s;
+}
+.search-result-link:hover { border-color: var(--line2); }
+
+.search-result-title {
+  font-size: 12px;
+  color: var(--stone);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-result-snippet {
+  font-size: 11px;
+  color: var(--sub);
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.45;
+}
+
 /* Typing indicator */
 .typing {
   display: flex;
@@ -1335,17 +1374,30 @@ function ChatPage({ settings, memory, people, initialQuery }) {
                               : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
                               : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
                               : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
+                              : type === 'search' ? `Searched: "${a.result?.query || 'web'}"`
                               : type;
                   return (
-                    <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
-                      {ok ? '✓' : '✗'} {label}
-                      {type === 'search_trains' && a.result?.bookingUrl && (
-                        <a href={a.result.bookingUrl} target="_blank" rel="noopener"
-                           style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
-                          Book on Trainline →
-                        </a>
+                    <div key={j}>
+                      <span className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
+                        {ok ? '✓' : '✗'} {label}
+                        {type === 'search_trains' && a.result?.bookingUrl && (
+                          <a href={a.result.bookingUrl} target="_blank" rel="noopener"
+                             style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
+                            Book on Trainline →
+                          </a>
+                        )}
+                      </span>
+                      {type === 'search' && a.result?.results?.length > 0 && (
+                        <div className="search-results">
+                          {a.result.results.slice(0, 3).map((r, k) => (
+                            <a key={k} href={r.url} target="_blank" rel="noopener" className="search-result-link">
+                              <div className="search-result-title">{r.title}</div>
+                              <div className="search-result-snippet">{r.snippet}</div>
+                            </a>
+                          ))}
+                        </div>
                       )}
-                    </span>
+                    </div>
                   );
                 })}
               </div>

@@ -86,7 +86,8 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "book_uber", "input": {"destination": "destination address"}},
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
     {"type": "get_telegram_contacts", "input": {}},
-    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}}
+    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
+    {"type": "search", "input": {"query": "search query"}}
   ]
 }
 </action>
@@ -645,12 +646,16 @@ Current time: ${timeStr}`;
     // Gemini sometimes returns only an action block with no spoken text — use action result text as fallback
     if (!spoken && actions.length > 0) spoken = ''; // filled below after execution
 
+    // Execute physical actions via MCP
+    const actionResults = [];
+
     // If Oxy wants to search, execute it and re-prompt
     const searchAction = actions.find(a => a.type === 'search');
     if (searchAction) {
       const query = searchAction.input?.query || message;
       console.log('[search]', query);
       const results = await duckDuckGoSearch(query);
+      actionResults.push({ action: 'search', result: { success: true, query, results, text: `Searched for "${query}"` } });
       const searchContext = results.length > 0
         ? 'SEARCH RESULTS:\n' + results.map((r, i) => `${i+1}. ${r.title}\n   ${r.snippet}`).join('\n\n')
         : 'SEARCH RESULTS: No results found.';
@@ -668,9 +673,6 @@ Current time: ${timeStr}`;
       spoken = followParsed.spoken;
       actions = followParsed.actions;
     }
-
-    // Execute physical actions via MCP
-    const actionResults = [];
     const physicalActions = actions.filter(a => a.type !== 'search');
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
