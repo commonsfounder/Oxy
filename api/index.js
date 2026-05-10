@@ -63,10 +63,10 @@ CORE ETHOS:
 
 FACTUALITY:
 - Say what you know. Don't fill gaps with guesses or confident bullshit.
-- When you're unsure about a fact → search for it immediately. Uncertainty → action, not hedging.
+- You have live Google Search grounding — use it. When you need current or verifiable facts, search results are automatically incorporated.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
-- If you're not 100% sure → search. That's the rule.
+- Prefer grounded facts over training memory for anything time-sensitive or verifiable.
 
 ACTIONS YOU CAN TAKE:
 Always return an action block when doing any of these. Never say you can't — just do it.
@@ -288,28 +288,6 @@ async function savePreference(userId, key, value) {
     .upsert({ user_id: userId, key, value }, { onConflict: 'user_id,key' });
 }
 
-async function duckDuckGoSearch(query) {
-  try {
-    const resp = await axios.get('https://html.duckduckgo.com/html/', {
-      params: { q: query },
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      timeout: 8000
-    });
-    const results = [];
-    const regex = /<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)<\/a>/gis;
-    let match;
-    while ((match = regex.exec(resp.data)) !== null) {
-      const title = match[2].replace(/<[^>]*>/g, '').trim();
-      const snippet = match[3].replace(/<[^>]*>/g, '').trim();
-      let url = match[1];
-      try { url = new URL(url).searchParams.get('uddg') || url; } catch {}
-      if (title && snippet) results.push({ title, snippet, url });
-    }
-    return results.slice(0, 5);
-  } catch {
-    return [];
-  }
-}
 
 app.post('/process-audio', upload.single('audio'), async (req, res) => {
   try {
@@ -363,7 +341,11 @@ ${availableActions}
 
 Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-flash-preview',
+      systemInstruction: systemPrompt,
+      tools: [{ googleSearch: {} }]
+    });
     const geminiRes = await model.generateContent({
       contents: [...normalizeGeminiHistory(history), { role: 'user', parts: [{ text: userText }] }]
     });
@@ -573,7 +555,11 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-flash-preview',
+      systemInstruction: systemPrompt,
+      tools: [{ googleSearch: {} }]
+    });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
     
@@ -631,7 +617,11 @@ ${availableActions}
 
 Current time: ${timeStr}`;
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview', systemInstruction: systemPrompt });
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-3-flash-preview',
+      systemInstruction: systemPrompt,
+      tools: [{ googleSearch: {} }]
+    });
     const baseHistory = normalizeGeminiHistory(cleanHistory);
     const geminiRes = await model.generateContent({
       contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
@@ -645,33 +635,9 @@ Current time: ${timeStr}`;
     // Gemini sometimes returns only an action block with no spoken text — use action result text as fallback
     if (!spoken && actions.length > 0) spoken = ''; // filled below after execution
 
-    // If Oxy wants to search, execute it and re-prompt
-    const searchAction = actions.find(a => a.type === 'search');
-    if (searchAction) {
-      const query = searchAction.input?.query || message;
-      console.log('[search]', query);
-      const results = await duckDuckGoSearch(query);
-      const searchContext = results.length > 0
-        ? 'SEARCH RESULTS:\n' + results.map((r, i) => `${i+1}. ${r.title}\n   ${r.snippet}`).join('\n\n')
-        : 'SEARCH RESULTS: No results found.';
-
-      const followUp = await model.generateContent({
-        contents: [
-          ...baseHistory,
-          { role: 'user', parts: [{ text: message }] },
-          { role: 'model', parts: [{ text: spoken }] },
-          { role: 'user', parts: [{ text: `Here are the search results for "${query}":\n\n${searchContext}\n\nAnswer my original question based on these results. Be direct and factual.` }] }
-        ]
-      });
-
-      const followParsed = parseActions(followUp.response.text());
-      spoken = followParsed.spoken;
-      actions = followParsed.actions;
-    }
-
     // Execute physical actions via MCP
     const actionResults = [];
-    const physicalActions = actions.filter(a => a.type !== 'search');
+    const physicalActions = actions;
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
       const result = await callProxy(userId, action.type, action.input || {});
