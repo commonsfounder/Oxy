@@ -44,6 +44,8 @@ const supabase = createClient(
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+const contextCache = new Map();
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
@@ -138,37 +140,41 @@ function parseActions(fullResponse) {
   return { spoken, actions };
 }
 
-const VOICE_MAP = {
-  'British Warm': 'EXAVITQu4vr4xnSDxMaL',
-  'British Cool': 'XB0fDUnXU5powFXDhCwa',
-  'British Male': 'onwK4e9ZLuTAKqWW03F9',
-  'American Casual': 'pNInz6obpgDQGcFmaJgB'
-};
+function pcmToWav(pcmBuffer, sampleRate = 24000) {
+  const numChannels = 1, bitsPerSample = 16;
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
 
-async function generateSpeech(text, voiceStyle) {
-  const voiceId = VOICE_MAP[voiceStyle] || process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL';
-  const response = await axios.post(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+async function generateSpeech(text) {
+  const resp = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${process.env.GEMINI_API_KEY}`,
     {
-      text,
-      model_id: 'eleven_flash_v2_5',
-      voice_settings: {
-        stability: 0.5,
-        similarity_boost: 0.75,
-        style: 0.3
+      contents: [{ parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
       }
     },
-    {
-      headers: {
-        'xi-api-key': process.env.ELEVENLABS_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      responseType: 'arraybuffer',
-      timeout: 15000
-    }
+    { timeout: 20000 }
   );
-
-  return Buffer.from(response.data).toString('base64');
+  const pcm = Buffer.from(resp.data.candidates[0].content.parts[0].inlineData.data, 'base64');
+  return pcmToWav(pcm).toString('base64');
 }
 
 async function getMemory(userId) {
@@ -225,8 +231,9 @@ function shouldSaveMemory(text) {
 async function getHistory(userId) {
   const { data, error } = await supabase
     .from('conversations')
-    .select('role, content')
+    .select('role, content, created_at')
     .eq('user_id', userId)
+    .neq('role', 'system')
     .order('created_at', { ascending: false })
     .limit(10);
 
@@ -288,6 +295,45 @@ async function savePreference(userId, key, value) {
     .upsert({ user_id: userId, key, value }, { onConflict: 'user_id,key' });
 }
 
+async function getUserContext(userId) {
+  const cached = contextCache.get(userId);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.context;
+
+  const [connectors, memories, actionLog] = await Promise.all([
+    supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
+    supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
+    supabase.from('action_log').select('action').eq('user_id', userId).order('created_at', { ascending: false }).limit(100)
+  ]);
+
+  const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
+
+  const contactCounts = {};
+  for (const row of (actionLog.data || [])) {
+    try {
+      const a = typeof row.action === 'string' ? JSON.parse(row.action) : row.action;
+      const contact = a.input?.contact;
+      if (!contact || !['send_message', 'send_email', 'send_telegram'].includes(a.type)) continue;
+      const channel = a.type === 'send_telegram' ? 'Telegram' : a.type === 'send_email' ? 'Email' : 'iMessage';
+      const key = `${contact}||${channel}`;
+      contactCounts[key] = (contactCounts[key] || 0) + 1;
+    } catch {}
+  }
+  const patterns = Object.entries(contactCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, n]) => { const [name, ch] = k.split('||'); return `${name}: ${ch} (${n}x)`; })
+    .join(', ') || 'none yet';
+
+  const memoryLines = (memories.data || []).map(m => m.content).join('; ') || 'none';
+
+  const context = `LIVE USER CONTEXT:
+Active connectors: ${active}
+Messaging patterns: ${patterns}
+Key facts: ${memoryLines}`.slice(0, 1800);
+
+  contextCache.set(userId, { context, ts: Date.now() });
+  return context;
+}
 
 app.post('/process-audio', upload.single('audio'), async (req, res) => {
   try {
@@ -325,6 +371,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     ]);
     const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
+    const userContext = await getUserContext(userId);
     await saveMessage(userId, 'user', userText);
 
     console.log('[2/4] Thinking...');
@@ -339,7 +386,10 @@ ${preferences || 'Still learning.'}
 CONNECTED APPS:
 ${availableActions}
 
-Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
+Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}
+
+---
+${userContext}`;
 
     const model = genAI.getGenerativeModel({
       model: 'gemini-3-flash-preview',
@@ -375,14 +425,14 @@ Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' }
     }
 
     console.log('[3/4] Generating voice...');
-    const audioBase64 = await generateSpeech(spoken, 'British Warm');
+    const audioBase64 = await generateSpeech(spoken);
 
     console.log('[4/4] Done:', spoken);
     res.json({
       transcription: userText,
       text: spoken,
       audio: audioBase64,
-      audioFormat: 'mp3',
+      audioFormat: 'wav',
       actions: actionResults
     });
 
@@ -562,8 +612,6 @@ The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' }
     });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
-    
-    await saveMessage(userId, 'system', `[briefing] ${spoken}`);
 
     res.json({ text: spoken, actions });
   } catch (err) {
@@ -577,6 +625,49 @@ app.get('/history/:userId', async (req, res) => {
   try {
     const history = await getHistory(req.params.userId);
     res.json({ history });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/history/:userId/search', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  const q = (req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('role, content, created_at')
+      .eq('user_id', req.params.userId)
+      .neq('role', 'system')
+      .ilike('content', `%${q}%`)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    res.json({ results: (data || []).reverse() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/history/:userId/date', async (req, res) => {
+  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  const date = req.query.date;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
+  try {
+    const start = new Date(date + 'T00:00:00.000Z').toISOString();
+    const end   = new Date(date + 'T23:59:59.999Z').toISOString();
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('role, content, created_at')
+      .eq('user_id', req.params.userId)
+      .neq('role', 'system')
+      .gte('created_at', start)
+      .lte('created_at', end)
+      .order('created_at', { ascending: true })
+      .limit(50);
+    if (error) throw error;
+    res.json({ history: data || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -598,13 +689,14 @@ app.post('/chat', async (req, res) => {
     ]);
     const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
+    const userContext = await getUserContext(userId);
     await saveMessage(userId, 'user', message);
 
     const cleanHistory = history.filter(m => m.role !== 'system');
 
     const now = new Date();
-const timeStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
-const systemPrompt = `${OXCY_SYSTEM_PROMPT}
+    const timeStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
+    const systemPrompt = `${OXCY_SYSTEM_PROMPT}
 
 WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
@@ -615,7 +707,10 @@ ${preferences || 'Still learning.'}
 CONNECTED APPS:
 ${availableActions}
 
-Current time: ${timeStr}`;
+Current time: ${timeStr}
+
+---
+${userContext}`;
 
     const model = genAI.getGenerativeModel({
       model: 'gemini-3-flash-preview',
@@ -698,8 +793,8 @@ Current time: ${timeStr}`;
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
-      result.audio = await generateSpeech(spoken, settings.voice);
-      result.audioFormat = 'mp3';
+      result.audio = await generateSpeech(spoken);
+      result.audioFormat = 'wav';
     }
 
     res.json(result);

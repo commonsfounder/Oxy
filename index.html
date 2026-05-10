@@ -229,7 +229,7 @@ body::after {
 .topbar-badge::before { content: '· '; }
 
 /* ── CHAT ── */
-.chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
 .messages {
   flex: 1;
@@ -355,6 +355,141 @@ body::after {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
   40%           { opacity: 1;   transform: scale(1); }
 }
+
+/* Date separators */
+.date-separator {
+  text-align: center;
+  margin: 12px 0 4px;
+  position: relative;
+  flex-shrink: 0;
+}
+.date-separator span {
+  background: var(--bg);
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--stone);
+  position: relative;
+  z-index: 1;
+  letter-spacing: 0.02em;
+}
+.date-separator::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0; right: 0;
+  height: 1px;
+  background: var(--line2);
+}
+
+/* Search */
+.search-toggle-btn {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  z-index: 10;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.search-toggle-btn:hover { color: var(--text); border-color: var(--line2); background: var(--s3); }
+.search-toggle-btn svg { width: 14px; height: 14px; }
+
+.search-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 20;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line2);
+  padding: 12px 20px;
+}
+.search-bar-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.search-input {
+  flex: 1;
+  background: var(--s3);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 7px 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.search-input:focus { border-color: var(--gold); }
+.date-input {
+  background: var(--s3);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  color-scheme: dark;
+}
+.date-input:focus { border-color: var(--gold); }
+.search-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.search-close-btn:hover { color: var(--text); }
+.search-results {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.search-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.search-result:hover { background: var(--s3); }
+.sr-role { font-size: 10px; color: var(--gold); flex-shrink: 0; font-weight: 500; }
+.sr-content { font-size: 12.5px; color: var(--sub); flex: 1; }
+.sr-time { font-size: 10px; color: var(--dim); flex-shrink: 0; }
+
+/* History banner */
+.history-banner {
+  background: var(--s3);
+  border-bottom: 1px solid var(--line2);
+  padding: 8px 20px;
+  font-size: 12px;
+  color: var(--sub);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.history-back-btn {
+  background: transparent;
+  border: none;
+  color: var(--gold);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.history-back-btn:hover { opacity: 0.8; }
 
 /* Empty state */
 .empty-state {
@@ -1103,8 +1238,19 @@ const apiFetch = async (url, options = {}) => {
   return fetch(url, { ...options, headers });
 };
 
-function formatTime(date) {
-  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+function formatMsgTime(date) {
+  return (date instanceof Date ? date : new Date(date))
+    .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDateHeader(date) {
+  const d = new Date(date instanceof Date ? date : new Date(date));
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const cmp = new Date(d); cmp.setHours(0, 0, 0, 0);
+  if (cmp.getTime() === today.getTime()) return 'Today';
+  if (cmp.getTime() === yesterday.getTime()) return 'Yesterday';
+  return cmp.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
 /* ── SVG ICONS ── */
@@ -1193,6 +1339,10 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const [loading, setLoading] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [viewingDate, setViewingDate] = useState(null);
   const setRecordingWithCb = v => { setRecording(v); onRecordingChange?.(v); };
   const setLoadingWithCb   = v => { setLoading(v);   onProcessingChange?.(v); };
   const messagesEndRef    = useRef(null);
@@ -1201,16 +1351,18 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const mediaRecorderRef  = useRef(null);
   const chunksRef         = useRef([]);
 
-  useEffect(() => {
+  const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
       .then(r => r.json())
       .then(data => {
         if (data.history && data.history.length > 0) {
-          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date() })));
+          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at) })));
         }
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => { loadHistory(); }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1229,12 +1381,38 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     setSpeaking(false);
   };
 
+  const runSearch = useCallback(async (q) => {
+    if (!q.trim()) { setSearchResults([]); return; }
+    try {
+      const r = await apiFetch(`/history/${USER_ID}/search?q=${encodeURIComponent(q)}`).then(r => r.json());
+      setSearchResults(r.results || []);
+    } catch {}
+  }, []);
+
+  const jumpToDate = useCallback(async (date) => {
+    if (!date) return;
+    try {
+      const r = await apiFetch(`/history/${USER_ID}/date?date=${date}`).then(r => r.json());
+      if (r.history?.length) {
+        setMessages(r.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at) })));
+        setViewingDate(date);
+        setSearchOpen(false);
+        setSearchResults([]);
+        setSearchQuery('');
+      }
+    } catch {}
+  }, []);
+
+  const jumpToMessage = useCallback((msg) => {
+    jumpToDate(msg.created_at.slice(0, 10));
+  }, [jumpToDate]);
+
   const playAudioFromBase64 = useCallback(async (base64Audio) => {
     if (!base64Audio) return;
     try {
       setSpeaking(true);
       const bytes = new Uint8Array(atob(base64Audio).split('').map(c => c.charCodeAt(0)));
-      const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/mp3' }));
+      const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.onended = () => { setSpeaking(false); audioRef.current = null; };
@@ -1351,6 +1529,47 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   return (
     <div className="chat-page">
+      <button className="search-toggle-btn" onClick={() => setSearchOpen(o => !o)} title="Search messages">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+          <circle cx="6.5" cy="6.5" r="4"/><line x1="10" y1="10" x2="14" y2="14"/>
+        </svg>
+      </button>
+      {searchOpen && (
+        <div className="search-overlay">
+          <div className="search-bar-row">
+            <input
+              className="search-input"
+              autoFocus
+              placeholder="Search messages…"
+              value={searchQuery}
+              onChange={e => { setSearchQuery(e.target.value); runSearch(e.target.value); }}
+            />
+            <input
+              type="date"
+              className="date-input"
+              onChange={e => jumpToDate(e.target.value)}
+            />
+            <button className="search-close-btn" onClick={() => { setSearchOpen(false); setSearchResults([]); setSearchQuery(''); }}>✕</button>
+          </div>
+          {searchResults.length > 0 && (
+            <div className="search-results">
+              {searchResults.map((r, i) => (
+                <div key={i} className="search-result" onClick={() => jumpToMessage(r)}>
+                  <span className="sr-role">{r.role === 'user' ? 'You' : 'Oxy'}</span>
+                  <span className="sr-content">{r.content.length > 90 ? r.content.slice(0, 90) + '…' : r.content}</span>
+                  <span className="sr-time">{formatMsgTime(new Date(r.created_at))}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {viewingDate && (
+        <div className="history-banner">
+          Viewing {new Date(viewingDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          <button className="history-back-btn" onClick={() => { setViewingDate(null); loadHistory(); }}>Back to latest →</button>
+        </div>
+      )}
       <div className="messages">
         {messages.length === 0 && !loading && (
           <div className="empty-state">
@@ -1372,45 +1591,55 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             </div>
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
-            <div className="msg-bubble">
-              {msg.content}
-              {msg.audio && (
-                <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
+        {messages.map((msg, i) => {
+          const msgDate = msg.time instanceof Date ? msg.time : new Date(msg.time);
+          const prevDate = i > 0 ? (messages[i-1].time instanceof Date ? messages[i-1].time : new Date(messages[i-1].time)) : null;
+          const showDateHeader = !prevDate || msgDate.toDateString() !== prevDate.toDateString();
+          return (
+            <React.Fragment key={i}>
+              {showDateHeader && (
+                <div className="date-separator"><span>{formatDateHeader(msgDate)}</span></div>
               )}
-            </div>
-            {msg.actions && msg.actions.length > 0 && (
-              <div className="msg-actions-bar">
-                {msg.actions.map((a, j) => {
-                  const ok = a.result?.success !== false;
-                  const type = a.action || a.type || 'action';
-                  const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
-                              : type === 'send_email' ? 'Email sent'
-                              : type === 'create_calendar_event' ? 'Event created'
-                              : type === 'get_emails' ? 'Emails fetched'
-                              : type === 'get_calendar_events' ? 'Calendar fetched'
-                              : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
-                              : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
-                              : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
-                              : type;
-                  return (
-                    <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
-                      {ok ? '✓' : '✗'} {label}
-                      {type === 'search_trains' && a.result?.bookingUrl && (
-                        <a href={a.result.bookingUrl} target="_blank" rel="noopener"
-                           style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
-                          Book on Trainline →
-                        </a>
-                      )}
-                    </span>
-                  );
-                })}
+              <div className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
+                <div className="msg-bubble">
+                  {msg.content}
+                  {msg.audio && (
+                    <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
+                  )}
+                </div>
+                {msg.actions && msg.actions.length > 0 && (
+                  <div className="msg-actions-bar">
+                    {msg.actions.map((a, j) => {
+                      const ok = a.result?.success !== false;
+                      const type = a.action || a.type || 'action';
+                      const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
+                                  : type === 'send_email' ? 'Email sent'
+                                  : type === 'create_calendar_event' ? 'Event created'
+                                  : type === 'get_emails' ? 'Emails fetched'
+                                  : type === 'get_calendar_events' ? 'Calendar fetched'
+                                  : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
+                                  : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
+                                  : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
+                                  : type;
+                      return (
+                        <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
+                          {ok ? '✓' : '✗'} {label}
+                          {type === 'search_trains' && a.result?.bookingUrl && (
+                            <a href={a.result.bookingUrl} target="_blank" rel="noopener"
+                               style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
+                              Book on Trainline →
+                            </a>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="msg-time">{formatMsgTime(msgDate)}</div>
               </div>
-            )}
-            <div className="msg-time">{formatTime(msg.time)}</div>
-          </div>
-        ))}
+            </React.Fragment>
+          );
+        })}
         {loading && (
           <div className="message oxcy">
             <div className="typing"><span/><span/><span/></div>
