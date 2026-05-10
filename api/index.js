@@ -5,7 +5,6 @@ const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
-const FormData = require('form-data');
 const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
@@ -161,20 +160,69 @@ function pcmToWav(pcmBuffer, sampleRate = 24000) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
+function firstSentences(text, max = 2) {
+  const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
+  return (sentences.slice(0, max).join(' ').trim() || text.slice(0, 200)).trim();
+}
+
+async function runActions(userId, actions) {
+  const results = [];
+  for (const action of actions) {
+    console.log('[action] executing:', action.type, action.input);
+    const result = await callProxy(userId, action.type, action.input || {});
+    console.log('[action] result:', action.type, JSON.stringify(result));
+    results.push({ action: action.type, result });
+    supabase.from('action_log').insert({
+      user_id: userId,
+      action: JSON.stringify(action),
+      status: result.success ? 'executed' : 'failed',
+      error: result.success ? null : (result.error || null),
+      created_at: new Date().toISOString()
+    });
+  }
+  return results;
+}
+
 async function generateSpeech(text) {
-  const resp = await axios.post(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${process.env.GEMINI_API_KEY}`,
-    {
-      contents: [{ parts: [{ text }] }],
-      generationConfig: {
-        responseModalities: ['AUDIO'],
-        speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
-      }
-    },
-    { timeout: 20000 }
-  );
-  const pcm = Buffer.from(resp.data.candidates[0].content.parts[0].inlineData.data, 'base64');
-  return pcmToWav(pcm).toString('base64');
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 22000);
+  try {
+    const resp = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
+      {
+        contents: [{ parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
+        }
+      },
+      { responseType: 'stream', signal: controller.signal }
+    );
+    const pcmChunks = [];
+    await new Promise((resolve, reject) => {
+      let buf = '';
+      resp.data.on('data', chunk => {
+        buf += chunk.toString();
+        const events = buf.split('\n\n');
+        buf = events.pop();
+        for (const event of events) {
+          const line = event.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const parsed = JSON.parse(line.slice(6));
+            const part = parsed.candidates?.[0]?.content?.parts?.[0];
+            if (part?.inlineData?.data) pcmChunks.push(Buffer.from(part.inlineData.data, 'base64'));
+          } catch {}
+        }
+      });
+      resp.data.on('end', resolve);
+      resp.data.on('error', reject);
+    });
+    const pcm = Buffer.concat(pcmChunks);
+    return pcmToWav(pcm).toString('base64');
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function getMemory(userId) {
@@ -336,20 +384,25 @@ Key facts: ${memoryLines}`.slice(0, 1800);
 }
 
 app.post('/process-audio', upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No audio file received.' });
+  }
+
+  const userId = req.body.userId || 'default';
+  const now = Date.now();
+  const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
+  if (recentHits.length >= 10) {
+    return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+  }
+  audioRateLimit.set(userId, [...recentHits, now]);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file received.' });
-    }
-
-    const userId = req.body.userId || 'default';
-
-    const now = Date.now();
-    const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
-    if (recentHits.length >= 10) {
-      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
-    }
-    audioRateLimit.set(userId, [...recentHits, now]);
-
     console.log('[1/4] Transcribing audio...');
     const transcription = await openai.audio.transcriptions.create({
       file: new File([req.file.buffer], 'audio.wav', { type: 'audio/wav' }),
@@ -361,18 +414,21 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     console.log('    Transcribed:', userText);
 
     if (!userText) {
-      return res.json({ transcription: '', text: '', audio: null, actions: [] });
+      sse({ type: 'done' });
+      return res.end();
     }
 
-    const [memory, history, preferences] = await Promise.all([
+    sse({ type: 'transcription', text: userText });
+    await saveMessage(userId, 'user', userText);
+
+    const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
       getMemory(userId),
       getHistory(userId),
-      getPreferences(userId)
+      getPreferences(userId),
+      getEnabledConnectors(userId),
+      getUserContext(userId)
     ]);
-    const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
-    const userContext = await getUserContext(userId);
-    await saveMessage(userId, 'user', userText);
 
     console.log('[2/4] Thinking...');
     const systemPrompt = `${OXCY_SYSTEM_PROMPT}
@@ -401,44 +457,29 @@ ${userContext}`;
     });
 
     const { spoken, actions } = parseActions(geminiRes.response.text());
-    await saveMessage(userId, 'assistant', spoken);
 
-    if (shouldSaveMemory(userText)) {
-      const fact = await extractMemoryFact(userId, userText);
-      if (fact) await saveMemory(userId, fact);
-    }
+    console.log('[3/4] Saving + actions + voice in parallel...');
+    const [, actionResults, audioBase64] = await Promise.all([
+      saveMessage(userId, 'assistant', spoken),
+      runActions(userId, actions),
+      generateSpeech(firstSentences(spoken))
+    ]);
 
-    // Execute physical actions via MCP
-    const actionResults = [];
-    for (const action of actions) {
-      console.log('[mcp] executing:', action.type, action.input);
-      const result = await callProxy(userId, action.type, action.input || {});
-      console.log('[action result]', action.type, JSON.stringify(result));
-      actionResults.push({ action: action.type, result });
-      await supabase.from('action_log').insert({
-        user_id: userId,
-        action: JSON.stringify(action),
-        status: result.success ? 'executed' : 'failed',
-        error: result.success ? null : (result.error || null),
-        created_at: new Date().toISOString()
-      });
-    }
-
-    console.log('[3/4] Generating voice...');
-    const audioBase64 = await generateSpeech(spoken);
+    sse({ type: 'response', text: spoken, actions: actionResults });
+    sse({ type: 'audio', data: audioBase64, format: 'wav' });
+    sse({ type: 'done' });
+    res.end();
 
     console.log('[4/4] Done:', spoken);
-    res.json({
-      transcription: userText,
-      text: spoken,
-      audio: audioBase64,
-      audioFormat: 'wav',
-      actions: actionResults
-    });
 
+    if (shouldSaveMemory(userText)) {
+      extractMemoryFact(userId, userText).then(fact => {
+        if (fact) saveMemory(userId, fact);
+      }).catch(() => {});
+    }
   } catch (err) {
     console.error('/process-audio error:', err.message);
-    res.status(500).json({ error: err.message });
+    try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
   }
 });
 
@@ -682,17 +723,15 @@ app.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'message is required.' });
     }
 
-    const [memory, history, preferences] = await Promise.all([
+    const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
       getMemory(userId),
       getHistory(userId),
-      getPreferences(userId)
+      getPreferences(userId),
+      getEnabledConnectors(userId),
+      getUserContext(userId)
     ]);
-    const enabledConnectors = await getEnabledConnectors(userId);
     const availableActions = buildAvailableActions(enabledConnectors);
-    const userContext = await getUserContext(userId);
     await saveMessage(userId, 'user', message);
-
-    const cleanHistory = history.filter(m => m.role !== 'system');
 
     const now = new Date();
     const timeStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
@@ -717,7 +756,7 @@ ${userContext}`;
       systemInstruction: systemPrompt,
       tools: [{ googleSearch: {} }]
     });
-    const baseHistory = normalizeGeminiHistory(cleanHistory);
+    const baseHistory = normalizeGeminiHistory(history);
     const geminiRes = await model.generateContent({
       contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
     });
@@ -738,7 +777,7 @@ ${userContext}`;
       const result = await callProxy(userId, action.type, action.input || {});
       console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
-      await supabase.from('action_log').insert({
+      supabase.from('action_log').insert({
         user_id: userId,
         action: JSON.stringify(action),
         status: result.success ? 'executed' : 'failed',
@@ -773,23 +812,6 @@ ${userContext}`;
 
     await saveMessage(userId, 'assistant', spoken);
 
-    if (shouldSaveMemory(message)) {
-      const fact = await extractMemoryFact(userId, message);
-      if (fact) await saveMemory(userId, fact);
-    }
-
-    // Check if user expressed preference about communication style
-    const styleCues = [
-      { pattern: /too long|tl;dr|too short|not enough|be brief|be concise|more detail|explain more|less detail|shut up|stop rambling/i, key: 'response_length' },
-      { pattern: /be direct|be blunt|be nice|be polite|don't be rude|don't be sarcastic|more casual|more formal/i, key: 'tone_preference' },
-      { pattern: /use bullet|use numbers|no bullet|no numbers|bullet points|step by step/i, key: 'format_preference' },
-    ];
-    for (const cue of styleCues) {
-      if (cue.pattern.test(message)) {
-        await savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
-      }
-    }
-
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
@@ -798,6 +820,24 @@ ${userContext}`;
     }
 
     res.json(result);
+
+    // Fire-and-forget: memory extraction + style preference saves
+    if (shouldSaveMemory(message)) {
+      extractMemoryFact(userId, message).then(fact => {
+        if (fact) saveMemory(userId, fact);
+      }).catch(() => {});
+    }
+
+    const styleCues = [
+      { pattern: /too long|tl;dr|too short|not enough|be brief|be concise|more detail|explain more|less detail|shut up|stop rambling/i, key: 'response_length' },
+      { pattern: /be direct|be blunt|be nice|be polite|don't be rude|don't be sarcastic|more casual|more formal/i, key: 'tone_preference' },
+      { pattern: /use bullet|use numbers|no bullet|no numbers|bullet points|step by step/i, key: 'format_preference' },
+    ];
+    for (const cue of styleCues) {
+      if (cue.pattern.test(message)) {
+        savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
+      }
+    }
 
   } catch (err) {
     console.error('/chat error:', err.message);

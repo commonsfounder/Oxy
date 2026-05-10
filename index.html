@@ -1466,19 +1466,43 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   const sendAudio = async () => {
     setLoadingWithCb(true);
+    const placeholderId = Date.now();
     try {
       const wavBlob  = await webmToWav(new Blob(chunksRef.current, { type: 'audio/webm' }));
       const formData = new FormData();
       formData.append('audio', wavBlob, 'audio.wav');
       formData.append('userId', USER_ID);
-      const data = await (await apiFetch('/process-audio', { method: 'POST', body: formData })).json();
-      if (data.transcription) setMessages(prev => [...prev, { role: 'user', content: data.transcription, time: new Date() }]);
-      if (data.text) {
-        const m = { role: 'assistant', content: data.text, time: new Date() };
-        if (data.audio)   m.audio   = data.audio;
-        if (data.actions?.length) m.actions = data.actions;
-        setMessages(prev => [...prev, m]);
-        if (data.audio) playAudioFromBase64(data.audio);
+      const response = await apiFetch('/process-audio', { method: 'POST', body: formData });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const events = buf.split('\n\n');
+        buf = events.pop();
+        for (const event of events) {
+          const line = event.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === 'transcription') {
+              setMessages(prev => [...prev, { role: 'user', content: ev.text, time: new Date(), _id: placeholderId }]);
+            }
+            if (ev.type === 'response') {
+              const m = { role: 'assistant', content: ev.text, time: new Date() };
+              if (ev.actions?.length) m.actions = ev.actions;
+              setMessages(prev => [...prev, m]);
+            }
+            if (ev.type === 'audio') {
+              playAudioFromBase64(ev.data);
+            }
+            if (ev.type === 'error') {
+              console.error('Audio processing error:', ev.error);
+            }
+          } catch {}
+        }
       }
     } catch (err) { console.error('Audio error:', err); }
     setLoadingWithCb(false);
