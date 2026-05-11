@@ -36,15 +36,17 @@ app.use(express.json());
 
 const audioRateLimit = new Map();
 
-// Periodically prune stale rate-limit entries (every 5 min)
-setInterval(() => {
-  const now = Date.now();
-  for (const [uid, timestamps] of audioRateLimit) {
-    const recent = timestamps.filter(t => now - t < 60000);
-    if (recent.length === 0) audioRateLimit.delete(uid);
-    else audioRateLimit.set(uid, recent);
-  }
-}, 5 * 60 * 1000);
+// Prune stale rate-limit entries (skip in serverless — Maps are ephemeral per invocation)
+if (!process.env.VERCEL) {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [uid, timestamps] of audioRateLimit) {
+      const recent = timestamps.filter(t => now - t < 60000);
+      if (recent.length === 0) audioRateLimit.delete(uid);
+      else audioRateLimit.set(uid, recent);
+    }
+  }, 5 * 60 * 1000).unref();
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -57,13 +59,15 @@ const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
 const CONTEXT_CACHE_MAX = 500;
 const contextCache = new Map();
 
-// Periodically prune expired context cache entries (every 10 min)
-setInterval(() => {
-  const now = Date.now();
-  for (const [uid, entry] of contextCache) {
-    if (now - entry.ts > CONTEXT_CACHE_TTL) contextCache.delete(uid);
-  }
-}, 10 * 60 * 1000);
+// Prune expired context cache entries (skip in serverless)
+if (!process.env.VERCEL) {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [uid, entry] of contextCache) {
+      if (now - entry.ts > CONTEXT_CACHE_TTL) contextCache.delete(uid);
+    }
+  }, 10 * 60 * 1000).unref();
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
