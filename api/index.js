@@ -36,6 +36,16 @@ app.use(express.json());
 
 const audioRateLimit = new Map();
 
+// Periodically prune stale rate-limit entries (every 5 min)
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, timestamps] of audioRateLimit) {
+    const recent = timestamps.filter(t => now - t < 60000);
+    if (recent.length === 0) audioRateLimit.delete(uid);
+    else audioRateLimit.set(uid, recent);
+  }
+}, 5 * 60 * 1000);
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -43,15 +53,23 @@ const supabase = createClient(
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
+const CONTEXT_CACHE_MAX = 500;
 const contextCache = new Map();
+
+// Periodically prune expired context cache entries (every 10 min)
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, entry] of contextCache) {
+    if (now - entry.ts > CONTEXT_CACHE_TTL) contextCache.delete(uid);
+  }
+}, 10 * 60 * 1000);
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-async function callProxy(userId, action, params) {
-  return dispatch(userId, action, params);
-}
+const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
 
@@ -169,7 +187,7 @@ async function runActions(userId, actions) {
   const results = [];
   for (const action of actions) {
     console.log('[action] executing:', action.type, action.input);
-    const result = await callProxy(userId, action.type, action.input || {});
+    const result = await dispatch(userId, action.type, action.input || {});
     console.log('[action] result:', action.type, JSON.stringify(result));
     results.push({ action: action.type, result });
     supabase.from('action_log').insert({
@@ -345,7 +363,7 @@ async function savePreference(userId, key, value) {
 
 async function getUserContext(userId) {
   const cached = contextCache.get(userId);
-  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.context;
+  if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) return cached.context;
 
   const [connectors, memories, actionLog] = await Promise.all([
     supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
@@ -379,6 +397,10 @@ Active connectors: ${active}
 Messaging patterns: ${patterns}
 Key facts: ${memoryLines}`.slice(0, 1800);
 
+  if (contextCache.size >= CONTEXT_CACHE_MAX) {
+    const oldest = contextCache.keys().next().value;
+    contextCache.delete(oldest);
+  }
   contextCache.set(userId, { context, ts: Date.now() });
   return context;
 }
@@ -442,7 +464,7 @@ ${preferences || 'Still learning.'}
 CONNECTED APPS:
 ${availableActions}
 
-Current time: ${new Date().toLocaleString('en-GB', { timeZone: 'Europe/London' })}
+Current time: ${new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
 ---
 ${userContext}`;
@@ -644,7 +666,7 @@ ${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent
 
 Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
 
-The current time is: ${now.toLocaleString('en-GB', { timeZone: 'Europe/London' })}`;
+The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
     const model = genAI.getGenerativeModel({
       model: 'gemini-3-flash-preview',
@@ -734,7 +756,7 @@ app.post('/chat', async (req, res) => {
     await saveMessage(userId, 'user', message);
 
     const now = new Date();
-    const timeStr = now.toLocaleString('en-GB', { timeZone: 'Europe/London' });
+    const timeStr = now.toLocaleString('en-GB', { timeZone: TIMEZONE });
     const systemPrompt = `${OXCY_SYSTEM_PROMPT}
 
 WHAT YOU KNOW ABOUT THIS PERSON:
@@ -774,7 +796,7 @@ ${userContext}`;
     const physicalActions = actions;
     for (const action of physicalActions) {
       console.log('[mcp] executing:', action.type, action.input);
-      const result = await callProxy(userId, action.type, action.input || {});
+      const result = await dispatch(userId, action.type, action.input || {});
       console.log('[action result]', action.type, JSON.stringify(result));
       actionResults.push({ action: action.type, result });
       supabase.from('action_log').insert({
