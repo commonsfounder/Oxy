@@ -231,10 +231,201 @@ body::after {
 /* ── CHAT ── */
 .chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
+.ops-shell {
+  padding: 22px 24px 0;
+  border-bottom: 1px solid var(--line);
+  background:
+    radial-gradient(circle at 14% 8%, rgba(200,184,154,0.16), transparent 26%),
+    radial-gradient(circle at 88% 12%, rgba(95,49,28,0.16), transparent 24%),
+    linear-gradient(180deg, rgba(255,248,238,0.03), rgba(255,255,255,0));
+}
+
+.ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(220px, 0.72fr);
+  gap: 12px;
+  align-items: stretch;
+}
+
+.ops-hero, .ops-panel {
+  border-radius: 22px;
+  padding: 22px 22px 19px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+
+.ops-hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 72% 24%, rgba(200,184,154,0.14), transparent 22%),
+    linear-gradient(135deg, rgba(58,33,23,0.82), rgba(18,18,18,0.95) 58%);
+  border: 1px solid rgba(200,184,154,0.16);
+}
+
+.ops-hero::after {
+  content: '';
+  position: absolute;
+  right: 28px;
+  top: 22px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 22%, rgba(200,184,154,0.18) 45%, rgba(0,0,0,0) 70%),
+    radial-gradient(circle at 50% 50%, rgba(200,184,154,0.22), rgba(0,0,0,0) 68%);
+  filter: blur(0.4px);
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.ops-panel {
+  background:
+    linear-gradient(180deg, rgba(255,252,248,0.05), rgba(255,255,255,0.015)),
+    radial-gradient(circle at top, rgba(200,184,154,0.05), transparent 58%);
+  border: 1px solid rgba(200,184,154,0.1);
+}
+
+.ops-kicker {
+  font-size: 10px;
+  font-weight: 600;
+  color: #d7c2a1;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
+}
+
+.ops-title {
+  margin-top: 8px;
+  max-width: 560px;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 37px;
+  line-height: 0.95;
+  letter-spacing: -0.8px;
+  color: #f5efe8;
+  position: relative;
+  z-index: 1;
+}
+
+.ops-sub {
+  margin-top: 12px;
+  max-width: 500px;
+  font-size: 13px;
+  color: rgba(242,242,242,0.78);
+  line-height: 1.7;
+  position: relative;
+  z-index: 1;
+}
+
+.ops-stats {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  position: relative;
+  z-index: 1;
+}
+
+.ops-stat {
+  padding: 13px 14px;
+  border-radius: 16px;
+  background: rgba(255,248,238,0.045);
+  border: 1px solid rgba(215,194,161,0.14);
+}
+
+.ops-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(215,194,161,0.82);
+}
+
+.ops-stat-value {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #f7f1ea;
+  line-height: 1.4;
+}
+
+.ops-panel-title {
+  font-size: 11px;
+  color: #cfb38b;
+  text-transform: uppercase;
+  letter-spacing: 1.3px;
+}
+
+.ops-panel-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ops-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+  border-radius: 14px;
+  background: rgba(255,248,238,0.022);
+  border: 1px solid rgba(200,184,154,0.1);
+}
+
+.ops-row-main {
+  min-width: 0;
+}
+
+.ops-row-label {
+  font-size: 12.5px;
+  color: #f2ece5;
+}
+
+.ops-row-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(242,242,242,0.58);
+  line-height: 1.5;
+}
+
+.ops-row-status {
+  font-size: 10px;
+  color: #d0b188;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+  opacity: 0.88;
+}
+
+.ops-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.ops-chip {
+  border: 1px solid rgba(215,194,161,0.18);
+  background: rgba(255,248,238,0.04);
+  color: #f6efe6;
+  border-radius: 999px;
+  padding: 7px 11px;
+  font-size: 11.5px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.ops-chip:hover {
+  background: rgba(255,248,238,0.08);
+  border-color: rgba(215,194,161,0.34);
+  transform: translateY(-1px);
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 44px 64px 20px;
+  padding: 30px 64px 20px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -243,7 +434,16 @@ body::after {
 
 .messages::-webkit-scrollbar { display: none; }
 
-@media (max-width: 768px) { .messages { padding: 24px 20px 16px; } }
+@media (max-width: 980px) {
+  .ops-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .ops-shell { padding: 16px 16px 0; }
+  .ops-title { font-size: 28px; }
+  .ops-stats { grid-template-columns: 1fr; }
+  .messages { padding: 22px 20px 16px; }
+}
 
 .message { display: flex; flex-direction: column; }
 .message.user { align-items: flex-end; }
@@ -287,6 +487,27 @@ body::after {
   padding: 0;
 }
 
+.msg-meta {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.msg-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  font-size: 10px;
+  color: var(--sub);
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+
 /* Audio play button */
 .msg-play-btn {
   display: inline-flex;
@@ -310,25 +531,61 @@ body::after {
 .msg-actions-bar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .msg-action-status {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
   font-size: 12px;
   font-weight: 400;
-  padding: 0;
-  border: none;
-  background: none;
-  border-radius: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  border-radius: 14px;
   letter-spacing: 0;
 }
 
-.msg-action-status.ok  { color: var(--green); }
-.msg-action-status.fail { color: var(--red); }
+.msg-action-copy {
+  min-width: 0;
+}
+
+.msg-action-title {
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.msg-action-sub {
+  margin-top: 4px;
+  color: var(--sub);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.msg-action-status.ok  { border-color: rgba(76,175,130,0.18); }
+.msg-action-status.fail { border-color: rgba(192,80,62,0.22); }
+
+.msg-action-pill {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+}
+
+.msg-action-status.ok .msg-action-pill {
+  color: var(--green);
+  background: rgba(76,175,130,0.12);
+}
+
+.msg-action-status.fail .msg-action-pill {
+  color: var(--red);
+  background: rgba(192,80,62,0.12);
+}
 
 /* Typing indicator */
 .typing {
@@ -1358,6 +1615,7 @@ function AutoRunActions({ actions }) {
 
 function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, onProcessingChange }) {
   const [messages, setMessages] = useState([]);
+  const [recentActions, setRecentActions] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [speaking, setSpeaking] = useState(false);
@@ -1385,7 +1643,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       .catch(() => {});
   }, []);
 
-  useEffect(() => { loadHistory(); }, []);
+  const loadRecentActions = useCallback(() => {
+    apiFetch('/action-log/' + USER_ID)
+      .then(r => r.json())
+      .then(data => { if (data.actions) setRecentActions(data.actions.slice(0, 4)); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => { loadHistory(); loadRecentActions(); }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1620,6 +1885,31 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
   };
 
+  const latestAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+  const briefingText = latestAssistant?.content || 'Resting quietly until you want something arranged, drafted, remembered, or set in motion.';
+  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'A private place for preferences, rituals, and the people who matter.';
+  const recentContacts = people.slice(0, 3).map(p => p.name);
+  const quickPrompts = [
+    'Shape the day with me',
+    `Draft a note to ${recentContacts[0] || 'someone important'}`,
+    'What needs my attention first?',
+    'Set the next detail in motion'
+  ];
+  const formatActionTitle = (entry) => {
+    const raw = entry?.action;
+    if (!raw) return 'Action';
+    if (typeof raw === 'string') return raw.replace(/_/g, ' ');
+    return (raw.type || raw.action || 'Action').replace(/_/g, ' ');
+  };
+  const formatTrailStatus = (status) => {
+    if (!status) return 'Kept';
+    const normalized = String(status).toLowerCase();
+    if (normalized === 'executed' || normalized === 'completed' || normalized === 'success') return 'Kept';
+    if (normalized === 'pending') return 'Awaiting';
+    if (normalized === 'failed' || normalized === 'error') return 'Needs care';
+    return normalized.replace(/_/g, ' ');
+  };
+
   return (
     <div className="chat-page">
       <button className="search-toggle-btn" onClick={() => setSearchOpen(o => !o)} title="Search messages">
@@ -1663,17 +1953,67 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           <button className="history-back-btn" onClick={() => { setViewingDate(null); loadHistory(); }}>Back to latest →</button>
         </div>
       )}
+      <div className="ops-shell">
+        <div className="ops-grid">
+          <div className="ops-hero">
+            <div className="ops-kicker">Private Piece</div>
+            <div className="ops-title">A private piece for correspondence, memory, and the small arrangements of life.</div>
+            <div className="ops-sub">{briefingText}</div>
+            <div className="ops-stats">
+              <div className="ops-stat">
+                <div className="ops-stat-label">Kept Close</div>
+                <div className="ops-stat-value">{memoryPreview}</div>
+              </div>
+              <div className="ops-stat">
+                <div className="ops-stat-label">Held Dear</div>
+                <div className="ops-stat-value">{recentContacts.length ? recentContacts.join(', ') : 'No saved people yet'}</div>
+              </div>
+              <div className="ops-stat">
+                <div className="ops-stat-label">Recent Motions</div>
+                <div className="ops-stat-value">{recentActions.length ? `${recentActions.length} recent arrangements remembered` : 'Nothing has been set in motion yet'}</div>
+              </div>
+            </div>
+            <div className="ops-chip-row">
+              {quickPrompts.map((prompt, i) => (
+                <button key={i} className="ops-chip" onClick={() => sendMessage(prompt)}>{prompt}</button>
+              ))}
+            </div>
+          </div>
+          <div className="ops-panel">
+            <div className="ops-panel-title">Private Trail</div>
+            <div className="ops-panel-list">
+              {recentActions.length ? recentActions.map((item, i) => (
+                <div key={i} className="ops-row">
+                  <div className="ops-row-main">
+                    <div className="ops-row-label">{formatActionTitle(item)}</div>
+                    <div className="ops-row-sub">{item.error || 'Kept here as part of Oxy’s quiet record.'}</div>
+                  </div>
+                  <div className="ops-row-status">{formatTrailStatus(item.status)}</div>
+                </div>
+              )) : (
+                <div className="ops-row">
+                  <div className="ops-row-main">
+                    <div className="ops-row-label">Nothing kept here yet</div>
+                    <div className="ops-row-sub">When Oxy drafts, sends, books, or prepares something, it will leave a quiet trace here.</div>
+                  </div>
+                  <div className="ops-row-status">Quiet</div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
       <div className="messages">
         {messages.length === 0 && !loading && (
           <div className="empty-state">
             <div className="empty-orb" />
-            <div className="empty-text">{settings.name}</div>
+            <div className="empty-text">Ask Oxy to compose, remember, arrange, or prepare something with care.</div>
             <div className="prompt-chips">
               {[
-                { icon: '📨', label: `Message ${people[0]?.name || 'a contact'}`, sub: 'Send via iMessage', prompt: `Send a message to ${people[0]?.name || 'someone'}` },
-                { icon: '⏰', label: 'Set a reminder',   sub: 'For any time or task',    prompt: 'Set a reminder for tomorrow' },
-                { icon: '🎵', label: 'Play music',        sub: 'Focus, chill, or hype',   prompt: 'Play something to help me focus' },
-                { icon: '☀️', label: 'Morning briefing', sub: "What's on today",          prompt: 'Give me my morning briefing' },
+                { icon: '📨', label: `Write to ${people[0]?.name || 'someone'}`, sub: 'A note prepared with tact', prompt: `Send a message to ${people[0]?.name || 'someone'}` },
+                { icon: '⏰', label: 'Keep a reminder',   sub: 'Hold a promise to yourself', prompt: 'Set a reminder for tomorrow' },
+                { icon: '🚕', label: 'Arrange transport',   sub: 'Set the journey in motion', prompt: 'Book me an Uber to the station' },
+                { icon: '☀️', label: 'Morning note', sub: 'A gentle sense of the day', prompt: 'Give me my morning briefing' },
               ].map((chip, i) => (
                 <button key={i} className="prompt-chip" onClick={() => sendMessage(chip.prompt)}>
                   <span className="prompt-chip-icon">{chip.icon}</span>
@@ -1696,6 +2036,12 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               <div className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
                 <div className="msg-bubble">
                   {msg.content}
+                  {msg.role === 'assistant' && (
+                    <div className="msg-meta">
+                      <span className="msg-tag">{msg.actions?.length ? 'Set in motion' : 'Kept'}</span>
+                      <span className="msg-tag">{/i don't know|not sure|uncertain/i.test(msg.content) ? 'Plainly said' : 'Private reply'}</span>
+                    </div>
+                  )}
                   {msg.audio && (
                     <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
                   )}
@@ -1716,13 +2062,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                                   : type;
                       return (
                         <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
-                          {ok ? '✓' : '✗'} {label}
-                          {type === 'search_trains' && a.result?.bookingUrl && (
-                            <a href={a.result.bookingUrl} target="_blank" rel="noopener"
-                               style={{color:'var(--stone)',fontSize:'11px',marginLeft:'8px',textDecoration:'none'}}>
-                              Book on Trainline →
-                            </a>
-                          )}
+                          <span className="msg-action-copy">
+                            <span className="msg-action-title">{label}</span>
+                            <span className="msg-action-sub">
+                              {a.result?.error || a.result?.text || 'Completed without extra detail.'}
+                              {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
+                            </span>
+                          </span>
+                          <span className="msg-action-pill">{ok ? 'set' : 'needs care'}</span>
                         </span>
                       );
                     })}
@@ -1818,15 +2165,15 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
       <div className="section">
         <div className="section-title">About You</div>
         <div className="memory-card">
-          <textarea className="memory-textarea" placeholder="Tell Oxy about yourself…" value={memory} onChange={e => setMemory(e.target.value)} />
+          <textarea className="memory-textarea" placeholder="Tell Oxy about your preferences, rituals, and the shape of your life…" value={memory} onChange={e => setMemory(e.target.value)} />
           <div className="memory-footer">
-            <button className="save-btn" onClick={saveMemory}>Save</button>
+            <button className="save-btn" onClick={saveMemory}>Keep Close</button>
           </div>
         </div>
       </div>
 
       <div className="section">
-        <div className="section-title">People</div>
+        <div className="section-title">Your Circle</div>
         <div className="memory-card">
           {people.map((p, i) => (
             <div key={i} className="person-row">
@@ -1840,13 +2187,13 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
           ))}
           <div className="add-person-row">
             <input className="mini-input" placeholder="Name" value={newName} onChange={e => setNewName(e.target.value)} />
-            <input className="mini-input" placeholder="Relationship" value={newRel} onChange={e => setNewRel(e.target.value)} />
-            <button className="mini-btn" onClick={addPerson}>Add</button>
+            <input className="mini-input" placeholder="How they matter" value={newRel} onChange={e => setNewRel(e.target.value)} />
+            <button className="mini-btn" onClick={addPerson}>Keep</button>
           </div>
         </div>
       </div>
 
-      {toast && <div className="toast">Saved</div>}
+      {toast && <div className="toast">Kept close</div>}
     </div>
   );
 }
@@ -1909,7 +2256,7 @@ function TelegramAuthModal({ onSuccess, onClose }) {
   };
 
   const stepConfig = {
-    phone: { title: 'Connect Telegram', sub: 'Enter your phone number in international format', label: 'Phone number', value: phone, onChange: setPhone, placeholder: '+447...', onSubmit: submitPhone, btnText: 'Send Code' },
+    phone: { title: 'Connect Telegram', sub: 'Enter your phone number in international format', label: 'Phone number', value: phone, onChange: setPhone, placeholder: '+447...', onSubmit: submitPhone, btnText: 'Send code' },
     code:  { title: 'Enter Code',       sub: 'Check your Telegram app for the verification code', label: 'Verification code', value: code, onChange: setCode, placeholder: '12345', onSubmit: submitCode, btnText: 'Verify' },
     twofa: { title: 'Two-Factor Auth',  sub: 'Enter your Telegram 2FA password', label: 'Password', value: pass, onChange: setPass, placeholder: '••••••••', onSubmit: submit2FA, btnText: 'Confirm', type: 'password' },
   }[step];
@@ -2034,7 +2381,7 @@ function ConnectorsPage() {
             </div>
             <div>
               <div className="hub-name">Google</div>
-              <div className="hub-desc">Gmail · Calendar{googleStatus === 'connected' ? ' · Connected ✓' : ''}</div>
+              <div className="hub-desc">Mail · Calendar{googleStatus === 'connected' ? ' · Kept in reach' : ''}</div>
             </div>
           </div>
           <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting'}>
@@ -2045,7 +2392,7 @@ function ConnectorsPage() {
 
       {Object.entries(grouped).map(([cat, items]) => (
         <div key={cat} className="section">
-          <div className="section-title">{cat}</div>
+          <div className="section-title">{cat === 'Messaging' ? 'Correspondence' : cat === 'Travel' ? 'Journeys' : cat}</div>
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:'12px'}}>
             {items.map(c => (
               <div key={c.id} className="hub-item" style={!c.implemented ? {opacity:0.4, pointerEvents:'none'} : {}}>
@@ -2087,16 +2434,16 @@ function ActionHistoryPage() {
   return (
     <div className="page-content">
       <div className="section">
-        <div className="section-title">Action History</div>
+        <div className="section-title">Private Trail</div>
         {actions.length === 0 ? (
-          <div style={{color:'var(--dim)',fontSize:'13px',paddingTop:'8px'}}>No actions yet.</div>
+          <div style={{color:'var(--dim)',fontSize:'13px',paddingTop:'8px'}}>Nothing has been kept here yet.</div>
         ) : (
           <div className="history-list">
             {actions.map((a, i) => (
               <div key={i} className="history-item">
                 <div className="history-time">{new Date(a.created_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
                 <div className="history-action">{formatAction(a.action)}</div>
-                <span className={`history-status status-${a.status}`}>{a.status}</span>
+                <span className={`history-status status-${a.status}`}>{a.status === 'executed' ? 'kept' : a.status}</span>
               </div>
             ))}
           </div>
@@ -2117,7 +2464,7 @@ function SettingsPage({ settings, setSettings }) {
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Assistant Name</div>
+              <div className="setting-label">Companion Name</div>
             </div>
             <input className="setting-input" value={settings.name} onChange={e => update('name', e.target.value)} />
           </div>
@@ -2129,8 +2476,8 @@ function SettingsPage({ settings, setSettings }) {
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Voice Playback</div>
-              <div className="setting-desc">Generate audio for responses</div>
+              <div className="setting-label">Spoken Replies</div>
+              <div className="setting-desc">Let Oxy answer aloud</div>
             </div>
             <button className={`toggle ${settings.voiceOn ? 'on' : ''}`} onClick={() => update('voiceOn', !settings.voiceOn)} />
           </div>
@@ -2138,12 +2485,12 @@ function SettingsPage({ settings, setSettings }) {
       </div>
 
       <div className="section">
-        <div className="section-title">Autonomy</div>
+        <div className="section-title">Temperament</div>
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Initiative Level</div>
-              <div className="setting-desc">How often Oxy proactively reaches out</div>
+              <div className="setting-label">Initiative</div>
+              <div className="setting-desc">How readily Oxy takes the lead</div>
             </div>
             <div className="autonomy-options">
               {['Low','Medium','High'].map(l => (
@@ -2246,13 +2593,13 @@ function App() {
 
   const navItems = [
     { id: 'chat',       label: 'Chat',       icon: Icons.chat },
-    { id: 'history',    label: 'History',    icon: Icons.history },
-    { id: 'connectors', label: 'Connectors', icon: Icons.connectors },
-    { id: 'memory',     label: 'Memory',     icon: Icons.memory },
-    { id: 'settings',  label: 'Settings',   icon: Icons.settings },
+    { id: 'history',    label: 'Trail',      icon: Icons.history },
+    { id: 'connectors', label: 'Links',      icon: Icons.connectors },
+    { id: 'memory',     label: 'Circle',     icon: Icons.memory },
+    { id: 'settings',   label: 'Manner',     icon: Icons.settings },
   ];
 
-  const titles = { chat: 'Chat', history: 'History', connectors: 'Connectors', memory: 'Memory', settings: 'Settings' };
+  const titles = { chat: 'Oxy', history: 'Private Trail', connectors: 'Links', memory: 'Circle', settings: 'Manner' };
 
   return (
     <div className="app">
@@ -2262,7 +2609,7 @@ function App() {
           <div className="logo-name">{settings.name}</div>
           <div className="logo-sub">
             <span className="status-dot" style={isRecording ? {background:'var(--red)',boxShadow:'0 0 6px rgba(192,80,62,0.5)'} : {}} />
-            {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'Online'}
+            {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'With you'}
           </div>
         </div>
         <nav className="nav">
@@ -2275,7 +2622,7 @@ function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="status" style={{fontSize:'10px',fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:'var(--dim)'}}>
-            Wearable AI
+            Private companion
           </div>
           <button
             className="stop-btn"
@@ -2297,20 +2644,14 @@ function App() {
       <div className="main">
         <div className="topbar">
           <span className="topbar-title">{titles[page]}</span>
+          {page === 'chat' && <span className="topbar-badge">Private correspondence and quiet arrangements</span>}
           {page === 'chat' && <button className="new-chat-btn" onClick={handleNewChat}>+ New Chat</button>}
         </div>
 
         {page === 'chat' && (
           <>
-            {briefing && (
-              <div className="briefing-banner">
-                <div className="briefing-label">Morning Briefing</div>
-                <div className="briefing-text">{briefing.text}</div>
-                {briefing.actions.length > 0 && <AutoRunActions actions={briefing.actions} />}
-                <button className="briefing-dismiss" onClick={() => setBriefing(null)}>Dismiss</button>
-              </div>
-            )}
             <ChatPage key={chatKey} settings={settings} memory={memory} people={people} initialQuery={initialQuery} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
+            {briefing?.actions?.length > 0 && <AutoRunActions actions={briefing.actions} />}
           </>
         )}
         {page === 'history'    && <ActionHistoryPage />}
