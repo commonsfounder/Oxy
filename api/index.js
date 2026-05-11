@@ -81,10 +81,8 @@ CORE ETHOS:
 
 FACTUALITY:
 - Say what you know. Don't fill gaps with guesses or confident bullshit.
-- You have live Google Search grounding — use it. When you need current or verifiable facts, search results are automatically incorporated.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
-- Prefer grounded facts over training memory for anything time-sensitive or verifiable.
 
 ACTIONS YOU CAN TAKE:
 Always return an action block when doing any of these. Never say you can't — just do it.
@@ -263,7 +261,7 @@ async function saveMemory(userId, content) {
 
 async function extractMemoryFact(userId, text) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
     const result = await model.generateContent(
       `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
@@ -647,9 +645,8 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
-      systemInstruction: systemPrompt,
-      tools: [{ googleSearch: {} }]
+      model: 'gemini-2.0-flash',
+      systemInstruction: systemPrompt
     });
     const geminiRes = await model.generateContent('whats going on today?');
     const { spoken, actions } = parseActions(geminiRes.response.text());
@@ -742,9 +739,8 @@ Current time: ${timeStr}
 ${userContext}`;
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3-flash-preview',
-    systemInstruction: systemPrompt,
-    tools: [{ googleSearch: {} }]
+    model: 'gemini-2.0-flash',
+    systemInstruction: systemPrompt
   });
   return { model, history, availableActions };
 }
@@ -781,11 +777,15 @@ app.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'message is required.' });
     }
 
+    const t0 = Date.now();
+    const elapsed = label => console.log(`[timing] ${label}: ${Date.now() - t0}ms`);
+
     // Build context (parallel DB queries) and save user message concurrently
     const [{ model, history }] = await Promise.all([
       buildChatContext(userId),
       saveMessage(userId, 'user', message)
     ]);
+    elapsed('context+save');
     const baseHistory = normalizeGeminiHistory(history);
     const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];
 
@@ -801,15 +801,18 @@ app.post('/chat', async (req, res) => {
         // Stream Gemini response token-by-token
         const stream = await model.generateContentStream({ contents });
         let fullText = '';
+        let firstChunk = true;
         for await (const chunk of stream.stream) {
           const text = chunk.text();
           if (text) {
+            if (firstChunk) { elapsed('first-token'); firstChunk = false; }
             fullText += text;
             // Only stream visible text, not action blocks
             const visibleChunk = text.replace(/<action>[\s\S]*?<\/action>/g, '');
             if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
           }
         }
+        elapsed('gemini-complete');
 
         let { spoken, actions } = parseActions(fullText);
 
@@ -828,6 +831,7 @@ app.post('/chat', async (req, res) => {
             return { action: action.type, result };
           }));
           sse({ type: 'actions', results: actionResults });
+          elapsed('actions-complete');
         }
 
         // For data-fetching actions, stream a follow-up summary
@@ -862,11 +866,13 @@ app.post('/chat', async (req, res) => {
           try {
             const audio = await generateSpeech(spoken);
             if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
+            elapsed('tts-complete');
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
           }
         }
 
+        elapsed('total');
         sse({ type: 'done' });
         res.end();
 
