@@ -232,32 +232,21 @@ body::after {
 .chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
 .ops-shell {
-  padding: 18px 24px 0;
+  padding: 20px 24px 6px;
   border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255,248,238,0.03), rgba(255,255,255,0));
+  background: none;
 }
 
 .ops-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.8fr);
-  gap: 14px;
-  align-items: stretch;
-}
-
-.ops-hero, .ops-panel {
-  border-radius: 20px;
-  padding: 18px 18px 16px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  display: block;
 }
 
 .ops-hero {
-  background: linear-gradient(180deg, rgba(255,252,248,0.045), rgba(255,255,255,0.02));
-  border: 1px solid rgba(200,184,154,0.12);
-}
-
-.ops-panel {
-  background: linear-gradient(180deg, rgba(255,252,248,0.04), rgba(255,255,255,0.015));
-  border: 1px solid rgba(200,184,154,0.08);
+  border-radius: 0;
+  padding: 0 0 10px;
+  box-shadow: none;
+  background: none;
+  border: none;
 }
 
 .ops-kicker {
@@ -269,122 +258,58 @@ body::after {
 }
 
 .ops-title {
-  margin-top: 6px;
+  margin-top: 4px;
   max-width: 520px;
-  font-family: var(--font);
-  font-size: 24px;
-  line-height: 1.08;
-  letter-spacing: -0.3px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.02;
+  letter-spacing: -0.6px;
   color: var(--text);
 }
 
 .ops-sub {
-  margin-top: 10px;
+  margin-top: 8px;
   max-width: 560px;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--sub);
   line-height: 1.6;
 }
 
-.ops-stats {
-  margin-top: 18px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.ops-stat {
-  padding: 12px 13px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.025);
-  border: 1px solid var(--line);
-}
-
-.ops-stat-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--dim);
-}
-
-.ops-stat-value {
-  margin-top: 6px;
-  font-size: 12.5px;
-  color: var(--text);
-  line-height: 1.4;
-}
-
-.ops-panel-title {
-  font-size: 11px;
-  color: var(--dim);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.ops-panel-list {
+.ops-meta {
   margin-top: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px 16px;
 }
 
-.ops-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 12px;
-  border-radius: 14px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid var(--line);
-}
-
-.ops-row-main {
-  min-width: 0;
-}
-
-.ops-row-label {
-  font-size: 12.5px;
-  color: var(--text);
-}
-
-.ops-row-sub {
-  margin-top: 3px;
+.ops-meta-item {
   font-size: 11px;
   color: var(--sub);
-  line-height: 1.5;
-}
-
-.ops-row-status {
-  font-size: 10px;
-  color: var(--sub);
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  white-space: nowrap;
-  opacity: 0.88;
+  letter-spacing: 0.1px;
 }
 
 .ops-chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .ops-chip {
-  border: 1px solid var(--line2);
-  background: var(--s2);
+  border: 1px solid var(--line);
+  background: transparent;
   color: var(--text);
   border-radius: 999px;
-  padding: 7px 11px;
-  font-size: 11.5px;
+  padding: 6px 10px;
+  font-size: 11px;
   font-family: var(--font);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.15s;
 }
 
 .ops-chip:hover {
-  background: var(--s3);
+  background: rgba(255,255,255,0.03);
   border-color: var(--line2);
   transform: translateY(-1px);
 }
@@ -401,14 +326,9 @@ body::after {
 
 .messages::-webkit-scrollbar { display: none; }
 
-@media (max-width: 980px) {
-  .ops-grid { grid-template-columns: 1fr; }
-}
-
 @media (max-width: 768px) {
-  .ops-shell { padding: 16px 16px 0; }
-  .ops-title { font-size: 21px; }
-  .ops-stats { grid-template-columns: 1fr; }
+  .ops-shell { padding: 16px 16px 4px; }
+  .ops-title { font-size: 24px; }
   .messages { padding: 22px 20px 16px; }
 }
 
@@ -1854,8 +1774,9 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   const latestAssistant = [...messages].reverse().find(m => m.role === 'assistant');
   const briefingText = latestAssistant?.content || 'Ready.';
-  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'No memory saved yet.';
+  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 1).join(' · ') || 'No memory saved yet.';
   const recentContacts = people.slice(0, 3).map(p => p.name);
+  const recentActionSummary = recentActions.length ? `${recentActions.length} recent actions` : 'No actions yet';
   const quickPrompts = [
     `Message ${recentContacts[0] || 'a contact'}`,
     'Set a reminder',
@@ -1926,19 +1847,10 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             <div className="ops-kicker">Chat</div>
             <div className="ops-title">{settings.name}</div>
             <div className="ops-sub">{briefingText}</div>
-            <div className="ops-stats">
-              <div className="ops-stat">
-                <div className="ops-stat-label">Memory</div>
-                <div className="ops-stat-value">{memoryPreview}</div>
-              </div>
-              <div className="ops-stat">
-                <div className="ops-stat-label">People</div>
-                <div className="ops-stat-value">{recentContacts.length ? recentContacts.join(', ') : 'No saved people yet'}</div>
-              </div>
-              <div className="ops-stat">
-                <div className="ops-stat-label">Recent Actions</div>
-                <div className="ops-stat-value">{recentActions.length ? `${recentActions.length} recent actions` : 'No actions yet'}</div>
-              </div>
+            <div className="ops-meta">
+              <div className="ops-meta-item">Memory: {memoryPreview}</div>
+              <div className="ops-meta-item">People: {recentContacts.length ? recentContacts.join(', ') : 'No saved people yet'}</div>
+              <div className="ops-meta-item">History: {recentActionSummary}</div>
             </div>
             <div className="ops-chip-row">
               {quickPrompts.map((prompt, i) => (
@@ -1949,28 +1861,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                   : `Send a message to ${recentContacts[0] || 'someone'}`
                 )}>{prompt}</button>
               ))}
-            </div>
-          </div>
-          <div className="ops-panel">
-            <div className="ops-panel-title">Action History</div>
-            <div className="ops-panel-list">
-              {recentActions.length ? recentActions.map((item, i) => (
-                <div key={i} className="ops-row">
-                  <div className="ops-row-main">
-                    <div className="ops-row-label">{formatActionTitle(item)}</div>
-                    <div className="ops-row-sub">{item.error || 'Recorded in your history.'}</div>
-                  </div>
-                  <div className="ops-row-status">{formatTrailStatus(item.status)}</div>
-                </div>
-              )) : (
-                <div className="ops-row">
-                  <div className="ops-row-main">
-                    <div className="ops-row-label">No recent actions yet</div>
-                    <div className="ops-row-sub">Actions you take with Oxy will appear here.</div>
-                  </div>
-                  <div className="ops-row-status">Empty</div>
-                </div>
-              )}
             </div>
           </div>
         </div>
