@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -7,6 +9,15 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
+const {
+  createSessionToken,
+  getAuthenticatedUserId,
+  hashPassword,
+  requireSessionAuth,
+  signPayload,
+  verifyPassword,
+  verifySignedPayload
+} = require('../auth');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -30,8 +41,50 @@ function isValidUserId(id) {
   return typeof id === 'string' && USER_ID_RE.test(id);
 }
 
+function requireValidUserIdValue(userId, res) {
+  if (!isValidUserId(userId)) {
+    res.status(400).json({ error: 'Valid userId is required.' });
+    return false;
+  }
+  return true;
+}
+
+function requireMatchingUser(req, res, candidateUserId) {
+  if (!requireValidUserIdValue(candidateUserId, res)) return false;
+  const authenticatedUserId = getAuthenticatedUserId(req);
+  if (!authenticatedUserId || authenticatedUserId !== candidateUserId) {
+    res.status(403).json({ error: 'Forbidden' });
+    return false;
+  }
+  return true;
+}
+
+function signOAuthState(userId) {
+  return signPayload({ type: 'google_oauth', userId }, 15 * 60 * 1000);
+}
+
+function verifyOAuthState(state) {
+  const payload = verifySignedPayload(state);
+  if (!payload || payload.type !== 'google_oauth') return null;
+  return isValidUserId(payload.userId) ? payload.userId : null;
+}
+
 app.use(cors());
 app.use(express.json());
+
+app.use((req, res, next) => {
+  const publicPaths = new Set([
+    '/',
+    '/health',
+    '/install-shortcut',
+    '/auth/google/callback',
+    '/auth/register',
+    '/auth/login'
+  ]);
+
+  if (publicPaths.has(req.path)) return next();
+  return requireSessionAuth(req, res, next);
+});
 
 const audioRateLimit = new Map();
 
@@ -245,19 +298,41 @@ async function generateSpeech(text) {
 async function getMemory(userId) {
   const { data, error } = await supabase
     .from('memories')
-    .select('content')
+    .select('content, source')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(50);
 
   if (error || !data) return '';
-  return data.map(m => m.content).join('\n');
+  const manualProfile = data.find(m => m.source === 'manual_profile')?.content?.trim();
+  const facts = data
+    .filter(m => m.source !== 'manual_profile')
+    .map(m => m.content)
+    .filter(Boolean);
+  return [manualProfile, ...facts].filter(Boolean).join('\n');
 }
 
-async function saveMemory(userId, content) {
+async function saveMemory(userId, content, source = 'fact') {
+  if (source === 'manual_profile') {
+    const { data: inserted } = await supabase
+      .from('memories')
+      .insert({ user_id: userId, content, source, created_at: new Date().toISOString() })
+      .select('id');
+
+    if (inserted?.[0]?.id) {
+      await supabase
+        .from('memories')
+        .delete()
+        .eq('user_id', userId)
+        .eq('source', 'manual_profile')
+        .neq('id', inserted[0].id);
+    }
+    return;
+  }
+
   await supabase
     .from('memories')
-    .insert({ user_id: userId, content, created_at: new Date().toISOString() });
+    .insert({ user_id: userId, content, source, created_at: new Date().toISOString() });
 }
 
 async function extractMemoryFact(userId, text) {
@@ -360,6 +435,17 @@ async function savePreference(userId, key, value) {
     .upsert({ user_id: userId, key, value }, { onConflict: 'user_id,key' });
 }
 
+async function getUserAccount(userId) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('user_id, password_hash')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 async function getUserContext(userId) {
   const cached = contextCache.get(userId);
   if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) return cached.context;
@@ -404,12 +490,63 @@ Key facts: ${memoryLines}`.slice(0, 1800);
   return context;
 }
 
+app.post('/auth/register', async (req, res) => {
+  try {
+    const { userId, password } = req.body || {};
+    if (!requireValidUserIdValue(userId, res)) return;
+    if (typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+
+    const existing = await getUserAccount(userId);
+    if (existing) {
+      return res.status(409).json({ error: 'That user ID is already taken.' });
+    }
+
+    const passwordHash = hashPassword(password);
+    const { error } = await supabase
+      .from('users')
+      .insert({
+        user_id: userId,
+        password_hash: passwordHash,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+
+    if (error) throw error;
+
+    res.json({ success: true, token: createSessionToken(userId), userId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { userId, password } = req.body || {};
+    if (!requireValidUserIdValue(userId, res)) return;
+    if (typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'Password is required.' });
+    }
+
+    const account = await getUserAccount(userId);
+    if (!account || !verifyPassword(password, account.password_hash)) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    res.json({ success: true, token: createSessionToken(userId), userId });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/process-audio', upload.single('audio'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No audio file received.' });
   }
 
-  const userId = req.body.userId || 'default';
+  const userId = req.body.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
   const now = Date.now();
   const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
   if (recentHits.length >= 10) {
@@ -489,20 +626,10 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
 app.post('/memory', async (req, res) => {
   try {
-    const { userId = 'default', content } = req.body;
+    const { userId, content } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
-
-    // Insert new row first so data is never lost, then prune old rows
-    const { data: inserted } = await supabase
-      .from('memories')
-      .insert({ user_id: userId, content, created_at: new Date().toISOString() })
-      .select('id');
-
-    if (inserted?.[0]?.id) {
-      await supabase.from('memories').delete()
-        .eq('user_id', userId)
-        .neq('id', inserted[0].id);
-    }
+    await saveMemory(userId, content.trim(), 'manual_profile');
 
     res.json({ success: true });
   } catch (err) {
@@ -511,17 +638,18 @@ app.post('/memory', async (req, res) => {
 });
 
 app.get('/memory/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const { data, error } = await supabase
       .from('memories')
-      .select('content')
+      .select('content, source')
       .eq('user_id', req.params.userId)
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(50);
     
     if (error || !data) return res.json({ memory: '' });
-    res.json({ memory: data.map(m => m.content).join('\n') });
+    const manualProfile = data.find(row => row.source === 'manual_profile')?.content || '';
+    res.json({ memory: manualProfile });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -529,7 +657,8 @@ app.get('/memory/:userId', async (req, res) => {
 
 app.post('/action-log', async (req, res) => {
   try {
-    const { userId = 'default', action, status = 'executed' } = req.body;
+    const { userId, action, status = 'executed' } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     if (!action) return res.status(400).json({ error: 'action is required.' });
     
     await supabase.from('action_log').insert({
@@ -545,7 +674,7 @@ app.post('/action-log', async (req, res) => {
 });
 
 app.get('/action-log/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const { data, error } = await supabase
       .from('action_log')
@@ -583,7 +712,7 @@ const CONNECTORS = [
 ];
 
 app.get('/connectors/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const { data, error } = await supabase
       .from('connectors')
@@ -608,7 +737,8 @@ app.get('/connectors/:userId', async (req, res) => {
 
 app.post('/connectors', async (req, res) => {
   try {
-    const { userId = 'default', connectorId, enabled } = req.body;
+    const { userId, connectorId, enabled } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     
     await supabase
       .from('connectors')
@@ -626,7 +756,7 @@ app.post('/connectors', async (req, res) => {
 });
 
 app.get('/briefing/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const userId = req.params.userId;
     const [memory, history] = await Promise.all([
@@ -665,7 +795,7 @@ The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 });
 
 app.get('/history/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const history = await getHistory(req.params.userId);
     res.json({ history });
@@ -675,7 +805,7 @@ app.get('/history/:userId', async (req, res) => {
 });
 
 app.get('/history/:userId/search', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
   try {
@@ -695,7 +825,7 @@ app.get('/history/:userId/search', async (req, res) => {
 });
 
 app.get('/history/:userId/date', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   const date = req.query.date;
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
   try {
@@ -768,7 +898,7 @@ const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_event
 function postResponseTasks(userId, message) {
   if (shouldSaveMemory(message)) {
     extractMemoryFact(userId, message).then(fact => {
-      if (fact) saveMemory(userId, fact);
+      if (fact) saveMemory(userId, fact, 'fact');
     }).catch(() => {});
   }
   const styleCues = [
@@ -787,7 +917,8 @@ app.post('/chat', async (req, res) => {
   const streaming = req.query.stream === 'true';
 
   try {
-    const { message, userId = 'default', settings = {} } = req.body;
+    const { message, userId, settings = {} } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
 
     if (!message?.trim()) {
@@ -969,7 +1100,7 @@ app.post('/chat', async (req, res) => {
 });
 
 app.get('/preferences/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const { data, error } = await supabase
       .from('preferences')
@@ -984,7 +1115,7 @@ app.get('/preferences/:userId', async (req, res) => {
 });
 
 app.delete('/preferences/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     await supabase.from('preferences').delete().eq('user_id', req.params.userId);
     res.json({ success: true });
@@ -997,7 +1128,8 @@ app.delete('/preferences/:userId', async (req, res) => {
 
 app.post('/auth/telegram/start', async (req, res) => {
   try {
-    const { userId = 'default', phone } = req.body;
+    const { userId, phone } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     if (!phone) return res.status(400).json({ error: 'phone is required' });
     const result = await telegram.startAuth(userId, phone);
     res.json(result);
@@ -1008,7 +1140,8 @@ app.post('/auth/telegram/start', async (req, res) => {
 
 app.post('/auth/telegram/verify', async (req, res) => {
   try {
-    const { userId = 'default', code } = req.body;
+    const { userId, code } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     if (!code) return res.status(400).json({ error: 'code is required' });
     const result = await telegram.verifyCode(userId, code);
     res.json(result);
@@ -1019,7 +1152,8 @@ app.post('/auth/telegram/verify', async (req, res) => {
 
 app.post('/auth/telegram/2fa', async (req, res) => {
   try {
-    const { userId = 'default', password } = req.body;
+    const { userId, password } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
     if (!password) return res.status(400).json({ error: 'password is required' });
     const result = await telegram.verify2FA(userId, password);
     res.json(result);
@@ -1040,8 +1174,10 @@ app.get('/auth/google/redirect-uri', (req, res) => {
 });
 
 app.get('/auth/google', (req, res) => {
-  const userId = req.query.userId || 'default';
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
   const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
+  const state = signOAuthState(userId);
   const params = new URLSearchParams({
     client_id: process.env.GMAIL_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -1049,17 +1185,22 @@ app.get('/auth/google', (req, res) => {
     scope: GOOGLE_SCOPES,
     access_type: 'offline',
     prompt: 'consent',
-    state: userId
+    state
   });
   res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
 });
 
 app.get('/auth/google/callback', async (req, res) => {
-  const { code, state: userId = 'default', error } = req.query;
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state);
 
   if (error) {
     const appOrigin = process.env.APP_URL || '*';
     return res.send(`<script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+
+  if (!userId) {
+    return res.status(400).send('Invalid OAuth state');
   }
 
   try {
@@ -1108,7 +1249,7 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.get('/debug/:userId', async (req, res) => {
-  if (!isValidUserId(req.params.userId)) return res.status(400).json({ error: 'Invalid userId' });
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
   const userId = req.params.userId;
   try {
     const enabledConnectors = await getEnabledConnectors(userId);
@@ -1123,7 +1264,11 @@ app.get('/debug/:userId', async (req, res) => {
     res.json({
       userId,
       enabledConnectors,
-      connectorRows: connRow,
+      connectorRows: (connRow || []).map(row => ({
+        connector_id: row.connector_id,
+        enabled: row.enabled,
+        hasTokens: !!row.tokens
+      })),
       googleEmailTest: emailTest,
       googleCalendarTest: calendarTest,
       envHasGmailRefreshToken: !!process.env.GMAIL_REFRESH_TOKEN,

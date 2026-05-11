@@ -1228,13 +1228,38 @@ const { useState, useRef, useEffect, useCallback } = React;
 
 // INJECT_CREDENTIALS
 
-let API_SECRET = window.OXY_INJECTED_SECRET || localStorage.getItem('oxcy_secret');
-let USER_ID    = window.OXY_INJECTED_USER    || localStorage.getItem('oxcy_userId') || 'user123';
+let AUTH_TOKEN = window.OXY_INJECTED_TOKEN || localStorage.getItem('oxy_auth_token');
+let USER_ID    = window.OXY_INJECTED_USER  || localStorage.getItem('oxy_user_id') || '';
 
 const apiFetch = async (url, options = {}) => {
-  const headers = { ...options.headers, 'X-Api-Key': API_SECRET };
+  const headers = { ...options.headers };
+  if (AUTH_TOKEN) headers.Authorization = `Bearer ${AUTH_TOKEN}`;
   return fetch(url, { ...options, headers });
 };
+
+function withAuthToken(url) {
+  if (!AUTH_TOKEN) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}authToken=${encodeURIComponent(AUTH_TOKEN)}`;
+}
+
+function persistSession(token, userId) {
+  AUTH_TOKEN = token;
+  USER_ID = userId;
+  localStorage.setItem('oxy_auth_token', token);
+  localStorage.setItem('oxy_user_id', userId);
+  localStorage.removeItem('oxcy_secret');
+  localStorage.removeItem('oxcy_userId');
+}
+
+function clearSession() {
+  AUTH_TOKEN = '';
+  USER_ID = '';
+  localStorage.removeItem('oxy_auth_token');
+  localStorage.removeItem('oxy_user_id');
+  localStorage.removeItem('oxcy_secret');
+  localStorage.removeItem('oxcy_userId');
+}
 
 function formatMsgTime(date) {
   return (date instanceof Date ? date : new Date(date))
@@ -1947,7 +1972,7 @@ function ConnectorsPage() {
 
   const connectGoogle = () => {
     setGoogleStatus('connecting');
-    window.open(`/auth/google?userId=${USER_ID}`, 'oxy_auth', 'width=500,height=600');
+    window.open(withAuthToken(`/auth/google?userId=${encodeURIComponent(USER_ID)}`), 'oxy_auth', 'width=500,height=600');
   };
 
   const toggle = async (id, enabled) => {
@@ -2135,7 +2160,7 @@ function SettingsPage({ settings, setSettings }) {
 }
 
 function App() {
-  const [isAuth,      setIsAuth]      = useState(!!API_SECRET);
+  const [isAuth,      setIsAuth]      = useState(!!AUTH_TOKEN && !!USER_ID);
   const [page,        setPage]        = useState('chat');
   const [chatKey,     setChatKey]     = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -2146,32 +2171,75 @@ function App() {
   const handleNewChat = () => setChatKey(k => k + 1);
   const [briefing, setBriefing] = useState(null);
   const [initialQuery, setInitialQuery] = useState(null);
+  const [authMode, setAuthMode] = useState('login');
+  const [authUserId, setAuthUserId] = useState(USER_ID);
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
 
   useEffect(() => {
     if (!isAuth) return;
     apiFetch(`/briefing/${USER_ID}`)
-      .then(r => r.json())
+      .then(async r => {
+        if (r.status === 401) {
+          clearSession();
+          setIsAuth(false);
+          return {};
+        }
+        return r.json();
+      })
       .then(d => { if (d.text) setBriefing({ text: d.text, actions: d.actions || [] }); })
       .catch(() => {});
   }, [isAuth]);
+
+  const submitAuth = async () => {
+    const userId = authUserId.trim();
+    const password = authPassword;
+    if (!userId || !password) {
+      setAuthError('Enter both a user ID and password.');
+      return;
+    }
+
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const r = await fetch(authMode === 'register' ? '/auth/register' : '/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, password })
+      });
+      const d = await r.json();
+      if (!r.ok || !d.token) {
+        setAuthError(d.error || 'Authentication failed.');
+      } else {
+        persistSession(d.token, d.userId || userId);
+        setAuthPassword('');
+        setIsAuth(true);
+      }
+    } catch {
+      setAuthError('Network error. Try again.');
+    } finally {
+      setAuthBusy(false);
+    }
+  };
 
   if (!isAuth) return (
     <div className="auth-overlay">
       <div className="auth-card">
         <h2>Welcome to Oxy</h2>
-        <p>Enter your credentials to connect</p>
-        <input type="text"     className="auth-input" placeholder="User ID"       defaultValue={USER_ID} id="uid-f" />
-        <input type="password" className="auth-input" placeholder="API Secret Key"                       id="sec-f" />
-        <button className="auth-btn" onClick={() => {
-          const u = document.getElementById('uid-f').value;
-          const s = document.getElementById('sec-f').value;
-          if (u && s) {
-            localStorage.setItem('oxcy_secret', s);
-            localStorage.setItem('oxcy_userId', u);
-            API_SECRET = s; USER_ID = u;
-            setIsAuth(true);
-          }
-        }}>Connect</button>
+        <p>{authMode === 'register' ? 'Create your personal Oxy account' : 'Sign in to your Oxy account'}</p>
+        <input type="text" className="auth-input" placeholder="User ID" value={authUserId} onChange={e => setAuthUserId(e.target.value)} />
+        <input type="password" className="auth-input" placeholder={authMode === 'register' ? 'Password (8+ characters)' : 'Password'} value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && !authBusy && submitAuth()} />
+        {authError && <div style={{color:'var(--red)',fontSize:'12px',marginBottom:'10px'}}>{authError}</div>}
+        <button className="auth-btn" onClick={submitAuth} disabled={authBusy}>
+          {authBusy ? 'Please wait…' : authMode === 'register' ? 'Create Account' : 'Sign In'}
+        </button>
+        <button
+          onClick={() => { setAuthMode(authMode === 'register' ? 'login' : 'register'); setAuthError(''); }}
+          style={{marginTop:'14px',background:'none',border:'none',color:'var(--sub)',fontSize:'12px',cursor:'pointer',fontFamily:'var(--font)'}}
+        >
+          {authMode === 'register' ? 'Already have an account? Sign in' : 'Need an account? Register'}
+        </button>
       </div>
     </div>
   );
@@ -2209,6 +2277,19 @@ function App() {
           <div className="status" style={{fontSize:'10px',fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:'var(--dim)'}}>
             Wearable AI
           </div>
+          <button
+            className="stop-btn"
+            style={{marginLeft:0, marginTop:'10px'}}
+            onClick={() => {
+              clearSession();
+              setBriefing(null);
+              setMemory('');
+              setPeople([]);
+              setIsAuth(false);
+            }}
+          >
+            Sign out
+          </button>
         </div>
       </div>
 

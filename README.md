@@ -137,6 +137,7 @@ Schema is in `supabase-migration.sql`.
    Fill in the values — at minimum you need:
    - `SUPABASE_URL` and `SUPABASE_KEY` — for the database
    - `GEMINI_API_KEY` — for the AI (conversation + TTS + speech-to-text)
+   - `OXY_SESSION_SECRET` — signs per-user login sessions
 
    Optional (enable more connectors):
    - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` — Gmail + Calendar
@@ -158,6 +159,10 @@ Schema is in `supabase-migration.sql`.
    ```
 
    The app is available at `http://localhost:3000` (or whichever port Express binds to).
+
+6. **Create your first user**
+
+   Open the app and register with a user ID and password. Oxy now uses per-user accounts and signed sessions instead of a shared API secret.
 
 ### Deploying to Vercel
 

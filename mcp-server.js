@@ -1,13 +1,20 @@
+require("dotenv").config();
+
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const fs = require("fs").promises;
 const { randomUUID } = require("crypto");
 const path = require("path");
+const { requireSessionAuth } = require("./auth");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use((req, res, next) => {
+  if (req.path === "/health") return next();
+  return requireSessionAuth(req, res, next);
+});
 
 const REMINDERS_FILE = path.join(__dirname, "reminders.json");
 
@@ -198,14 +205,7 @@ async function getGoogleCalendarToken() {
 app.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    tools: ["send_message", "create_reminder", "get_reminders", "complete_reminder", "make_call", "play_music", "create_calendar_event", "smart_home"],
-    configured: {
-      twilio: !!TWILIO_ACCOUNT_SID,
-      spotify: !!SPOTIFY_CLIENT_ID,
-      google_calendar: !!GOOGLE_CALENDAR_CREDENTIALS,
-      home_assistant: !!HOME_ASSISTANT_URL,
-      telegram: !!TELEGRAM_BOT_TOKEN
-    }
+    toolCount: 8
   });
 });
 
