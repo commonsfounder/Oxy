@@ -81,6 +81,7 @@ CORE ETHOS:
 
 FACTUALITY:
 - Say what you know. Don't fill gaps with guesses or confident bullshit.
+- You sometimes have Google Search available for current/real-time questions. When search results are present, use them.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
 
@@ -435,7 +436,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
           audioPart
         ]}]
       }),
-      buildChatContext(userId)
+      buildChatContext(userId) // message unknown yet — no search for audio transcription step
     ]);
 
     const userText = transcribeRes.response.text()?.trim();
@@ -448,7 +449,12 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     saveMessage(userId, 'user', userText).catch(() => {});
 
     // Step 2: Send transcribed text to the main model (with full system prompt + history)
-    const { model, history } = context;
+    // Rebuild model with search if the transcribed text needs it
+    let { model, history } = context;
+    if (needsSearch(userText)) {
+      const refreshed = await buildChatContext(userId, userText);
+      model = refreshed.model;
+    }
     const baseHistory = normalizeGeminiHistory(history);
 
     const stream = await model.generateContentStream({
@@ -711,8 +717,14 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
+// Detect whether a message likely needs current/real-time information
+const SEARCH_PATTERNS = /\b(news|weather|forecast|score|stocks?|price|market|latest|current|today'?s?|tonight|yesterday|this week|this month|trending|who won|what happened|search|look up|find out|google|update on|how much is|exchange rate|live|breaking)\b/i;
+function needsSearch(message) {
+  return SEARCH_PATTERNS.test(message);
+}
+
 // Shared logic for building the Gemini model + system prompt
-async function buildChatContext(userId) {
+async function buildChatContext(userId, message) {
   const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
     getMemory(userId),
     getHistory(userId),
@@ -738,10 +750,15 @@ Current time: ${timeStr}
 ---
 ${userContext}`;
 
-  const model = genAI.getGenerativeModel({
+  const useSearch = message && needsSearch(message);
+  const modelConfig = {
     model: 'gemini-2.0-flash',
     systemInstruction: systemPrompt
-  });
+  };
+  if (useSearch) modelConfig.tools = [{ googleSearch: {} }];
+  if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
+
+  const model = genAI.getGenerativeModel(modelConfig);
   return { model, history, availableActions };
 }
 
@@ -782,7 +799,7 @@ app.post('/chat', async (req, res) => {
 
     // Build context (parallel DB queries) and save user message concurrently
     const [{ model, history }] = await Promise.all([
-      buildChatContext(userId),
+      buildChatContext(userId, message),
       saveMessage(userId, 'user', message)
     ]);
     elapsed('context+save');
