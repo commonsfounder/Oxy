@@ -1515,24 +1515,70 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     stopSpeaking();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     try {
-      const url  = settings.voiceOn ? '/chat?tts=true' : '/chat';
-      const data = await (await apiFetch(url, {
+      const params = new URLSearchParams({ stream: 'true' });
+      if (settings.voiceOn) params.set('tts', 'true');
+      const resp = await apiFetch(`/chat?${params}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, userId: USER_ID, settings, memory, people })
-      })).json();
-      const m = { role: 'assistant', content: data.text || 'Something went wrong.', time: new Date() };
-      if (data.audio)         m.audio   = data.audio;
-      if (data.actions?.length) {
-        m.actions = data.actions;
-        data.actions.forEach(a => {
-          if (a.result?.deepLink) {
-            window.location.href = a.result.deepLink;
-          }
-        });
+      });
+
+      // Add a placeholder assistant message that we'll update as tokens stream in
+      const placeholderId = Date.now();
+      setMessages(prev => [...prev, { role: 'assistant', content: '', time: new Date(), _streamId: placeholderId }]);
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let streamedText = '';
+      let streamActions = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            if (ev.type === 'text') {
+              streamedText += ev.chunk;
+              setMessages(prev => prev.map(m =>
+                m._streamId === placeholderId ? { ...m, content: streamedText } : m
+              ));
+            }
+            if (ev.type === 'actions' && ev.results?.length) {
+              streamActions = ev.results;
+              setMessages(prev => prev.map(m =>
+                m._streamId === placeholderId ? { ...m, actions: ev.results } : m
+              ));
+              ev.results.forEach(a => {
+                if (a.result?.deepLink) window.location.href = a.result.deepLink;
+              });
+            }
+            if (ev.type === 'audio') {
+              playAudioFromBase64(ev.data);
+            }
+            if (ev.type === 'error') {
+              streamedText = ev.error || 'Something went wrong.';
+              setMessages(prev => prev.map(m =>
+                m._streamId === placeholderId ? { ...m, content: streamedText } : m
+              ));
+            }
+          } catch {}
+        }
       }
-      setMessages(prev => [...prev, m]);
-      if (data.audio) playAudioFromBase64(data.audio);
+
+      // Finalize: remove stream marker
+      if (!streamedText) streamedText = 'Something went wrong.';
+      setMessages(prev => prev.map(m => {
+        if (m._streamId !== placeholderId) return m;
+        const final = { role: 'assistant', content: streamedText, time: m.time };
+        if (streamActions) final.actions = streamActions;
+        return final;
+      }));
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
