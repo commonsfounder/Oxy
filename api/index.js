@@ -429,80 +429,53 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
   try {
-    console.log('[1/4] Transcribing audio...');
-    const transcription = await openai.audio.transcriptions.create({
-      file: new File([req.file.buffer], 'audio.wav', { type: 'audio/wav' }),
-      model: 'whisper-1',
-      language: 'en'
-    });
+    // Transcribe audio and build context in parallel
+    const [transcription, context] = await Promise.all([
+      openai.audio.transcriptions.create({
+        file: new File([req.file.buffer], 'audio.wav', { type: 'audio/wav' }),
+        model: 'whisper-1',
+        language: 'en'
+      }),
+      buildChatContext(userId)
+    ]);
 
     const userText = transcription.text?.trim();
-    console.log('    Transcribed:', userText);
-
     if (!userText) {
       sse({ type: 'done' });
       return res.end();
     }
 
     sse({ type: 'transcription', text: userText });
-    await saveMessage(userId, 'user', userText);
+    saveMessage(userId, 'user', userText).catch(() => {});
 
-    const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
-      getMemory(userId),
-      getHistory(userId),
-      getPreferences(userId),
-      getEnabledConnectors(userId),
-      getUserContext(userId)
-    ]);
-    const availableActions = buildAvailableActions(enabledConnectors);
+    const { model, history } = context;
+    const baseHistory = normalizeGeminiHistory(history);
 
-    console.log('[2/4] Thinking...');
-    const systemPrompt = `${OXCY_SYSTEM_PROMPT}
-
-WHAT YOU KNOW ABOUT THIS PERSON:
-${memory || 'Nothing yet.'}
-
-HOW THE USER LIKES THINGS (learned over time):
-${preferences || 'Still learning.'}
-
-CONNECTED APPS:
-${availableActions}
-
-Current time: ${new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })}
-
----
-${userContext}`;
-
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
-      systemInstruction: systemPrompt,
-      tools: [{ googleSearch: {} }]
+    // Stream Gemini response instead of blocking
+    const stream = await model.generateContentStream({
+      contents: [...baseHistory, { role: 'user', parts: [{ text: userText }] }]
     });
-    const geminiRes = await model.generateContent({
-      contents: [...normalizeGeminiHistory(history), { role: 'user', parts: [{ text: userText }] }]
-    });
+    let fullText = '';
+    for await (const chunk of stream.stream) {
+      const text = chunk.text();
+      if (text) fullText += text;
+    }
 
-    const { spoken, actions } = parseActions(geminiRes.response.text());
+    const { spoken, actions } = parseActions(fullText);
 
-    console.log('[3/4] Saving + actions + voice in parallel...');
-    const [, actionResults, audioBase64] = await Promise.all([
-      saveMessage(userId, 'assistant', spoken),
+    // Run actions + TTS in parallel (save is fire-and-forget)
+    const [actionResults, audioBase64] = await Promise.all([
       runActions(userId, actions),
       generateSpeech(firstSentences(spoken))
     ]);
+    saveMessage(userId, 'assistant', spoken).catch(() => {});
 
     sse({ type: 'response', text: spoken, actions: actionResults });
     sse({ type: 'audio', data: audioBase64, format: 'wav' });
     sse({ type: 'done' });
     res.end();
 
-    console.log('[4/4] Done:', spoken);
-
-    if (shouldSaveMemory(userText)) {
-      extractMemoryFact(userId, userText).then(fact => {
-        if (fact) saveMemory(userId, fact);
-      }).catch(() => {});
-    }
+    postResponseTasks(userId, userText);
   } catch (err) {
     console.error('/process-audio error:', err.message);
     try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
@@ -740,28 +713,18 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
-app.post('/chat', async (req, res) => {
-  try {
-    const { message, userId = 'default', settings = {} } = req.body;
-    const wantsTTS = req.query.tts === 'true';
-
-    if (!message?.trim()) {
-      return res.status(400).json({ error: 'message is required.' });
-    }
-
-    const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
-      getMemory(userId),
-      getHistory(userId),
-      getPreferences(userId),
-      getEnabledConnectors(userId),
-      getUserContext(userId)
-    ]);
-    const availableActions = buildAvailableActions(enabledConnectors);
-    await saveMessage(userId, 'user', message);
-
-    const now = new Date();
-    const timeStr = now.toLocaleString('en-GB', { timeZone: TIMEZONE });
-    const systemPrompt = `${OXCY_SYSTEM_PROMPT}
+// Shared logic for building the Gemini model + system prompt
+async function buildChatContext(userId) {
+  const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
+    getMemory(userId),
+    getHistory(userId),
+    getPreferences(userId),
+    getEnabledConnectors(userId),
+    getUserContext(userId)
+  ]);
+  const availableActions = buildAvailableActions(enabledConnectors);
+  const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
+  const systemPrompt = `${OXCY_SYSTEM_PROMPT}
 
 WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
@@ -777,43 +740,165 @@ Current time: ${timeStr}
 ---
 ${userContext}`;
 
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
-      systemInstruction: systemPrompt,
-      tools: [{ googleSearch: {} }]
-    });
-    const baseHistory = normalizeGeminiHistory(history);
-    const geminiRes = await model.generateContent({
-      contents: [...baseHistory, { role: 'user', parts: [{ text: message }] }]
-    });
+  const model = genAI.getGenerativeModel({
+    model: 'gemini-3-flash-preview',
+    systemInstruction: systemPrompt,
+    tools: [{ googleSearch: {} }]
+  });
+  return { model, history, availableActions };
+}
 
-    const rawText = geminiRes.response.text();
-    console.log('[gemini raw]', rawText.slice(0, 400));
-    let { spoken, actions } = parseActions(rawText);
-    console.log('[actions parsed]', JSON.stringify(actions));
+const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
 
-    // Gemini sometimes returns only an action block with no spoken text — use action result text as fallback
-    if (!spoken && actions.length > 0) spoken = ''; // filled below after execution
+// Fire-and-forget post-response tasks (memory + style preferences)
+function postResponseTasks(userId, message) {
+  if (shouldSaveMemory(message)) {
+    extractMemoryFact(userId, message).then(fact => {
+      if (fact) saveMemory(userId, fact);
+    }).catch(() => {});
+  }
+  const styleCues = [
+    { pattern: /too long|tl;dr|too short|not enough|be brief|be concise|more detail|explain more|less detail|shut up|stop rambling/i, key: 'response_length' },
+    { pattern: /be direct|be blunt|be nice|be polite|don't be rude|don't be sarcastic|more casual|more formal/i, key: 'tone_preference' },
+    { pattern: /use bullet|use numbers|no bullet|no numbers|bullet points|step by step/i, key: 'format_preference' },
+  ];
+  for (const cue of styleCues) {
+    if (cue.pattern.test(message)) {
+      savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
+    }
+  }
+}
 
-    // Execute physical actions via MCP
-    const actionResults = [];
-    const physicalActions = actions;
-    for (const action of physicalActions) {
-      console.log('[mcp] executing:', action.type, action.input);
-      const result = await dispatch(userId, action.type, action.input || {});
-      console.log('[action result]', action.type, JSON.stringify(result));
-      actionResults.push({ action: action.type, result });
-      supabase.from('action_log').insert({
-        user_id: userId,
-        action: JSON.stringify(action),
-        status: result.success ? 'executed' : 'failed',
-        error: result.success ? null : (result.error || null),
-        created_at: new Date().toISOString()
-      });
+app.post('/chat', async (req, res) => {
+  const streaming = req.query.stream === 'true';
+
+  try {
+    const { message, userId = 'default', settings = {} } = req.body;
+    const wantsTTS = req.query.tts === 'true';
+
+    if (!message?.trim()) {
+      return res.status(400).json({ error: 'message is required.' });
     }
 
-    // For data-fetching actions, re-prompt Gemini with the results so it speaks them back
-    const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+    // Build context (parallel DB queries) and save user message concurrently
+    const [{ model, history }] = await Promise.all([
+      buildChatContext(userId),
+      saveMessage(userId, 'user', message)
+    ]);
+    const baseHistory = normalizeGeminiHistory(history);
+    const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];
+
+    // ── Streaming mode (SSE) ────────────────────────────────────────────
+    if (streaming) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+      const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+      try {
+        // Stream Gemini response token-by-token
+        const stream = await model.generateContentStream({ contents });
+        let fullText = '';
+        for await (const chunk of stream.stream) {
+          const text = chunk.text();
+          if (text) {
+            fullText += text;
+            // Only stream visible text, not action blocks
+            const visibleChunk = text.replace(/<action>[\s\S]*?<\/action>/g, '');
+            if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
+          }
+        }
+
+        let { spoken, actions } = parseActions(fullText);
+
+        // Execute actions in parallel
+        let actionResults = [];
+        if (actions.length > 0) {
+          actionResults = await Promise.all(actions.map(async action => {
+            const result = await dispatch(userId, action.type, action.input || {});
+            supabase.from('action_log').insert({
+              user_id: userId,
+              action: JSON.stringify(action),
+              status: result.success ? 'executed' : 'failed',
+              error: result.success ? null : (result.error || null),
+              created_at: new Date().toISOString()
+            });
+            return { action: action.type, result };
+          }));
+          sse({ type: 'actions', results: actionResults });
+        }
+
+        // For data-fetching actions, stream a follow-up summary
+        const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+        if (dataResults.length > 0) {
+          const context = dataResults.map(a => a.result.text).join('\n\n');
+          const followUp = await model.generateContentStream({
+            contents: [
+              ...baseHistory,
+              { role: 'user', parts: [{ text: message }] },
+              { role: 'model', parts: [{ text: spoken || '…' }] },
+              { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise.` }] }
+            ]
+          });
+          spoken = '';
+          for await (const chunk of followUp.stream) {
+            const text = chunk.text();
+            if (text) {
+              spoken += text;
+              sse({ type: 'text', chunk: text });
+            }
+          }
+          spoken = parseActions(spoken).spoken || spoken || context;
+        }
+
+        if (!spoken) {
+          spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
+          sse({ type: 'text', chunk: spoken });
+        }
+
+        if (wantsTTS) {
+          const audio = await generateSpeech(spoken);
+          sse({ type: 'audio', data: audio, format: 'wav' });
+        }
+
+        sse({ type: 'done' });
+        res.end();
+
+        // Fire-and-forget: save assistant message + memory/preferences
+        saveMessage(userId, 'assistant', spoken).catch(() => {});
+        postResponseTasks(userId, message);
+
+      } catch (err) {
+        console.error('/chat stream error:', err.message);
+        try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+      }
+      return;
+    }
+
+    // ── Non-streaming mode (JSON — backward compatible) ─────────────────
+    const geminiRes = await model.generateContent({ contents });
+
+    const rawText = geminiRes.response.text();
+    let { spoken, actions } = parseActions(rawText);
+
+    // Execute actions in parallel instead of sequentially
+    let actionResults = [];
+    if (actions.length > 0) {
+      actionResults = await Promise.all(actions.map(async action => {
+        const result = await dispatch(userId, action.type, action.input || {});
+        supabase.from('action_log').insert({
+          user_id: userId,
+          action: JSON.stringify(action),
+          status: result.success ? 'executed' : 'failed',
+          error: result.success ? null : (result.error || null),
+          created_at: new Date().toISOString()
+        });
+        return { action: action.type, result };
+      }));
+    }
+
+    // For data-fetching actions, re-prompt Gemini with results
     const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
     if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
@@ -828,15 +913,12 @@ ${userContext}`;
       spoken = parseActions(followUp.response.text()).spoken || context;
     }
 
-    // If Gemini returned no spoken text at all, build one from action results
     if (!spoken) {
-      spoken = actionResults
-        .map(a => a.result?.text)
-        .filter(Boolean)
-        .join(' ') || 'Done.';
+      spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
     }
 
-    await saveMessage(userId, 'assistant', spoken);
+    // Don't block on saving assistant message
+    saveMessage(userId, 'assistant', spoken).catch(() => {});
 
     const result = { text: spoken, actions: actionResults };
 
@@ -846,24 +928,7 @@ ${userContext}`;
     }
 
     res.json(result);
-
-    // Fire-and-forget: memory extraction + style preference saves
-    if (shouldSaveMemory(message)) {
-      extractMemoryFact(userId, message).then(fact => {
-        if (fact) saveMemory(userId, fact);
-      }).catch(() => {});
-    }
-
-    const styleCues = [
-      { pattern: /too long|tl;dr|too short|not enough|be brief|be concise|more detail|explain more|less detail|shut up|stop rambling/i, key: 'response_length' },
-      { pattern: /be direct|be blunt|be nice|be polite|don't be rude|don't be sarcastic|more casual|more formal/i, key: 'tone_preference' },
-      { pattern: /use bullet|use numbers|no bullet|no numbers|bullet points|step by step/i, key: 'format_preference' },
-    ];
-    for (const cue of styleCues) {
-      if (cue.pattern.test(message)) {
-        savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
-      }
-    }
+    postResponseTasks(userId, message);
 
   } catch (err) {
     console.error('/chat error:', err.message);
