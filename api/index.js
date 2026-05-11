@@ -137,6 +137,10 @@ FACTUALITY:
 - You sometimes have Google Search available for current/real-time questions. When search results are present, use them.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
+- If the user asks for a factual answer and you are missing evidence, say that clearly and ask one short follow-up or say you don't know.
+- If the user asks you to do something but key details are missing, ask only for the missing detail instead of inventing it.
+- Never imply you saw, checked, sent, booked, verified, or found something unless tool results or conversation context explicitly show that.
+- When using memory, treat it as possibly stale personal context, not as proof of current real-world facts.
 
 ACTIONS YOU CAN TAKE:
 Always return an action block when doing any of these. Never say you can't — just do it.
@@ -168,7 +172,9 @@ ABSOLUTE RULES:
 4. Never fabricate information — search instead if you need real-world data
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
-7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once`;
+7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
+8. If you are unsure, ask a brief clarifying question instead of guessing
+9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -777,6 +783,9 @@ Recent conversation:
 ${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
 
 Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
+- Only mention things that are directly supported by memory or recent conversation shown above.
+- Do not invent plans, meetings, news, weather, or tasks.
+- If there is no concrete update, just greet them and say it's a quiet start.
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
@@ -991,7 +1000,7 @@ app.post('/chat', async (req, res) => {
               ...baseHistory,
               { role: 'user', parts: [{ text: message }] },
               { role: 'model', parts: [{ text: spoken || '…' }] },
-              { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise.` }] }
+              { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
             ]
           });
           spoken = '';
@@ -1066,7 +1075,7 @@ app.post('/chat', async (req, res) => {
           ...baseHistory,
           { role: 'user', parts: [{ text: message }] },
           { role: 'model', parts: [{ text: spoken || '…' }] },
-          { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise.` }] }
+          { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
         ]
       });
       spoken = parseActions(followUp.response.text()).spoken || context;
