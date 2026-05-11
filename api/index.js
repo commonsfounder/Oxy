@@ -337,7 +337,7 @@ async function saveMemory(userId, content, source = 'fact') {
 
 async function extractMemoryFact(userId, text) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
     const result = await model.generateContent(
       `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
@@ -565,7 +565,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
 
     // Step 1: Transcribe with Gemini (fast, no system prompt needed) + build context in parallel
-    const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
     const [transcribeRes, context] = await Promise.all([
       transcribeModel.generateContent({
         contents: [{ role: 'user', parts: [
@@ -781,7 +781,7 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-3-flash-preview',
       systemInstruction: systemPrompt
     });
     const geminiRes = await model.generateContent('whats going on today?');
@@ -882,7 +882,7 @@ ${userContext}`;
 
   const useSearch = message && needsSearch(message);
   const modelConfig = {
-    model: 'gemini-2.0-flash',
+    model: 'gemini-3-flash-preview',
     systemInstruction: systemPrompt
   };
   if (useSearch) modelConfig.tools = [{ googleSearch: {} }];
