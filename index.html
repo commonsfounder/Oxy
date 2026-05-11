@@ -232,126 +232,93 @@ body::after {
 .chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
 .ops-shell {
-  padding: 22px 24px 0;
+  padding: 18px 24px 0;
   border-bottom: 1px solid var(--line);
-  background:
-    radial-gradient(circle at 14% 8%, rgba(200,184,154,0.16), transparent 26%),
-    radial-gradient(circle at 88% 12%, rgba(95,49,28,0.16), transparent 24%),
-    linear-gradient(180deg, rgba(255,248,238,0.03), rgba(255,255,255,0));
+  background: linear-gradient(180deg, rgba(255,248,238,0.03), rgba(255,255,255,0));
 }
 
 .ops-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.9fr) minmax(220px, 0.72fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 0.8fr);
+  gap: 14px;
   align-items: stretch;
 }
 
 .ops-hero, .ops-panel {
-  border-radius: 22px;
-  padding: 22px 22px 19px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  border-radius: 20px;
+  padding: 18px 18px 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
 
 .ops-hero {
-  position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 72% 24%, rgba(200,184,154,0.14), transparent 22%),
-    linear-gradient(135deg, rgba(58,33,23,0.82), rgba(18,18,18,0.95) 58%);
-  border: 1px solid rgba(200,184,154,0.16);
-}
-
-.ops-hero::after {
-  content: '';
-  position: absolute;
-  right: 28px;
-  top: 22px;
-  width: 132px;
-  height: 132px;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 35%, rgba(255,255,255,0.55), rgba(255,255,255,0.08) 22%, rgba(200,184,154,0.18) 45%, rgba(0,0,0,0) 70%),
-    radial-gradient(circle at 50% 50%, rgba(200,184,154,0.22), rgba(0,0,0,0) 68%);
-  filter: blur(0.4px);
-  opacity: 0.9;
-  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255,252,248,0.045), rgba(255,255,255,0.02));
+  border: 1px solid rgba(200,184,154,0.12);
 }
 
 .ops-panel {
-  background:
-    linear-gradient(180deg, rgba(255,252,248,0.05), rgba(255,255,255,0.015)),
-    radial-gradient(circle at top, rgba(200,184,154,0.05), transparent 58%);
-  border: 1px solid rgba(200,184,154,0.1);
+  background: linear-gradient(180deg, rgba(255,252,248,0.04), rgba(255,255,255,0.015));
+  border: 1px solid rgba(200,184,154,0.08);
 }
 
 .ops-kicker {
   font-size: 10px;
   font-weight: 600;
-  color: #d7c2a1;
-  letter-spacing: 1.5px;
+  color: var(--dim);
+  letter-spacing: 1px;
   text-transform: uppercase;
-  position: relative;
-  z-index: 1;
 }
 
 .ops-title {
-  margin-top: 8px;
-  max-width: 560px;
-  font-family: "Cormorant Garamond", Georgia, serif;
-  font-size: 37px;
-  line-height: 0.95;
-  letter-spacing: -0.8px;
-  color: #f5efe8;
-  position: relative;
-  z-index: 1;
+  margin-top: 6px;
+  max-width: 520px;
+  font-family: var(--font);
+  font-size: 24px;
+  line-height: 1.08;
+  letter-spacing: -0.3px;
+  color: var(--text);
 }
 
 .ops-sub {
-  margin-top: 12px;
-  max-width: 500px;
+  margin-top: 10px;
+  max-width: 560px;
   font-size: 13px;
-  color: rgba(242,242,242,0.78);
-  line-height: 1.7;
-  position: relative;
-  z-index: 1;
+  color: var(--sub);
+  line-height: 1.6;
 }
 
 .ops-stats {
-  margin-top: 22px;
+  margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
-  position: relative;
-  z-index: 1;
 }
 
 .ops-stat {
-  padding: 13px 14px;
-  border-radius: 16px;
-  background: rgba(255,248,238,0.045);
-  border: 1px solid rgba(215,194,161,0.14);
+  padding: 12px 13px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--line);
 }
 
 .ops-stat-label {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: rgba(215,194,161,0.82);
+  color: var(--dim);
 }
 
 .ops-stat-value {
   margin-top: 6px;
-  font-size: 13px;
-  color: #f7f1ea;
+  font-size: 12.5px;
+  color: var(--text);
   line-height: 1.4;
 }
 
 .ops-panel-title {
   font-size: 11px;
-  color: #cfb38b;
+  color: var(--dim);
   text-transform: uppercase;
-  letter-spacing: 1.3px;
+  letter-spacing: 1px;
 }
 
 .ops-panel-list {
@@ -368,8 +335,8 @@ body::after {
   gap: 12px;
   padding: 11px 12px;
   border-radius: 14px;
-  background: rgba(255,248,238,0.022);
-  border: 1px solid rgba(200,184,154,0.1);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line);
 }
 
 .ops-row-main {
@@ -378,21 +345,21 @@ body::after {
 
 .ops-row-label {
   font-size: 12.5px;
-  color: #f2ece5;
+  color: var(--text);
 }
 
 .ops-row-sub {
   margin-top: 3px;
   font-size: 11px;
-  color: rgba(242,242,242,0.58);
+  color: var(--sub);
   line-height: 1.5;
 }
 
 .ops-row-status {
   font-size: 10px;
-  color: #d0b188;
+  color: var(--sub);
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.8px;
   white-space: nowrap;
   opacity: 0.88;
 }
@@ -401,13 +368,13 @@ body::after {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 .ops-chip {
-  border: 1px solid rgba(215,194,161,0.18);
-  background: rgba(255,248,238,0.04);
-  color: #f6efe6;
+  border: 1px solid var(--line2);
+  background: var(--s2);
+  color: var(--text);
   border-radius: 999px;
   padding: 7px 11px;
   font-size: 11.5px;
@@ -417,8 +384,8 @@ body::after {
 }
 
 .ops-chip:hover {
-  background: rgba(255,248,238,0.08);
-  border-color: rgba(215,194,161,0.34);
+  background: var(--s3);
+  border-color: var(--line2);
   transform: translateY(-1px);
 }
 
@@ -440,7 +407,7 @@ body::after {
 
 @media (max-width: 768px) {
   .ops-shell { padding: 16px 16px 0; }
-  .ops-title { font-size: 28px; }
+  .ops-title { font-size: 21px; }
   .ops-stats { grid-template-columns: 1fr; }
   .messages { padding: 22px 20px 16px; }
 }
@@ -1886,14 +1853,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   };
 
   const latestAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-  const briefingText = latestAssistant?.content || 'Resting quietly until you want something arranged, drafted, remembered, or set in motion.';
-  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'A private place for preferences, rituals, and the people who matter.';
+  const briefingText = latestAssistant?.content || 'Ready.';
+  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'No memory saved yet.';
   const recentContacts = people.slice(0, 3).map(p => p.name);
   const quickPrompts = [
-    'Shape the day with me',
-    `Draft a note to ${recentContacts[0] || 'someone important'}`,
-    'What needs my attention first?',
-    'Set the next detail in motion'
+    `Message ${recentContacts[0] || 'a contact'}`,
+    'Set a reminder',
+    'Play music',
+    'Morning briefing'
   ];
   const formatActionTitle = (entry) => {
     const raw = entry?.action;
@@ -1902,11 +1869,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     return (raw.type || raw.action || 'Action').replace(/_/g, ' ');
   };
   const formatTrailStatus = (status) => {
-    if (!status) return 'Kept';
+    if (!status) return 'Done';
     const normalized = String(status).toLowerCase();
-    if (normalized === 'executed' || normalized === 'completed' || normalized === 'success') return 'Kept';
-    if (normalized === 'pending') return 'Awaiting';
-    if (normalized === 'failed' || normalized === 'error') return 'Needs care';
+    if (normalized === 'executed' || normalized === 'completed' || normalized === 'success') return 'Done';
+    if (normalized === 'pending') return 'Pending';
+    if (normalized === 'failed' || normalized === 'error') return 'Failed';
     return normalized.replace(/_/g, ' ');
   };
 
@@ -1956,47 +1923,52 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       <div className="ops-shell">
         <div className="ops-grid">
           <div className="ops-hero">
-            <div className="ops-kicker">Private Piece</div>
-            <div className="ops-title">A private piece for correspondence, memory, and the small arrangements of life.</div>
+            <div className="ops-kicker">Chat</div>
+            <div className="ops-title">{settings.name}</div>
             <div className="ops-sub">{briefingText}</div>
             <div className="ops-stats">
               <div className="ops-stat">
-                <div className="ops-stat-label">Kept Close</div>
+                <div className="ops-stat-label">Memory</div>
                 <div className="ops-stat-value">{memoryPreview}</div>
               </div>
               <div className="ops-stat">
-                <div className="ops-stat-label">Held Dear</div>
+                <div className="ops-stat-label">People</div>
                 <div className="ops-stat-value">{recentContacts.length ? recentContacts.join(', ') : 'No saved people yet'}</div>
               </div>
               <div className="ops-stat">
-                <div className="ops-stat-label">Recent Motions</div>
-                <div className="ops-stat-value">{recentActions.length ? `${recentActions.length} recent arrangements remembered` : 'Nothing has been set in motion yet'}</div>
+                <div className="ops-stat-label">Recent Actions</div>
+                <div className="ops-stat-value">{recentActions.length ? `${recentActions.length} recent actions` : 'No actions yet'}</div>
               </div>
             </div>
             <div className="ops-chip-row">
               {quickPrompts.map((prompt, i) => (
-                <button key={i} className="ops-chip" onClick={() => sendMessage(prompt)}>{prompt}</button>
+                <button key={i} className="ops-chip" onClick={() => sendMessage(
+                  prompt === 'Set a reminder' ? 'Set a reminder for tomorrow'
+                  : prompt === 'Play music' ? 'Play something to help me focus'
+                  : prompt === 'Morning briefing' ? 'Give me my morning briefing'
+                  : `Send a message to ${recentContacts[0] || 'someone'}`
+                )}>{prompt}</button>
               ))}
             </div>
           </div>
           <div className="ops-panel">
-            <div className="ops-panel-title">Private Trail</div>
+            <div className="ops-panel-title">Action History</div>
             <div className="ops-panel-list">
               {recentActions.length ? recentActions.map((item, i) => (
                 <div key={i} className="ops-row">
                   <div className="ops-row-main">
                     <div className="ops-row-label">{formatActionTitle(item)}</div>
-                    <div className="ops-row-sub">{item.error || 'Kept here as part of Oxy’s quiet record.'}</div>
+                    <div className="ops-row-sub">{item.error || 'Recorded in your history.'}</div>
                   </div>
                   <div className="ops-row-status">{formatTrailStatus(item.status)}</div>
                 </div>
               )) : (
                 <div className="ops-row">
                   <div className="ops-row-main">
-                    <div className="ops-row-label">Nothing kept here yet</div>
-                    <div className="ops-row-sub">When Oxy drafts, sends, books, or prepares something, it will leave a quiet trace here.</div>
+                    <div className="ops-row-label">No recent actions yet</div>
+                    <div className="ops-row-sub">Actions you take with Oxy will appear here.</div>
                   </div>
-                  <div className="ops-row-status">Quiet</div>
+                  <div className="ops-row-status">Empty</div>
                 </div>
               )}
             </div>
@@ -2006,14 +1978,13 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       <div className="messages">
         {messages.length === 0 && !loading && (
           <div className="empty-state">
-            <div className="empty-orb" />
-            <div className="empty-text">Ask Oxy to compose, remember, arrange, or prepare something with care.</div>
+            <div className="empty-text">{settings.name}</div>
             <div className="prompt-chips">
               {[
-                { icon: '📨', label: `Write to ${people[0]?.name || 'someone'}`, sub: 'A note prepared with tact', prompt: `Send a message to ${people[0]?.name || 'someone'}` },
-                { icon: '⏰', label: 'Keep a reminder',   sub: 'Hold a promise to yourself', prompt: 'Set a reminder for tomorrow' },
+                { icon: '📨', label: `Message ${people[0]?.name || 'a contact'}`, sub: 'Send via iMessage', prompt: `Send a message to ${people[0]?.name || 'someone'}` },
+                { icon: '⏰', label: 'Set a reminder',   sub: 'For any time or task', prompt: 'Set a reminder for tomorrow' },
                 { icon: '🚕', label: 'Arrange transport',   sub: 'Set the journey in motion', prompt: 'Book me an Uber to the station' },
-                { icon: '☀️', label: 'Morning note', sub: 'A gentle sense of the day', prompt: 'Give me my morning briefing' },
+                { icon: '☀️', label: 'Morning briefing', sub: "What's on today", prompt: 'Give me my morning briefing' },
               ].map((chip, i) => (
                 <button key={i} className="prompt-chip" onClick={() => sendMessage(chip.prompt)}>
                   <span className="prompt-chip-icon">{chip.icon}</span>
@@ -2038,8 +2009,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                   {msg.content}
                   {msg.role === 'assistant' && (
                     <div className="msg-meta">
-                      <span className="msg-tag">{msg.actions?.length ? 'Set in motion' : 'Kept'}</span>
-                      <span className="msg-tag">{/i don't know|not sure|uncertain/i.test(msg.content) ? 'Plainly said' : 'Private reply'}</span>
+                      <span className="msg-tag">{msg.actions?.length ? 'Actions' : 'Reply'}</span>
+                      <span className="msg-tag">{/i don't know|not sure|uncertain/i.test(msg.content) ? 'Uncertain' : 'Assistant'}</span>
                     </div>
                   )}
                   {msg.audio && (
@@ -2069,7 +2040,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                               {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
                             </span>
                           </span>
-                          <span className="msg-action-pill">{ok ? 'set' : 'needs care'}</span>
+                          <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>
                         </span>
                       );
                     })}
@@ -2165,15 +2136,15 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
       <div className="section">
         <div className="section-title">About You</div>
         <div className="memory-card">
-          <textarea className="memory-textarea" placeholder="Tell Oxy about your preferences, rituals, and the shape of your life…" value={memory} onChange={e => setMemory(e.target.value)} />
+          <textarea className="memory-textarea" placeholder="Tell Oxy about yourself…" value={memory} onChange={e => setMemory(e.target.value)} />
           <div className="memory-footer">
-            <button className="save-btn" onClick={saveMemory}>Keep Close</button>
+            <button className="save-btn" onClick={saveMemory}>Save</button>
           </div>
         </div>
       </div>
 
       <div className="section">
-        <div className="section-title">Your Circle</div>
+        <div className="section-title">People</div>
         <div className="memory-card">
           {people.map((p, i) => (
             <div key={i} className="person-row">
@@ -2187,13 +2158,13 @@ function MemoryPage({ memory, setMemory, people, setPeople }) {
           ))}
           <div className="add-person-row">
             <input className="mini-input" placeholder="Name" value={newName} onChange={e => setNewName(e.target.value)} />
-            <input className="mini-input" placeholder="How they matter" value={newRel} onChange={e => setNewRel(e.target.value)} />
-            <button className="mini-btn" onClick={addPerson}>Keep</button>
+            <input className="mini-input" placeholder="Relationship" value={newRel} onChange={e => setNewRel(e.target.value)} />
+            <button className="mini-btn" onClick={addPerson}>Add</button>
           </div>
         </div>
       </div>
 
-      {toast && <div className="toast">Kept close</div>}
+      {toast && <div className="toast">Saved</div>}
     </div>
   );
 }
@@ -2381,7 +2352,7 @@ function ConnectorsPage() {
             </div>
             <div>
               <div className="hub-name">Google</div>
-              <div className="hub-desc">Mail · Calendar{googleStatus === 'connected' ? ' · Kept in reach' : ''}</div>
+              <div className="hub-desc">Gmail · Calendar{googleStatus === 'connected' ? ' · Connected ✓' : ''}</div>
             </div>
           </div>
           <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting'}>
@@ -2392,7 +2363,7 @@ function ConnectorsPage() {
 
       {Object.entries(grouped).map(([cat, items]) => (
         <div key={cat} className="section">
-          <div className="section-title">{cat === 'Messaging' ? 'Correspondence' : cat === 'Travel' ? 'Journeys' : cat}</div>
+          <div className="section-title">{cat}</div>
           <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:'12px'}}>
             {items.map(c => (
               <div key={c.id} className="hub-item" style={!c.implemented ? {opacity:0.4, pointerEvents:'none'} : {}}>
@@ -2434,16 +2405,16 @@ function ActionHistoryPage() {
   return (
     <div className="page-content">
       <div className="section">
-        <div className="section-title">Private Trail</div>
+        <div className="section-title">Action History</div>
         {actions.length === 0 ? (
-          <div style={{color:'var(--dim)',fontSize:'13px',paddingTop:'8px'}}>Nothing has been kept here yet.</div>
+          <div style={{color:'var(--dim)',fontSize:'13px',paddingTop:'8px'}}>No actions yet.</div>
         ) : (
           <div className="history-list">
             {actions.map((a, i) => (
               <div key={i} className="history-item">
                 <div className="history-time">{new Date(a.created_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</div>
                 <div className="history-action">{formatAction(a.action)}</div>
-                <span className={`history-status status-${a.status}`}>{a.status === 'executed' ? 'kept' : a.status}</span>
+                <span className={`history-status status-${a.status}`}>{a.status}</span>
               </div>
             ))}
           </div>
@@ -2464,7 +2435,7 @@ function SettingsPage({ settings, setSettings }) {
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Companion Name</div>
+              <div className="setting-label">Assistant Name</div>
             </div>
             <input className="setting-input" value={settings.name} onChange={e => update('name', e.target.value)} />
           </div>
@@ -2476,8 +2447,8 @@ function SettingsPage({ settings, setSettings }) {
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Spoken Replies</div>
-              <div className="setting-desc">Let Oxy answer aloud</div>
+              <div className="setting-label">Voice Playback</div>
+              <div className="setting-desc">Generate audio for responses</div>
             </div>
             <button className={`toggle ${settings.voiceOn ? 'on' : ''}`} onClick={() => update('voiceOn', !settings.voiceOn)} />
           </div>
@@ -2485,12 +2456,12 @@ function SettingsPage({ settings, setSettings }) {
       </div>
 
       <div className="section">
-        <div className="section-title">Temperament</div>
+        <div className="section-title">Autonomy</div>
         <div className="settings-group">
           <div className="setting-row">
             <div className="setting-info">
-              <div className="setting-label">Initiative</div>
-              <div className="setting-desc">How readily Oxy takes the lead</div>
+              <div className="setting-label">Initiative Level</div>
+              <div className="setting-desc">How often Oxy proactively reaches out</div>
             </div>
             <div className="autonomy-options">
               {['Low','Medium','High'].map(l => (
@@ -2593,13 +2564,13 @@ function App() {
 
   const navItems = [
     { id: 'chat',       label: 'Chat',       icon: Icons.chat },
-    { id: 'history',    label: 'Trail',      icon: Icons.history },
-    { id: 'connectors', label: 'Links',      icon: Icons.connectors },
-    { id: 'memory',     label: 'Circle',     icon: Icons.memory },
-    { id: 'settings',   label: 'Manner',     icon: Icons.settings },
+    { id: 'history',    label: 'History',    icon: Icons.history },
+    { id: 'connectors', label: 'Connectors', icon: Icons.connectors },
+    { id: 'memory',     label: 'Memory',     icon: Icons.memory },
+    { id: 'settings',   label: 'Settings',   icon: Icons.settings },
   ];
 
-  const titles = { chat: 'Oxy', history: 'Private Trail', connectors: 'Links', memory: 'Circle', settings: 'Manner' };
+  const titles = { chat: 'Oxy', history: 'History', connectors: 'Connectors', memory: 'Memory', settings: 'Settings' };
 
   return (
     <div className="app">
@@ -2609,7 +2580,7 @@ function App() {
           <div className="logo-name">{settings.name}</div>
           <div className="logo-sub">
             <span className="status-dot" style={isRecording ? {background:'var(--red)',boxShadow:'0 0 6px rgba(192,80,62,0.5)'} : {}} />
-            {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'With you'}
+            {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'Online'}
           </div>
         </div>
         <nav className="nav">
@@ -2622,7 +2593,7 @@ function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="status" style={{fontSize:'10px',fontWeight:500,letterSpacing:'1px',textTransform:'uppercase',color:'var(--dim)'}}>
-            Private companion
+            Wearable AI
           </div>
           <button
             className="stop-btn"
@@ -2644,7 +2615,6 @@ function App() {
       <div className="main">
         <div className="topbar">
           <span className="topbar-title">{titles[page]}</span>
-          {page === 'chat' && <span className="topbar-badge">Private correspondence and quiet arrangements</span>}
           {page === 'chat' && <button className="new-chat-btn" onClick={handleNewChat}>+ New Chat</button>}
         </div>
 
