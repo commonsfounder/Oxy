@@ -5,7 +5,7 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 ## What It Does
 
 - **Conversational AI** — Chat via text or voice. Oxy responds naturally, remembers personal context across conversations, and adapts its tone to your preferences over time.
-- **Voice I/O** — Record audio from your browser, get it transcribed (OpenAI Whisper), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
+- **Voice I/O** — Record audio from your browser, get it transcribed (Gemini), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
 - **Real Actions** — Oxy doesn't just talk. When you say "text Sarah I'm running late" or "book an Uber to the station", it actually does it through connected services.
 - **Memory** — Oxy automatically extracts and stores personal facts from conversations ("Works at KPMG", "Has a dog named Biscuit") and uses them to personalise future replies.
 - **Connectors** — A pluggable connector system lets Oxy interface with external services. Each connector handles auth, token refresh, and API calls independently.
@@ -38,7 +38,7 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 │  preferences │         ┌──────────────────────┐
 └──────────────┘         │   External APIs      │
                          │  Gemini (LLM + TTS)  │
-                         │  OpenAI Whisper (STT) │
+                         │  Gemini (STT)         │
                          │  Google (Gmail, Cal)  │
                          │  Telegram User API    │
                          │  Spotify Web API      │
@@ -68,7 +68,7 @@ An Express 5 server deployed on Vercel (serverless) or as a standalone Node.js p
 
 **Core flow for a message:**
 1. User sends text or audio
-2. Audio is transcribed via OpenAI Whisper
+2. Audio is transcribed via Gemini
 3. Conversation history, memories, preferences, and connected-app context are loaded from Supabase
 4. Gemini generates a response (with Google Search grounding enabled)
 5. If the response contains an `<action>` block, actions are dispatched to the connector system
@@ -136,8 +136,7 @@ Schema is in `supabase-migration.sql`.
    ```
    Fill in the values — at minimum you need:
    - `SUPABASE_URL` and `SUPABASE_KEY` — for the database
-   - `GEMINI_API_KEY` — for the AI (conversation + TTS)
-   - `OPENAI_API_KEY` — for Whisper speech-to-text
+   - `GEMINI_API_KEY` — for the AI (conversation + TTS + speech-to-text)
 
    Optional (enable more connectors):
    - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` — Gmail + Calendar
@@ -201,7 +200,7 @@ Oxy/
 ## How It Works — End to End
 
 1. **You speak or type** → The frontend captures audio via `MediaRecorder` or takes text input
-2. **Audio is transcribed** → Sent to `/process-audio`, transcribed by OpenAI Whisper
+2. **Audio is transcribed** → Sent to `/process-audio`, transcribed by Gemini
 3. **Context is assembled** → Your memories, conversation history, preferences, connected apps, and messaging patterns are loaded from Supabase
 4. **Gemini thinks** → The AI generates a response using all available context, with Google Search grounding for real-world facts
 5. **Actions are executed** → If the response includes an `<action>` block, each action is dispatched to the relevant connector

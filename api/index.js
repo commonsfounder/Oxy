@@ -4,7 +4,6 @@ const cors = require('cors');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const OpenAI = require('openai');
 const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
@@ -68,10 +67,6 @@ if (!process.env.VERCEL) {
     }
   }, 10 * 60 * 1000).unref();
 }
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 
@@ -206,6 +201,7 @@ async function runActions(userId, actions) {
 }
 
 async function generateSpeech(text) {
+  if (!text || !text.trim()) return null;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 22000);
   try {
@@ -429,17 +425,22 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
   try {
-    // Transcribe audio and build context in parallel
-    const [transcription, context] = await Promise.all([
-      openai.audio.transcriptions.create({
-        file: new File([req.file.buffer], 'audio.wav', { type: 'audio/wav' }),
-        model: 'whisper-1',
-        language: 'en'
+    const audioBase64Input = req.file.buffer.toString('base64');
+    const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
+
+    // Step 1: Transcribe with Gemini (fast, no system prompt needed) + build context in parallel
+    const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const [transcribeRes, context] = await Promise.all([
+      transcribeModel.generateContent({
+        contents: [{ role: 'user', parts: [
+          { text: 'Transcribe this audio exactly. Return only the transcribed text, nothing else.' },
+          audioPart
+        ]}]
       }),
       buildChatContext(userId)
     ]);
 
-    const userText = transcription.text?.trim();
+    const userText = transcribeRes.response.text()?.trim();
     if (!userText) {
       sse({ type: 'done' });
       return res.end();
@@ -448,10 +449,10 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     sse({ type: 'transcription', text: userText });
     saveMessage(userId, 'user', userText).catch(() => {});
 
+    // Step 2: Send transcribed text to the main model (with full system prompt + history)
     const { model, history } = context;
     const baseHistory = normalizeGeminiHistory(history);
 
-    // Stream Gemini response instead of blocking
     const stream = await model.generateContentStream({
       contents: [...baseHistory, { role: 'user', parts: [{ text: userText }] }]
     });
@@ -466,12 +467,12 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     // Run actions + TTS in parallel (save is fire-and-forget)
     const [actionResults, audioBase64] = await Promise.all([
       runActions(userId, actions),
-      generateSpeech(firstSentences(spoken))
+      generateSpeech(firstSentences(spoken)).catch(err => { console.error('[tts error]', err.message); return null; })
     ]);
     saveMessage(userId, 'assistant', spoken).catch(() => {});
 
     sse({ type: 'response', text: spoken, actions: actionResults });
-    sse({ type: 'audio', data: audioBase64, format: 'wav' });
+    if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav' });
     sse({ type: 'done' });
     res.end();
 
@@ -858,8 +859,12 @@ app.post('/chat', async (req, res) => {
         }
 
         if (wantsTTS) {
-          const audio = await generateSpeech(spoken);
-          sse({ type: 'audio', data: audio, format: 'wav' });
+          try {
+            const audio = await generateSpeech(spoken);
+            if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
+          } catch (ttsErr) {
+            console.error('[tts error]', ttsErr.message);
+          }
         }
 
         sse({ type: 'done' });
@@ -923,8 +928,12 @@ app.post('/chat', async (req, res) => {
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
-      result.audio = await generateSpeech(spoken);
-      result.audioFormat = 'wav';
+      try {
+        const audio = await generateSpeech(spoken);
+        if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
+      } catch (ttsErr) {
+        console.error('[tts error]', ttsErr.message);
+      }
     }
 
     res.json(result);
