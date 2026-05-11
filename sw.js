@@ -1,7 +1,7 @@
-// Commons Service Worker
+// Oxy Service Worker
 // Network-first for HTML; cache-first for static assets
 
-var CACHE = 'commons-v7';
+var CACHE = 'oxy-v1';
 var SHELL = [
   '/manifest.json',
   '/icons/icon-192.png',
@@ -32,10 +32,10 @@ self.addEventListener('activate', function(e) {
 
 // ── Push notifications ────────────────────────────────────────────────────
 self.addEventListener('push', function(event) {
-  var data = event.data ? event.data.json() : { title: 'Commons', body: 'You have a new notification' };
+  var data = event.data ? event.data.json() : { title: 'Oxy', body: 'You have a new notification' };
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
+    self.registration.showNotification(data.title || 'Oxy', {
+      body: data.body || '',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       data: { url: data.url || '/' }
@@ -45,7 +45,14 @@ self.addEventListener('push', function(event) {
 
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
-  event.waitUntil(clients.openWindow(event.notification.data.url));
+  event.waitUntil(
+    clients.matchAll({ type: 'window' }).then(function(clientList) {
+      for (var i = 0; i < clientList.length; i++) {
+        if (clientList[i].url === '/' && 'focus' in clientList[i]) return clientList[i].focus();
+      }
+      if (clients.openWindow) return clients.openWindow(event.notification.data.url || '/');
+    })
+  );
 });
 
 // ── Fetch: strategy per request type ─────────────────────────────────────
@@ -89,35 +96,7 @@ self.addEventListener('fetch', function(e) {
           caches.open(CACHE).then(function(c) { c.put(e.request, clone); });
         }
         return response;
-      }).catch(function() {
-        if (e.request.mode === 'navigate') {
-          return caches.match('/index.html');
-        }
       });
-    })
-  );
-});
-
-self.addEventListener('push', event => {
-  const data = event.data ? event.data.json() : { title: 'Commons', body: 'You have a new notification' };
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'Commons', {
-      body: data.body || '',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      data: { url: data.url || '/' }
-    })
-  );
-});
-
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  event.waitUntil(
-    clients.matchAll({ type: 'window' }).then(clientList => {
-      for (const client of clientList) {
-        if (client.url === '/' && 'focus' in client) return client.focus();
-      }
-      if (clients.openWindow) return clients.openWindow(event.notification.data.url || '/');
     })
   );
 });

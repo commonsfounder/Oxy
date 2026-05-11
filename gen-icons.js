@@ -16,5 +16,5 @@ function makeIcon(size, file) {
   console.log('Created', file);
 }
 
-makeIcon(192, 'icon-192.png');
-makeIcon(512, 'icon-512.png');
+makeIcon(192, 'icons/icon-192.png');
+makeIcon(512, 'icons/icon-512.png');

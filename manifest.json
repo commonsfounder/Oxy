@@ -1,12 +1,12 @@
 {
-  "name": "Commons",
-  "short_name": "Commons",
-  "description": "Help and be helped in your community",
+  "name": "Oxy",
+  "short_name": "Oxy",
+  "description": "Your AI-powered personal assistant",
   "start_url": "/index.html",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#F7F5F0",
-  "theme_color": "#2ABFBF",
+  "background_color": "#0C0C0C",
+  "theme_color": "#0C0C0C",
   "scope": "/",
   "icons": [
     {

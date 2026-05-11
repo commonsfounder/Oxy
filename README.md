@@ -23,9 +23,7 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 ┌───────────────────▼─────────────────────────────────────┐
 │                   API Server (Express 5)                 │
 │  api/index.js — chat, audio, memory, connectors, auth   │
-│  api/proxy.js — action dispatch                         │
-│  api/tools.js — standalone tool implementations         │
-│  api/chat.js  — Vercel serverless chat handler          │
+│  api/proxy.js — action dispatch (Vercel serverless)     │
 └───────┬──────────────┬──────────────────────────────────┘
         │              │
 ┌───────▼──────┐ ┌─────▼──────────────────────────────────┐
@@ -189,9 +187,7 @@ Oxy/
 ├── Oxy.shortcut            # Pre-built Apple Shortcut file
 ├── api/
 │   ├── index.js            # Main API (chat, audio, memory, connectors, auth)
-│   ├── chat.js             # Vercel serverless chat handler
-│   ├── proxy.js            # Action dispatch proxy
-│   ├── tools.js            # Tool implementations (SMS, Spotify, Calendar, etc.)
+│   ├── proxy.js            # Action dispatch proxy (Vercel serverless)
 │   └── geocoding.js        # Google Maps geocoding helper
 ├── connectors/
 │   ├── index.js            # Connector registry and dispatcher
