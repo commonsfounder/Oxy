@@ -1265,37 +1265,38 @@ body::after {
 const { useState, useRef, useEffect, useCallback } = React;
 const DEFAULT_SETTINGS = { name: 'Oxy', voice: 'Aoede', voiceOn: true, autonomy: 'Medium' };
 const VOICE_OPTIONS = [
-  { value: 'Aoede', label: 'Aoede — Breezy' },
-  { value: 'Achernar', label: 'Achernar — Soft' },
-  { value: 'Achird', label: 'Achird — Friendly' },
-  { value: 'Algenib', label: 'Algenib — Gravelly' },
-  { value: 'Algieba', label: 'Algieba — Smooth' },
-  { value: 'Alnilam', label: 'Alnilam — Firm' },
-  { value: 'Autonoe', label: 'Autonoe — Bright' },
-  { value: 'Callirrhoe', label: 'Callirrhoe — Easy-going' },
-  { value: 'Charon', label: 'Charon — Informative' },
-  { value: 'Despina', label: 'Despina — Smooth' },
-  { value: 'Enceladus', label: 'Enceladus — Breathy' },
-  { value: 'Erinome', label: 'Erinome — Clear' },
-  { value: 'Fenrir', label: 'Fenrir — Excitable' },
-  { value: 'Gacrux', label: 'Gacrux — Mature' },
-  { value: 'Iapetus', label: 'Iapetus — Clear' },
-  { value: 'Kore', label: 'Kore — Firm' },
-  { value: 'Laomedeia', label: 'Laomedeia — Upbeat' },
-  { value: 'Leda', label: 'Leda — Youthful' },
-  { value: 'Orus', label: 'Orus — Firm' },
-  { value: 'Puck', label: 'Puck — Upbeat' },
-  { value: 'Pulcherrima', label: 'Pulcherrima — Forward' },
-  { value: 'Rasalgethi', label: 'Rasalgethi — Informative' },
-  { value: 'Sadachbia', label: 'Sadachbia — Lively' },
-  { value: 'Sadaltager', label: 'Sadaltager — Knowledgeable' },
-  { value: 'Schedar', label: 'Schedar — Even' },
-  { value: 'Sulafat', label: 'Sulafat — Warm' },
-  { value: 'Umbriel', label: 'Umbriel — Easy-going' },
-  { value: 'Vindemiatrix', label: 'Vindemiatrix — Gentle' },
-  { value: 'Zephyr', label: 'Zephyr — Bright' },
-  { value: 'Zubenelgenubi', label: 'Zubenelgenubi — Casual' }
+  { value: 'Aoede', label: 'Breezy' },
+  { value: 'Achernar', label: 'Soft' },
+  { value: 'Achird', label: 'Friendly' },
+  { value: 'Algenib', label: 'Gravelly' },
+  { value: 'Algieba', label: 'Smooth' },
+  { value: 'Alnilam', label: 'Firm' },
+  { value: 'Autonoe', label: 'Bright' },
+  { value: 'Callirrhoe', label: 'Easy-going' },
+  { value: 'Charon', label: 'Informative' },
+  { value: 'Despina', label: 'Polished' },
+  { value: 'Enceladus', label: 'Breathy' },
+  { value: 'Erinome', label: 'Clear' },
+  { value: 'Fenrir', label: 'Excitable' },
+  { value: 'Gacrux', label: 'Mature' },
+  { value: 'Iapetus', label: 'Measured' },
+  { value: 'Kore', label: 'Stoic' },
+  { value: 'Laomedeia', label: 'Upbeat' },
+  { value: 'Leda', label: 'Youthful' },
+  { value: 'Orus', label: 'Grounded' },
+  { value: 'Puck', label: 'Playful' },
+  { value: 'Pulcherrima', label: 'Forward' },
+  { value: 'Rasalgethi', label: 'Guide' },
+  { value: 'Sadachbia', label: 'Lively' },
+  { value: 'Sadaltager', label: 'Wise' },
+  { value: 'Schedar', label: 'Even' },
+  { value: 'Sulafat', label: 'Warm' },
+  { value: 'Umbriel', label: 'Relaxed' },
+  { value: 'Vindemiatrix', label: 'Gentle' },
+  { value: 'Zephyr', label: 'Spark' },
+  { value: 'Zubenelgenubi', label: 'Casual' }
 ];
+const VOICE_LABELS = Object.fromEntries(VOICE_OPTIONS.map(v => [v.value, v.label]));
 
 // INJECT_CREDENTIALS
 
@@ -1345,6 +1346,31 @@ function formatDateHeader(date) {
   if (cmp.getTime() === today.getTime()) return 'Today';
   if (cmp.getTime() === yesterday.getTime()) return 'Yesterday';
   return cmp.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function humanizeActionType(type) {
+  const map = {
+    send_email: 'Send Email',
+    get_emails: 'Inbox',
+    search_emails: 'Search Email',
+    create_calendar_event: 'Create Calendar Event',
+    get_calendar_events: 'Calendar',
+    send_telegram: 'Send Telegram',
+    get_telegram_contacts: 'Telegram Contacts',
+    book_uber: 'Book Uber',
+    search_trains: 'Train Search',
+    send_message: 'Send Message',
+    create_reminder: 'Create Reminder',
+    play_music: 'Play Music',
+    homekit_control: 'Home Control',
+    get_directions: 'Directions',
+    order_food: 'Order Food',
+    check_balance: 'Check Balance',
+    place_bet: 'Place Bet',
+    create_note: 'Create Note'
+  };
+  if (!type) return 'Action';
+  return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 /* ── SVG ICONS ── */
@@ -1445,13 +1471,15 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const audioRef          = useRef(null);
   const mediaRecorderRef  = useRef(null);
   const chunksRef         = useRef([]);
+  const messageRefs       = useRef({});
+  const pendingJumpRef    = useRef(null);
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
       .then(r => r.json())
       .then(data => {
         if (data.history && data.history.length > 0) {
-          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at) })));
+          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at), created_at: m.created_at })));
         }
       })
       .catch(() => {});
@@ -1469,6 +1497,22 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
+
+  useEffect(() => {
+    const target = pendingJumpRef.current;
+    if (!target) return;
+    const exact = messageRefs.current[target.created_at];
+    if (exact) {
+      exact.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      pendingJumpRef.current = null;
+      return;
+    }
+    const fallback = Object.values(messageRefs.current).find(el => el?.dataset?.msgContent === target.content);
+    if (fallback) {
+      fallback.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      pendingJumpRef.current = null;
+    }
+  }, [messages]);
 
   const autoSend = useRef(false);
   useEffect(() => {
@@ -1496,7 +1540,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     try {
       const r = await apiFetch(`/history/${USER_ID}/date?date=${date}`).then(r => r.json());
       if (r.history?.length) {
-        setMessages(r.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at) })));
+        setMessages(r.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at), created_at: m.created_at })));
         setViewingDate(date);
         setSearchOpen(false);
         setSearchResults([]);
@@ -1506,6 +1550,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   }, []);
 
   const jumpToMessage = useCallback((msg) => {
+    pendingJumpRef.current = { created_at: msg.created_at, content: msg.content };
     jumpToDate(msg.created_at.slice(0, 10));
   }, [jumpToDate]);
 
@@ -1594,6 +1639,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       const decoder = new TextDecoder();
       let buf = '';
       let ttsError = '';
+      let pendingAssistant = null;
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1611,10 +1657,15 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             if (ev.type === 'response') {
               const m = { role: 'assistant', content: ev.text, time: new Date() };
               if (ev.actions?.length) m.actions = ev.actions;
-              setMessages(prev => [...prev, m]);
+              pendingAssistant = m;
+              if (!settings.voiceOn) setMessages(prev => [...prev, m]);
             }
             if (ev.type === 'audio') {
               playAudioFromBase64(ev.data);
+              if (pendingAssistant) {
+                setMessages(prev => [...prev, pendingAssistant]);
+                pendingAssistant = null;
+              }
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
@@ -1626,6 +1677,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           } catch {}
         }
       }
+      if (pendingAssistant) setMessages(prev => [...prev, pendingAssistant]);
       if (ttsError) {
         setMessages(prev => [...prev, { role: 'assistant', content: `[Voice unavailable: ${ttsError}]`, time: new Date() }]);
       }
@@ -1660,6 +1712,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let streamedText = '';
       let streamActions = null;
       let ttsError = '';
+      const revealAfterAudio = !!settings.voiceOn;
+      let audioStarted = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1673,9 +1727,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'text') {
               streamedText += ev.chunk;
-              setMessages(prev => prev.map(m =>
-                m._streamId === placeholderId ? { ...m, content: streamedText } : m
-              ));
+              if (!revealAfterAudio || audioStarted) {
+                setMessages(prev => prev.map(m =>
+                  m._streamId === placeholderId ? { ...m, content: streamedText } : m
+                ));
+              }
             }
             if (ev.type === 'actions' && ev.results?.length) {
               streamActions = ev.results;
@@ -1687,6 +1743,10 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               });
             }
             if (ev.type === 'audio') {
+              audioStarted = true;
+              setMessages(prev => prev.map(m =>
+                m._streamId === placeholderId ? { ...m, content: streamedText } : m
+              ));
               playAudioFromBase64(ev.data);
             }
             if (ev.type === 'tts-error') {
@@ -1736,8 +1796,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const formatActionTitle = (entry) => {
     const raw = entry?.action;
     if (!raw) return 'Action';
-    if (typeof raw === 'string') return raw.replace(/_/g, ' ');
-    return (raw.type || raw.action || 'Action').replace(/_/g, ' ');
+    if (typeof raw === 'string') return humanizeActionType(raw);
+    return humanizeActionType(raw.type || raw.action || 'Action');
   };
   const formatTrailStatus = (status) => {
     if (!status) return 'Done';
@@ -1820,7 +1880,18 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               {showDateHeader && (
                 <div className="date-separator"><span>{formatDateHeader(msgDate)}</span></div>
               )}
-              <div className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
+              <div
+                className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}
+                ref={el => {
+                  const key = msg.created_at || `${msg.role}-${msg.time?.getTime?.() || i}-${i}`;
+                  if (el) {
+                    messageRefs.current[key] = el;
+                    el.dataset.msgContent = msg.content || '';
+                  } else {
+                    delete messageRefs.current[key];
+                  }
+                }}
+              >
                 <div className="msg-bubble">
                   {msg.content}
                   {msg.audio && (
@@ -1840,7 +1911,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                                   : type === 'send_telegram' ? `Telegram — ${a.result?.text || 'message sent'}`
                                   : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
                                   : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
-                                  : type;
+                                  : humanizeActionType(type);
                       return (
                         <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
                           <span className="msg-action-copy">
@@ -2202,8 +2273,15 @@ function ActionHistoryPage() {
 
   const formatAction = a => {
     if (!a) return '';
-    if (typeof a === 'string') { try { const p = JSON.parse(a); return p.type === 'shortcut' ? p.name : p.type || a; } catch { return a; } }
-    if (typeof a === 'object') return a.type === 'shortcut' ? a.name : a.type || JSON.stringify(a);
+    if (typeof a === 'string') {
+      try {
+        const p = JSON.parse(a);
+        return p.type === 'shortcut' ? p.name : humanizeActionType(p.type || a);
+      } catch {
+        return humanizeActionType(a);
+      }
+    }
+    if (typeof a === 'object') return a.type === 'shortcut' ? a.name : humanizeActionType(a.type || JSON.stringify(a));
     return String(a);
   };
 
@@ -2306,7 +2384,6 @@ function SettingsPage({ settings, setSettings }) {
 function App() {
   const [isAuth,      setIsAuth]      = useState(!!AUTH_TOKEN && !!USER_ID);
   const [page,        setPage]        = useState('chat');
-  const [chatKey,     setChatKey]     = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing,setIsProcessing]= useState(false);
   const [memory,      setMemory]      = useState('');
@@ -2319,7 +2396,6 @@ function App() {
       return DEFAULT_SETTINGS;
     }
   });
-  const handleNewChat = () => setChatKey(k => k + 1);
   const [briefing, setBriefing] = useState(null);
   const [initialQuery, setInitialQuery] = useState(null);
   const [authMode, setAuthMode] = useState('login');
@@ -2448,12 +2524,11 @@ function App() {
       <div className="main">
         <div className="topbar">
           <span className="topbar-title">{titles[page]}</span>
-          {page === 'chat' && <button className="new-chat-btn" onClick={handleNewChat}>+ New Chat</button>}
         </div>
 
         {page === 'chat' && (
           <>
-            <ChatPage key={chatKey} settings={settings} memory={memory} people={people} initialQuery={initialQuery} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
+            <ChatPage settings={settings} memory={memory} people={people} initialQuery={initialQuery} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
             {briefing?.actions?.length > 0 && <AutoRunActions actions={briefing.actions} />}
           </>
         )}
