@@ -1265,11 +1265,36 @@ body::after {
 const { useState, useRef, useEffect, useCallback } = React;
 const DEFAULT_SETTINGS = { name: 'Oxy', voice: 'Aoede', voiceOn: true, autonomy: 'Medium' };
 const VOICE_OPTIONS = [
-  'Aoede', 'Achernar', 'Achird', 'Algenib', 'Algieba', 'Alnilam', 'Autonoe',
-  'Callirrhoe', 'Charon', 'Despina', 'Enceladus', 'Erinome', 'Fenrir', 'Gacrux',
-  'Iapetus', 'Kore', 'Laomedeia', 'Leda', 'Orus', 'Puck', 'Pulcherrima',
-  'Rasalgethi', 'Sadachbia', 'Sadaltager', 'Schedar', 'Sulafat', 'Umbriel',
-  'Vindemiatrix', 'Zephyr', 'Zubenelgenubi'
+  { value: 'Aoede', label: 'Aoede — Breezy' },
+  { value: 'Achernar', label: 'Achernar — Soft' },
+  { value: 'Achird', label: 'Achird — Friendly' },
+  { value: 'Algenib', label: 'Algenib — Gravelly' },
+  { value: 'Algieba', label: 'Algieba — Smooth' },
+  { value: 'Alnilam', label: 'Alnilam — Firm' },
+  { value: 'Autonoe', label: 'Autonoe — Bright' },
+  { value: 'Callirrhoe', label: 'Callirrhoe — Easy-going' },
+  { value: 'Charon', label: 'Charon — Informative' },
+  { value: 'Despina', label: 'Despina — Smooth' },
+  { value: 'Enceladus', label: 'Enceladus — Breathy' },
+  { value: 'Erinome', label: 'Erinome — Clear' },
+  { value: 'Fenrir', label: 'Fenrir — Excitable' },
+  { value: 'Gacrux', label: 'Gacrux — Mature' },
+  { value: 'Iapetus', label: 'Iapetus — Clear' },
+  { value: 'Kore', label: 'Kore — Firm' },
+  { value: 'Laomedeia', label: 'Laomedeia — Upbeat' },
+  { value: 'Leda', label: 'Leda — Youthful' },
+  { value: 'Orus', label: 'Orus — Firm' },
+  { value: 'Puck', label: 'Puck — Upbeat' },
+  { value: 'Pulcherrima', label: 'Pulcherrima — Forward' },
+  { value: 'Rasalgethi', label: 'Rasalgethi — Informative' },
+  { value: 'Sadachbia', label: 'Sadachbia — Lively' },
+  { value: 'Sadaltager', label: 'Sadaltager — Knowledgeable' },
+  { value: 'Schedar', label: 'Schedar — Even' },
+  { value: 'Sulafat', label: 'Sulafat — Warm' },
+  { value: 'Umbriel', label: 'Umbriel — Easy-going' },
+  { value: 'Vindemiatrix', label: 'Vindemiatrix — Gentle' },
+  { value: 'Zephyr', label: 'Zephyr — Bright' },
+  { value: 'Zubenelgenubi', label: 'Zubenelgenubi — Casual' }
 ];
 
 // INJECT_CREDENTIALS
@@ -1568,6 +1593,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
+      let ttsError = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1590,11 +1616,18 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             if (ev.type === 'audio') {
               playAudioFromBase64(ev.data);
             }
+            if (ev.type === 'tts-error') {
+              ttsError = ev.error || 'Voice unavailable.';
+              console.error('TTS error:', ttsError);
+            }
             if (ev.type === 'error') {
               console.error('Audio processing error:', ev.error);
             }
           } catch {}
         }
+      }
+      if (ttsError) {
+        setMessages(prev => [...prev, { role: 'assistant', content: `[Voice unavailable: ${ttsError}]`, time: new Date() }]);
       }
     } catch (err) { console.error('Audio error:', err); }
     setLoadingWithCb(false);
@@ -1626,6 +1659,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let buf = '';
       let streamedText = '';
       let streamActions = null;
+      let ttsError = '';
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1656,10 +1690,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               playAudioFromBase64(ev.data);
             }
             if (ev.type === 'tts-error') {
-              console.error('TTS error:', ev.error);
+              ttsError = ev.error || 'Voice unavailable.';
+              console.error('TTS error:', ttsError);
               setMessages(prev => prev.map(m =>
                 m._streamId === placeholderId
-                  ? { ...m, content: `${streamedText}\n\n[Voice unavailable: ${ev.error}]`.trim() }
+                  ? { ...m, content: `${streamedText}\n\n[Voice unavailable: ${ttsError}]`.trim() }
                   : m
               ));
             }
@@ -1677,7 +1712,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       if (!streamedText) streamedText = 'Something went wrong.';
       setMessages(prev => prev.map(m => {
         if (m._streamId !== placeholderId) return m;
-        const final = { role: 'assistant', content: streamedText, time: m.time };
+        const final = { role: 'assistant', content: ttsError ? `${streamedText}\n\n[Voice unavailable: ${ttsError}]`.trim() : streamedText, time: m.time };
         if (streamActions) final.actions = streamActions;
         return final;
       }));
@@ -2168,7 +2203,8 @@ function ActionHistoryPage() {
   const formatAction = a => {
     if (!a) return '';
     if (typeof a === 'string') { try { const p = JSON.parse(a); return p.type === 'shortcut' ? p.name : p.type || a; } catch { return a; } }
-    return a;
+    if (typeof a === 'object') return a.type === 'shortcut' ? a.name : a.type || JSON.stringify(a);
+    return String(a);
   };
 
   if (loading) return (
@@ -2239,7 +2275,7 @@ function SettingsPage({ settings, setSettings }) {
               <div className="setting-desc">Choose the voice used for spoken replies</div>
             </div>
             <select className="setting-input" value={settings.voice} onChange={e => update('voice', e.target.value)}>
-              {VOICE_OPTIONS.map(voice => <option key={voice} value={voice}>{voice}</option>)}
+              {VOICE_OPTIONS.map(voice => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
             </select>
           </div>
         </div>
