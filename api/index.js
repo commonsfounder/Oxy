@@ -279,7 +279,7 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   const timeoutId = setTimeout(() => controller.abort(), 22000);
   try {
     const resp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         contents: [{ parts: [{ text }] }],
         generationConfig: {
@@ -287,33 +287,13 @@ async function generateSpeech(text, voiceName = 'Aoede') {
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
         }
       },
-      { responseType: 'stream', signal: controller.signal }
+      { signal: controller.signal }
     );
-    const pcmChunks = [];
-    await new Promise((resolve, reject) => {
-      let buf = '';
-      resp.data.on('data', chunk => {
-        buf += chunk.toString();
-        const events = buf.split('\n\n');
-        buf = events.pop();
-        for (const event of events) {
-          const line = event.split('\n').find(l => l.startsWith('data: '));
-          if (!line) continue;
-          try {
-            const parsed = JSON.parse(line.slice(6));
-            const part = parsed.candidates?.[0]?.content?.parts?.[0];
-            if (part?.inlineData?.data) pcmChunks.push(Buffer.from(part.inlineData.data, 'base64'));
-          } catch {}
-        }
-      });
-      resp.data.on('end', resolve);
-      resp.data.on('error', reject);
-    });
-    const pcm = Buffer.concat(pcmChunks);
-    if (!pcm.length) {
+    const base64Audio = resp.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!base64Audio) {
       throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
     }
-    return pcmToWav(pcm).toString('base64');
+    return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
   } catch (err) {
     const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
     throw new Error(`TTS failed (${safeVoiceName}): ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
