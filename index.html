@@ -308,6 +308,21 @@ body::after {
 }
 .msg-play-btn:hover { background: var(--s4); color: var(--text); }
 
+.msg-image-wrap {
+  margin-top: 12px;
+  max-width: 420px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid var(--line2);
+  background: var(--s1);
+}
+
+.msg-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* Action results — quiet lines */
 .msg-actions-bar {
   display: flex;
@@ -655,21 +670,102 @@ body::after {
 
 @media (max-width: 768px) { .chat-input-area { padding: 10px 16px 20px; } }
 
+.composer-stack {
+  position: relative;
+}
+
+.attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--s1);
+  border: 1px solid var(--line2);
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.attachment-pill strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.attachment-clear {
+  border: none;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.attachment-clear:hover { color: var(--text); }
+
 .input-row {
   display: flex;
   align-items: flex-end;
   gap: 8px;
   background: var(--s1);
   border: 1px solid var(--line2);
-  border-radius: 16px;
-  padding: 11px 11px 11px 18px;
-  transition: border-color 0.2s;
+  border-radius: 20px;
+  padding: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .input-row:focus-within {
   border-color: rgba(200,184,154,0.28);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 0 0 3px rgba(200,184,154,0.07);
+}
+
+.composer-plus-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.composer-plus,
+.composer-primary {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.composer-plus {
+  border: 1px solid var(--line2);
+  background: var(--s2);
+  color: var(--sub);
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s, transform 0.18s;
+}
+
+.composer-plus:hover { background: var(--s3); color: var(--text); }
+.composer-plus.open { color: var(--text); transform: rotate(45deg); }
+
+.composer-input-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 0 1px;
+}
+
+.composer-mode {
+  font-size: 11px;
+  color: var(--stone);
+  letter-spacing: 0.2px;
 }
 
 .chat-input {
@@ -690,24 +786,30 @@ body::after {
 
 .chat-input::placeholder { color: var(--dim); }
 
-.mic-btn {
-  width: 33px;
-  height: 33px;
-  border-radius: 9px;
-  border: 1px solid var(--line2);
-  background: var(--s2);
-  color: var(--sub);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.composer-primary {
+  position: relative;
+  border: none;
+  background: var(--text);
+  color: var(--bg);
   cursor: pointer;
-  flex-shrink: 0;
-  font-size: 14px;
-  transition: background 0.13s, color 0.13s;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  transition: transform 0.18s, opacity 0.16s, background 0.16s, color 0.16s;
 }
-.mic-btn:hover { background: var(--s3); color: var(--text); }
 
-.mic-btn.recording {
+.composer-primary:hover { opacity: 0.9; }
+.composer-primary:active { opacity: 0.78; transform: scale(0.98); }
+.composer-primary:disabled { background: var(--s3); color: var(--dim); box-shadow: none; cursor: not-allowed; }
+
+.composer-primary.mic {
+  background: var(--s2);
+  border: 1px solid var(--line2);
+  color: var(--sub);
+  box-shadow: none;
+}
+
+.composer-primary.mic:hover { background: var(--s3); color: var(--text); }
+
+.composer-primary.recording {
   background: rgba(192,80,62,0.15);
   border-color: rgba(192,80,62,0.4);
   color: var(--red);
@@ -719,25 +821,82 @@ body::after {
   50%       { box-shadow: 0 0 0 5px rgba(192,80,62,0); }
 }
 
-.send-btn {
-  width: 33px;
-  height: 33px;
-  border-radius: 9px;
-  border: none;
-  background: var(--text);
-  color: var(--bg);
+.composer-primary-icon {
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-  font-size: 16px;
-  transition: opacity 0.13s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  width: 16px;
+  height: 16px;
+  transition: opacity 0.18s ease, transform 0.22s ease;
 }
-.send-btn:hover { opacity: 0.88; }
-.send-btn:active { opacity: 0.75; }
-.send-btn:disabled { background: var(--s3); color: var(--dim); box-shadow: none; cursor: not-allowed; }
+
+.composer-primary.mic .icon-mic,
+.composer-primary.send .icon-send {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+.composer-primary.mic .icon-send,
+.composer-primary.send .icon-mic {
+  opacity: 0;
+  transform: scale(0.75) rotate(-18deg);
+}
+
+.composer-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 10px);
+  width: 228px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(22,22,22,0.97);
+  border: 1px solid var(--line2);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.35);
+  backdrop-filter: blur(18px);
+  z-index: 20;
+}
+
+.composer-menu-title {
+  padding: 6px 8px 8px;
+  color: var(--dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.composer-menu-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: none;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--font);
+  text-align: left;
+}
+
+.composer-menu-item:hover { background: rgba(255,255,255,0.05); }
+
+.composer-menu-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.composer-menu-copy strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.composer-menu-copy span {
+  font-size: 11px;
+  color: var(--sub);
+}
 
 /* ── PAGE CONTENT ── */
 .page-content {
@@ -1416,6 +1575,29 @@ const Icons = {
       <path d="M1.5 6.5H11.5M7 2l4.5 4.5L7 11"/>
     </svg>
   ),
+  plus: (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M8 3v10M3 8h10"/>
+    </svg>
+  ),
+  image: (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.2" y="2.4" width="11.6" height="11.2" rx="2"/>
+      <path d="M5 10l1.8-1.9 1.9 1.7 2.7-3 1.6 1.9"/>
+      <circle cx="5.2" cy="5.7" r="1"/>
+    </svg>
+  ),
+  camera: (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.2 4.2 6 3h4l.8 1.2H13a1.8 1.8 0 0 1 1.8 1.8v5.8A1.8 1.8 0 0 1 13 13.6H3a1.8 1.8 0 0 1-1.8-1.8V6A1.8 1.8 0 0 1 3 4.2h2.2Z"/>
+      <circle cx="8" cy="8.8" r="2.5"/>
+    </svg>
+  ),
+  paperclip: (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8.5 9.8 4.7a2.5 2.5 0 1 1 3.5 3.5L7.8 13.7a4 4 0 0 1-5.7-5.7L7 3.1"/>
+    </svg>
+  ),
 };
 
 function AutoRunActions({ actions }) {
@@ -1460,6 +1642,9 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const [loading, setLoading] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const [composerMode, setComposerMode] = useState('chat');
+  const [selectedImage, setSelectedImage] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -1473,6 +1658,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const chunksRef         = useRef([]);
   const messageRefs       = useRef({});
   const pendingJumpRef    = useRef(null);
+  const imageInputRef     = useRef(null);
+  const cameraInputRef    = useRef(null);
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
@@ -1493,6 +1680,10 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   }, []);
 
   useEffect(() => { loadHistory(); loadRecentActions(); }, []);
+
+  useEffect(() => () => {
+    if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl);
+  }, [selectedImage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1526,6 +1717,34 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
     setSpeaking(false);
   };
+
+  const resetImageDraft = useCallback(() => {
+    setComposerMode('chat');
+    setSelectedImage(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  }, []);
+
+  const pickImageFile = useCallback(file => {
+    if (!file) return;
+    setSelectedImage(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return {
+        file,
+        name: file.name,
+        previewUrl: URL.createObjectURL(file)
+      };
+    });
+    setComposerMode('image');
+    setComposerMenuOpen(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const onImagePicked = useCallback(e => {
+    pickImageFile(e.target.files?.[0] || null);
+    e.target.value = '';
+  }, [pickImageFile]);
 
   const runSearch = useCallback(async (q) => {
     if (!q.trim()) { setSearchResults([]); return; }
@@ -1706,6 +1925,50 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     setLoadingWithCb(false);
   };
 
+  const sendImageRequest = useCallback(async (overrideText) => {
+    const prompt = (overrideText || input).trim();
+    if (!prompt || loading) return;
+    const userMessage = selectedImage ? `${prompt}\n\n[Image reference attached: ${selectedImage.name}]` : prompt;
+    setMessages(prev => [...prev, { role: 'user', content: userMessage, time: new Date() }]);
+    if (!overrideText) setInput('');
+    setLoadingWithCb(true);
+    stopSpeaking();
+    setComposerMenuOpen(false);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    const placeholderId = Date.now();
+    setMessages(prev => [...prev, { role: 'assistant', content: selectedImage ? 'Editing image…' : 'Generating image…', time: new Date(), _streamId: placeholderId }]);
+
+    try {
+      const formData = new FormData();
+      formData.append('userId', USER_ID);
+      formData.append('prompt', prompt);
+      if (selectedImage?.file) formData.append('image', selectedImage.file);
+
+      const resp = await apiFetch('/images/generate', { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (!resp.ok || !data.image) {
+        throw new Error(data.error || 'Image generation failed.');
+      }
+
+      const generatedImage = `data:${data.mimeType || 'image/png'};base64,${data.image}`;
+      setMessages(prev => prev.map(m =>
+        m._streamId === placeholderId
+          ? { role: 'assistant', content: data.text || 'Made this for you.', image: generatedImage, time: m.time }
+          : m
+      ));
+      resetImageDraft();
+    } catch (err) {
+      setMessages(prev => prev.map(m =>
+        m._streamId === placeholderId
+          ? { role: 'assistant', content: err.message || 'Image generation failed.', time: m.time }
+          : m
+      ));
+    } finally {
+      setLoadingWithCb(false);
+    }
+  }, [input, loading, selectedImage, resetImageDraft]);
+
   const sendMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
     if (!text || loading) return;
@@ -1821,7 +2084,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   }, [input, loading, settings, memory, people]);
 
   const handleKeyDown = e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (composerMode === 'image') sendImageRequest();
+      else sendMessage();
+    }
   };
 
   const handleInput = e => {
@@ -1936,6 +2203,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                     <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
                   )}
                 </div>
+                {msg.image && (
+                  <div className="msg-image-wrap">
+                    <img className="msg-image" src={msg.image} alt="Generated by Oxy" />
+                  </div>
+                )}
                 {msg.actions && msg.actions.length > 0 && (
                   <div className="msg-actions-bar">
                     {msg.actions.map((a, j) => {
@@ -1987,32 +2259,90 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       )}
 
       <div className="chat-input-area">
-        <div className="input-row">
-          <textarea
-            ref={textareaRef}
-            className="chat-input"
-            placeholder={`Message ${settings.name}…`}
-            value={input}
-            onChange={handleInput}
-            onKeyDown={handleKeyDown}
-            rows={1}
-          />
-          {input.trim() ? (
-            <button className="send-btn" onClick={() => sendMessage()} disabled={loading}>
-              <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:13,height:13}}>{Icons.send}</span>
-            </button>
-          ) : (
-            <button
-              className={`mic-btn ${recording ? 'recording' : ''}`}
-              onMouseDown={startRecording}
-              onMouseUp={stopRecording}
-              onTouchStart={startRecording}
-              onTouchEnd={stopRecording}
-              title="Hold to record"
-            >
-              <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:14,height:14}}>{Icons.mic}</span>
-            </button>
+        <div className="composer-stack">
+          <input ref={imageInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={onImagePicked} />
+          <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={onImagePicked} />
+
+          {(selectedImage || composerMode === 'image') && (
+            <div className="attachment-strip">
+              <div className="attachment-pill">
+                <span>{Icons.image}</span>
+                <span>
+                  <strong>{selectedImage ? selectedImage.name : 'Generate image'}</strong>
+                  {selectedImage ? ' ready to edit' : ' using prompt only'}
+                </span>
+                <button className="attachment-clear" onClick={resetImageDraft} title="Remove">×</button>
+              </div>
+            </div>
           )}
+
+          <div className="input-row">
+            <div className="composer-plus-wrap">
+              <button className={`composer-plus ${composerMenuOpen ? 'open' : ''}`} onClick={() => setComposerMenuOpen(v => !v)} title="Add">
+                <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.plus}</span>
+              </button>
+              {composerMenuOpen && (
+                <div className="composer-menu">
+                  <div className="composer-menu-title">Create</div>
+                  <button className="composer-menu-item" onClick={() => { setComposerMode('image'); setComposerMenuOpen(false); requestAnimationFrame(() => textareaRef.current?.focus()); }}>
+                    <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.image}</span>
+                    <span className="composer-menu-copy">
+                      <strong>Generate image</strong>
+                      <span>Prompt Oxy to create a visual</span>
+                    </span>
+                  </button>
+                  <button className="composer-menu-item" onClick={() => { setComposerMenuOpen(false); imageInputRef.current?.click(); }}>
+                    <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.paperclip}</span>
+                    <span className="composer-menu-copy">
+                      <strong>Upload image</strong>
+                      <span>Edit or build from a photo</span>
+                    </span>
+                  </button>
+                  <button className="composer-menu-item" onClick={() => { setComposerMenuOpen(false); cameraInputRef.current?.click(); }}>
+                    <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.camera}</span>
+                    <span className="composer-menu-copy">
+                      <strong>Take photo</strong>
+                      <span>Use the camera as image input</span>
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="composer-input-wrap">
+              {composerMode === 'image' && (
+                <div className="composer-mode">{selectedImage ? 'Image edit mode' : 'Image generation mode'}</div>
+              )}
+              <textarea
+                ref={textareaRef}
+                className="chat-input"
+                placeholder={composerMode === 'image' ? `Describe the image you want ${selectedImage ? 'changed' : 'made'}…` : `Message ${settings.name}…`}
+                value={input}
+                onChange={handleInput}
+                onKeyDown={handleKeyDown}
+                rows={1}
+              />
+            </div>
+
+            {(input.trim() || composerMode === 'image') ? (
+              <button className="composer-primary send" onClick={() => composerMode === 'image' ? sendImageRequest() : sendMessage()} disabled={loading || !input.trim()}>
+                <span className="composer-primary-icon icon-send">{Icons.send}</span>
+                <span className="composer-primary-icon icon-mic">{Icons.mic}</span>
+              </button>
+            ) : (
+              <button
+                className={`composer-primary mic ${recording ? 'recording' : ''}`}
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onTouchStart={startRecording}
+                onTouchEnd={stopRecording}
+                title="Hold to record"
+              >
+                <span className="composer-primary-icon icon-send">{Icons.send}</span>
+                <span className="composer-primary-icon icon-mic">{Icons.mic}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

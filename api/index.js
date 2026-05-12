@@ -276,6 +276,7 @@ const GEMINI_TTS_MODELS = [
   'gemini-3.1-flash-tts-preview',
   'gemini-2.5-flash-preview-tts'
 ];
+const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
 
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
@@ -312,6 +313,52 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   }
 
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
+}
+
+async function generateImage(prompt, imageFile) {
+  if (!prompt || !prompt.trim()) {
+    throw new Error('Image prompt is required.');
+  }
+
+  const parts = [];
+  if (imageFile) {
+    if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
+      throw new Error('Only image uploads are supported for image generation.');
+    }
+    parts.push({
+      inline_data: {
+        mime_type: imageFile.mimetype,
+        data: imageFile.buffer.toString('base64')
+      }
+    });
+  }
+  parts.push({ text: prompt.trim() });
+
+  const resp = await axios.post(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_IMAGE_MODEL}:generateContent`,
+    {
+      contents: [{ parts }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }
+    },
+    {
+      headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY }
+    }
+  );
+
+  const responseParts = resp.data?.candidates?.[0]?.content?.parts || [];
+  const text = responseParts.find(part => typeof part.text === 'string' && part.text.trim())?.text?.trim() || 'Made this for you.';
+  const imagePart = responseParts.find(part => part.inlineData?.data || part.inline_data?.data);
+  const inlineData = imagePart?.inlineData || imagePart?.inline_data;
+
+  if (!inlineData?.data) {
+    throw new Error('Gemini image generation returned no image.');
+  }
+
+  return {
+    text,
+    image: inlineData.data,
+    mimeType: inlineData.mimeType || inlineData.mime_type || 'image/png'
+  };
 }
 
 async function getMemory(userId) {
@@ -640,6 +687,23 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   } catch (err) {
     console.error('/process-audio error:', err.message);
     try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+  }
+});
+
+app.post('/images/generate', upload.single('image'), async (req, res) => {
+  try {
+    const { userId, prompt } = req.body;
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required.' });
+
+    const result = await generateImage(prompt, req.file || null);
+    saveMessage(userId, 'user', prompt.trim()).catch(() => {});
+    saveMessage(userId, 'assistant', result.text).catch(() => {});
+
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('/images/generate error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
   }
 });
 
