@@ -250,6 +250,7 @@ body::after {
 .message { display: flex; flex-direction: column; }
 .message.user { align-items: flex-end; }
 .message.oxcy { align-items: flex-start; max-width: 540px; }
+.message.visual-message { max-width: 560px; }
 
 /* Oxy speaks — no bubble, pure type */
 .message.oxcy .msg-bubble {
@@ -309,12 +310,13 @@ body::after {
 .msg-play-btn:hover { background: var(--s4); color: var(--text); }
 
 .msg-image-wrap {
-  margin-top: 12px;
-  max-width: 420px;
-  border-radius: 18px;
+  margin-top: 10px;
+  max-width: 460px;
+  border-radius: 22px;
   overflow: hidden;
-  border: 1px solid var(--line2);
-  background: var(--s1);
+  border: none;
+  background: transparent;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.18);
 }
 
 .msg-image {
@@ -324,17 +326,27 @@ body::after {
 }
 
 .artifact-card {
-  margin-top: 10px;
-  border: 1px solid var(--line2);
+  margin-top: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
   background: rgba(255,255,255,0.02);
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
+}
+
+.artifact-card.visual {
+  border: none;
+  background: transparent;
+}
+
+.artifact-card.analysis,
+.artifact-card.deck {
+  background: rgba(255,255,255,0.025);
 }
 
 .artifact-image {
   display: block;
   width: 100%;
-  max-width: 360px;
+  max-width: 420px;
   height: auto;
 }
 
@@ -342,7 +354,18 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 12px 12px;
+  padding: 8px 2px 2px;
+}
+
+.artifact-card.analysis .artifact-copy,
+.artifact-card.deck .artifact-copy {
+  padding: 12px 14px 14px;
+}
+
+.artifact-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .artifact-title {
@@ -399,8 +422,8 @@ body::after {
 .msg-actions-bar {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .msg-action-status {
@@ -412,9 +435,15 @@ body::after {
   font-weight: 400;
   padding: 11px 12px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.02);
+  background: rgba(255,255,255,0.018);
   border-radius: 14px;
   letter-spacing: 0;
+}
+
+.msg-action-status.artifact-only {
+  border: none;
+  background: transparent;
+  padding: 0;
 }
 
 .msg-action-copy {
@@ -431,6 +460,15 @@ body::after {
   color: var(--sub);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.msg-action-meta {
+  display: inline-block;
+  margin-bottom: 6px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .msg-action-status.ok  { border-color: rgba(76,175,130,0.18); }
@@ -1611,6 +1649,29 @@ function humanizeActionType(type) {
   return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function normalizeHistoryMessage(m) {
+  return {
+    role: m.role,
+    content: m.content || '',
+    image: m.image || null,
+    actions: Array.isArray(m.actions) ? m.actions : [],
+    audio: m.audio || null,
+    kind: m.kind || null,
+    time: new Date(m.created_at),
+    created_at: m.created_at
+  };
+}
+
+const AUTO_OPEN_ACTIONS = new Set([
+  'book_uber',
+  'order_uber_eats',
+  'order_deliveroo',
+  'search_netflix_title',
+  'add_to_netflix_list'
+]);
+
+const VISUAL_ARTIFACT_TYPES = new Set(['image', 'diagram', 'slide_deck', 'image_analysis']);
+
 /* ── SVG ICONS ── */
 const Icons = {
   chat: (
@@ -1746,7 +1807,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       .then(r => r.json())
       .then(data => {
         if (data.history && data.history.length > 0) {
-          setMessages(data.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at), created_at: m.created_at })));
+          setMessages(data.history.map(normalizeHistoryMessage));
         }
       })
       .catch(() => {});
@@ -1839,7 +1900,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     try {
       const r = await apiFetch(`/history/${USER_ID}/date?date=${date}`).then(r => r.json());
       if (r.history?.length) {
-        setMessages(r.history.map(m => ({ role: m.role, content: m.content, time: new Date(m.created_at), created_at: m.created_at })));
+        setMessages(r.history.map(normalizeHistoryMessage));
         setViewingDate(date);
         setSearchOpen(false);
         setSearchResults([]);
@@ -1880,6 +1941,48 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       setSpeaking(false);
     }
   }, []);
+
+  const openActionLink = useCallback((deepLink, webLink) => {
+    const primary = deepLink || webLink;
+    if (!primary) return;
+    if (!deepLink || deepLink === webLink) {
+      window.open(primary, '_blank', 'noopener');
+      return;
+    }
+
+    let settled = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!settled && webLink) {
+        settled = true;
+        window.open(webLink, '_blank', 'noopener');
+      }
+    }, 1200);
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        settled = true;
+        clearTimeout(fallbackTimer);
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.location.href = deepLink;
+    setTimeout(() => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearTimeout(fallbackTimer);
+    }, 3500);
+  }, []);
+
+  const maybeOpenActionResults = useCallback((results = []) => {
+    results.forEach(entry => {
+      const type = entry?.action || entry?.type;
+      if (!AUTO_OPEN_ACTIONS.has(type)) return;
+      const deepLink = entry?.result?.deepLink;
+      const webLink = entry?.result?.webLink;
+      if (deepLink || webLink) openActionLink(deepLink, webLink);
+    });
+  }, [openActionLink]);
 
   const startRecording = async () => {
     try {
@@ -1965,6 +2068,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               const m = { role: 'assistant', content: ev.text, time: new Date() };
               if (ev.actions?.length) m.actions = ev.actions;
               pendingAssistant = m;
+              if (ev.actions?.length) maybeOpenActionResults(ev.actions);
               if (!settings.voiceOn) {
                 revealPendingAssistant();
               } else if (!voiceRevealTimer) {
@@ -2034,7 +2138,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       const generatedImage = `data:${data.mimeType || 'image/png'};base64,${data.image}`;
       setMessages(prev => prev.map(m =>
         m._streamId === placeholderId
-          ? { role: 'assistant', content: data.text || 'Made this for you.', image: generatedImage, time: m.time }
+          ? { role: 'assistant', content: '', image: generatedImage, kind: 'image', time: m.time }
           : m
       ));
       resetImageDraft();
@@ -2082,6 +2186,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           ? { role: 'assistant', content: finalText, actions: data.actions || [], time: m.time }
           : m
       ));
+      if (data.actions?.length) maybeOpenActionResults(data.actions);
       if (data.audio) playAudioFromBase64(data.audio);
       resetImageDraft();
     } catch (err) {
@@ -2157,9 +2262,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               setMessages(prev => prev.map(m =>
                 m._streamId === placeholderId ? { ...m, actions: ev.results } : m
               ));
-              ev.results.forEach(a => {
-                if (a.result?.deepLink) window.location.href = a.result.deepLink;
-              });
+              maybeOpenActionResults(ev.results);
             }
             if (ev.type === 'audio') {
               if (voiceRevealTimer) {
@@ -2207,7 +2310,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
     setLoadingWithCb(false);
-  }, [input, loading, settings, memory, people]);
+  }, [input, loading, settings, memory, people, maybeOpenActionResults]);
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -2245,11 +2348,15 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     if (artifact.type === 'image' || artifact.type === 'diagram' || artifact.type === 'image_analysis') {
       const src = artifact.image ? `data:${artifact.mimeType || 'image/png'};base64,${artifact.image}` : null;
       return (
-        <div className="artifact-card">
+        <div className={`artifact-card ${artifact.type === 'image_analysis' ? 'analysis' : 'visual'}`}>
           {src && <img className="artifact-image" src={src} alt={artifact.title || 'Artifact'} />}
           <div className="artifact-copy">
-            <div className="artifact-title">{artifact.title || humanizeActionType(artifact.type)}</div>
-            {artifact.summary && <div className="artifact-sub">{artifact.summary}</div>}
+            {(artifact.title || artifact.summary) && (
+              <div className="artifact-meta">
+                <div className="artifact-title">{artifact.title || humanizeActionType(artifact.type)}</div>
+                {artifact.summary && <div className="artifact-sub">{artifact.summary}</div>}
+              </div>
+            )}
             {artifact.mermaid && <pre className="artifact-code">{artifact.mermaid}</pre>}
           </div>
         </div>
@@ -2258,11 +2365,13 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     if (artifact.type === 'slide_deck') {
       const src = artifact.image ? `data:${artifact.mimeType || 'image/png'};base64,${artifact.image}` : null;
       return (
-        <div className="artifact-card">
+        <div className="artifact-card deck">
           {src && <img className="artifact-image" src={src} alt={artifact.title || 'Presentation cover'} />}
           <div className="artifact-copy">
-            <div className="artifact-title">{artifact.title || 'Presentation'}</div>
-            {artifact.subtitle && <div className="artifact-sub">{artifact.subtitle}</div>}
+            <div className="artifact-meta">
+              <div className="artifact-title">{artifact.title || 'Presentation'}</div>
+              {artifact.subtitle && <div className="artifact-sub">{artifact.subtitle}</div>}
+            </div>
             <div className="artifact-slide-list">
               {(artifact.slides || []).map((slide, idx) => (
                 <div key={idx} className="artifact-slide">
@@ -2351,7 +2460,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                 <div className="date-separator"><span>{formatDateHeader(msgDate)}</span></div>
               )}
               <div
-                className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}
+                className={`message ${msg.role === 'user' ? 'user' : 'oxcy'} ${!msg.content && (msg.image || msg.actions?.length) ? 'visual-message' : ''}`}
                 ref={el => {
                   const key = msg.created_at || `${msg.role}-${msg.time?.getTime?.() || i}-${i}`;
                   if (el) {
@@ -2362,12 +2471,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                   }
                 }}
               >
-                <div className="msg-bubble">
-                  {msg.content}
-                  {msg.audio && (
-                    <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
-                  )}
-                </div>
+                {(msg.content || msg.audio) && (
+                  <div className="msg-bubble">
+                    {msg.content}
+                    {msg.audio && (
+                      <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
+                    )}
+                  </div>
+                )}
                 {msg.image && (
                   <div className="msg-image-wrap">
                     <img className="msg-image" src={msg.image} alt="Generated by Oxy" />
@@ -2378,6 +2489,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                     {msg.actions.map((a, j) => {
                       const ok = a.result?.success !== false;
                       const type = a.action || a.type || 'action';
+                      const artifact = a.result?.artifact;
+                      const artifactOnly = artifact && VISUAL_ARTIFACT_TYPES.has(artifact.type) && ok;
                       const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
                                   : type === 'send_email' ? 'Email sent'
                                   : type === 'create_calendar_event' ? 'Event created'
@@ -2387,17 +2500,21 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                                   : type === 'get_telegram_contacts' ? `${a.result?.text || 'Contacts fetched'}`
                                   : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
                                   : humanizeActionType(type);
+                      const detail = a.result?.error || a.result?.text || '';
                       return (
-                        <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'}`}>
+                        <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'} ${artifactOnly ? 'artifact-only' : ''}`}>
                           <span className="msg-action-copy">
-                            <span className="msg-action-title">{label}</span>
-                            <span className="msg-action-sub">
-                              {a.result?.error || a.result?.text || 'Completed without extra detail.'}
-                              {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
-                            </span>
-                            {renderArtifact(a.result?.artifact)}
+                            {!artifactOnly && <span className="msg-action-title">{label}</span>}
+                            {!artifactOnly && detail && (
+                              <span className="msg-action-sub">
+                                {detail}
+                                {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
+                              </span>
+                            )}
+                            {artifactOnly && <span className="msg-action-meta">{label}</span>}
+                            {renderArtifact(artifact)}
                           </span>
-                          <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>
+                          {!artifactOnly && <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>}
                         </span>
                       );
                     })}

@@ -9,6 +9,14 @@ function buildSearchQuery(params = {}) {
   ].filter(Boolean).join(' ').trim();
 }
 
+function uberEatsWebLink(query) {
+  return `https://www.ubereats.com/search?q=${encodeURIComponent(query)}`;
+}
+
+function uberEatsDeepLink(query) {
+  return `ubereats://search?q=${encodeURIComponent(query)}`;
+}
+
 async function execute(userId, action, params) {
   try {
     if (action !== 'order_uber_eats') {
@@ -20,13 +28,11 @@ async function execute(userId, action, params) {
       return { success: false, error: 'order_uber_eats requires a restaurant, item, cuisine, or query' };
     }
 
-    const webLink = `https://www.ubereats.com/search?q=${encodeURIComponent(query)}`;
-
     return {
       success: true,
-      text: `Opening Uber Eats for ${query} — confirm the order in the app.`,
-      deepLink: webLink,
-      webLink
+      text: `Trying Uber Eats for ${query}.`,
+      deepLink: uberEatsDeepLink(query),
+      webLink: uberEatsWebLink(query)
     };
   } catch (err) {
     return { success: false, error: `Uber Eats error: ${err.message}` };

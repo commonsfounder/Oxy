@@ -65,6 +65,13 @@ function requireMatchingUser(req, res, candidateUserId) {
   return true;
 }
 
+function humanizeActionType(type) {
+  if (!type) return 'Action';
+  return String(type)
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
 function signOAuthState(userId) {
   return signPayload({ type: 'google_oauth', userId }, 15 * 60 * 1000);
 }
@@ -644,13 +651,67 @@ async function getHistory(userId) {
     .limit(10);
 
   if (error || !data) return [];
-  return data.reverse();
+  return data.reverse().map(normalizeConversationRow);
+}
+
+function serializeConversationContent(payload) {
+  if (payload == null) return '';
+  if (typeof payload === 'string') return payload;
+  if (typeof payload !== 'object') return String(payload);
+
+  const next = {};
+  if (typeof payload.text === 'string') next.text = payload.text;
+  if (typeof payload.image === 'string') next.image = payload.image;
+  if (Array.isArray(payload.actions) && payload.actions.length) next.actions = payload.actions;
+  if (typeof payload.audio === 'string') next.audio = payload.audio;
+  if (typeof payload.kind === 'string') next.kind = payload.kind;
+
+  return Object.keys(next).length === 1 && typeof next.text === 'string'
+    ? next.text
+    : JSON.stringify(next);
+}
+
+function conversationFallbackText(entry) {
+  if (entry?.content) return entry.content;
+  if (entry?.image) return 'Generated image';
+  if (entry?.actions?.length) {
+    const firstAction = entry.actions[0]?.action || entry.actions[0]?.type || 'action';
+    return humanizeActionType(firstAction);
+  }
+  return '';
+}
+
+function normalizeConversationRow(row) {
+  const parsed = safeParseJSON(row?.content);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return {
+      ...row,
+      content: typeof parsed.text === 'string' ? parsed.text : '',
+      image: typeof parsed.image === 'string' ? parsed.image : null,
+      actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      audio: typeof parsed.audio === 'string' ? parsed.audio : null,
+      kind: typeof parsed.kind === 'string' ? parsed.kind : null
+    };
+  }
+  return {
+    ...row,
+    content: typeof row?.content === 'string' ? row.content : String(row?.content || ''),
+    image: null,
+    actions: [],
+    audio: null,
+    kind: null
+  };
 }
 
 async function saveMessage(userId, role, content) {
   await supabase
     .from('conversations')
-    .insert({ user_id: userId, role, content, created_at: new Date().toISOString() });
+    .insert({
+      user_id: userId,
+      role,
+      content: serializeConversationContent(content),
+      created_at: new Date().toISOString()
+    });
 }
 
 async function getPreferences(userId) {
@@ -878,7 +939,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       executeActions(userId, actions),
       generateSpeech(firstSentences(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
     ]);
-    saveMessage(userId, 'assistant', spoken).catch(() => {});
+    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
 
     sse({ type: 'response', text: spoken, actions: actionResults });
     if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav' });
@@ -899,10 +960,11 @@ app.post('/images/generate', upload.single('image'), async (req, res) => {
     if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required.' });
 
     const result = await generateImage(prompt, req.file || null);
+    const imageUrl = `data:${result.mimeType || 'image/png'};base64,${result.image}`;
     saveMessage(userId, 'user', prompt.trim()).catch(() => {});
-    saveMessage(userId, 'assistant', result.text).catch(() => {});
+    saveMessage(userId, 'assistant', { text: '', image: imageUrl, kind: 'image' }).catch(() => {});
 
-    res.json({ success: true, ...result });
+    res.json({ success: true, ...result, text: '' });
   } catch (err) {
     console.error('/images/generate error:', err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.error?.message || err.message });
@@ -967,7 +1029,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
     }
 
-    saveMessage(userId, 'assistant', spoken).catch(() => {});
+    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
@@ -1202,7 +1264,11 @@ app.get('/history/:userId/search', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(20);
     if (error) throw error;
-    res.json({ results: (data || []).reverse() });
+    const results = (data || [])
+      .reverse()
+      .map(normalizeConversationRow)
+      .map(entry => ({ ...entry, content: conversationFallbackText(entry) }));
+    res.json({ results });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1225,7 +1291,7 @@ app.get('/history/:userId/date', async (req, res) => {
       .order('created_at', { ascending: true })
       .limit(50);
     if (error) throw error;
-    res.json({ history: data || [] });
+    res.json({ history: (data || []).map(normalizeConversationRow) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1407,7 +1473,7 @@ app.post('/chat', async (req, res) => {
         res.end();
 
         // Fire-and-forget: save assistant message + memory/preferences
-        saveMessage(userId, 'assistant', spoken).catch(() => {});
+        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
         postResponseTasks(userId, message);
 
       } catch (err) {
@@ -1449,7 +1515,7 @@ app.post('/chat', async (req, res) => {
     }
 
     // Don't block on saving assistant message
-    saveMessage(userId, 'assistant', spoken).catch(() => {});
+    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
 
     const result = { text: spoken, actions: actionResults };
 
