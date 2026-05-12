@@ -289,27 +289,6 @@ body::after {
   padding: 0;
 }
 
-.msg-meta {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.msg-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255,255,255,0.02);
-  font-size: 10px;
-  color: var(--sub);
-  text-transform: uppercase;
-  letter-spacing: 0.7px;
-}
-
 /* Audio play button */
 .msg-play-btn {
   display: inline-flex;
@@ -1284,6 +1263,14 @@ body::after {
 
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
+const DEFAULT_SETTINGS = { name: 'Oxy', voice: 'Aoede', voiceOn: true, autonomy: 'Medium' };
+const VOICE_OPTIONS = [
+  'Aoede', 'Achernar', 'Achird', 'Algenib', 'Algieba', 'Alnilam', 'Autonoe',
+  'Callirrhoe', 'Charon', 'Despina', 'Enceladus', 'Erinome', 'Fenrir', 'Gacrux',
+  'Iapetus', 'Kore', 'Laomedeia', 'Leda', 'Orus', 'Puck', 'Pulcherrima',
+  'Rasalgethi', 'Sadachbia', 'Sadaltager', 'Schedar', 'Sulafat', 'Umbriel',
+  'Vindemiatrix', 'Zephyr', 'Zubenelgenubi'
+];
 
 // INJECT_CREDENTIALS
 
@@ -1576,6 +1563,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       const formData = new FormData();
       formData.append('audio', wavBlob, 'audio.wav');
       formData.append('userId', USER_ID);
+      formData.append('voice', settings.voice);
       const response = await apiFetch('/process-audio', { method: 'POST', body: formData });
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -1792,12 +1780,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               <div className={`message ${msg.role === 'user' ? 'user' : 'oxcy'}`}>
                 <div className="msg-bubble">
                   {msg.content}
-                  {msg.role === 'assistant' && (
-                    <div className="msg-meta">
-                      <span className="msg-tag">{msg.actions?.length ? 'Actions' : 'Reply'}</span>
-                      <span className="msg-tag">{/i don't know|not sure|uncertain/i.test(msg.content) ? 'Uncertain' : 'Assistant'}</span>
-                    </div>
-                  )}
                   {msg.audio && (
                     <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
                   )}
@@ -2114,7 +2096,7 @@ function ConnectorsPage() {
     return acc;
   }, {});
 
-  const googleBtnLabel = { idle: 'Connect', connecting: 'Connecting…', connected: 'Reconnect', error: 'Retry' }[googleStatus];
+  const googleBtnLabel = { idle: 'Connect', connecting: 'Connecting…', connected: 'Connected', error: 'Retry' }[googleStatus];
   const googleBtnStyle = googleStatus === 'connected'
     ? { background: 'rgba(52,168,83,0.15)', color: '#34A853', border: '1px solid rgba(52,168,83,0.3)' }
     : {};
@@ -2140,7 +2122,7 @@ function ConnectorsPage() {
               <div className="hub-desc">Gmail · Calendar{googleStatus === 'connected' ? ' · Connected ✓' : ''}</div>
             </div>
           </div>
-          <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting'}>
+          <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting' || googleStatus === 'connected'}>
             {googleBtnLabel}
           </button>
         </div>
@@ -2211,7 +2193,13 @@ function ActionHistoryPage() {
 
 function SettingsPage({ settings, setSettings }) {
   const [toast, setToast] = useState(false);
-  const update = (k, v) => setSettings(prev => ({ ...prev, [k]: v }));
+  const update = (k, v) => {
+    setSettings(prev => {
+      const next = { ...prev, [k]: v };
+      localStorage.setItem('oxy_settings', JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <div className="page-content">
@@ -2236,6 +2224,15 @@ function SettingsPage({ settings, setSettings }) {
               <div className="setting-desc">Generate audio for responses</div>
             </div>
             <button className={`toggle ${settings.voiceOn ? 'on' : ''}`} onClick={() => update('voiceOn', !settings.voiceOn)} />
+          </div>
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Gemini Voice</div>
+              <div className="setting-desc">Choose the voice used for spoken replies</div>
+            </div>
+            <select className="setting-input" value={settings.voice} onChange={e => update('voice', e.target.value)}>
+              {VOICE_OPTIONS.map(voice => <option key={voice} value={voice}>{voice}</option>)}
+            </select>
           </div>
         </div>
       </div>
@@ -2270,7 +2267,14 @@ function App() {
   const [isProcessing,setIsProcessing]= useState(false);
   const [memory,      setMemory]      = useState('');
   const [people,      setPeople]      = useState([]);
-  const [settings,    setSettings]    = useState({ name: 'Oxy', voice: 'British Warm', voiceOn: true, autonomy: 'Medium' });
+  const [settings,    setSettings]    = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('oxy_settings') || 'null');
+      return saved ? { ...DEFAULT_SETTINGS, ...saved } : DEFAULT_SETTINGS;
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  });
   const handleNewChat = () => setChatKey(k => k + 1);
   const [briefing, setBriefing] = useState(null);
   const [initialQuery, setInitialQuery] = useState(null);

@@ -87,6 +87,13 @@ app.use((req, res, next) => {
 });
 
 const audioRateLimit = new Map();
+const GEMINI_TTS_VOICES = new Set([
+  'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
+  'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
+  'Despina', 'Erinome', 'Algenib', 'Rasalgethi', 'Laomedeia', 'Achernar',
+  'Alnilam', 'Schedar', 'Gacrux', 'Pulcherrima', 'Achird', 'Zubenelgenubi',
+  'Vindemiatrix', 'Sadachbia', 'Sadaltager', 'Sulafat'
+]);
 
 // Prune stale rate-limit entries (skip in serverless — Maps are ephemeral per invocation)
 if (!process.env.VERCEL) {
@@ -265,8 +272,9 @@ async function runActions(userId, actions) {
   return results;
 }
 
-async function generateSpeech(text) {
+async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
+  const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 22000);
   try {
@@ -276,7 +284,7 @@ async function generateSpeech(text) {
         contents: [{ parts: [{ text }] }],
         generationConfig: {
           responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Aoede' } } }
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
         }
       },
       { responseType: 'stream', signal: controller.signal }
@@ -621,7 +629,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     // Run actions + TTS in parallel (save is fire-and-forget)
     const [actionResults, audioBase64] = await Promise.all([
       runActions(userId, actions),
-      generateSpeech(firstSentences(spoken)).catch(err => { console.error('[tts error]', err.message); return null; })
+      generateSpeech(firstSentences(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
     ]);
     saveMessage(userId, 'assistant', spoken).catch(() => {});
 
@@ -661,8 +669,7 @@ app.get('/memory/:userId', async (req, res) => {
       .limit(50);
     
     if (error || !data) return res.json({ memory: '' });
-    const manualProfile = data.find(row => row.source === 'manual_profile')?.content || '';
-    res.json({ memory: manualProfile });
+    res.json({ memory: await getMemory(req.params.userId) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1030,7 +1037,7 @@ app.post('/chat', async (req, res) => {
 
         if (wantsTTS) {
           try {
-            const audio = await generateSpeech(spoken);
+            const audio = await generateSpeech(spoken, settings.voice);
             if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
             elapsed('tts-complete');
           } catch (ttsErr) {
@@ -1101,7 +1108,7 @@ app.post('/chat', async (req, res) => {
 
     if (wantsTTS) {
       try {
-        const audio = await generateSpeech(spoken);
+        const audio = await generateSpeech(spoken, settings.voice);
         if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
