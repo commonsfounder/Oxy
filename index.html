@@ -323,6 +323,78 @@ body::after {
   height: auto;
 }
 
+.artifact-card {
+  margin-top: 10px;
+  border: 1px solid var(--line2);
+  background: rgba(255,255,255,0.02);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.artifact-image {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+}
+
+.artifact-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+.artifact-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.artifact-sub {
+  font-size: 11.5px;
+  color: var(--sub);
+  line-height: 1.5;
+}
+
+.artifact-code {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--sub);
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+.artifact-slide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.artifact-slide {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+
+.artifact-slide-title {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.artifact-slide-bullets {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--sub);
+}
+
 /* Action results — quiet lines */
 .msg-actions-bar {
   display: flex;
@@ -1526,7 +1598,10 @@ function humanizeActionType(type) {
     order_food: 'Order Food',
     check_balance: 'Check Balance',
     place_bet: 'Place Bet',
-    create_note: 'Create Note'
+    create_note: 'Create Note',
+    generate_visual: 'Generate Visual',
+    create_diagram: 'Create Diagram',
+    create_presentation: 'Create Presentation'
   };
   if (!type) return 'Action';
   return map[type] || type.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -1660,6 +1735,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const pendingJumpRef    = useRef(null);
   const imageInputRef     = useRef(null);
   const cameraInputRef    = useRef(null);
+  const pendingImageModeRef = useRef('vision');
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
@@ -1726,7 +1802,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     });
   }, []);
 
-  const pickImageFile = useCallback(file => {
+  const pickImageFile = useCallback((file, mode = 'vision') => {
     if (!file) return;
     setSelectedImage(prev => {
       if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
@@ -1736,13 +1812,13 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
         previewUrl: URL.createObjectURL(file)
       };
     });
-    setComposerMode('image');
+    setComposerMode(mode);
     setComposerMenuOpen(false);
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
   const onImagePicked = useCallback(e => {
-    pickImageFile(e.target.files?.[0] || null);
+    pickImageFile(e.target.files?.[0] || null, pendingImageModeRef.current || 'vision');
     e.target.value = '';
   }, [pickImageFile]);
 
@@ -1969,6 +2045,52 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     }
   }, [input, loading, selectedImage, resetImageDraft]);
 
+  const sendVisionMessage = useCallback(async (overrideText) => {
+    const text = (overrideText || input).trim();
+    if (!text || loading || !selectedImage?.file) return;
+    setMessages(prev => [...prev, { role: 'user', content: `${text}\n\n[Attached image: ${selectedImage.name}]`, time: new Date() }]);
+    if (!overrideText) setInput('');
+    setLoadingWithCb(true);
+    stopSpeaking();
+    setComposerMenuOpen(false);
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+    const placeholderId = Date.now();
+    setMessages(prev => [...prev, { role: 'assistant', content: 'Looking through the image…', time: new Date(), _streamId: placeholderId }]);
+
+    try {
+      const params = new URLSearchParams();
+      if (settings.voiceOn) params.set('tts', 'true');
+      const formData = new FormData();
+      formData.append('userId', USER_ID);
+      formData.append('message', text);
+      formData.append('settings', JSON.stringify(settings));
+      formData.append('image', selectedImage.file);
+
+      const resp = await apiFetch(`/chat-with-image${params.toString() ? `?${params}` : ''}`, { method: 'POST', body: formData });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || 'Image analysis failed.');
+
+      let finalText = data.text || 'I looked through it.';
+      if (data.ttsError) finalText = `${finalText}\n\n[Voice unavailable: ${data.ttsError}]`.trim();
+      setMessages(prev => prev.map(m =>
+        m._streamId === placeholderId
+          ? { role: 'assistant', content: finalText, actions: data.actions || [], time: m.time }
+          : m
+      ));
+      if (data.audio) playAudioFromBase64(data.audio);
+      resetImageDraft();
+    } catch (err) {
+      setMessages(prev => prev.map(m =>
+        m._streamId === placeholderId
+          ? { role: 'assistant', content: err.message || 'Image analysis failed.', time: m.time }
+          : m
+      ));
+    } finally {
+      setLoadingWithCb(false);
+    }
+  }, [input, loading, selectedImage, settings, resetImageDraft, playAudioFromBase64]);
+
   const sendMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
     if (!text || loading) return;
@@ -2087,6 +2209,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (composerMode === 'image') sendImageRequest();
+      else if (selectedImage?.file) sendVisionMessage();
       else sendMessage();
     }
   };
@@ -2111,6 +2234,44 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     if (normalized === 'pending') return 'Pending';
     if (normalized === 'failed' || normalized === 'error') return 'Failed';
     return normalized.replace(/_/g, ' ');
+  };
+
+  const renderArtifact = artifact => {
+    if (!artifact) return null;
+    if (artifact.type === 'image' || artifact.type === 'diagram' || artifact.type === 'image_analysis') {
+      const src = artifact.image ? `data:${artifact.mimeType || 'image/png'};base64,${artifact.image}` : null;
+      return (
+        <div className="artifact-card">
+          {src && <img className="artifact-image" src={src} alt={artifact.title || 'Artifact'} />}
+          <div className="artifact-copy">
+            <div className="artifact-title">{artifact.title || humanizeActionType(artifact.type)}</div>
+            {artifact.summary && <div className="artifact-sub">{artifact.summary}</div>}
+            {artifact.mermaid && <pre className="artifact-code">{artifact.mermaid}</pre>}
+          </div>
+        </div>
+      );
+    }
+    if (artifact.type === 'slide_deck') {
+      const src = artifact.image ? `data:${artifact.mimeType || 'image/png'};base64,${artifact.image}` : null;
+      return (
+        <div className="artifact-card">
+          {src && <img className="artifact-image" src={src} alt={artifact.title || 'Presentation cover'} />}
+          <div className="artifact-copy">
+            <div className="artifact-title">{artifact.title || 'Presentation'}</div>
+            {artifact.subtitle && <div className="artifact-sub">{artifact.subtitle}</div>}
+            <div className="artifact-slide-list">
+              {(artifact.slides || []).map((slide, idx) => (
+                <div key={idx} className="artifact-slide">
+                  <div className="artifact-slide-title">{idx + 1}. {slide.title}</div>
+                  <div className="artifact-slide-bullets">{(slide.bullets || []).slice(0, 3).join(' • ')}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -2230,6 +2391,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                               {a.result?.error || a.result?.text || 'Completed without extra detail.'}
                               {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
                             </span>
+                            {renderArtifact(a.result?.artifact)}
                           </span>
                           <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>
                         </span>
@@ -2269,7 +2431,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                 <span>{Icons.image}</span>
                 <span>
                   <strong>{selectedImage ? selectedImage.name : 'Generate image'}</strong>
-                  {selectedImage ? ' ready to edit' : ' using prompt only'}
+                  {selectedImage ? (composerMode === 'image' ? ' ready to turn into a visual' : ' ready for analysis or workflows') : ' using prompt only'}
                 </span>
                 <button className="attachment-clear" onClick={resetImageDraft} title="Remove">×</button>
               </div>
@@ -2288,21 +2450,21 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                     <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.image}</span>
                     <span className="composer-menu-copy">
                       <strong>Generate image</strong>
-                      <span>Prompt Oxy to create a visual</span>
+                      <span>Create a visual inside the workflow</span>
                     </span>
                   </button>
-                  <button className="composer-menu-item" onClick={() => { setComposerMenuOpen(false); imageInputRef.current?.click(); }}>
+                  <button className="composer-menu-item" onClick={() => { pendingImageModeRef.current = 'vision'; setComposerMode('vision'); setComposerMenuOpen(false); imageInputRef.current?.click(); }}>
                     <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.paperclip}</span>
                     <span className="composer-menu-copy">
                       <strong>Upload image</strong>
-                      <span>Edit or build from a photo</span>
+                      <span>Analyze a screenshot or photo</span>
                     </span>
                   </button>
-                  <button className="composer-menu-item" onClick={() => { setComposerMenuOpen(false); cameraInputRef.current?.click(); }}>
+                  <button className="composer-menu-item" onClick={() => { pendingImageModeRef.current = 'vision'; setComposerMode('vision'); setComposerMenuOpen(false); cameraInputRef.current?.click(); }}>
                     <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.camera}</span>
                     <span className="composer-menu-copy">
                       <strong>Take photo</strong>
-                      <span>Use the camera as image input</span>
+                      <span>Use the camera for context</span>
                     </span>
                   </button>
                 </div>
@@ -2310,13 +2472,23 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             </div>
 
             <div className="composer-input-wrap">
-              {composerMode === 'image' && (
-                <div className="composer-mode">{selectedImage ? 'Image edit mode' : 'Image generation mode'}</div>
+              {composerMode !== 'chat' && (
+                <div className="composer-mode">
+                  {composerMode === 'image'
+                    ? (selectedImage ? 'Visual mode with reference image' : 'Visual generation mode')
+                    : 'Image context mode'}
+                </div>
               )}
               <textarea
                 ref={textareaRef}
                 className="chat-input"
-                placeholder={composerMode === 'image' ? `Describe the image you want ${selectedImage ? 'changed' : 'made'}…` : `Message ${settings.name}…`}
+                placeholder={
+                  composerMode === 'image'
+                    ? `Describe the visual you want ${selectedImage ? 'made from this image' : 'made'}…`
+                    : composerMode === 'vision'
+                      ? 'Ask Oxy to analyze this screenshot, build slides, explain what it sees, or make a diagram…'
+                      : `Message ${settings.name}…`
+                }
                 value={input}
                 onChange={handleInput}
                 onKeyDown={handleKeyDown}
@@ -2324,8 +2496,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               />
             </div>
 
-            {(input.trim() || composerMode === 'image') ? (
-              <button className="composer-primary send" onClick={() => composerMode === 'image' ? sendImageRequest() : sendMessage()} disabled={loading || !input.trim()}>
+            {(input.trim() || composerMode !== 'chat') ? (
+              <button className="composer-primary send" onClick={() => composerMode === 'image' ? sendImageRequest() : selectedImage?.file ? sendVisionMessage() : sendMessage()} disabled={loading || !input.trim()}>
                 <span className="composer-primary-icon icon-send">{Icons.send}</span>
                 <span className="composer-primary-icon icon-mic">{Icons.mic}</span>
               </button>

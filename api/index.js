@@ -36,6 +36,12 @@ function safeParseJSON(val) {
   try { return JSON.parse(val); } catch { return val; }
 }
 
+function parseLooseJson(text) {
+  if (!text || typeof text !== 'string') return null;
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  try { return JSON.parse(cleaned); } catch { return null; }
+}
+
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 function isValidUserId(id) {
   return typeof id === 'string' && USER_ID_RE.test(id);
@@ -167,7 +173,10 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "book_uber", "input": {"destination": "destination address"}},
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
     {"type": "get_telegram_contacts", "input": {}},
-    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}}
+    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
+    {"type": "generate_visual", "input": {"brief": "what to create", "style": "optional style", "usage": "where this visual will be used"}},
+    {"type": "create_diagram", "input": {"topic": "what to explain", "goal": "what the diagram should help with"}},
+    {"type": "create_presentation", "input": {"topic": "subject", "audience": "who it's for", "objective": "what the deck should achieve", "slide_count": 6}}
   ]
 }
 </action>
@@ -181,7 +190,8 @@ ABSOLUTE RULES:
 6. Always include a spoken sentence alongside every action block — never return the action block alone
 7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
 8. If you are unsure, ask a brief clarifying question instead of guessing
-9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not`;
+9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
+10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -245,6 +255,16 @@ function pcmToWav(pcmBuffer, sampleRate = 24000) {
 function firstSentences(text, max = 2) {
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
   return (sentences.slice(0, max).join(' ').trim() || text.slice(0, 200)).trim();
+}
+
+async function generateStructuredObject(prompt, fallback = null, imageFile = null) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const parts = [{ text: `${prompt}\n\nReturn JSON only. No markdown fences.` }];
+  if (imageFile?.buffer && imageFile?.mimetype?.startsWith('image/')) {
+    parts.push({ inlineData: { mimeType: imageFile.mimetype, data: imageFile.buffer.toString('base64') } });
+  }
+  const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
+  return parseLooseJson(result.response.text()) || fallback;
 }
 
 function stripActionMarkupForDisplay(text) {
@@ -359,6 +379,182 @@ async function generateImage(prompt, imageFile) {
     image: inlineData.data,
     mimeType: inlineData.mimeType || inlineData.mime_type || 'image/png'
   };
+}
+
+async function analyzeImage(prompt, imageFile) {
+  if (!imageFile?.buffer) throw new Error('An image attachment is required.');
+  if (!imageFile.mimetype || !imageFile.mimetype.startsWith('image/')) {
+    throw new Error('Only image uploads are supported.');
+  }
+
+  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const result = await model.generateContent({
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: prompt?.trim() || 'Describe this image clearly and practically.' },
+        { inlineData: { mimeType: imageFile.mimetype, data: imageFile.buffer.toString('base64') } }
+      ]
+    }]
+  });
+
+  return {
+    success: true,
+    text: result.response.text()?.trim() || 'I looked through the image.',
+    artifact: {
+      type: 'image_analysis',
+      image: imageFile.buffer.toString('base64'),
+      mimeType: imageFile.mimetype,
+      title: 'Attached image'
+    }
+  };
+}
+
+async function createDiagramArtifact(input, imageFile) {
+  const topic = input?.topic || input?.brief || 'the topic';
+  const goal = input?.goal || input?.usage || 'make the idea easy to understand';
+  const attachmentNote = imageFile ? 'An image or screenshot is attached. Incorporate what is visible if relevant.' : '';
+  const spec = await generateStructuredObject(
+    `Create a clean teaching diagram plan for "${topic}".
+Goal: ${goal}
+${attachmentNote}
+
+Return strict JSON with:
+{
+  "title": "short title",
+  "summary": "one sentence",
+  "mermaid": "valid mermaid flowchart or mindmap syntax",
+  "visual_prompt": "prompt for an elegant flat educational diagram preview image"
+}`,
+    {
+      title: topic,
+      summary: `A simple diagram for ${topic}.`,
+      mermaid: `flowchart TD\n  A[${topic}] --> B[Key idea]\n  B --> C[Outcome]`,
+      visual_prompt: `A refined educational diagram about ${topic}, minimal, elegant, dark background, warm neutral accents`
+    },
+    imageFile || null
+  );
+
+  const preview = await generateImage(spec.visual_prompt || `An elegant educational diagram about ${topic}.`, imageFile || null);
+  return {
+    success: true,
+    text: spec.summary || `I made a diagram for ${topic}.`,
+    artifact: {
+      type: 'diagram',
+      title: spec.title || topic,
+      summary: spec.summary || '',
+      mermaid: spec.mermaid || '',
+      image: preview.image,
+      mimeType: preview.mimeType,
+      caption: preview.text
+    }
+  };
+}
+
+async function createPresentationArtifact(input, imageFile) {
+  const topic = input?.topic || 'the topic';
+  const audience = input?.audience || 'the intended audience';
+  const objective = input?.objective || 'explain the topic clearly';
+  const slideCount = Math.min(Math.max(Number(input?.slide_count) || 6, 3), 10);
+  const attachmentNote = imageFile ? 'A reference image or screenshot is attached. Use it as source context where relevant.' : '';
+
+  const deck = await generateStructuredObject(
+    `Create a concise premium presentation outline.
+Topic: ${topic}
+Audience: ${audience}
+Objective: ${objective}
+Slides: ${slideCount}
+${attachmentNote}
+
+Return strict JSON:
+{
+  "title": "deck title",
+  "subtitle": "deck subtitle",
+  "theme": "short visual direction",
+  "slides": [
+    {
+      "title": "slide title",
+      "bullets": ["bullet", "bullet"],
+      "speaker_notes": "one or two lines",
+      "visual_prompt": "what image or visual should appear on this slide"
+    }
+  ]
+}`,
+    {
+      title: topic,
+      subtitle: objective,
+      theme: 'Clean editorial study deck',
+      slides: Array.from({ length: slideCount }, (_, i) => ({
+        title: i === 0 ? topic : `Slide ${i + 1}`,
+        bullets: ['Key point', 'Supporting detail'],
+        speaker_notes: 'Talk through the main point simply.',
+        visual_prompt: `An elegant visual supporting ${topic}`
+      }))
+    },
+    imageFile || null
+  );
+
+  const coverPrompt = deck.slides?.[0]?.visual_prompt || `A premium presentation cover visual for ${topic}, minimalist, intelligent, editorial`;
+  const cover = await generateImage(coverPrompt, imageFile || null);
+  return {
+    success: true,
+    text: `I built a ${slideCount}-slide presentation structure for ${topic}.`,
+    artifact: {
+      type: 'slide_deck',
+      title: deck.title || topic,
+      subtitle: deck.subtitle || objective,
+      theme: deck.theme || '',
+      image: cover.image,
+      mimeType: cover.mimeType,
+      slides: (deck.slides || []).slice(0, slideCount)
+    }
+  };
+}
+
+async function executeAction(userId, action, params, context = {}) {
+  switch (action) {
+    case 'generate_visual': {
+      const brief = params?.brief || params?.prompt || params?.topic;
+      if (!brief) return { success: false, error: 'generate_visual needs a brief.' };
+      const prompt = [
+        brief,
+        params?.style ? `Style: ${params.style}` : '',
+        params?.usage ? `Usage: ${params.usage}` : ''
+      ].filter(Boolean).join('\n');
+      const visual = await generateImage(prompt, context.imageFile || null);
+      return {
+        success: true,
+        text: visual.text || 'I made a visual for this.',
+        artifact: {
+          type: 'image',
+          title: params?.usage || 'Generated visual',
+          image: visual.image,
+          mimeType: visual.mimeType
+        }
+      };
+    }
+    case 'create_diagram':
+      return createDiagramArtifact(params || {}, context.imageFile || null);
+    case 'create_presentation':
+      return createPresentationArtifact(params || {}, context.imageFile || null);
+    default:
+      return dispatch(userId, action, params);
+  }
+}
+
+async function executeActions(userId, actions, context = {}) {
+  if (!actions?.length) return [];
+  return Promise.all(actions.map(async action => {
+    const result = await executeAction(userId, action.type, action.input || {}, context);
+    supabase.from('action_log').insert({
+      user_id: userId,
+      action: JSON.stringify(action),
+      status: result.success ? 'executed' : 'failed',
+      error: result.success ? null : (result.error || null),
+      created_at: new Date().toISOString()
+    });
+    return { action: action.type, result };
+  }));
 }
 
 async function getMemory(userId) {
@@ -673,7 +869,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
     // Run actions + TTS in parallel (save is fire-and-forget)
     const [actionResults, audioBase64] = await Promise.all([
-      runActions(userId, actions),
+      executeActions(userId, actions),
       generateSpeech(firstSentences(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
     ]);
     saveMessage(userId, 'assistant', spoken).catch(() => {});
@@ -703,6 +899,84 @@ app.post('/images/generate', upload.single('image'), async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error('/images/generate error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+  }
+});
+
+app.post('/chat-with-image', upload.single('image'), async (req, res) => {
+  try {
+    const userId = req.body.userId;
+    const message = (req.body.message || '').trim();
+    const settings = safeParseJSON(req.body.settings) || {};
+    const wantsTTS = req.query.tts === 'true';
+
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!req.file) return res.status(400).json({ error: 'image is required.' });
+    if (!message) return res.status(400).json({ error: 'message is required.' });
+
+    const [{ model, history }] = await Promise.all([
+      buildChatContext(userId, message),
+      saveMessage(userId, 'user', `${message}\n\n[Attached image: ${req.file.originalname || 'image'}]`)
+    ]);
+    const baseHistory = normalizeGeminiHistory(history);
+    const contents = [
+      ...baseHistory,
+      {
+        role: 'user',
+        parts: [
+          { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
+          { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
+        ]
+      }
+    ];
+
+    const geminiRes = await model.generateContent({ contents });
+    let { spoken, actions } = parseActions(geminiRes.response.text());
+    let actionResults = [];
+    if (actions.length > 0) {
+      actionResults = await executeActions(userId, actions, { imageFile: req.file });
+    }
+
+    const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+    if (dataResults.length > 0) {
+      const context = dataResults.map(a => a.result.text).join('\n\n');
+      const followUp = await model.generateContent({
+        contents: [
+          ...baseHistory,
+          {
+            role: 'user',
+            parts: [
+              { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
+              { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
+            ]
+          },
+          { role: 'model', parts: [{ text: spoken || '...' }] },
+          { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached image context. Do not invent unstated facts.` }] }
+        ]
+      });
+      spoken = parseActions(followUp.response.text()).spoken || spoken || context;
+    }
+
+    if (!spoken) {
+      spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
+    }
+
+    saveMessage(userId, 'assistant', spoken).catch(() => {});
+    const result = { text: spoken, actions: actionResults };
+
+    if (wantsTTS) {
+      try {
+        const audio = await generateSpeech(spoken, settings.voice);
+        if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
+      } catch (ttsErr) {
+        console.error('[tts error]', ttsErr.message);
+        result.ttsError = ttsErr.message;
+      }
+    }
+
+    res.json(result);
+  } catch (err) {
+    console.error('/chat-with-image error:', err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.error?.message || err.message });
   }
 });
@@ -949,7 +1223,7 @@ async function buildChatContext(userId, message) {
   ]);
   const availableActions = buildAvailableActions(enabledConnectors);
   const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
-  const systemPrompt = `${OXCY_SYSTEM_PROMPT}
+    const systemPrompt = `${OXCY_SYSTEM_PROMPT}
 
 WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
@@ -959,6 +1233,11 @@ ${preferences || 'Still learning.'}
 
 CONNECTED APPS:
 ${availableActions}
+
+NATIVE CREATIVE TOOLS:
+- generate_visual for contextual images, mockups, study aids, previews, and supporting visuals
+- create_diagram for explaining systems, concepts, and workflows
+- create_presentation for slide structures and decks
 
 Current time: ${timeStr}
 
@@ -1054,17 +1333,7 @@ app.post('/chat', async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await Promise.all(actions.map(async action => {
-            const result = await dispatch(userId, action.type, action.input || {});
-            supabase.from('action_log').insert({
-              user_id: userId,
-              action: JSON.stringify(action),
-              status: result.success ? 'executed' : 'failed',
-              error: result.success ? null : (result.error || null),
-              created_at: new Date().toISOString()
-            });
-            return { action: action.type, result };
-          }));
+          actionResults = await executeActions(userId, actions);
           sse({ type: 'actions', results: actionResults });
           elapsed('actions-complete');
         }
@@ -1132,17 +1401,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await Promise.all(actions.map(async action => {
-        const result = await dispatch(userId, action.type, action.input || {});
-        supabase.from('action_log').insert({
-          user_id: userId,
-          action: JSON.stringify(action),
-          status: result.success ? 'executed' : 'failed',
-          error: result.success ? null : (result.error || null),
-          created_at: new Date().toISOString()
-        });
-        return { action: action.type, result };
-      }));
+      actionResults = await executeActions(userId, actions);
     }
 
     // For data-fetching actions, re-prompt Gemini with results
