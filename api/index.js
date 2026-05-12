@@ -272,34 +272,46 @@ async function runActions(userId, actions) {
   return results;
 }
 
+const GEMINI_TTS_MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-preview-tts'
+];
+
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 22000);
-  try {
-    const resp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        contents: [{ parts: [{ text }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
-        }
-      },
-      { signal: controller.signal }
-    );
-    const base64Audio = resp.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!base64Audio) {
-      throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
+  const failures = [];
+
+  for (const modelName of GEMINI_TTS_MODELS) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 22000);
+    try {
+      const resp = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        {
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
+          }
+        },
+        { signal: controller.signal }
+      );
+      const base64Audio = resp.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) {
+        throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
+      }
+      console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
+      return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
+    } catch (err) {
+      const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
+      failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
-  } catch (err) {
-    const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
-    throw new Error(`TTS failed (${safeVoiceName}): ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
 }
 
 async function getMemory(userId) {
