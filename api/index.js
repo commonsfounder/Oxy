@@ -310,7 +310,13 @@ async function generateSpeech(text, voiceName = 'Aoede') {
       resp.data.on('error', reject);
     });
     const pcm = Buffer.concat(pcmChunks);
+    if (!pcm.length) {
+      throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
+    }
     return pcmToWav(pcm).toString('base64');
+  } catch (err) {
+    const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
+    throw new Error(`TTS failed (${safeVoiceName}): ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
   } finally {
     clearTimeout(timeoutId);
   }
@@ -1042,6 +1048,7 @@ app.post('/chat', async (req, res) => {
             elapsed('tts-complete');
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
+            sse({ type: 'tts-error', error: ttsErr.message });
           }
         }
 
@@ -1112,6 +1119,7 @@ app.post('/chat', async (req, res) => {
         if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
+        result.ttsError = ttsErr.message;
       }
     }
 

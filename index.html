@@ -1655,6 +1655,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             if (ev.type === 'audio') {
               playAudioFromBase64(ev.data);
             }
+            if (ev.type === 'tts-error') {
+              console.error('TTS error:', ev.error);
+              setMessages(prev => prev.map(m =>
+                m._streamId === placeholderId
+                  ? { ...m, content: `${streamedText}\n\n[Voice unavailable: ${ev.error}]`.trim() }
+                  : m
+              ));
+            }
             if (ev.type === 'error') {
               streamedText = ev.error || 'Something went wrong.';
               setMessages(prev => prev.map(m =>
