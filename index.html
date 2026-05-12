@@ -1640,6 +1640,14 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let buf = '';
       let ttsError = '';
       let pendingAssistant = null;
+      let pendingAssistantShown = false;
+      let voiceRevealTimer = null;
+      const revealPendingAssistant = () => {
+        if (!pendingAssistant || pendingAssistantShown) return;
+        pendingAssistantShown = true;
+        setMessages(prev => [...prev, pendingAssistant]);
+        pendingAssistant = null;
+      };
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -1658,18 +1666,30 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               const m = { role: 'assistant', content: ev.text, time: new Date() };
               if (ev.actions?.length) m.actions = ev.actions;
               pendingAssistant = m;
-              if (!settings.voiceOn) setMessages(prev => [...prev, m]);
+              if (!settings.voiceOn) {
+                revealPendingAssistant();
+              } else if (!voiceRevealTimer) {
+                voiceRevealTimer = setTimeout(() => {
+                  revealPendingAssistant();
+                }, 900);
+              }
             }
             if (ev.type === 'audio') {
               playAudioFromBase64(ev.data);
-              if (pendingAssistant) {
-                setMessages(prev => [...prev, pendingAssistant]);
-                pendingAssistant = null;
+              if (voiceRevealTimer) {
+                clearTimeout(voiceRevealTimer);
+                voiceRevealTimer = null;
               }
+              revealPendingAssistant();
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
               console.error('TTS error:', ttsError);
+              if (voiceRevealTimer) {
+                clearTimeout(voiceRevealTimer);
+                voiceRevealTimer = null;
+              }
+              revealPendingAssistant();
             }
             if (ev.type === 'error') {
               console.error('Audio processing error:', ev.error);
@@ -1677,7 +1697,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           } catch {}
         }
       }
-      if (pendingAssistant) setMessages(prev => [...prev, pendingAssistant]);
+      if (voiceRevealTimer) clearTimeout(voiceRevealTimer);
+      revealPendingAssistant();
       if (ttsError) {
         setMessages(prev => [...prev, { role: 'assistant', content: `[Voice unavailable: ${ttsError}]`, time: new Date() }]);
       }
@@ -1712,8 +1733,19 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let streamedText = '';
       let streamActions = null;
       let ttsError = '';
-      const revealAfterAudio = !!settings.voiceOn;
-      let audioStarted = false;
+      let revealText = !settings.voiceOn;
+      let voiceRevealTimer = null;
+      const publishStreamedText = () => {
+        setMessages(prev => prev.map(m =>
+          m._streamId === placeholderId ? { ...m, content: streamedText } : m
+        ));
+      };
+      if (settings.voiceOn) {
+        voiceRevealTimer = setTimeout(() => {
+          revealText = true;
+          publishStreamedText();
+        }, 900);
+      }
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1727,10 +1759,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'text') {
               streamedText += ev.chunk;
-              if (!revealAfterAudio || audioStarted) {
-                setMessages(prev => prev.map(m =>
-                  m._streamId === placeholderId ? { ...m, content: streamedText } : m
-                ));
+              if (revealText) {
+                publishStreamedText();
               }
             }
             if (ev.type === 'actions' && ev.results?.length) {
@@ -1743,15 +1773,22 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               });
             }
             if (ev.type === 'audio') {
-              audioStarted = true;
-              setMessages(prev => prev.map(m =>
-                m._streamId === placeholderId ? { ...m, content: streamedText } : m
-              ));
+              if (voiceRevealTimer) {
+                clearTimeout(voiceRevealTimer);
+                voiceRevealTimer = null;
+              }
+              revealText = true;
+              publishStreamedText();
               playAudioFromBase64(ev.data);
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
               console.error('TTS error:', ttsError);
+              if (voiceRevealTimer) {
+                clearTimeout(voiceRevealTimer);
+                voiceRevealTimer = null;
+              }
+              revealText = true;
               setMessages(prev => prev.map(m =>
                 m._streamId === placeholderId
                   ? { ...m, content: `${streamedText}\n\n[Voice unavailable: ${ttsError}]`.trim() }
@@ -1769,6 +1806,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       }
 
       // Finalize: remove stream marker
+      if (voiceRevealTimer) clearTimeout(voiceRevealTimer);
       if (!streamedText) streamedText = 'Something went wrong.';
       setMessages(prev => prev.map(m => {
         if (m._streamId !== placeholderId) return m;
