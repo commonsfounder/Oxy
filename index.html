@@ -1585,15 +1585,29 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const playAudioFromBase64 = useCallback(async (base64Audio) => {
     if (!base64Audio) return;
     try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       setSpeaking(true);
       const bytes = new Uint8Array(atob(base64Audio).split('').map(c => c.charCodeAt(0)));
       const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
       const audio = new Audio(url);
+      audio.preload = 'auto';
+      audio.playsInline = true;
       audioRef.current = audio;
-      audio.onended = () => { setSpeaking(false); audioRef.current = null; };
-      audio.onerror = () => { setSpeaking(false); audioRef.current = null; };
-      audio.play();
-    } catch (err) { setSpeaking(false); }
+      const cleanup = () => {
+        setSpeaking(false);
+        if (audioRef.current === audio) audioRef.current = null;
+        URL.revokeObjectURL(url);
+      };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+      await audio.play();
+    } catch (err) {
+      console.error('Audio playback error:', err);
+      setSpeaking(false);
+    }
   }, []);
 
   const startRecording = async () => {

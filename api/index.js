@@ -240,6 +240,13 @@ function firstSentences(text, max = 2) {
   return (sentences.slice(0, max).join(' ').trim() || text.slice(0, 200)).trim();
 }
 
+function stripActionMarkupForDisplay(text) {
+  if (!text) return '';
+  return text
+    .replace(/<action>[\s\S]*?<\/action>/g, '')
+    .replace(/<action>[\s\S]*$/g, '');
+}
+
 async function runActions(userId, actions) {
   const results = [];
   for (const action of actions) {
@@ -264,7 +271,7 @@ async function generateSpeech(text) {
   const timeoutId = setTimeout(() => controller.abort(), 22000);
   try {
     const resp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
       {
         contents: [{ parts: [{ text }] }],
         generationConfig: {
@@ -959,13 +966,15 @@ app.post('/chat', async (req, res) => {
         const stream = await model.generateContentStream({ contents });
         let fullText = '';
         let firstChunk = true;
+        let lastVisibleText = '';
         for await (const chunk of stream.stream) {
           const text = chunk.text();
           if (text) {
             if (firstChunk) { elapsed('first-token'); firstChunk = false; }
             fullText += text;
-            // Only stream visible text, not action blocks
-            const visibleChunk = text.replace(/<action>[\s\S]*?<\/action>/g, '');
+            const nextVisibleText = stripActionMarkupForDisplay(fullText);
+            const visibleChunk = nextVisibleText.slice(lastVisibleText.length);
+            lastVisibleText = nextVisibleText;
             if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
           }
         }
