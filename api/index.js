@@ -174,6 +174,10 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
     {"type": "get_telegram_contacts", "input": {}},
     {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
+    {"type": "order_uber_eats", "input": {"query": "food or restaurant", "restaurant": "optional restaurant name", "item": "optional dish"}},
+    {"type": "order_deliveroo", "input": {"query": "food or restaurant", "restaurant": "optional restaurant name", "item": "optional dish"}},
+    {"type": "search_netflix_title", "input": {"title": "show or film title"}},
+    {"type": "add_to_netflix_list", "input": {"title": "show or film title"}},
     {"type": "generate_visual", "input": {"brief": "what to create", "style": "optional style", "usage": "where this visual will be used"}},
     {"type": "create_diagram", "input": {"topic": "what to explain", "goal": "what the diagram should help with"}},
     {"type": "create_presentation", "input": {"topic": "subject", "audience": "who it's for", "objective": "what the deck should achieve", "slide_count": 6}}
@@ -678,8 +682,10 @@ function buildAvailableActions(enabled) {
     homekit: ['homekit_control'],
     maps: ['get_directions'],
     uber: ['book_uber'],
+    ubereats: ['order_uber_eats'],
+    netflix: ['search_netflix_title', 'add_to_netflix_list'],
     telegram: ['send_telegram', 'get_telegram_contacts'],
-    deliveroo: ['order_food'],
+    deliveroo: ['order_deliveroo'],
     monzo: ['check_balance'],
     betfair: ['place_bet'],
     notion: ['create_note'],
@@ -1066,6 +1072,25 @@ const CONNECTORS = [
   { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity', implemented: false },
   { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',      implemented: false },
 ];
+
+CONNECTORS.splice(0, CONNECTORS.length,
+  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google',        implemented: true },
+  { id: 'imessage',  name: 'iMessage',                  icon: '💬', category: 'Messages',      implemented: false },
+  { id: 'whatsapp',  name: 'WhatsApp',                  icon: '💚', category: 'Messages',      implemented: false },
+  { id: 'netflix',   name: 'Netflix',                   icon: '🎬', category: 'Entertainment', implemented: true },
+  { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',         implemented: false },
+  { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity',  implemented: false },
+  { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',          implemented: true },
+  { id: 'ubereats',  name: 'Uber Eats',                 icon: '🍔', category: 'Food',          implemented: true },
+  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',     implemented: true },
+  { id: 'telegram',  name: 'Telegram',                  icon: '✈️', category: 'Messages',      implemented: true },
+  { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',       implemented: false },
+  { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',          implemented: false },
+  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',     implemented: true },
+  { id: 'maps',      name: 'Google Maps',               icon: '📍', category: 'Navigation',    implemented: false },
+  { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity',  implemented: false },
+  { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',       implemented: false },
+);
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
