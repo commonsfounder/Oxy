@@ -271,7 +271,7 @@ async function generateSpeech(text) {
   const timeoutId = setTimeout(() => controller.abort(), 22000);
   try {
     const resp = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:streamGenerateContent?key=${process.env.GEMINI_API_KEY}&alt=sse`,
       {
         contents: [{ parts: [{ text }] }],
         generationConfig: {
