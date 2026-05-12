@@ -231,89 +231,6 @@ body::after {
 /* ── CHAT ── */
 .chat-page { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
 
-.ops-shell {
-  padding: 20px 24px 6px;
-  border-bottom: 1px solid var(--line);
-  background: none;
-}
-
-.ops-grid {
-  display: block;
-}
-
-.ops-hero {
-  border-radius: 0;
-  padding: 0 0 10px;
-  box-shadow: none;
-  background: none;
-  border: none;
-}
-
-.ops-kicker {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--dim);
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-
-.ops-title {
-  margin-top: 4px;
-  max-width: 520px;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-  font-size: 30px;
-  font-weight: 500;
-  line-height: 1.02;
-  letter-spacing: -0.6px;
-  color: var(--text);
-}
-
-.ops-sub {
-  margin-top: 8px;
-  max-width: 560px;
-  font-size: 12.5px;
-  color: var(--sub);
-  line-height: 1.6;
-}
-
-.ops-meta {
-  margin-top: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-}
-
-.ops-meta-item {
-  font-size: 11px;
-  color: var(--sub);
-  letter-spacing: 0.1px;
-}
-
-.ops-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.ops-chip {
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--text);
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-family: var(--font);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.15s;
-}
-
-.ops-chip:hover {
-  background: rgba(255,255,255,0.03);
-  border-color: var(--line2);
-  transform: translateY(-1px);
-}
-
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -327,8 +244,6 @@ body::after {
 .messages::-webkit-scrollbar { display: none; }
 
 @media (max-width: 768px) {
-  .ops-shell { padding: 16px 16px 4px; }
-  .ops-title { font-size: 24px; }
   .messages { padding: 22px 20px 16px; }
 }
 
@@ -1786,17 +1701,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
   };
 
-  const latestAssistant = [...messages].reverse().find(m => m.role === 'assistant');
-  const briefingText = latestAssistant?.content || 'Ready.';
-  const memoryPreview = memory?.split('\n').filter(Boolean).slice(0, 1).join(' · ') || 'No memory saved yet.';
   const recentContacts = people.slice(0, 3).map(p => p.name);
-  const recentActionSummary = recentActions.length ? `${recentActions.length} recent actions` : 'No actions yet';
-  const quickPrompts = [
-    `Message ${recentContacts[0] || 'a contact'}`,
-    'Set a reminder',
-    'Play music',
-    'Morning briefing'
-  ];
   const formatActionTitle = (entry) => {
     const raw = entry?.action;
     if (!raw) return 'Action';
@@ -1855,30 +1760,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           <button className="history-back-btn" onClick={() => { setViewingDate(null); loadHistory(); }}>Back to latest →</button>
         </div>
       )}
-      <div className="ops-shell">
-        <div className="ops-grid">
-          <div className="ops-hero">
-            <div className="ops-kicker">Chat</div>
-            <div className="ops-title">{settings.name}</div>
-            <div className="ops-sub">{briefingText}</div>
-            <div className="ops-meta">
-              <div className="ops-meta-item">Memory: {memoryPreview}</div>
-              <div className="ops-meta-item">People: {recentContacts.length ? recentContacts.join(', ') : 'No saved people yet'}</div>
-              <div className="ops-meta-item">History: {recentActionSummary}</div>
-            </div>
-            <div className="ops-chip-row">
-              {quickPrompts.map((prompt, i) => (
-                <button key={i} className="ops-chip" onClick={() => sendMessage(
-                  prompt === 'Set a reminder' ? 'Set a reminder for tomorrow'
-                  : prompt === 'Play music' ? 'Play something to help me focus'
-                  : prompt === 'Morning briefing' ? 'Give me my morning briefing'
-                  : `Send a message to ${recentContacts[0] || 'someone'}`
-                )}>{prompt}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
       <div className="messages">
         {messages.length === 0 && !loading && (
           <div className="empty-state">
