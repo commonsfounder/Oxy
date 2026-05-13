@@ -200,6 +200,8 @@ ABSOLUTE RULES:
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
 7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
+7a. If the user asks about trains, departures, arrivals, platforms, or the next train to somewhere, use search_trains instead of guessing
+7b. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
 8. If you are unsure, ask a brief clarifying question instead of guessing
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text`;
@@ -308,15 +310,32 @@ const GEMINI_TTS_MODELS = [
   'gemini-2.5-flash-preview-tts'
 ];
 const GEMINI_IMAGE_MODEL = 'gemini-2.5-flash-image';
+let preferredTtsModel = null;
+
+function buildVoiceExcerpt(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return '';
+  const sentences = trimmed.match(/[^.!?]+[.!?]+/g) || [];
+  let excerpt = '';
+  for (const sentence of sentences.slice(0, 2)) {
+    const candidate = `${excerpt} ${sentence}`.trim();
+    if (candidate.length > 180) break;
+    excerpt = candidate;
+  }
+  return (excerpt || trimmed.slice(0, 180)).trim();
+}
 
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
   const failures = [];
+  const orderedModels = preferredTtsModel
+    ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
+    : GEMINI_TTS_MODELS;
 
-  for (const modelName of GEMINI_TTS_MODELS) {
+  for (const modelName of orderedModels) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 22000);
+    const timeoutId = setTimeout(() => controller.abort(), 9000);
     try {
       const resp = await axios.post(
         `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`,
@@ -333,6 +352,7 @@ async function generateSpeech(text, voiceName = 'Aoede') {
       if (!base64Audio) {
         throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
       }
+      preferredTtsModel = modelName;
       console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
       return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
     } catch (err) {
@@ -937,7 +957,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     // Run actions + TTS in parallel (save is fire-and-forget)
     const [actionResults, audioBase64] = await Promise.all([
       executeActions(userId, actions),
-      generateSpeech(firstSentences(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
+      generateSpeech(buildVoiceExcerpt(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
     ]);
     saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
 
@@ -1006,7 +1026,9 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     }
 
     const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
-    if (dataResults.length > 0) {
+    if (canUseDirectActionSummary(actionResults)) {
+      spoken = summarizeActionResults(actionResults);
+    } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
       const followUp = await model.generateContent({
         contents: [
@@ -1034,7 +1056,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
 
     if (wantsTTS) {
       try {
-        const audio = await generateSpeech(spoken, settings.voice);
+        const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
         if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
@@ -1348,6 +1370,20 @@ ${userContext}`;
 }
 
 const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains']);
+
+function canUseDirectActionSummary(actionResults) {
+  return actionResults.length > 0 && actionResults.every(entry =>
+    DIRECT_SUMMARY_ACTIONS.has(entry.action) && entry.result?.success && entry.result?.text
+  );
+}
+
+function summarizeActionResults(actionResults) {
+  return actionResults
+    .map(entry => entry.result?.text?.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 // Fire-and-forget post-response tasks (memory + style preferences)
 function postResponseTasks(userId, message) {
@@ -1431,7 +1467,10 @@ app.post('/chat', async (req, res) => {
 
         // For data-fetching actions, stream a follow-up summary
         const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
-        if (dataResults.length > 0) {
+        if (canUseDirectActionSummary(actionResults)) {
+          spoken = summarizeActionResults(actionResults);
+          sse({ type: 'text', chunk: spoken });
+        } else if (dataResults.length > 0) {
           const context = dataResults.map(a => a.result.text).join('\n\n');
           const followUp = await model.generateContentStream({
             contents: [
@@ -1459,7 +1498,7 @@ app.post('/chat', async (req, res) => {
 
         if (wantsTTS) {
           try {
-            const audio = await generateSpeech(spoken, settings.voice);
+            const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
             if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
             elapsed('tts-complete');
           } catch (ttsErr) {
@@ -1497,7 +1536,9 @@ app.post('/chat', async (req, res) => {
 
     // For data-fetching actions, re-prompt Gemini with results
     const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
-    if (dataResults.length > 0) {
+    if (canUseDirectActionSummary(actionResults)) {
+      spoken = summarizeActionResults(actionResults);
+    } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
       const followUp = await model.generateContent({
         contents: [
@@ -1521,7 +1562,7 @@ app.post('/chat', async (req, res) => {
 
     if (wantsTTS) {
       try {
-        const audio = await generateSpeech(spoken, settings.voice);
+        const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
         if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);

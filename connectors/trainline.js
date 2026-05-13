@@ -136,13 +136,21 @@ async function execute(userId, action, params) {
     const bookingUrl = buildTrainlineURL(originCRS, destCRS);
 
     if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
-      return { success: true, text: `No live times available right now, but here's Trainline for ${origin} to ${destination}`, bookingUrl };
+      return {
+        success: true,
+        text: `I couldn't check live departures for ${origin} to ${destination} because live rail data isn't configured right now. I can still open Trainline for the route.`,
+        bookingUrl
+      };
     }
 
     const trains = await getNextTrains(originCRS, destCRS);
 
     if (!trains.length) {
-      return { success: true, text: `No trains found from ${origin} to ${destination} right now.`, bookingUrl };
+      return {
+        success: true,
+        text: `I couldn't find any matching live departures from ${origin} to ${destination} in the current feed. That doesn't necessarily mean there are no trains at all, so I've included Trainline to double-check.`,
+        bookingUrl
+      };
     }
 
     const lines = trains.map((t, i) => {
