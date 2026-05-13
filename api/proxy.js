@@ -1,10 +1,11 @@
 require('dotenv').config();
 
-const { createClient } = require('@supabase/supabase-js');
 const { dispatch } = require('../connectors');
 const { getAuthenticatedUserId, requireSessionAuth } = require('../auth');
+const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createSupabaseServiceClient();
+logMissingRuntimeEnvOnce('proxy bootstrap');
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 module.exports = async function handler(req, res) {

@@ -2,9 +2,10 @@ const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { Api } = require('telegram');
 const { computeCheck } = require('telegram/Password');
-const { createClient } = require('@supabase/supabase-js');
+const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createSupabaseServiceClient();
+logMissingRuntimeEnvOnce('telegram connector bootstrap');
 
 const SUPPORTED_ACTIONS = ['send_telegram', 'get_telegram_contacts'];
 

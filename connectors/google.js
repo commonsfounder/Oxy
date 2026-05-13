@@ -1,7 +1,8 @@
 const axios = require('axios');
-const { createClient } = require('@supabase/supabase-js');
+const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+const supabase = createSupabaseServiceClient();
+logMissingRuntimeEnvOnce('google connector bootstrap');
 
 const SUPPORTED_ACTIONS = ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'];
 

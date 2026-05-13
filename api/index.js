@@ -4,11 +4,15 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const axios = require('axios');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
+const {
+  createGeminiServiceClient,
+  createSupabaseServiceClient,
+  getMissingRuntimeEnv,
+  logMissingRuntimeEnvOnce
+} = require('../runtime');
 const {
   createSessionToken,
   getAuthenticatedUserId,
@@ -120,12 +124,9 @@ if (!process.env.VERCEL) {
   }, 5 * 60 * 1000).unref();
 }
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const supabase = createSupabaseServiceClient();
+const genAI = createGeminiServiceClient();
+logMissingRuntimeEnvOnce('api bootstrap');
 
 const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
 const CONTEXT_CACHE_MAX = 500;
@@ -1813,8 +1814,11 @@ app.get('/debug/:userId', async (req, res) => {
 });
 
 app.get('/health', (_req, res) => {
+  const missingEnv = getMissingRuntimeEnv();
   res.json({
-    status: 'Oxcy is alive',
+    status: missingEnv.length ? 'degraded' : 'ok',
+    app: 'Oxy',
+    missingEnv,
     timestamp: new Date().toISOString()
   });
 });
