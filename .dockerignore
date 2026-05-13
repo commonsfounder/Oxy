@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.env
+.env.local
+.git
+.gitignore
+.vercel
+.next
+.lazyweb
+dist
+build
+coverage
+.DS_Store

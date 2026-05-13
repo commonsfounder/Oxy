@@ -1,0 +1,13 @@
+.git
+.gitignore
+.gcloudignore
+node_modules
+.env
+.env.local
+.vercel
+.next
+.lazyweb
+dist
+build
+coverage
+.DS_Store

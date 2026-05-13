@@ -174,6 +174,72 @@ vercel deploy
 
 Set all environment variables in the Vercel dashboard under Project Settings → Environment Variables.
 
+### Deploying to Cloud Run
+
+Cloud Run is the best fit if you want to get Oxy off Vercel and prepare for a later Gemini Live / realtime voice backend. This repo now runs as a standard Node service and includes:
+
+- `server.js` listening on `0.0.0.0:$PORT`
+- `Dockerfile` for Cloud Run source or container deploys
+- `.dockerignore` to keep deploys lean
+- `cloudrun.env.example.yaml` for runtime env vars
+
+1. **Install and auth `gcloud`**
+   ```bash
+   gcloud auth login
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+2. **Enable the required services**
+   ```bash
+   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+   ```
+
+3. **Create your Cloud Run env file**
+   ```bash
+   cp cloudrun.env.example.yaml cloudrun.env.yaml
+   ```
+   Fill in the real values. For production, Secret Manager is better than plain env files, but this is the fastest path to a working deploy.
+
+4. **Deploy from source**
+   ```bash
+   gcloud run deploy oxy \
+     --source . \
+     --region europe-west2 \
+     --allow-unauthenticated \
+     --env-vars-file cloudrun.env.yaml
+   ```
+
+   Cloud Run will use the checked-in `Dockerfile` automatically.
+
+5. **Set `APP_URL` after the first deploy**
+
+   Once the service is up, get its public URL:
+   ```bash
+   gcloud run services describe oxy \
+     --region europe-west2 \
+     --format="value(status.url)"
+   ```
+
+   Then update the service so OAuth and browser postMessage checks use the real Cloud Run URL:
+   ```bash
+   gcloud run services update oxy \
+     --region europe-west2 \
+     --update-env-vars APP_URL=https://YOUR-SERVICE-URL.a.run.app
+   ```
+
+6. **Smoke-test**
+
+   Check:
+   - `GET /health`
+   - register/login
+   - chat
+   - voice
+   - Google connector OAuth callback
+
+Notes:
+- `vercel.json` can stay in the repo while you migrate; Cloud Run ignores it.
+- `mcp-server.js` is a separate process. If you still want the MCP server in Cloud Run, deploy it as a second service instead of trying to run both processes in one container.
+
 ## Project Structure
 
 ```
