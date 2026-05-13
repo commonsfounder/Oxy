@@ -58,20 +58,29 @@ async function lookupCRS(name) {
 async function getNextTrains(originCRS, destCRS) {
   const appId  = process.env.TRANSPORT_API_APP_ID;
   const appKey = process.env.TRANSPORT_API_APP_KEY;
+  const endpoint = `https://transportapi.com/v3/uk/train/station/${originCRS}/live.json`;
+  const baseParams = {
+    app_id: appId,
+    app_key: appKey,
+    calling_at: destCRS,
+    train_status: 'passenger',
+  };
 
-  const resp = await axios.get(
-    `https://transportapi.com/v3/uk/train/station/${originCRS}/live.json`,
-    {
-      params: {
-        app_id: appId,
-        app_key: appKey,
-        calling_at: destCRS,
-        darwin: true,
-        train_status: 'passenger',
-      },
+  let resp;
+  try {
+    resp = await axios.get(endpoint, {
+      params: { ...baseParams, darwin: true },
       timeout: 10000,
-    }
-  );
+    });
+  } catch (err) {
+    // Some TransportAPI apps can access live rail data but not the Darwin-specific flag.
+    // Retry the plain live endpoint before surfacing a failure.
+    if (err.response?.status !== 403) throw err;
+    resp = await axios.get(endpoint, {
+      params: baseParams,
+      timeout: 10000,
+    });
+  }
 
   const departures = resp.data?.departures?.all || [];
   return departures.slice(0, 3).map(d => ({
