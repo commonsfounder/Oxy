@@ -143,6 +143,8 @@ if (!process.env.VERCEL) {
 }
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash';
+const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash';
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
 
@@ -205,12 +207,15 @@ ABSOLUTE RULES:
 7b. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
 8. If you are unsure, ask a brief clarifying question instead of guessing
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
-10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text`;
+10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
+11. Recent action results are real state. Don't repeat successful actions unless the user clearly asks you to repeat them.
+12. If a recent action failed and the user asks to retry, fix, redo, or "do the failed one", retry only the failed action unless they explicitly ask to rerun other actions too.
+13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
     role: m.role === 'user' ? 'user' : 'model',
-    parts: [{ text: m.content || '' }]
+    parts: [{ text: toGeminiHistoryText(m) }]
   }));
   // Drop leading model turns — Gemini requires starting with user
   while (mapped.length > 0 && mapped[0].role !== 'user') mapped.shift();
@@ -266,6 +271,45 @@ function pcmToWav(pcmBuffer, sampleRate = 24000) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
+function invalidateUserContextCache(userId) {
+  if (userId) contextCache.delete(userId);
+}
+
+function summarizeActionInput(input) {
+  if (!input || typeof input !== 'object') return '';
+  const preferredKeys = ['contact', 'to', 'title', 'destination', 'query', 'restaurant', 'item', 'origin', 'topic', 'brief'];
+  const values = preferredKeys
+    .map(key => input[key])
+    .filter(Boolean)
+    .slice(0, 3);
+  return values.length ? ` (${values.join(' · ')})` : '';
+}
+
+function summarizeActionOutcome(entry) {
+  const type = entry?.action || entry?.type || 'action';
+  const result = entry?.result || {};
+  const status = result.success === false ? 'failed' : 'succeeded';
+  const detail = (result.error || result.text || '').trim();
+  return `- ${humanizeActionType(type)}${summarizeActionInput(entry?.input || result?.input)}: ${status}${detail ? ` — ${detail}` : ''}`;
+}
+
+function toGeminiHistoryText(message) {
+  const content = message?.content || '';
+  const actionLines = Array.isArray(message?.actions) ? message.actions.map(summarizeActionOutcome).filter(Boolean) : [];
+  if (!actionLines.length) return content || conversationFallbackText(message);
+  return [content, 'Action results:', ...actionLines].filter(Boolean).join('\n');
+}
+
+function serializeLoggedAction(action, result) {
+  return JSON.stringify({
+    type: action?.type || '',
+    input: action?.input || {},
+    status: result?.success ? 'executed' : 'failed',
+    resultText: typeof result?.text === 'string' ? result.text.slice(0, 280) : '',
+    error: result?.success ? null : (result?.error || null)
+  });
+}
+
 function getWavDurationMs(buffer) {
   try {
     if (!buffer || buffer.length < 44) return null;
@@ -297,7 +341,7 @@ function isImplausibleTranscript(text, durationMs) {
 async function transcribeAudio(buffer) {
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-  const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const transcribeModel = genAI.getGenerativeModel({ model: FAST_MODEL });
   const durationMs = getWavDurationMs(buffer);
 
   const prompts = [
@@ -327,7 +371,7 @@ function firstSentences(text, max = 2) {
 }
 
 async function generateStructuredObject(prompt, fallback = null, imageFile = null) {
-  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
   const parts = [{ text: `${prompt}\n\nReturn JSON only. No markdown fences.` }];
   if (imageFile?.buffer && imageFile?.mimetype?.startsWith('image/')) {
     parts.push({ inlineData: { mimeType: imageFile.mimetype, data: imageFile.buffer.toString('base64') } });
@@ -350,14 +394,15 @@ async function runActions(userId, actions) {
     const result = await dispatch(userId, action.type, action.input || {});
     console.log('[action] result:', action.type, JSON.stringify(result));
     results.push({ action: action.type, result });
-    supabase.from('action_log').insert({
+    await supabase.from('action_log').insert({
       user_id: userId,
-      action: JSON.stringify(action),
+      action: serializeLoggedAction(action, result),
       status: result.success ? 'executed' : 'failed',
       error: result.success ? null : (result.error || null),
       created_at: new Date().toISOString()
     });
   }
+  invalidateUserContextCache(userId);
   return results;
 }
 
@@ -474,7 +519,7 @@ async function analyzeImage(prompt, imageFile) {
     throw new Error('Only image uploads are supported.');
   }
 
-  const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
   const result = await model.generateContent({
     contents: [{
       role: 'user',
@@ -631,17 +676,19 @@ async function executeAction(userId, action, params, context = {}) {
 
 async function executeActions(userId, actions, context = {}) {
   if (!actions?.length) return [];
-  return Promise.all(actions.map(async action => {
+  const results = await Promise.all(actions.map(async action => {
     const result = await executeAction(userId, action.type, action.input || {}, context);
-    supabase.from('action_log').insert({
+    await supabase.from('action_log').insert({
       user_id: userId,
-      action: JSON.stringify(action),
+      action: serializeLoggedAction(action, result),
       status: result.success ? 'executed' : 'failed',
       error: result.success ? null : (result.error || null),
       created_at: new Date().toISOString()
     });
     return { action: action.type, result };
   }));
+  invalidateUserContextCache(userId);
+  return results;
 }
 
 async function getMemory(userId) {
@@ -686,7 +733,7 @@ async function saveMemory(userId, content, source = 'fact') {
 
 async function extractMemoryFact(userId, text) {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const result = await model.generateContent(
       `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
@@ -724,7 +771,7 @@ async function getHistory(userId) {
     .eq('user_id', userId)
     .neq('role', 'system')
     .order('created_at', { ascending: false })
-    .limit(10);
+    .limit(25);
 
   if (error || !data) return [];
   return data.reverse().map(normalizeConversationRow);
@@ -788,6 +835,7 @@ async function saveMessage(userId, role, content) {
       content: serializeConversationContent(content),
       created_at: new Date().toISOString()
     });
+  invalidateUserContextCache(userId);
 }
 
 async function getPreferences(userId) {
@@ -858,12 +906,13 @@ async function getUserContext(userId) {
   const [connectors, memories, actionLog] = await Promise.all([
     supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
     supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
-    supabase.from('action_log').select('action').eq('user_id', userId).order('created_at', { ascending: false }).limit(100)
+    supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(12)
   ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
 
   const contactCounts = {};
+  const recentActionLines = [];
   for (const row of (actionLog.data || [])) {
     try {
       const a = typeof row.action === 'string' ? JSON.parse(row.action) : row.action;
@@ -874,6 +923,17 @@ async function getUserContext(userId) {
       contactCounts[key] = (contactCounts[key] || 0) + 1;
     } catch {}
   }
+  for (const row of (actionLog.data || []).slice(0, 8)) {
+    try {
+      const a = typeof row.action === 'string' ? JSON.parse(row.action) : row.action;
+      const status = row.status === 'failed' ? 'failed' : 'succeeded';
+      const detail = (row.error || a.resultText || '').trim();
+      recentActionLines.push(
+        `${new Date(row.created_at).toLocaleTimeString('en-GB', { timeZone: TIMEZONE, hour: '2-digit', minute: '2-digit' })}: ` +
+        `${humanizeActionType(a.type)}${summarizeActionInput(a.input)} — ${status}${detail ? ` (${detail})` : ''}`
+      );
+    } catch {}
+  }
   const patterns = Object.entries(contactCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 6)
@@ -881,11 +941,13 @@ async function getUserContext(userId) {
     .join(', ') || 'none yet';
 
   const memoryLines = (memories.data || []).map(m => m.content).join('; ') || 'none';
+  const recentActions = recentActionLines.join(' | ') || 'none yet';
 
   const context = `LIVE USER CONTEXT:
 Active connectors: ${active}
 Messaging patterns: ${patterns}
-Key facts: ${memoryLines}`.slice(0, 1800);
+Key facts: ${memoryLines}
+Recent action outcomes: ${recentActions}`.slice(0, 2200);
 
   if (contextCache.size >= CONTEXT_CACHE_MAX) {
     const oldest = contextCache.keys().next().value;
@@ -1303,7 +1365,7 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3-flash-preview',
+      model: PRIMARY_CHAT_MODEL,
       systemInstruction: systemPrompt
     });
     const geminiRes = await model.generateContent('whats going on today?');
@@ -1413,7 +1475,7 @@ ${userContext}`;
 
   const useSearch = message && needsSearch(message);
   const modelConfig = {
-    model: 'gemini-3-flash-preview',
+    model: PRIMARY_CHAT_MODEL,
     systemInstruction: systemPrompt
   };
   if (useSearch) modelConfig.tools = [{ googleSearch: {} }];
