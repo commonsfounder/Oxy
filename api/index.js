@@ -143,7 +143,7 @@ if (!process.env.VERCEL) {
 }
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-pro-preview';
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3-flash-preview';
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.

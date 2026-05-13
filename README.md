@@ -176,12 +176,13 @@ Set all environment variables in the Vercel dashboard under Project Settings →
 
 ### Deploying to Cloud Run
 
-Cloud Run is the best fit if you want to get Oxy off Vercel and prepare for a later Gemini Live / realtime voice backend. This repo now runs as a standard Node service and includes:
+Cloud Run is the best fit if you want to get Oxy off Vercel and run the new realtime voice path cleanly. This repo now runs as a standard Node service and includes:
 
 - `server.js` listening on `0.0.0.0:$PORT`
 - `Dockerfile` for Cloud Run source or container deploys
 - `.dockerignore` to keep deploys lean
 - `cloudrun.env.example.yaml` for runtime env vars
+- `/realtime-voice` WebSocket handling for Gemini Live sessions
 
 1. **Install and auth `gcloud`**
    ```bash
@@ -199,6 +200,10 @@ Cloud Run is the best fit if you want to get Oxy off Vercel and prepare for a la
    cp cloudrun.env.example.yaml cloudrun.env.yaml
    ```
    Fill in the real values. For production, Secret Manager is better than plain env files, but this is the fastest path to a working deploy.
+   If you want Gemini Live over Vertex AI instead of the Developer API, also fill in:
+   - `GOOGLE_GENAI_USE_ENTERPRISE=true`
+   - `GOOGLE_CLOUD_PROJECT`
+   - `GOOGLE_CLOUD_LOCATION`
 
 4. **Deploy from source**
    ```bash
@@ -232,8 +237,8 @@ Cloud Run is the best fit if you want to get Oxy off Vercel and prepare for a la
    Check:
    - `GET /health`
    - register/login
-   - chat
-   - voice
+   - typed chat
+   - hold-to-talk voice
    - Google connector OAuth callback
 
 Notes:

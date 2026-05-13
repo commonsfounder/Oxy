@@ -1603,6 +1603,12 @@ function withAuthToken(url) {
   return `${url}${sep}authToken=${encodeURIComponent(AUTH_TOKEN)}`;
 }
 
+function getRealtimeVoiceSocketUrl() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const auth = AUTH_TOKEN ? `?authToken=${encodeURIComponent(AUTH_TOKEN)}` : '';
+  return `${protocol}//${window.location.host}/realtime-voice${auth}`;
+}
+
 function persistSession(token, userId) {
   AUTH_TOKEN = token;
   USER_ID = userId;
@@ -1833,6 +1839,12 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const imageInputRef     = useRef(null);
   const cameraInputRef    = useRef(null);
   const pendingImageModeRef = useRef('vision');
+  const liveSocketRef     = useRef(null);
+  const liveAudioContextRef = useRef(null);
+  const liveAudioCursorRef = useRef(0);
+  const liveAudioDrainTimerRef = useRef(null);
+  const liveTurnRef       = useRef(null);
+  const liveInputRef      = useRef(null);
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
@@ -1857,6 +1869,20 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   useEffect(() => () => {
     if (selectedImage?.previewUrl) URL.revokeObjectURL(selectedImage.previewUrl);
   }, [selectedImage]);
+
+  useEffect(() => () => {
+    if (liveAudioDrainTimerRef.current) clearTimeout(liveAudioDrainTimerRef.current);
+    if (liveInputRef.current?.stop) liveInputRef.current.stop();
+    if (liveSocketRef.current && liveSocketRef.current.readyState === WebSocket.OPEN) {
+      try {
+        liveSocketRef.current.send(JSON.stringify({ type: 'live-stop' }));
+      } catch {}
+      liveSocketRef.current.close();
+    }
+    if (liveAudioContextRef.current && liveAudioContextRef.current.state !== 'closed') {
+      liveAudioContextRef.current.close().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1887,7 +1913,25 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   }, [initialQuery]);
 
   const stopSpeaking = () => {
+    if (liveInputRef.current?.stop) liveInputRef.current.stop();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    if (liveAudioDrainTimerRef.current) {
+      clearTimeout(liveAudioDrainTimerRef.current);
+      liveAudioDrainTimerRef.current = null;
+    }
+    if (liveAudioContextRef.current && liveAudioContextRef.current.state !== 'closed') {
+      liveAudioContextRef.current.close().catch(() => {});
+    }
+    liveAudioContextRef.current = null;
+    liveAudioCursorRef.current = 0;
+    if (liveSocketRef.current && liveSocketRef.current.readyState === WebSocket.OPEN) {
+      try {
+        liveSocketRef.current.send(JSON.stringify({ type: 'live-stop' }));
+      } catch {}
+      liveSocketRef.current.close();
+    }
+    liveSocketRef.current = null;
+    liveTurnRef.current = null;
     setSpeaking(false);
   };
 
@@ -1974,6 +2018,203 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     }
   }, []);
 
+  const ensureRealtimeAudioContext = useCallback(async (sampleRateHint = 24000) => {
+    let ctx = liveAudioContextRef.current;
+    if (!ctx || ctx.state === 'closed') {
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRateHint });
+      liveAudioContextRef.current = ctx;
+      liveAudioCursorRef.current = ctx.currentTime;
+    }
+    if (ctx.state === 'suspended') await ctx.resume();
+    return ctx;
+  }, []);
+
+  const scheduleRealtimeSpeakingDrain = useCallback((ctx, endTime) => {
+    if (liveAudioDrainTimerRef.current) clearTimeout(liveAudioDrainTimerRef.current);
+    const waitMs = Math.max(0, (endTime - ctx.currentTime) * 1000) + 120;
+    liveAudioDrainTimerRef.current = setTimeout(() => {
+      if (!audioRef.current) setSpeaking(false);
+    }, waitMs);
+  }, []);
+
+  const playRealtimeAudioChunk = useCallback(async (base64Audio, mimeType = 'audio/pcm;rate=24000') => {
+    if (!base64Audio) return;
+    const normalizedType = String(mimeType || '').toLowerCase();
+    if (!/audio\/(pcm|l16)/.test(normalizedType)) {
+      await playAudioFromBase64(base64Audio);
+      return;
+    }
+
+    const rateMatch = normalizedType.match(/(?:rate|sample_rate)=([0-9]+)/);
+    const sampleRate = rateMatch ? Number(rateMatch[1]) : 24000;
+    const ctx = await ensureRealtimeAudioContext(sampleRate);
+    const bytes = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
+    const sampleCount = Math.floor(bytes.byteLength / 2);
+    if (!sampleCount) return;
+
+    const buffer = ctx.createBuffer(1, sampleCount, sampleRate);
+    const channel = buffer.getChannelData(0);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < sampleCount; i += 1) {
+      channel[i] = view.getInt16(i * 2, true) / 32768;
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime + 0.02, liveAudioCursorRef.current || ctx.currentTime);
+    source.start(startAt);
+    const endAt = startAt + buffer.duration;
+    liveAudioCursorRef.current = endAt;
+    setSpeaking(true);
+    source.onended = () => scheduleRealtimeSpeakingDrain(ctx, endAt);
+  }, [ensureRealtimeAudioContext, playAudioFromBase64, scheduleRealtimeSpeakingDrain]);
+
+  const upsertLiveMessage = useCallback((slot, updater) => {
+    const liveTurn = liveTurnRef.current;
+    const targetId = liveTurn?.[slot];
+    if (!targetId) return;
+    setMessages(prev => prev.map(msg => {
+      if (msg._liveId !== targetId) return msg;
+      return typeof updater === 'function' ? updater(msg) : { ...msg, ...updater };
+    }));
+  }, []);
+
+  const beginLiveTurn = useCallback(() => {
+    const base = Date.now();
+    const liveTurn = {
+      userId: `${base}-user`,
+      assistantId: `${base}-assistant`
+    };
+    liveTurnRef.current = liveTurn;
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: '', time: new Date(), _liveId: liveTurn.userId, _livePending: true },
+      { role: 'assistant', content: '', time: new Date(), _liveId: liveTurn.assistantId, _livePending: true, actions: [] }
+    ]);
+    return liveTurn;
+  }, []);
+
+  const finalizeLiveTurn = useCallback(() => {
+    const liveTurn = liveTurnRef.current;
+    if (!liveTurn) return;
+    setMessages(prev => prev
+      .map(msg => {
+        if (msg._liveId !== liveTurn.userId && msg._liveId !== liveTurn.assistantId) return msg;
+        const next = { ...msg };
+        delete next._livePending;
+        return next;
+      })
+      .filter(msg => !(msg._liveId && !msg.content && !msg.actions?.length))
+    );
+    liveTurnRef.current = null;
+    setLoadingWithCb(false);
+  }, []);
+
+  const openRealtimeVoiceSession = useCallback(async (stream) => {
+    const socket = new WebSocket(getRealtimeVoiceSocketUrl());
+
+    await new Promise((resolve, reject) => {
+      socket.onopen = resolve;
+      socket.onerror = () => reject(new Error('Realtime voice connection failed.'));
+    });
+
+    const inputContext = new (window.AudioContext || window.webkitAudioContext)();
+    const inputSource = inputContext.createMediaStreamSource(stream);
+    const processor = inputContext.createScriptProcessor(4096, 1, 1);
+    const silentGain = inputContext.createGain();
+    silentGain.gain.value = 0;
+    inputSource.connect(processor);
+    processor.connect(silentGain);
+    silentGain.connect(inputContext.destination);
+
+    const liveTurn = beginLiveTurn();
+    const liveCapture = {
+      state: 'recording',
+      stop: () => {
+        if (liveCapture.state !== 'recording') return;
+        liveCapture.state = 'inactive';
+        try { processor.disconnect(); } catch {}
+        try { inputSource.disconnect(); } catch {}
+        try { silentGain.disconnect(); } catch {}
+        inputContext.close().catch(() => {});
+        stream.getTracks().forEach(t => t.stop());
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'audio-end' }));
+        }
+        setLoadingWithCb(true);
+      }
+    };
+
+    processor.onaudioprocess = event => {
+      if (socket.readyState !== WebSocket.OPEN || liveCapture.state !== 'recording') return;
+      const input = event.inputBuffer.getChannelData(0);
+      const pcm = new Int16Array(input.length);
+      for (let i = 0; i < input.length; i += 1) {
+        const sample = Math.max(-1, Math.min(1, input[i]));
+        pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+      }
+      const bytes = new Uint8Array(pcm.buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+      socket.send(JSON.stringify({
+        type: 'audio-chunk',
+        mimeType: `audio/pcm;rate=${inputContext.sampleRate}`,
+        data: btoa(binary)
+      }));
+    };
+
+    liveSocketRef.current = socket;
+    mediaRecorderRef.current = liveCapture;
+    liveInputRef.current = liveCapture;
+    socket.send(JSON.stringify({ type: 'live-start', voice: settings.voice }));
+
+    socket.onmessage = async (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'user-transcript') {
+          upsertLiveMessage('userId', msg => ({ ...msg, content: payload.text || '', _livePending: !payload.final }));
+        }
+        if (payload.type === 'assistant-transcript') {
+          upsertLiveMessage('assistantId', msg => ({ ...msg, content: payload.text || '', _livePending: !payload.final }));
+        }
+        if (payload.type === 'assistant-actions' && payload.results?.length) {
+          upsertLiveMessage('assistantId', msg => ({
+            ...msg,
+            actions: [...(msg.actions || []), ...payload.results]
+          }));
+          maybeOpenActionResults(payload.results);
+        }
+        if (payload.type === 'assistant-audio') {
+          await playRealtimeAudioChunk(payload.data, payload.mimeType);
+        }
+        if (payload.type === 'live-error') {
+          upsertLiveMessage('assistantId', msg => ({
+            ...msg,
+            content: msg.content || `[Voice unavailable: ${payload.error || 'Realtime voice failed.'}]`
+          }));
+          finalizeLiveTurn();
+        }
+        if (payload.type === 'live-turn-complete') {
+          finalizeLiveTurn();
+          if (socket.readyState === WebSocket.OPEN) socket.close();
+        }
+      } catch (err) {
+        console.error('Realtime voice message error:', err);
+      }
+    };
+
+    socket.onclose = () => {
+      if (liveCapture.state === 'recording') liveCapture.stop();
+      if (liveSocketRef.current === socket) liveSocketRef.current = null;
+      if (mediaRecorderRef.current === liveCapture) mediaRecorderRef.current = null;
+      if (liveInputRef.current === liveCapture) liveInputRef.current = null;
+      finalizeLiveTurn();
+    };
+    setRecordingWithCb(true);
+    return { liveTurn, liveCapture };
+  }, [beginLiveTurn, finalizeLiveTurn, maybeOpenActionResults, playRealtimeAudioChunk, settings.voice, upsertLiveMessage]);
+
   const openActionLink = useCallback((deepLink, webLink) => {
     const primary = deepLink || webLink;
     if (!primary) return;
@@ -2018,15 +2259,24 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   const startRecording = async () => {
     try {
+      stopSpeaking();
       const stream        = await navigator.mediaDevices.getUserMedia({ audio: true });
+      chunksRef.current = [];
+      if (window.WebSocket) {
+        try {
+          await openRealtimeVoiceSession(stream);
+          return;
+        } catch (realtimeErr) {
+          console.warn('Realtime voice unavailable, falling back to upload flow:', realtimeErr);
+        }
+      }
+
       const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
       mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
       mediaRecorder.ondataavailable = e => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mediaRecorder.onstop = async () => { stream.getTracks().forEach(t => t.stop()); await sendAudio(); };
       mediaRecorder.start();
       setRecordingWithCb(true);
-      stopSpeaking();
     } catch (err) { console.error('Mic error:', err); }
   };
 
