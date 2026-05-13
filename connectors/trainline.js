@@ -121,6 +121,11 @@ function buildTrainlineURL(originCRS, destCRS) {
   return `https://www.thetrainline.com/trains/${from}/${to}`;
 }
 
+function compareClockTimes(a, b) {
+  if (!a || !b || !/^\d{2}:\d{2}$/.test(a) || !/^\d{2}:\d{2}$/.test(b)) return null;
+  return a.localeCompare(b);
+}
+
 async function execute(userId, action, params) {
   try {
     if (action !== 'search_trains') return { success: false, error: `Unknown action: ${action}` };
@@ -156,10 +161,15 @@ async function execute(userId, action, params) {
     const lines = trains.map((t, i) => {
       const dep = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
         ? `${t.scheduledDeparture} (exp ${t.estimatedDeparture})` : t.scheduledDeparture;
-      const arr = t.estimatedArrival || t.scheduledArrival || '?';
+      const rawArr = t.estimatedArrival || t.scheduledArrival || '';
+      const depCompareValue = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
+        ? t.estimatedDeparture
+        : t.scheduledDeparture;
+      const arr = compareClockTimes(rawArr, depCompareValue) === -1 ? '' : rawArr;
       const plat = t.platform ? ` · Platform ${t.platform}` : '';
       const status = t.cancelled ? ' ✗ CANCELLED' : '';
-      return `${i + 1}. ${dep} → ${arr}${plat}${status}`;
+      const arrivalPart = arr ? ` → ${arr}` : '';
+      return `${i + 1}. ${dep}${arrivalPart}${plat}${status}`;
     });
 
     return {

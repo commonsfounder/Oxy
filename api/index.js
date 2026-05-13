@@ -265,6 +265,61 @@ function pcmToWav(pcmBuffer, sampleRate = 24000) {
   return Buffer.concat([header, pcmBuffer]);
 }
 
+function getWavDurationMs(buffer) {
+  try {
+    if (!buffer || buffer.length < 44) return null;
+    const sampleRate = buffer.readUInt32LE(24);
+    const byteRate = buffer.readUInt32LE(28);
+    const dataSize = buffer.readUInt32LE(40);
+    if (!sampleRate || !byteRate || !dataSize) return null;
+    return Math.round((dataSize / byteRate) * 1000);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTranscript(text) {
+  return String(text || '').trim().replace(/^["'\s]+|["'\s]+$/g, '');
+}
+
+function isImplausibleTranscript(text, durationMs) {
+  const normalized = normalizeTranscript(text);
+  if (!normalized) return false;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (!durationMs || durationMs < 400) return words.length > 4;
+  const wordsPerSecond = words.length / Math.max(durationMs / 1000, 0.5);
+  if (durationMs < 1500 && words.length > 7) return true;
+  if (durationMs < 2500 && words.length > 12) return true;
+  return wordsPerSecond > 4.8;
+}
+
+async function transcribeAudio(buffer) {
+  const audioBase64Input = buffer.toString('base64');
+  const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
+  const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+  const durationMs = getWavDurationMs(buffer);
+
+  const prompts = [
+    'Transcribe this audio exactly. Return only the spoken words. If any part is unclear, omit it rather than guessing. If there is no clear speech, return an empty string.',
+    'Verbatim transcription only. Do not answer the user. Do not infer intent. Do not add any words that are not clearly audible. If unclear, return an empty string.'
+  ];
+
+  let lastTranscript = '';
+  for (const prompt of prompts) {
+    const response = await transcribeModel.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
+      generationConfig: { temperature: 0, topP: 0.1, topK: 1 }
+    });
+    const transcript = normalizeTranscript(response.response.text());
+    lastTranscript = transcript;
+    if (transcript && !isImplausibleTranscript(transcript, durationMs)) {
+      return transcript;
+    }
+  }
+
+  return isImplausibleTranscript(lastTranscript, durationMs) ? '' : lastTranscript;
+}
+
 function firstSentences(text, max = 2) {
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
   return (sentences.slice(0, max).join(' ').trim() || text.slice(0, 200)).trim();
@@ -910,23 +965,13 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
 
   try {
-    const audioBase64Input = req.file.buffer.toString('base64');
-    const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-
-    // Step 1: Transcribe with Gemini (fast, no system prompt needed) + build context in parallel
-    const transcribeModel = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
-    const [transcribeRes, context] = await Promise.all([
-      transcribeModel.generateContent({
-        contents: [{ role: 'user', parts: [
-          { text: 'Transcribe this audio exactly. Return only the transcribed text, nothing else.' },
-          audioPart
-        ]}]
-      }),
+    const [userText, context] = await Promise.all([
+      transcribeAudio(req.file.buffer),
       buildChatContext(userId) // message unknown yet — no search for audio transcription step
     ]);
 
-    const userText = transcribeRes.response.text()?.trim();
     if (!userText) {
+      sse({ type: 'transcription-error', error: "I couldn't clearly make out what you said." });
       sse({ type: 'done' });
       return res.end();
     }
@@ -954,15 +999,23 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
     const { spoken, actions } = parseActions(fullText);
 
-    // Run actions + TTS in parallel (save is fire-and-forget)
-    const [actionResults, audioBase64] = await Promise.all([
-      executeActions(userId, actions),
-      generateSpeech(buildVoiceExcerpt(spoken), req.body.voice).catch(err => { console.error('[tts error]', err.message); return null; })
-    ]);
-    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
+    let actionResults = [];
+    let audioBase64 = null;
+    let ttsError = '';
+    if (actions.length > 0) {
+      actionResults = await executeActions(userId, actions);
+    }
+    const finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
+    audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
+      ttsError = err.message;
+      console.error('[tts error]', err.message);
+      return null;
+    });
+    saveMessage(userId, 'assistant', { text: finalSpoken, actions: actionResults }).catch(() => {});
 
-    sse({ type: 'response', text: spoken, actions: actionResults });
+    sse({ type: 'response', text: finalSpoken, actions: actionResults });
     if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav' });
+    if (ttsError) sse({ type: 'tts-error', error: ttsError });
     sse({ type: 'done' });
     res.end();
 

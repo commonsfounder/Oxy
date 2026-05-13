@@ -462,6 +462,25 @@ body::after {
   line-height: 1.45;
 }
 
+.msg-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.msg-action-link:hover {
+  background: rgba(255,255,255,0.08);
+}
+
 .msg-action-meta {
   display: inline-block;
   margin-bottom: 6px;
@@ -1662,6 +1681,19 @@ function normalizeHistoryMessage(m) {
   };
 }
 
+function getActionLink(result = {}) {
+  return result.bookingUrl || result.webLink || result.deepLink || null;
+}
+
+function getActionLinkLabel(type, result = {}) {
+  if (type === 'search_trains' && result.bookingUrl) return 'Open in Trainline';
+  if (type === 'book_uber') return 'Open Uber';
+  if (type === 'order_uber_eats') return 'Open Uber Eats';
+  if (type === 'order_deliveroo') return 'Open Deliveroo';
+  if (type === 'search_netflix_title' || type === 'add_to_netflix_list') return 'Open Netflix';
+  return 'Open';
+}
+
 const AUTO_OPEN_ACTIONS = new Set([
   'book_uber',
   'order_uber_eats',
@@ -2063,6 +2095,9 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'transcription') {
               setMessages(prev => [...prev, { role: 'user', content: ev.text, time: new Date(), _id: placeholderId }]);
+            }
+            if (ev.type === 'transcription-error') {
+              setMessages(prev => [...prev, { role: 'assistant', content: ev.error || "I couldn't clearly make out what you said.", time: new Date() }]);
             }
             if (ev.type === 'response') {
               const m = { role: 'assistant', content: ev.text, time: new Date() };
@@ -2491,6 +2526,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                       const type = a.action || a.type || 'action';
                       const artifact = a.result?.artifact;
                       const artifactOnly = artifact && VISUAL_ARTIFACT_TYPES.has(artifact.type) && ok;
+                      const actionLink = getActionLink(a.result || {});
                       const label = type === 'book_uber' ? `Uber — ${a.result?.text || 'opening app'}`
                                   : type === 'send_email' ? 'Email sent'
                                   : type === 'create_calendar_event' ? 'Event created'
@@ -2501,18 +2537,28 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                                   : type === 'search_trains' ? (a.result?.trains?.length ? 'Train times' : 'Trainline')
                                   : humanizeActionType(type);
                       const detail = a.result?.error || a.result?.text || '';
+                      const repeatedDetail = !!(detail && msg.content && msg.content.includes(detail));
                       return (
                         <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'} ${artifactOnly ? 'artifact-only' : ''}`}>
                           <span className="msg-action-copy">
                             {!artifactOnly && <span className="msg-action-title">{label}</span>}
-                            {!artifactOnly && detail && (
+                            {!artifactOnly && detail && !repeatedDetail && (
                               <span className="msg-action-sub">
                                 {detail}
-                                {type === 'search_trains' && a.result?.bookingUrl ? ' Book on Trainline from the link in the result.' : ''}
                               </span>
                             )}
                             {artifactOnly && <span className="msg-action-meta">{label}</span>}
                             {renderArtifact(artifact)}
+                            {!artifactOnly && actionLink && (
+                              <a
+                                className="msg-action-link"
+                                href={actionLink}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {getActionLinkLabel(type, a.result || {})}
+                              </a>
+                            )}
                           </span>
                           {!artifactOnly && <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>}
                         </span>
