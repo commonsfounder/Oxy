@@ -268,6 +268,16 @@ function sendSocketEvent(socket, payload) {
   socket.send(JSON.stringify(payload));
 }
 
+function getInputMimeType(mimeType = '') {
+  const normalized = String(mimeType || '').toLowerCase();
+  const rateMatch = normalized.match(/(?:rate|sample_rate)=([0-9]+)/);
+  const sampleRate = rateMatch ? Number(rateMatch[1]) : 16000;
+  if (normalized.includes('audio/l16')) return `audio/l16;rate=${sampleRate}`;
+  if (normalized.includes('audio/pcm')) return `audio/l16;rate=${sampleRate}`;
+  if (normalized.startsWith('audio/')) return normalized;
+  return `audio/l16;rate=${sampleRate}`;
+}
+
 function normalizeVoiceName(voiceName) {
   return LIVE_VOICE_SET.has(voiceName) ? voiceName : 'Schedar';
 }
@@ -550,6 +560,22 @@ function writeUnauthorized(socket) {
   socket.destroy();
 }
 
+async function flushPendingAudio(state) {
+  while (state.pendingEvents.length > 0 && state.session) {
+    const event = state.pendingEvents.shift();
+    if (event.type === 'audio-chunk') {
+      const bytes = Buffer.from(event.data || '', 'base64');
+      state.session.sendRealtimeInput({
+        audio: new Blob([bytes], { type: getInputMimeType(event.mimeType) })
+      });
+      continue;
+    }
+    if (event.type === 'audio-end') {
+      state.session.sendRealtimeInput({ audioStreamEnd: true });
+    }
+  }
+}
+
 function attachRealtimeVoiceServer(server) {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -574,9 +600,11 @@ function attachRealtimeVoiceServer(server) {
     const userId = req.auth.userId;
     const state = {
       session: null,
+      sessionPromise: null,
       userTranscript: '',
       assistantTranscript: '',
-      actionResults: []
+      actionResults: [],
+      pendingEvents: []
     };
 
     socket.on('message', async raw => {
@@ -584,13 +612,28 @@ function attachRealtimeVoiceServer(server) {
         const event = JSON.parse(String(raw));
 
         if (event.type === 'live-start') {
-          if (!state.session) {
-            state.session = await createLiveSession(userId, event.voice, socket, state);
+          if (!state.session && !state.sessionPromise) {
+            state.sessionPromise = createLiveSession(userId, event.voice, socket, state)
+              .then(async session => {
+                state.session = session;
+                state.sessionPromise = null;
+                await flushPendingAudio(state);
+                return session;
+              })
+              .catch(error => {
+                state.sessionPromise = null;
+                createSocketError(socket, error);
+                throw error;
+              });
           }
           return;
         }
 
         if (!state.session) {
+          if (state.sessionPromise && (event.type === 'audio-chunk' || event.type === 'audio-end')) {
+            state.pendingEvents.push(event);
+            return;
+          }
           createSocketError(socket, 'Live session has not been started yet.');
           return;
         }
@@ -598,7 +641,7 @@ function attachRealtimeVoiceServer(server) {
         if (event.type === 'audio-chunk') {
           const bytes = Buffer.from(event.data || '', 'base64');
           state.session.sendRealtimeInput({
-            audio: new Blob([bytes], { type: event.mimeType || 'audio/webm' })
+            audio: new Blob([bytes], { type: getInputMimeType(event.mimeType) })
           });
           return;
         }
@@ -622,6 +665,8 @@ function attachRealtimeVoiceServer(server) {
         state.session?.close();
       } catch {}
       state.session = null;
+      state.sessionPromise = null;
+      state.pendingEvents = [];
     });
   });
 

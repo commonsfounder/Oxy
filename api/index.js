@@ -771,7 +771,7 @@ async function getHistory(userId) {
     .eq('user_id', userId)
     .neq('role', 'system')
     .order('created_at', { ascending: false })
-    .limit(25);
+    .limit(12);
 
   if (error || !data) return [];
   return data.reverse().map(normalizeConversationRow);
@@ -906,7 +906,7 @@ async function getUserContext(userId) {
   const [connectors, memories, actionLog] = await Promise.all([
     supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
     supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
-    supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(12)
+    supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)
   ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
@@ -923,7 +923,7 @@ async function getUserContext(userId) {
       contactCounts[key] = (contactCounts[key] || 0) + 1;
     } catch {}
   }
-  for (const row of (actionLog.data || []).slice(0, 8)) {
+  for (const row of (actionLog.data || []).slice(0, 5)) {
     try {
       const a = typeof row.action === 'string' ? JSON.parse(row.action) : row.action;
       const status = row.status === 'failed' ? 'failed' : 'succeeded';
@@ -1535,11 +1535,9 @@ app.post('/chat', async (req, res) => {
     const t0 = Date.now();
     const elapsed = label => console.log(`[timing] ${label}: ${Date.now() - t0}ms`);
 
-    // Build context (parallel DB queries) and save user message concurrently
-    const [{ model, history }] = await Promise.all([
-      buildChatContext(userId, message),
-      saveMessage(userId, 'user', message)
-    ]);
+    // Let the model start as soon as context is ready instead of waiting on the DB write.
+    saveMessage(userId, 'user', message).catch(() => {});
+    const { model, history } = await buildChatContext(userId, message);
     elapsed('context+save');
     const baseHistory = normalizeGeminiHistory(history);
     const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];

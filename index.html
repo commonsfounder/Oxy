@@ -2159,7 +2159,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
       socket.send(JSON.stringify({
         type: 'audio-chunk',
-        mimeType: `audio/pcm;rate=${inputContext.sampleRate}`,
+        mimeType: `audio/l16;rate=${inputContext.sampleRate}`,
         data: btoa(binary)
       }));
     };
