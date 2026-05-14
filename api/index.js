@@ -443,6 +443,26 @@ Current time: ${timeStr}
 ${userContext}`;
 }
 
+function buildQuickTurnContext(preferences) {
+  return `FAST TURN MODE:
+Reply in one short natural sentence.
+Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
+Keep it warm, effortless, and concise.
+
+USER STYLE PREFERENCES:
+${preferences || 'Still learning.'}`;
+}
+
+function isQuickTurnMessage(message) {
+  const text = String(message || '').trim();
+  if (!text || text.length > 32) return false;
+  if (/[?]/.test(text)) return false;
+  const normalized = text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+  const wordCount = normalized.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 5) return false;
+  return /^(hi|hey|hello|yo|sup|hiya|haha|lol|ok|okay|kk|cool|nice|great|sure|yep|yes|nah|no|thanks|thank you|morning|good morning|afternoon|good afternoon|evening|good evening)$/.test(normalized);
+}
+
 async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
   const cacheKey = `${modelName}:${OXCY_SYSTEM_PROMPT}`;
   let cacheState = promptCacheStates.get(cacheKey);
@@ -457,8 +477,8 @@ async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL
   }
 
   if (cacheState.pending) {
-    if (trace) trace.log('prompt_cache.await_pending');
-    return cacheState.pending;
+    if (trace) trace.log('prompt_cache.pending');
+    return cacheState.name || '';
   }
 
   cacheState.pending = (async () => {
@@ -492,7 +512,8 @@ async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL
     }
   })();
 
-  return cacheState.pending;
+  if (trace) trace.log('prompt_cache.warm_start');
+  return cacheState.name || '';
 }
 
 function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent }) {
@@ -501,7 +522,7 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   if (canUseCachedPrompt) {
     config.cachedContent = cachedContentName;
   } else {
-    config.systemInstruction = dynamicSystemPrompt;
+    config.systemInstruction = `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim();
   }
   if (useSearch) config.tools = [{ googleSearch: {} }];
 
@@ -1693,24 +1714,28 @@ function needsSearch(message) {
 
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL) {
+  const quickTurn = isQuickTurnMessage(message);
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName] = await Promise.all([
-    getMemory(userId, trace),
+    quickTurn ? Promise.resolve('') : getMemory(userId, trace),
     getHistory(userId, trace),
     getPreferences(userId, trace),
-    getEnabledConnectors(userId, trace),
-    getUserContext(userId, trace),
+    quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
+    quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
     getPromptCacheName(trace, modelName)
   ]);
-  const availableActions = buildAvailableActions(enabledConnectors);
-  const dynamicSystemPrompt = buildDynamicSystemPrompt(memory, preferences, availableActions, userContext);
+  const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
+  const dynamicSystemPrompt = quickTurn
+    ? buildQuickTurnContext(preferences)
+    : buildDynamicSystemPrompt(memory, preferences, availableActions, userContext);
   const useSearch = message && needsSearch(message);
   if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
   return {
-    history,
+    history: quickTurn ? history.slice(-6) : history,
     availableActions,
     useSearch,
     dynamicSystemPrompt,
-    cachedContentName
+    cachedContentName,
+    quickTurn
   };
 }
 
