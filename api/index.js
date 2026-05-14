@@ -146,6 +146,29 @@ const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3-flash-preview';
 
+function createRequestTrace(label) {
+  const startedAt = Date.now();
+  const prefix = `[trace:${label}]`;
+  return {
+    log(step, extra = '') {
+      const suffix = extra ? ` ${extra}` : '';
+      console.log(`${prefix} +${Date.now() - startedAt}ms ${step}${suffix}`);
+    },
+    async run(step, fn) {
+      const opStart = Date.now();
+      console.log(`${prefix} +${opStart - startedAt}ms BEGIN ${step}`);
+      try {
+        const result = await fn();
+        console.log(`${prefix} +${Date.now() - startedAt}ms END ${step} (${Date.now() - opStart}ms)`);
+        return result;
+      } catch (error) {
+        console.log(`${prefix} +${Date.now() - startedAt}ms FAIL ${step} (${Date.now() - opStart}ms) ${error.message}`);
+        throw error;
+      }
+    }
+  };
+}
+
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
 
 CORE ETHOS:
@@ -674,30 +697,40 @@ async function executeAction(userId, action, params, context = {}) {
   }
 }
 
-async function executeActions(userId, actions, context = {}) {
+async function executeActions(userId, actions, context = {}, trace = null) {
   if (!actions?.length) return [];
   const results = await Promise.all(actions.map(async action => {
-    const result = await executeAction(userId, action.type, action.input || {}, context);
-    await supabase.from('action_log').insert({
+    const result = trace
+      ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
+      : await executeAction(userId, action.type, action.input || {}, context);
+    const insertActionLog = () => supabase.from('action_log').insert({
       user_id: userId,
       action: serializeLoggedAction(action, result),
       status: result.success ? 'executed' : 'failed',
       error: result.success ? null : (result.error || null),
       created_at: new Date().toISOString()
     });
+    if (trace) {
+      await trace.run(`supabase.action_log.insert.${action.type}`, insertActionLog);
+    } else {
+      await insertActionLog();
+    }
     return { action: action.type, result };
   }));
   invalidateUserContextCache(userId);
   return results;
 }
 
-async function getMemory(userId) {
-  const { data, error } = await supabase
+async function getMemory(userId, trace = null) {
+  const fetchMemory = () => supabase
     .from('memories')
     .select('content, source')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
     .limit(50);
+  const { data, error } = trace
+    ? await trace.run('supabase.memories.fetch', fetchMemory)
+    : await fetchMemory();
 
   if (error || !data) return '';
   const manualProfile = data.find(m => m.source === 'manual_profile')?.content?.trim();
@@ -764,14 +797,17 @@ function shouldSaveMemory(text) {
   return triggers.some(t => lower.includes(t));
 }
 
-async function getHistory(userId) {
-  const { data, error } = await supabase
+async function getHistory(userId, trace = null) {
+  const fetchHistory = () => supabase
     .from('conversations')
     .select('role, content, created_at')
     .eq('user_id', userId)
     .neq('role', 'system')
     .order('created_at', { ascending: false })
     .limit(12);
+  const { data, error } = trace
+    ? await trace.run('supabase.conversations.fetch_history', fetchHistory)
+    : await fetchHistory();
 
   if (error || !data) return [];
   return data.reverse().map(normalizeConversationRow);
@@ -826,8 +862,8 @@ function normalizeConversationRow(row) {
   };
 }
 
-async function saveMessage(userId, role, content) {
-  await supabase
+async function saveMessage(userId, role, content, trace = null) {
+  const insertMessage = () => supabase
     .from('conversations')
     .insert({
       user_id: userId,
@@ -835,24 +871,35 @@ async function saveMessage(userId, role, content) {
       content: serializeConversationContent(content),
       created_at: new Date().toISOString()
     });
+  if (trace) {
+    await trace.run(`supabase.conversations.insert_${role}`, insertMessage);
+  } else {
+    await insertMessage();
+  }
   invalidateUserContextCache(userId);
 }
 
-async function getPreferences(userId) {
-  const { data, error } = await supabase
+async function getPreferences(userId, trace = null) {
+  const fetchPreferences = () => supabase
     .from('preferences')
     .select('key, value')
     .eq('user_id', userId);
+  const { data, error } = trace
+    ? await trace.run('supabase.preferences.fetch', fetchPreferences)
+    : await fetchPreferences();
   if (error || !data) return '';
   return data.map(p => `${p.key}: ${p.value}`).join('\n');
 }
 
-async function getEnabledConnectors(userId) {
-  const { data, error } = await supabase
+async function getEnabledConnectors(userId, trace = null) {
+  const fetchConnectors = () => supabase
     .from('connectors')
     .select('connector_id')
     .eq('user_id', userId)
     .eq('enabled', true);
+  const { data, error } = trace
+    ? await trace.run('supabase.connectors.fetch_enabled', fetchConnectors)
+    : await fetchConnectors();
   if (error || !data) return [];
   return data.map(c => c.connector_id);
 }
@@ -899,15 +946,24 @@ async function getUserAccount(userId) {
   return data;
 }
 
-async function getUserContext(userId) {
+async function getUserContext(userId, trace = null) {
   const cached = contextCache.get(userId);
-  if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) return cached.context;
+  if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) {
+    if (trace) trace.log('user_context.cache_hit');
+    return cached.context;
+  }
 
-  const [connectors, memories, actionLog] = await Promise.all([
-    supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
-    supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
-    supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)
-  ]);
+  const [connectors, memories, actionLog] = trace
+    ? await Promise.all([
+      trace.run('supabase.user_context.connectors', () => supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true)),
+      trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)),
+      trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8))
+    ])
+    : await Promise.all([
+      supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
+      supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
+      supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)
+    ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
 
@@ -1442,13 +1498,13 @@ function needsSearch(message) {
 }
 
 // Shared logic for building the Gemini model + system prompt
-async function buildChatContext(userId, message) {
+async function buildChatContext(userId, message, trace = null) {
   const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
-    getMemory(userId),
-    getHistory(userId),
-    getPreferences(userId),
-    getEnabledConnectors(userId),
-    getUserContext(userId)
+    getMemory(userId, trace),
+    getHistory(userId, trace),
+    getPreferences(userId, trace),
+    getEnabledConnectors(userId, trace),
+    getUserContext(userId, trace)
   ]);
   const availableActions = buildAvailableActions(enabledConnectors);
   const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
@@ -1532,13 +1588,12 @@ app.post('/chat', async (req, res) => {
       return res.status(400).json({ error: 'message is required.' });
     }
 
-    const t0 = Date.now();
-    const elapsed = label => console.log(`[timing] ${label}: ${Date.now() - t0}ms`);
+    const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
+    trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
-    saveMessage(userId, 'user', message).catch(() => {});
-    const { model, history } = await buildChatContext(userId, message);
-    elapsed('context+save');
+    saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+    const { model, history } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace));
     const baseHistory = normalizeGeminiHistory(history);
     const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];
 
@@ -1552,14 +1607,14 @@ app.post('/chat', async (req, res) => {
 
       try {
         // Stream Gemini response token-by-token
-        const stream = await model.generateContentStream({ contents });
+        const stream = await trace.run('gemini.generateContentStream.initial', () => model.generateContentStream({ contents }));
         let fullText = '';
         let firstChunk = true;
         let lastVisibleText = '';
         for await (const chunk of stream.stream) {
           const text = chunk.text();
           if (text) {
-            if (firstChunk) { elapsed('first-token'); firstChunk = false; }
+            if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
             fullText += text;
             const nextVisibleText = stripActionMarkupForDisplay(fullText);
             const visibleChunk = nextVisibleText.slice(lastVisibleText.length);
@@ -1567,16 +1622,16 @@ app.post('/chat', async (req, res) => {
             if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
           }
         }
-        elapsed('gemini-complete');
+        trace.log('gemini.initial_complete');
 
         let { spoken, actions } = parseActions(fullText);
 
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions);
+          actionResults = await executeActions(userId, actions, {}, trace);
           sse({ type: 'actions', results: actionResults });
-          elapsed('actions-complete');
+          trace.log('actions.complete');
         }
 
         // For data-fetching actions, stream a follow-up summary
@@ -1586,14 +1641,14 @@ app.post('/chat', async (req, res) => {
           sse({ type: 'text', chunk: spoken });
         } else if (dataResults.length > 0) {
           const context = dataResults.map(a => a.result.text).join('\n\n');
-          const followUp = await model.generateContentStream({
+          const followUp = await trace.run('gemini.generateContentStream.followup', () => model.generateContentStream({
             contents: [
               ...baseHistory,
               { role: 'user', parts: [{ text: message }] },
               { role: 'model', parts: [{ text: spoken || '…' }] },
               { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
             ]
-          });
+          }));
           spoken = '';
           for await (const chunk of followUp.stream) {
             const text = chunk.text();
@@ -1612,24 +1667,26 @@ app.post('/chat', async (req, res) => {
 
         if (wantsTTS) {
           try {
-            const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
+            const audio = await trace.run('gemini.tts.generateSpeech', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
             if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
-            elapsed('tts-complete');
+            trace.log('tts.complete');
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
             sse({ type: 'tts-error', error: ttsErr.message });
           }
         }
 
-        elapsed('total');
+        trace.log('request.total');
         sse({ type: 'done' });
         res.end();
 
         // Fire-and-forget: save assistant message + memory/preferences
-        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
+        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+          .catch(err => trace.log('supabase.conversations.insert_assistant.async_fail', err.message));
         postResponseTasks(userId, message);
 
       } catch (err) {
+        trace.log('request.error', err.message);
         console.error('/chat stream error:', err.message);
         try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
       }
@@ -1637,7 +1694,7 @@ app.post('/chat', async (req, res) => {
     }
 
     // ── Non-streaming mode (JSON — backward compatible) ─────────────────
-    const geminiRes = await model.generateContent({ contents });
+    const geminiRes = await trace.run('gemini.generateContent.nonstream', () => model.generateContent({ contents }));
 
     const rawText = geminiRes.response.text();
     let { spoken, actions } = parseActions(rawText);
@@ -1645,7 +1702,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions);
+      actionResults = await executeActions(userId, actions, {}, trace);
     }
 
     // For data-fetching actions, re-prompt Gemini with results
@@ -1654,14 +1711,14 @@ app.post('/chat', async (req, res) => {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
-      const followUp = await model.generateContent({
+      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => model.generateContent({
         contents: [
           ...baseHistory,
           { role: 'user', parts: [{ text: message }] },
           { role: 'model', parts: [{ text: spoken || '…' }] },
           { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
         ]
-      });
+      }));
       spoken = parseActions(followUp.response.text()).spoken || context;
     }
 
@@ -1670,13 +1727,14 @@ app.post('/chat', async (req, res) => {
     }
 
     // Don't block on saving assistant message
-    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
+    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+      .catch(err => trace.log('supabase.conversations.insert_assistant.async_fail', err.message));
 
     const result = { text: spoken, actions: actionResults };
 
     if (wantsTTS) {
       try {
-        const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
+        const audio = await trace.run('gemini.tts.generateSpeech.nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
         if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
@@ -1684,10 +1742,12 @@ app.post('/chat', async (req, res) => {
       }
     }
 
+    trace.log('request.total');
     res.json(result);
     postResponseTasks(userId, message);
 
   } catch (err) {
+    console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
     console.error('/chat error:', err.message);
     res.status(500).json({ error: err.message, text: `Error: ${err.message}` });
   }
