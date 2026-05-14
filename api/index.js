@@ -189,6 +189,7 @@ CORE ETHOS:
 - Send the message. Set the reminder. Make the call. No hesitation, no "are you sure?"
 - You're a person they trust, not a corporate chatbot or a bully.
 - Talk like a real friend — casual, natural, direct. No corporate-speak.
+- For simple conversational questions, keep replies to a maximum of 2 sentences. Voice replies must be concise.
 
 FACTUALITY:
 - Say what you know. Don't fill gaps with guesses or confident bullshit.
@@ -649,6 +650,77 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
 }
 
+async function* generateSpeechStream(text, voiceName = 'Aoede') {
+  if (!text || !text.trim()) return;
+  const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
+  const failures = [];
+  const orderedModels = preferredTtsModel
+    ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
+    : GEMINI_TTS_MODELS;
+
+  for (const modelName of orderedModels) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 9000);
+    let sawAudio = false;
+    try {
+      const resp = await axios.post(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${process.env.GEMINI_API_KEY}`,
+        {
+          contents: [{ parts: [{ text }] }],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
+          }
+        },
+        {
+          signal: controller.signal,
+          responseType: 'stream',
+          headers: { Accept: 'text/event-stream' }
+        }
+      );
+
+      let buffer = '';
+      for await (const rawChunk of resp.data) {
+        buffer += rawChunk.toString('utf8');
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() || '';
+
+        for (const event of events) {
+          const lines = event.split(/\r?\n/).filter(line => line.startsWith('data: '));
+          for (const line of lines) {
+            const payload = line.slice(6).trim();
+            if (!payload || payload === '[DONE]') continue;
+            const parsed = JSON.parse(payload);
+            const parts = parsed?.candidates?.[0]?.content?.parts || [];
+            for (const part of parts) {
+              const base64Audio = part?.inlineData?.data || part?.inline_data?.data;
+              if (!base64Audio) continue;
+              sawAudio = true;
+              if (preferredTtsModel !== modelName) {
+                preferredTtsModel = modelName;
+                console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
+              }
+              yield pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
+            }
+          }
+        }
+      }
+
+      if (!sawAudio) {
+        throw new Error(`Gemini TTS returned empty audio for voice ${safeVoiceName}.`);
+      }
+      return;
+    } catch (err) {
+      const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
+      failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
+}
+
 function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
   let lastSentenceCount = 0;
   let nextEmitIndex = 0;
@@ -657,10 +729,15 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
 
   const flushReadyAudio = () => {
     while (readyAudio.has(nextEmitIndex)) {
-      const audio = readyAudio.get(nextEmitIndex);
+      const state = readyAudio.get(nextEmitIndex);
+      while (state.chunks.length) {
+        const audio = state.chunks.shift();
+        const chunkIndex = state.sentCount++;
+        sse({ type: 'audio', data: audio, format: 'wav', seq: nextEmitIndex, chunk: chunkIndex });
+        if (trace) trace.log(`tts.chunk_sent.${nextEmitIndex}.${chunkIndex}`);
+      }
+      if (!state.done) break;
       readyAudio.delete(nextEmitIndex);
-      sse({ type: 'audio', data: audio, format: 'wav', seq: nextEmitIndex });
-      if (trace) trace.log(`tts.chunk_sent.${nextEmitIndex}`);
       nextEmitIndex += 1;
     }
   };
@@ -679,15 +756,21 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
       }
     }
     if (trace) trace.log(`tts.chunk_start.${seq}`);
-    const task = generateSpeech(trimmed, voiceName)
-      .then(audio => {
-        readyAudio.set(seq, audio);
+    const state = { chunks: [], done: false, sentCount: 0 };
+    readyAudio.set(seq, state);
+    const task = (async () => {
+      try {
+        for await (const audio of generateSpeechStream(trimmed, voiceName)) {
+          state.chunks.push(audio);
+          flushReadyAudio();
+        }
+        state.done = true;
         flushReadyAudio();
-      })
-      .catch(error => {
+      } catch (error) {
         if (trace) trace.log(`tts.chunk_fail.${seq}`, error.message);
         throw error;
-      });
+      }
+    })();
     tasks.push(task);
   };
 
