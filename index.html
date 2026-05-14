@@ -1880,6 +1880,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const queuedAudioRef    = useRef([]);
   const queuedAudioPlayingRef = useRef(false);
   const statusClearTimerRef = useRef(null);
+  const recordingStopRequestedRef = useRef(false);
 
   const updateCurrentStatus = useCallback((status, label) => {
     if (statusClearTimerRef.current) {
@@ -2377,12 +2378,18 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   const startRecording = async () => {
     try {
+      recordingStopRequestedRef.current = false;
       stopSpeaking();
       const stream        = await navigator.mediaDevices.getUserMedia({ audio: true });
       chunksRef.current = [];
       if (window.WebSocket) {
         try {
           await openRealtimeVoiceSession(stream);
+          if (recordingStopRequestedRef.current && liveInputRef.current?.stop) {
+            liveInputRef.current.stop();
+            setRecordingWithCb(false);
+            recordingStopRequestedRef.current = false;
+          }
           return;
         } catch (realtimeErr) {
           console.warn('Realtime voice unavailable, falling back to upload flow:', realtimeErr);
@@ -2395,13 +2402,26 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       mediaRecorder.onstop = async () => { stream.getTracks().forEach(t => t.stop()); await sendAudio(); };
       mediaRecorder.start();
       setRecordingWithCb(true);
+      if (recordingStopRequestedRef.current) {
+        mediaRecorder.stop();
+        setRecordingWithCb(false);
+        recordingStopRequestedRef.current = false;
+      }
     } catch (err) { console.error('Mic error:', err); }
   };
 
   const stopRecording = () => {
+    recordingStopRequestedRef.current = true;
+    if (liveInputRef.current?.stop) {
+      liveInputRef.current.stop();
+      setRecordingWithCb(false);
+      recordingStopRequestedRef.current = false;
+      return;
+    }
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
       setRecordingWithCb(false);
+      recordingStopRequestedRef.current = false;
     }
   };
 
@@ -2636,6 +2656,10 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             }
             if (ev.type === 'text') {
               streamedText += ev.chunk;
+              publishStreamedText();
+            }
+            if (ev.type === 'replace') {
+              streamedText = ev.text || '';
               publishStreamedText();
             }
             if (ev.type === 'actions' && ev.results?.length) {

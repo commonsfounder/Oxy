@@ -1482,7 +1482,28 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions);
     }
-    const finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
+    const dataResults = getStructuredDataResults(actionResults);
+    let finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
+    if (!canUseDirectActionSummary(actionResults) && dataResults.length > 0) {
+      const context = dataResults.map(a => a.text).join('\n\n');
+      const followUpRequest = buildModernGenerateRequest({
+        dynamicSystemPrompt,
+        useSearch,
+        cachedContentName,
+        baseHistory,
+        userContent: { role: 'user', parts: [{ text: userText }] }
+      });
+      followUpRequest.contents.push(
+        { role: 'model', parts: [{ text: spoken || '...' }] },
+        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+      );
+      const followUp = await modernGenAI.models.generateContent({
+        model: PRIMARY_CHAT_MODEL,
+        contents: followUpRequest.contents,
+        config: followUpRequest.config
+      });
+      finalSpoken = parseActions(followUp.text || '').spoken || context;
+    }
     audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
       ttsError = err.message;
       console.error('[tts error]', err.message);
@@ -1562,11 +1583,11 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       actionResults = await executeActions(userId, actions, { imageFile: req.file });
     }
 
-    const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+    const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.result.text).join('\n\n');
+      const context = dataResults.map(a => a.text).join('\n\n');
       const followUpRequest = buildModernGenerateRequest({
         dynamicSystemPrompt,
         useSearch,
@@ -1913,6 +1934,37 @@ function summarizeActionResults(actionResults) {
     .join('\n\n');
 }
 
+function buildStructuredDataSummary(entry) {
+  const result = entry?.result || {};
+  if (entry?.action === 'get_emails' || entry?.action === 'search_emails') {
+    if (!Array.isArray(result.emails) || result.emails.length === 0) return result.text || 'No emails found.';
+    const emails = result.emails.map((email, index) => (
+      `${index + 1}. From: ${email.from || 'Unknown sender'} | Subject: ${email.subject || '(No subject)'}${email.date ? ` | Date: ${email.date}` : ''}`
+    ));
+    return `Email results:\n${emails.join('\n')}`;
+  }
+  if (entry?.action === 'get_calendar_events') {
+    if (!Array.isArray(result.events) || result.events.length === 0) return result.text || 'No upcoming events found.';
+    const events = result.events.map((event, index) => (
+      `${index + 1}. ${event.title || 'Untitled'}${event.start ? ` | Starts: ${event.start}` : ''}${event.end ? ` | Ends: ${event.end}` : ''}`
+    ));
+    return `Upcoming events:\n${events.join('\n')}`;
+  }
+  if (entry?.action === 'get_telegram_contacts') {
+    if (!Array.isArray(result.contacts) || result.contacts.length === 0) return result.text || 'No contacts found.';
+    const contacts = result.contacts.map((contact, index) => `${index + 1}. ${contact.name || contact.username || 'Unnamed contact'}`);
+    return `Telegram contacts:\n${contacts.join('\n')}`;
+  }
+  return result.text || '';
+}
+
+function getStructuredDataResults(actionResults) {
+  return actionResults
+    .filter(entry => DATA_ACTIONS.has(entry.action) && entry.result?.success)
+    .map(entry => ({ action: entry.action, text: buildStructuredDataSummary(entry) }))
+    .filter(entry => entry.text);
+}
+
 // Fire-and-forget post-response tasks (memory + style preferences)
 function postResponseTasks(userId, message) {
   if (shouldSaveMemory(message)) {
@@ -2017,13 +2069,16 @@ app.post('/chat', async (req, res) => {
         }
 
         // For data-fetching actions, stream a follow-up summary
-        const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+        const dataResults = getStructuredDataResults(actionResults);
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
+          sse({ type: 'replace', text: spoken });
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
-          const context = dataResults.map(a => a.result.text).join('\n\n');
+          sse({ type: 'replace', text: '' });
+          lastVisibleText = '';
+          const context = dataResults.map(a => a.text).join('\n\n');
           const followUpRequest = buildModernGenerateRequest({
             dynamicSystemPrompt,
             useSearch,
@@ -2105,11 +2160,11 @@ app.post('/chat', async (req, res) => {
     }
 
     // For data-fetching actions, re-prompt Gemini with results
-    const dataResults = actionResults.filter(a => DATA_ACTIONS.has(a.action) && a.result?.success && a.result?.text);
+    const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.result.text).join('\n\n');
+      const context = dataResults.map(a => a.text).join('\n\n');
       const followUpRequest = buildModernGenerateRequest({
         dynamicSystemPrompt,
         useSearch,

@@ -75,6 +75,25 @@ function buildMime(to, subject, body) {
   return Buffer.from(msg).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+function summarizeEmails(emails = [], emptyText = 'No emails found') {
+  if (!Array.isArray(emails) || emails.length === 0) return emptyText;
+  const lines = emails.map((email, index) => {
+    const from = email.from || 'Unknown sender';
+    const subject = email.subject || '(No subject)';
+    const date = email.date || '';
+    return `${index + 1}. From: ${from} | Subject: ${subject}${date ? ` | Date: ${date}` : ''}`;
+  });
+  return `Latest emails:\n${lines.join('\n')}`;
+}
+
+function summarizeCalendarEvents(events = [], emptyText = 'No upcoming events found') {
+  if (!Array.isArray(events) || events.length === 0) return emptyText;
+  const lines = events.map((event, index) => (
+    `${index + 1}. ${event.title || 'Untitled'}${event.start ? ` | Starts: ${event.start}` : ''}${event.end ? ` | Ends: ${event.end}` : ''}`
+  ));
+  return `Upcoming events:\n${lines.join('\n')}`;
+}
+
 async function execute(userId, action, params) {
   let token;
   try {
@@ -107,7 +126,7 @@ async function execute(userId, action, params) {
           const get = n => h.find(x => x.name === n)?.value || '';
           return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
         }));
-        return { success: true, emails, text: `Found ${emails.length} emails` };
+        return { success: true, emails, text: summarizeEmails(emails) };
       }
 
       case 'search_emails': {
@@ -124,7 +143,11 @@ async function execute(userId, action, params) {
           const get = n => h.find(x => x.name === n)?.value || '';
           return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
         }));
-        return { success: true, emails, text: `Found ${emails.length} emails matching "${query}"` };
+        return {
+          success: true,
+          emails,
+          text: `Email results for "${query}":\n${summarizeEmails(emails, `No emails matching "${query}"`)}`
+        };
       }
 
       case 'create_calendar_event': {
@@ -153,7 +176,7 @@ async function execute(userId, action, params) {
         const events = (resp.data.items || []).map(e => ({
           id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
         }));
-        return { success: true, events, text: `Found ${events.length} upcoming events` };
+        return { success: true, events, text: summarizeCalendarEvents(events) };
       }
 
       default:
