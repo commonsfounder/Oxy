@@ -1844,7 +1844,7 @@ function AutoRunActions({ actions }) {
   return null;
 }
 
-function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, onProcessingChange }) {
+function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, onRecordingChange, onProcessingChange }) {
   const [messages, setMessages] = useState([]);
   const [recentActions, setRecentActions] = useState([]);
   const [input, setInput] = useState('');
@@ -1859,6 +1859,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [viewingDate, setViewingDate] = useState(null);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const setRecordingWithCb = v => { setRecording(v); onRecordingChange?.(v); };
   const setLoadingWithCb   = v => { setLoading(v);   onProcessingChange?.(v); };
   const messagesEndRef    = useRef(null);
@@ -1881,6 +1882,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const queuedAudioPlayingRef = useRef(false);
   const statusClearTimerRef = useRef(null);
   const recordingStopRequestedRef = useRef(false);
+  const briefingInjectedRef = useRef(null);
 
   const updateCurrentStatus = useCallback((status, label) => {
     if (statusClearTimerRef.current) {
@@ -1921,7 +1923,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           setMessages(data.history.map(normalizeHistoryMessage));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setHistoryLoaded(true));
   }, []);
 
   const loadRecentActions = useCallback(() => {
@@ -1985,6 +1988,16 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       sendMessage(initialQuery);
     }
   }, [initialQuery]);
+
+  useEffect(() => {
+    const text = proactiveBriefing?.text?.trim();
+    if (!historyLoaded || !text || briefingInjectedRef.current === text) return;
+    briefingInjectedRef.current = text;
+    setMessages(prev => {
+      if (prev.some(msg => msg.role === 'assistant' && (msg.content || '').trim() === text)) return prev;
+      return [...prev, { role: 'assistant', content: text, time: new Date(), _briefing: true }];
+    });
+  }, [historyLoaded, proactiveBriefing]);
 
   const stopSpeaking = () => {
     if (liveInputRef.current?.stop) liveInputRef.current.stop();
@@ -3611,7 +3624,7 @@ function App() {
 
         {page === 'chat' && (
           <>
-            <ChatPage settings={settings} memory={memory} people={people} initialQuery={initialQuery} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
+            <ChatPage settings={settings} memory={memory} people={people} initialQuery={initialQuery} proactiveBriefing={briefing} onRecordingChange={setIsRecording} onProcessingChange={setIsProcessing} />
             {briefing?.actions?.length > 0 && <AutoRunActions actions={briefing.actions} />}
           </>
         )}
