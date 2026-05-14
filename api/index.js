@@ -5,6 +5,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
+const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
 const {
@@ -126,6 +127,7 @@ if (!process.env.VERCEL) {
 
 const supabase = createSupabaseServiceClient();
 const genAI = createGeminiServiceClient();
+const modernGenAI = new ModernGoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
 logMissingRuntimeEnvOnce('api bootstrap');
 
 const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
@@ -145,6 +147,9 @@ if (!process.env.VERCEL) {
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3-flash-preview';
+const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
+const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
+const promptCacheStates = new Map();
 
 function createRequestTrace(label) {
   const startedAt = Date.now();
@@ -410,6 +415,95 @@ function stripActionMarkupForDisplay(text) {
     .replace(/<action>[\s\S]*$/g, '');
 }
 
+function splitCompleteSentences(text) {
+  const cleaned = stripActionMarkupForDisplay(text || '');
+  const matches = cleaned.match(/[^.!?]+[.!?]+(?:["')\]]+)?/g) || [];
+  return matches.map(sentence => sentence.trim()).filter(Boolean);
+}
+
+function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext) {
+  const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
+  return `WHAT YOU KNOW ABOUT THIS PERSON:
+${memory || 'Nothing yet.'}
+
+HOW THE USER LIKES THINGS (learned over time):
+${preferences || 'Still learning.'}
+
+CONNECTED APPS:
+${availableActions}
+
+NATIVE CREATIVE TOOLS:
+- generate_visual for contextual images, mockups, study aids, previews, and supporting visuals
+- create_diagram for explaining systems, concepts, and workflows
+- create_presentation for slide structures and decks
+
+Current time: ${timeStr}
+
+---
+${userContext}`;
+}
+
+async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
+  const cacheKey = `${modelName}:${OXCY_SYSTEM_PROMPT}`;
+  let cacheState = promptCacheStates.get(cacheKey);
+  if (!cacheState) {
+    cacheState = { name: '', expireAt: 0, pending: null };
+    promptCacheStates.set(cacheKey, cacheState);
+  }
+
+  if (cacheState.name && Date.now() < cacheState.expireAt) {
+    if (trace) trace.log('prompt_cache.hit', cacheState.name);
+    return cacheState.name;
+  }
+
+  if (cacheState.pending) {
+    if (trace) trace.log('prompt_cache.await_pending');
+    return cacheState.pending;
+  }
+
+  cacheState.pending = (async () => {
+    try {
+      const cached = trace
+        ? await trace.run('gemini.caches.create', () => modernGenAI.caches.create({
+            model: modelName,
+            config: {
+              displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
+              systemInstruction: OXCY_SYSTEM_PROMPT,
+              ttl: PROMPT_CACHE_TTL
+            }
+          }))
+        : await modernGenAI.caches.create({
+            model: modelName,
+            config: {
+              displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
+              systemInstruction: OXCY_SYSTEM_PROMPT,
+              ttl: PROMPT_CACHE_TTL
+            }
+          });
+      cacheState.name = cached?.name || '';
+      cacheState.expireAt = Date.now() + 55 * 60 * 1000;
+      if (trace) trace.log('prompt_cache.created', cacheState.name || 'no-name');
+      return cacheState.name;
+    } catch (error) {
+      if (trace) trace.log('prompt_cache.unavailable', error.message);
+      return '';
+    } finally {
+      cacheState.pending = null;
+    }
+  })();
+
+  return cacheState.pending;
+}
+
+function buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName) {
+  const config = {
+    systemInstruction: dynamicSystemPrompt
+  };
+  if (cachedContentName) config.cachedContent = cachedContentName;
+  if (useSearch) config.tools = [{ googleSearch: {} }];
+  return config;
+}
+
 async function runActions(userId, actions) {
   const results = [];
   for (const action of actions) {
@@ -488,6 +582,65 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   }
 
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
+}
+
+function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
+  let lastSentenceCount = 0;
+  let nextEmitIndex = 0;
+  const readyAudio = new Map();
+  const tasks = [];
+
+  const flushReadyAudio = () => {
+    while (readyAudio.has(nextEmitIndex)) {
+      const audio = readyAudio.get(nextEmitIndex);
+      readyAudio.delete(nextEmitIndex);
+      sse({ type: 'audio', data: audio, format: 'wav', seq: nextEmitIndex });
+      if (trace) trace.log(`tts.chunk_sent.${nextEmitIndex}`);
+      nextEmitIndex += 1;
+    }
+  };
+
+  const schedule = sentence => {
+    const trimmed = sentence.trim();
+    if (!trimmed) return;
+    const seq = tasks.length;
+    if (trace) trace.log(`tts.chunk_schedule.${seq}`, JSON.stringify(trimmed.slice(0, 80)));
+    const task = generateSpeech(trimmed, voiceName)
+      .then(audio => {
+        readyAudio.set(seq, audio);
+        flushReadyAudio();
+      })
+      .catch(error => {
+        if (trace) trace.log(`tts.chunk_fail.${seq}`, error.message);
+        throw error;
+      });
+    tasks.push(task);
+  };
+
+  return {
+    ingest(text) {
+      const sentences = splitCompleteSentences(text);
+      for (let i = lastSentenceCount; i < sentences.length; i += 1) {
+        schedule(sentences[i]);
+      }
+      lastSentenceCount = sentences.length;
+    },
+    async flushRemainder(text) {
+      const cleaned = stripActionMarkupForDisplay(text || '').trim();
+      if (!cleaned) return;
+      const matches = [...cleaned.matchAll(/[^.!?]+[.!?]+(?:["')\]]+)?/g)];
+      let consumedLength = 0;
+      for (let i = 0; i < Math.min(lastSentenceCount, matches.length); i += 1) {
+        consumedLength = (matches[i].index || 0) + matches[i][0].length;
+      }
+      const remainder = cleaned.slice(consumedLength).trim();
+      if (remainder) schedule(remainder);
+    },
+    async waitForAll() {
+      await Promise.all(tasks);
+      flushReadyAudio();
+    }
+  };
 }
 
 async function generateImage(prompt, imageFile) {
@@ -1086,7 +1239,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   try {
     const [userText, context] = await Promise.all([
       transcribeAudio(req.file.buffer),
-      buildChatContext(userId) // message unknown yet — no search for audio transcription step
+      buildChatContext(userId, '', null, STREAMING_CHAT_MODEL) // message unknown yet — no search for audio transcription step
     ]);
 
     if (!userText) {
@@ -1100,19 +1253,24 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
     // Step 2: Send transcribed text to the main model (with full system prompt + history)
     // Rebuild model with search if the transcribed text needs it
-    let { model, history } = context;
+    let { history, useSearch, dynamicSystemPrompt, cachedContentName } = context;
     if (needsSearch(userText)) {
-      const refreshed = await buildChatContext(userId, userText);
-      model = refreshed.model;
+      const refreshed = await buildChatContext(userId, userText, null, STREAMING_CHAT_MODEL);
+      useSearch = refreshed.useSearch;
+      dynamicSystemPrompt = refreshed.dynamicSystemPrompt;
+      cachedContentName = refreshed.cachedContentName;
     }
     const baseHistory = normalizeGeminiHistory(history);
+    const streamConfig = buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName);
 
-    const stream = await model.generateContentStream({
-      contents: [...baseHistory, { role: 'user', parts: [{ text: userText }] }]
+    const stream = await modernGenAI.models.generateContentStream({
+      model: STREAMING_CHAT_MODEL,
+      contents: [...baseHistory, { role: 'user', parts: [{ text: userText }] }],
+      config: streamConfig
     });
     let fullText = '';
     for await (const chunk of stream.stream) {
-      const text = chunk.text();
+      const text = chunk.text || '';
       if (text) fullText += text;
     }
 
@@ -1174,8 +1332,8 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'image is required.' });
     if (!message) return res.status(400).json({ error: 'message is required.' });
 
-    const [{ model, history }] = await Promise.all([
-      buildChatContext(userId, message),
+    const [{ history, useSearch, dynamicSystemPrompt, cachedContentName }] = await Promise.all([
+      buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL),
       saveMessage(userId, 'user', `${message}\n\n[Attached image: ${req.file.originalname || 'image'}]`)
     ]);
     const baseHistory = normalizeGeminiHistory(history);
@@ -1190,8 +1348,12 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       }
     ];
 
-    const geminiRes = await model.generateContent({ contents });
-    let { spoken, actions } = parseActions(geminiRes.response.text());
+    const geminiRes = await modernGenAI.models.generateContent({
+      model: PRIMARY_CHAT_MODEL,
+      contents,
+      config: buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName)
+    });
+    let { spoken, actions } = parseActions(geminiRes.text || '');
     let actionResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { imageFile: req.file });
@@ -1202,7 +1364,8 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
-      const followUp = await model.generateContent({
+      const followUp = await modernGenAI.models.generateContent({
+        model: PRIMARY_CHAT_MODEL,
         contents: [
           ...baseHistory,
           {
@@ -1214,9 +1377,10 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
           },
           { role: 'model', parts: [{ text: spoken || '...' }] },
           { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached image context. Do not invent unstated facts.` }] }
-        ]
+        ],
+        config: buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName)
       });
-      spoken = parseActions(followUp.response.text()).spoken || spoken || context;
+      spoken = parseActions(followUp.text || '').spoken || spoken || context;
     }
 
     if (!spoken) {
@@ -1498,47 +1662,26 @@ function needsSearch(message) {
 }
 
 // Shared logic for building the Gemini model + system prompt
-async function buildChatContext(userId, message, trace = null) {
-  const [memory, history, preferences, enabledConnectors, userContext] = await Promise.all([
+async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL) {
+  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName] = await Promise.all([
     getMemory(userId, trace),
     getHistory(userId, trace),
     getPreferences(userId, trace),
     getEnabledConnectors(userId, trace),
-    getUserContext(userId, trace)
+    getUserContext(userId, trace),
+    getPromptCacheName(trace, modelName)
   ]);
   const availableActions = buildAvailableActions(enabledConnectors);
-  const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
-    const systemPrompt = `${OXCY_SYSTEM_PROMPT}
-
-WHAT YOU KNOW ABOUT THIS PERSON:
-${memory || 'Nothing yet.'}
-
-HOW THE USER LIKES THINGS (learned over time):
-${preferences || 'Still learning.'}
-
-CONNECTED APPS:
-${availableActions}
-
-NATIVE CREATIVE TOOLS:
-- generate_visual for contextual images, mockups, study aids, previews, and supporting visuals
-- create_diagram for explaining systems, concepts, and workflows
-- create_presentation for slide structures and decks
-
-Current time: ${timeStr}
-
----
-${userContext}`;
-
+  const dynamicSystemPrompt = buildDynamicSystemPrompt(memory, preferences, availableActions, userContext);
   const useSearch = message && needsSearch(message);
-  const modelConfig = {
-    model: PRIMARY_CHAT_MODEL,
-    systemInstruction: systemPrompt
-  };
-  if (useSearch) modelConfig.tools = [{ googleSearch: {} }];
   if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
-
-  const model = genAI.getGenerativeModel(modelConfig);
-  return { model, history, availableActions };
+  return {
+    history,
+    availableActions,
+    useSearch,
+    dynamicSystemPrompt,
+    cachedContentName
+  };
 }
 
 const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
@@ -1593,9 +1736,11 @@ app.post('/chat', async (req, res) => {
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
-    const { model, history } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace));
+    const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
+    const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel));
     const baseHistory = normalizeGeminiHistory(history);
     const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];
+    const requestConfig = buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName);
 
     // ── Streaming mode (SSE) ────────────────────────────────────────────
     if (streaming) {
@@ -1607,12 +1752,17 @@ app.post('/chat', async (req, res) => {
 
       try {
         // Stream Gemini response token-by-token
-        const stream = await trace.run('gemini.generateContentStream.initial', () => model.generateContentStream({ contents }));
+        const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
+          model: chatModel,
+          contents,
+          config: requestConfig
+        }));
         let fullText = '';
         let firstChunk = true;
         let lastVisibleText = '';
+        const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({ voiceName: settings.voice, sse, trace }) : null;
         for await (const chunk of stream.stream) {
-          const text = chunk.text();
+          const text = chunk.text || '';
           if (text) {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
             fullText += text;
@@ -1620,6 +1770,7 @@ app.post('/chat', async (req, res) => {
             const visibleChunk = nextVisibleText.slice(lastVisibleText.length);
             lastVisibleText = nextVisibleText;
             if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
+            if (ttsStreamer) ttsStreamer.ingest(nextVisibleText);
           }
         }
         trace.log('gemini.initial_complete');
@@ -1639,22 +1790,26 @@ app.post('/chat', async (req, res) => {
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
           sse({ type: 'text', chunk: spoken });
+          if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
           const context = dataResults.map(a => a.result.text).join('\n\n');
-          const followUp = await trace.run('gemini.generateContentStream.followup', () => model.generateContentStream({
+          const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
+            model: chatModel,
             contents: [
               ...baseHistory,
               { role: 'user', parts: [{ text: message }] },
               { role: 'model', parts: [{ text: spoken || '…' }] },
               { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-            ]
+            ],
+            config: requestConfig
           }));
           spoken = '';
           for await (const chunk of followUp.stream) {
-            const text = chunk.text();
+            const text = chunk.text || '';
             if (text) {
               spoken += text;
               sse({ type: 'text', chunk: text });
+              if (ttsStreamer) ttsStreamer.ingest(spoken);
             }
           }
           spoken = parseActions(spoken).spoken || spoken || context;
@@ -1663,12 +1818,15 @@ app.post('/chat', async (req, res) => {
         if (!spoken) {
           spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
           sse({ type: 'text', chunk: spoken });
+          if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
 
-        if (wantsTTS) {
+        if (wantsTTS && ttsStreamer) {
           try {
-            const audio = await trace.run('gemini.tts.generateSpeech', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
-            if (audio) sse({ type: 'audio', data: audio, format: 'wav' });
+            await trace.run('gemini.tts.generateSpeech.streamed', async () => {
+              await ttsStreamer.flushRemainder(spoken);
+              await ttsStreamer.waitForAll();
+            });
             trace.log('tts.complete');
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
@@ -1694,9 +1852,13 @@ app.post('/chat', async (req, res) => {
     }
 
     // ── Non-streaming mode (JSON — backward compatible) ─────────────────
-    const geminiRes = await trace.run('gemini.generateContent.nonstream', () => model.generateContent({ contents }));
+    const geminiRes = await trace.run('gemini.generateContent.nonstream', () => modernGenAI.models.generateContent({
+      model: chatModel,
+      contents,
+      config: requestConfig
+    }));
 
-    const rawText = geminiRes.response.text();
+    const rawText = geminiRes.text || '';
     let { spoken, actions } = parseActions(rawText);
 
     // Execute actions in parallel instead of sequentially
@@ -1711,15 +1873,17 @@ app.post('/chat', async (req, res) => {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
-      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => model.generateContent({
+      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
+        model: chatModel,
         contents: [
           ...baseHistory,
           { role: 'user', parts: [{ text: message }] },
           { role: 'model', parts: [{ text: spoken || '…' }] },
           { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-        ]
+        ],
+        config: requestConfig
       }));
-      spoken = parseActions(followUp.response.text()).spoken || context;
+      spoken = parseActions(followUp.text || '').spoken || context;
     }
 
     if (!spoken) {

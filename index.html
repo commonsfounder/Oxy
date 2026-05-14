@@ -1845,6 +1845,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const liveAudioDrainTimerRef = useRef(null);
   const liveTurnRef       = useRef(null);
   const liveInputRef      = useRef(null);
+  const queuedAudioRef    = useRef([]);
+  const queuedAudioPlayingRef = useRef(false);
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
@@ -1915,6 +1917,8 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const stopSpeaking = () => {
     if (liveInputRef.current?.stop) liveInputRef.current.stop();
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
+    queuedAudioRef.current = [];
+    queuedAudioPlayingRef.current = false;
     if (liveAudioDrainTimerRef.current) {
       clearTimeout(liveAudioDrainTimerRef.current);
       liveAudioDrainTimerRef.current = null;
@@ -2017,6 +2021,49 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       setSpeaking(false);
     }
   }, []);
+
+  const playQueuedAudioFromBase64 = useCallback(async () => {
+    if (queuedAudioPlayingRef.current) return;
+    const nextAudio = queuedAudioRef.current.shift();
+    if (!nextAudio) return;
+    queuedAudioPlayingRef.current = true;
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setSpeaking(true);
+      const bytes = new Uint8Array(atob(nextAudio).split('').map(c => c.charCodeAt(0)));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+      const audio = new Audio(url);
+      audio.preload = 'auto';
+      audio.playsInline = true;
+      audioRef.current = audio;
+      const cleanup = () => {
+        if (audioRef.current === audio) audioRef.current = null;
+        URL.revokeObjectURL(url);
+        queuedAudioPlayingRef.current = false;
+        if (queuedAudioRef.current.length) {
+          playQueuedAudioFromBase64();
+        } else {
+          setSpeaking(false);
+        }
+      };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+      await audio.play();
+    } catch (err) {
+      console.error('Queued audio playback error:', err);
+      queuedAudioPlayingRef.current = false;
+      setSpeaking(false);
+    }
+  }, []);
+
+  const enqueueAudioFromBase64 = useCallback((base64Audio) => {
+    if (!base64Audio) return;
+    queuedAudioRef.current.push(base64Audio);
+    playQueuedAudioFromBase64();
+  }, [playQueuedAudioFromBase64]);
 
   const ensureRealtimeAudioContext = useCallback(async (sampleRateHint = 24000) => {
     let ctx = liveAudioContextRef.current;
@@ -2325,7 +2372,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let ttsError = '';
       let pendingAssistant = null;
       let pendingAssistantShown = false;
-      let voiceRevealTimer = null;
       const revealPendingAssistant = () => {
         if (!pendingAssistant || pendingAssistantShown) return;
         pendingAssistantShown = true;
@@ -2354,29 +2400,15 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               if (ev.actions?.length) m.actions = ev.actions;
               pendingAssistant = m;
               if (ev.actions?.length) maybeOpenActionResults(ev.actions);
-              if (!settings.voiceOn) {
-                revealPendingAssistant();
-              } else if (!voiceRevealTimer) {
-                voiceRevealTimer = setTimeout(() => {
-                  revealPendingAssistant();
-                }, 900);
-              }
+              revealPendingAssistant();
             }
             if (ev.type === 'audio') {
-              playAudioFromBase64(ev.data);
-              if (voiceRevealTimer) {
-                clearTimeout(voiceRevealTimer);
-                voiceRevealTimer = null;
-              }
+              enqueueAudioFromBase64(ev.data);
               revealPendingAssistant();
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
               console.error('TTS error:', ttsError);
-              if (voiceRevealTimer) {
-                clearTimeout(voiceRevealTimer);
-                voiceRevealTimer = null;
-              }
               revealPendingAssistant();
             }
             if (ev.type === 'error') {
@@ -2385,7 +2417,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           } catch {}
         }
       }
-      if (voiceRevealTimer) clearTimeout(voiceRevealTimer);
       revealPendingAssistant();
       if (ttsError) {
         setMessages(prev => [...prev, { role: 'assistant', content: `[Voice unavailable: ${ttsError}]`, time: new Date() }]);
@@ -2472,7 +2503,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           : m
       ));
       if (data.actions?.length) maybeOpenActionResults(data.actions);
-      if (data.audio) playAudioFromBase64(data.audio);
+      if (data.audio) enqueueAudioFromBase64(data.audio);
       resetImageDraft();
     } catch (err) {
       setMessages(prev => prev.map(m =>
@@ -2483,7 +2514,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
     } finally {
       setLoadingWithCb(false);
     }
-  }, [input, loading, selectedImage, settings, resetImageDraft, playAudioFromBase64]);
+  }, [input, loading, selectedImage, settings, resetImageDraft, maybeOpenActionResults, enqueueAudioFromBase64]);
 
   const sendMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
@@ -2512,19 +2543,11 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       let streamedText = '';
       let streamActions = null;
       let ttsError = '';
-      let revealText = !settings.voiceOn;
-      let voiceRevealTimer = null;
       const publishStreamedText = () => {
         setMessages(prev => prev.map(m =>
           m._streamId === placeholderId ? { ...m, content: streamedText } : m
         ));
       };
-      if (settings.voiceOn) {
-        voiceRevealTimer = setTimeout(() => {
-          revealText = true;
-          publishStreamedText();
-        }, 900);
-      }
 
       while (true) {
         const { done, value } = await reader.read();
@@ -2538,9 +2561,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
             const ev = JSON.parse(line.slice(6));
             if (ev.type === 'text') {
               streamedText += ev.chunk;
-              if (revealText) {
-                publishStreamedText();
-              }
+              publishStreamedText();
             }
             if (ev.type === 'actions' && ev.results?.length) {
               streamActions = ev.results;
@@ -2550,22 +2571,12 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
               maybeOpenActionResults(ev.results);
             }
             if (ev.type === 'audio') {
-              if (voiceRevealTimer) {
-                clearTimeout(voiceRevealTimer);
-                voiceRevealTimer = null;
-              }
-              revealText = true;
               publishStreamedText();
-              playAudioFromBase64(ev.data);
+              enqueueAudioFromBase64(ev.data);
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
               console.error('TTS error:', ttsError);
-              if (voiceRevealTimer) {
-                clearTimeout(voiceRevealTimer);
-                voiceRevealTimer = null;
-              }
-              revealText = true;
               setMessages(prev => prev.map(m =>
                 m._streamId === placeholderId
                   ? { ...m, content: `${streamedText}\n\n[Voice unavailable: ${ttsError}]`.trim() }
@@ -2583,7 +2594,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       }
 
       // Finalize: remove stream marker
-      if (voiceRevealTimer) clearTimeout(voiceRevealTimer);
       if (!streamedText) streamedText = 'Something went wrong.';
       setMessages(prev => prev.map(m => {
         if (m._streamId !== placeholderId) return m;
@@ -2595,7 +2605,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
     setLoadingWithCb(false);
-  }, [input, loading, settings, memory, people, maybeOpenActionResults]);
+  }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64]);
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
