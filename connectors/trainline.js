@@ -76,14 +76,23 @@ async function getNextTrains(originCRS, destCRS) {
     // Some TransportAPI apps can access live rail data but not the Darwin-specific flag.
     // Retry the plain live endpoint before surfacing a failure.
     if (err.response?.status !== 403) throw err;
-    resp = await axios.get(endpoint, {
-      params: baseParams,
-      timeout: 10000,
-    });
+    try {
+      resp = await axios.get(endpoint, {
+        params: baseParams,
+        timeout: 10000,
+      });
+    } catch (fallbackErr) {
+      if (fallbackErr.response?.status === 403) {
+        return { trains: [], accessDenied: true };
+      }
+      throw fallbackErr;
+    }
   }
 
   const departures = resp.data?.departures?.all || [];
-  return departures.slice(0, 3).map(d => ({
+  return {
+    accessDenied: false,
+    trains: departures.slice(0, 3).map(d => ({
     scheduledDeparture: d.aimed_departure_time,
     estimatedDeparture: d.expected_departure_time,
     scheduledArrival:   d.aimed_arrival_time,
@@ -92,7 +101,8 @@ async function getNextTrains(originCRS, destCRS) {
     destination:        d.destination_name,
     operator:           d.operator_name,
     cancelled:          d.status === 'CANCELLED',
-  }));
+    }))
+  };
 }
 
 // CRS → Trainline city slug for route URLs (thetrainline.com/trains/{from}/{to})
@@ -159,7 +169,16 @@ async function execute(userId, action, params) {
       };
     }
 
-    const trains = await getNextTrains(originCRS, destCRS);
+    const { trains, accessDenied } = await getNextTrains(originCRS, destCRS);
+
+    if (accessDenied) {
+      return {
+        success: true,
+        text: `I couldn't access live departures for ${origin} to ${destination} with the current rail data permissions, but I can open the route in Trainline for you.`,
+        bookingUrl,
+        trains: []
+      };
+    }
 
     if (!trains.length) {
       return {
