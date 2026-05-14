@@ -752,6 +752,36 @@ body::after {
 
 @media (max-width: 768px) { .speaking-bar { padding: 9px 20px; } }
 
+.live-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 64px 0;
+  font-size: 11.5px;
+  color: var(--sub);
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) { .live-status-bar { padding: 10px 20px 0; } }
+
+.live-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--stone);
+  opacity: 0.75;
+}
+
+.live-status-dot.thinking { animation: pulseDot 1.1s ease-in-out infinite; }
+.live-status-dot.working  { background: var(--text); }
+.live-status-dot.done     { background: #7a8f72; }
+.live-status-dot.speaking { background: #b59d73; animation: pulseDot 0.8s ease-in-out infinite; }
+
+@keyframes pulseDot {
+  0%, 100% { transform: scale(0.85); opacity: 0.45; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
 .speaking-waves {
   display: flex;
   gap: 2px;
@@ -1819,6 +1849,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(null);
   const [recording, setRecording] = useState(false);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerMode, setComposerMode] = useState('chat');
@@ -1847,6 +1878,38 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const liveInputRef      = useRef(null);
   const queuedAudioRef    = useRef([]);
   const queuedAudioPlayingRef = useRef(false);
+  const statusClearTimerRef = useRef(null);
+
+  const updateCurrentStatus = useCallback((status, label) => {
+    if (statusClearTimerRef.current) {
+      clearTimeout(statusClearTimerRef.current);
+      statusClearTimerRef.current = null;
+    }
+    const tone = status === 'thinking_start'
+      ? 'thinking'
+      : status === 'action_start'
+        ? 'working'
+        : status === 'action_complete'
+          ? 'done'
+          : status === 'speaking_start'
+            ? 'speaking'
+            : 'thinking';
+    setCurrentStatus({ status, tone, label });
+    if (status === 'action_complete') {
+      statusClearTimerRef.current = setTimeout(() => {
+        setCurrentStatus(prev => (prev?.status === 'action_complete' ? null : prev));
+        statusClearTimerRef.current = null;
+      }, 1400);
+    }
+  }, []);
+
+  const clearCurrentStatus = useCallback(() => {
+    if (statusClearTimerRef.current) {
+      clearTimeout(statusClearTimerRef.current);
+      statusClearTimerRef.current = null;
+    }
+    setCurrentStatus(null);
+  }, []);
 
   const loadHistory = useCallback(() => {
     apiFetch('/history/' + USER_ID)
@@ -1874,6 +1937,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
 
   useEffect(() => () => {
     if (liveAudioDrainTimerRef.current) clearTimeout(liveAudioDrainTimerRef.current);
+    if (statusClearTimerRef.current) clearTimeout(statusClearTimerRef.current);
     if (liveInputRef.current?.stop) liveInputRef.current.stop();
     if (liveSocketRef.current && liveSocketRef.current.readyState === WebSocket.OPEN) {
       try {
@@ -1885,6 +1949,12 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
       liveAudioContextRef.current.close().catch(() => {});
     }
   }, []);
+
+  useEffect(() => {
+    if (!loading && !speaking && currentStatus?.status === 'speaking_start') {
+      clearCurrentStatus();
+    }
+  }, [loading, speaking, currentStatus, clearCurrentStatus]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2519,6 +2589,7 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
   const sendMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
     if (!text || loading) return;
+    clearCurrentStatus();
     setMessages(prev => [...prev, { role: 'user', content: text, time: new Date() }]);
     if (!overrideText) setInput('');
     setLoadingWithCb(true);
@@ -2559,6 +2630,9 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           if (!line.startsWith('data: ')) continue;
           try {
             const ev = JSON.parse(line.slice(6));
+            if (ev.type === 'status') {
+              updateCurrentStatus(ev.status, ev.label);
+            }
             if (ev.type === 'text') {
               streamedText += ev.chunk;
               publishStreamedText();
@@ -2602,10 +2676,12 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
         return final;
       }));
     } catch (err) {
+      clearCurrentStatus();
       setMessages(prev => [...prev, { role: 'assistant', content: 'Connection failed.', time: new Date() }]);
     }
+    if (!speaking) clearCurrentStatus();
     setLoadingWithCb(false);
-  }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64]);
+  }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64, clearCurrentStatus, updateCurrentStatus, speaking]);
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -2835,9 +2911,16 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
           <div className="message oxcy">
             <div className="typing"><span/><span/><span/></div>
           </div>
-        )}
+      )}
         <div ref={messagesEndRef} />
       </div>
+
+      {currentStatus?.label && (
+        <div className="live-status-bar">
+          <div className={`live-status-dot ${currentStatus.tone}`}/>
+          <span>{currentStatus.label}</span>
+        </div>
+      )}
 
       {speaking && (
         <div className="speaking-bar">

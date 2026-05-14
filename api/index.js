@@ -246,7 +246,12 @@ ABSOLUTE RULES:
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
 11. Recent action results are real state. Don't repeat successful actions unless the user clearly asks you to repeat them.
 12. If a recent action failed and the user asks to retry, fix, redo, or "do the failed one", retry only the failed action unless they explicitly ask to rerun other actions too.
-13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.`;
+13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.
+14. When executing communication actions, use the right register for the medium and relationship automatically.
+15. Emails to unknown or professional contacts should have a proper salutation, structured body, and sign-off.
+16. Emails to known contacts should match the established tone of that relationship.
+17. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
+18. Infer the appropriate format from context. The user should not need to specify formatting.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -650,6 +655,31 @@ async function generateSpeech(text, voiceName = 'Aoede') {
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
 }
 
+const ACTION_STATUS_LABELS = {
+  send_email: 'Sending email',
+  get_emails: 'Checking emails',
+  search_emails: 'Searching emails',
+  create_calendar_event: 'Creating calendar event',
+  get_calendar_events: 'Checking calendar',
+  book_uber: 'Booking Uber',
+  send_telegram: 'Sending Telegram message',
+  get_telegram_contacts: 'Checking Telegram contacts',
+  search_trains: 'Checking train times',
+  order_uber_eats: 'Opening Uber Eats',
+  order_deliveroo: 'Opening Deliveroo',
+  search_netflix_title: 'Searching Netflix',
+  add_to_netflix_list: 'Opening Netflix list',
+  generate_visual: 'Generating visual',
+  create_diagram: 'Creating diagram',
+  create_presentation: 'Building presentation'
+};
+
+function getActionStatusLabel(actionType, phase = 'start') {
+  const base = ACTION_STATUS_LABELS[actionType] || humanizeActionType(actionType);
+  if (phase === 'complete') return `${base} complete`;
+  return base;
+}
+
 async function* generateSpeechStream(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return;
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
@@ -721,11 +751,12 @@ async function* generateSpeechStream(text, voiceName = 'Aoede') {
   throw new Error(`TTS failed (${safeVoiceName}): ${failures.join(' | ')}`);
 }
 
-function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
+function createSentenceTtsStreamer({ voiceName, sse, trace = null, onSpeakingStart = null }) {
   let lastSentenceCount = 0;
   let nextEmitIndex = 0;
   const readyAudio = new Map();
   const tasks = [];
+  let speakingNotified = false;
 
   const flushReadyAudio = () => {
     while (readyAudio.has(nextEmitIndex)) {
@@ -733,6 +764,10 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
       while (state.chunks.length) {
         const audio = state.chunks.shift();
         const chunkIndex = state.sentCount++;
+        if (!speakingNotified) {
+          speakingNotified = true;
+          if (onSpeakingStart) onSpeakingStart();
+        }
         sse({ type: 'audio', data: audio, format: 'wav', seq: nextEmitIndex, chunk: chunkIndex });
         if (trace) trace.log(`tts.chunk_sent.${nextEmitIndex}.${chunkIndex}`);
       }
@@ -1007,9 +1042,10 @@ async function executeAction(userId, action, params, context = {}) {
   }
 }
 
-async function executeActions(userId, actions, context = {}, trace = null) {
+async function executeActions(userId, actions, context = {}, trace = null, callbacks = {}) {
   if (!actions?.length) return [];
   const results = await Promise.all(actions.map(async action => {
+    if (callbacks.onActionStart) callbacks.onActionStart(action);
     const result = trace
       ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
       : await executeAction(userId, action.type, action.input || {}, context);
@@ -1025,6 +1061,7 @@ async function executeActions(userId, actions, context = {}, trace = null) {
     } else {
       await insertActionLog();
     }
+    if (callbacks.onActionComplete) callbacks.onActionComplete(action, result);
     return { action: action.type, result };
   }));
   invalidateUserContextCache(userId);
@@ -1930,8 +1967,10 @@ app.post('/chat', async (req, res) => {
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
       const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
 
       try {
+        sendStatus('thinking_start', 'Thinking');
         // Stream Gemini response token-by-token
         const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
           model: chatModel,
@@ -1941,7 +1980,12 @@ app.post('/chat', async (req, res) => {
         let fullText = '';
         let firstChunk = true;
         let lastVisibleText = '';
-        const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({ voiceName: settings.voice, sse, trace }) : null;
+        const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({
+          voiceName: settings.voice,
+          sse,
+          trace,
+          onSpeakingStart: () => sendStatus('speaking_start', 'Speaking')
+        }) : null;
         for await (const chunk of stream) {
           const text = chunk.text || '';
           if (text) {
@@ -1961,7 +2005,13 @@ app.post('/chat', async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, {}, trace);
+          actionResults = await executeActions(userId, actions, {}, trace, {
+            onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
+            onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
+              action: action.type,
+              success: result?.success !== false
+            })
+          });
           sse({ type: 'actions', results: actionResults });
           trace.log('actions.complete');
         }
