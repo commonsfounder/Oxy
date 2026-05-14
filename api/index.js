@@ -152,9 +152,9 @@ const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
 
 setTimeout(() => {
-  getPromptCacheName(null, STREAMING_CHAT_MODEL).catch(() => {});
+  ensurePromptCacheWarm(null, STREAMING_CHAT_MODEL).catch(() => {});
   if (PRIMARY_CHAT_MODEL !== STREAMING_CHAT_MODEL) {
-    getPromptCacheName(null, PRIMARY_CHAT_MODEL).catch(() => {});
+    ensurePromptCacheWarm(null, PRIMARY_CHAT_MODEL).catch(() => {});
   }
 }, 0);
 
@@ -472,24 +472,26 @@ function isQuickTurnMessage(message) {
   return /^(hi|hey|hello|yo|sup|hiya|haha|lol|ok|okay|kk|cool|nice|great|sure|yep|yes|nah|no|thanks|thank you|morning|good morning|afternoon|good afternoon|evening|good evening)$/.test(normalized);
 }
 
-async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
+function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
   const cacheKey = `${modelName}:${OXCY_SYSTEM_PROMPT}`;
   let cacheState = promptCacheStates.get(cacheKey);
   if (!cacheState) {
-    cacheState = { name: '', expireAt: 0, pending: null };
+    cacheState = { key: cacheKey, name: '', expireAt: 0, pending: null };
     promptCacheStates.set(cacheKey, cacheState);
   }
+  return cacheState;
+}
 
+async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MODEL) {
+  const cacheState = getPromptCacheState(modelName);
   if (cacheState.name && Date.now() < cacheState.expireAt) {
     if (trace) trace.log('prompt_cache.hit', cacheState.name);
     return cacheState.name;
   }
-
   if (cacheState.pending) {
     if (trace) trace.log('prompt_cache.pending');
-    return cacheState.name || '';
+    return cacheState.pending;
   }
-
   cacheState.pending = (async () => {
     try {
       const cached = trace
@@ -520,8 +522,21 @@ async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL
       cacheState.pending = null;
     }
   })();
+  return cacheState.pending;
+}
 
+function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
+  const cacheState = getPromptCacheState(modelName);
+  if (cacheState.name && Date.now() < cacheState.expireAt) {
+    if (trace) trace.log('prompt_cache.hit', cacheState.name);
+    return cacheState.name;
+  }
+  if (cacheState.pending) {
+    if (trace) trace.log('prompt_cache.pending');
+    return cacheState.name || '';
+  }
   if (trace) trace.log('prompt_cache.warm_start');
+  ensurePromptCacheWarm(null, modelName).catch(() => {});
   return cacheState.name || '';
 }
 
@@ -655,6 +670,15 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null }) {
     if (!trimmed) return;
     const seq = tasks.length;
     if (trace) trace.log(`tts.chunk_schedule.${seq}`, JSON.stringify(trimmed.slice(0, 80)));
+    if (seq === 0) {
+      const earlyClause = trimmed.match(/^([^,;:]{1,24}[,;:])\s+(.+)$/);
+      if (earlyClause) {
+        schedule(earlyClause[1].trim());
+        schedule(earlyClause[2].trim());
+        return;
+      }
+    }
+    if (trace) trace.log(`tts.chunk_start.${seq}`);
     const task = generateSpeech(trimmed, voiceName)
       .then(audio => {
         readyAudio.set(seq, audio);
