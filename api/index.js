@@ -495,13 +495,28 @@ async function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL
   return cacheState.pending;
 }
 
-function buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName) {
-  const config = {
-    systemInstruction: dynamicSystemPrompt
-  };
-  if (cachedContentName) config.cachedContent = cachedContentName;
+function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent }) {
+  const canUseCachedPrompt = Boolean(cachedContentName) && !useSearch;
+  const config = {};
+  if (canUseCachedPrompt) {
+    config.cachedContent = cachedContentName;
+  } else {
+    config.systemInstruction = dynamicSystemPrompt;
+  }
   if (useSearch) config.tools = [{ googleSearch: {} }];
-  return config;
+
+  const dynamicContextParts = canUseCachedPrompt
+    ? [{ text: `Persistent user context for this conversation:\n\n${dynamicSystemPrompt}` }]
+    : [];
+
+  return {
+    config,
+    contents: [
+      ...baseHistory,
+      ...(dynamicContextParts.length ? [{ role: 'user', parts: dynamicContextParts }] : []),
+      userContent
+    ]
+  };
 }
 
 async function runActions(userId, actions) {
@@ -1261,12 +1276,18 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       cachedContentName = refreshed.cachedContentName;
     }
     const baseHistory = normalizeGeminiHistory(history);
-    const streamConfig = buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName);
+    const initialRequest = buildModernGenerateRequest({
+      dynamicSystemPrompt,
+      useSearch,
+      cachedContentName,
+      baseHistory,
+      userContent: { role: 'user', parts: [{ text: userText }] }
+    });
 
     const stream = await modernGenAI.models.generateContentStream({
       model: STREAMING_CHAT_MODEL,
-      contents: [...baseHistory, { role: 'user', parts: [{ text: userText }] }],
-      config: streamConfig
+      contents: initialRequest.contents,
+      config: initialRequest.config
     });
     let fullText = '';
     for await (const chunk of stream.stream) {
@@ -1337,21 +1358,24 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       saveMessage(userId, 'user', `${message}\n\n[Attached image: ${req.file.originalname || 'image'}]`)
     ]);
     const baseHistory = normalizeGeminiHistory(history);
-    const contents = [
-      ...baseHistory,
-      {
+    const initialRequest = buildModernGenerateRequest({
+      dynamicSystemPrompt,
+      useSearch,
+      cachedContentName,
+      baseHistory,
+      userContent: {
         role: 'user',
         parts: [
           { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
           { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
         ]
       }
-    ];
+    });
 
     const geminiRes = await modernGenAI.models.generateContent({
       model: PRIMARY_CHAT_MODEL,
-      contents,
-      config: buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName)
+      contents: initialRequest.contents,
+      config: initialRequest.config
     });
     let { spoken, actions } = parseActions(geminiRes.text || '');
     let actionResults = [];
@@ -1364,21 +1388,27 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
+      const followUpRequest = buildModernGenerateRequest({
+        dynamicSystemPrompt,
+        useSearch,
+        cachedContentName,
+        baseHistory,
+        userContent: {
+          role: 'user',
+          parts: [
+            { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
+            { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
+          ]
+        }
+      });
+      followUpRequest.contents.push(
+        { role: 'model', parts: [{ text: spoken || '...' }] },
+        { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached image context. Do not invent unstated facts.` }] }
+      );
       const followUp = await modernGenAI.models.generateContent({
         model: PRIMARY_CHAT_MODEL,
-        contents: [
-          ...baseHistory,
-          {
-            role: 'user',
-            parts: [
-              { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
-              { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
-            ]
-          },
-          { role: 'model', parts: [{ text: spoken || '...' }] },
-          { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached image context. Do not invent unstated facts.` }] }
-        ],
-        config: buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName)
+        contents: followUpRequest.contents,
+        config: followUpRequest.config
       });
       spoken = parseActions(followUp.text || '').spoken || spoken || context;
     }
@@ -1739,8 +1769,13 @@ app.post('/chat', async (req, res) => {
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel));
     const baseHistory = normalizeGeminiHistory(history);
-    const contents = [...baseHistory, { role: 'user', parts: [{ text: message }] }];
-    const requestConfig = buildModernGenerateConfig(dynamicSystemPrompt, useSearch, cachedContentName);
+    const initialRequest = buildModernGenerateRequest({
+      dynamicSystemPrompt,
+      useSearch,
+      cachedContentName,
+      baseHistory,
+      userContent: { role: 'user', parts: [{ text: message }] }
+    });
 
     // ── Streaming mode (SSE) ────────────────────────────────────────────
     if (streaming) {
@@ -1754,8 +1789,8 @@ app.post('/chat', async (req, res) => {
         // Stream Gemini response token-by-token
         const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
           model: chatModel,
-          contents,
-          config: requestConfig
+          contents: initialRequest.contents,
+          config: initialRequest.config
         }));
         let fullText = '';
         let firstChunk = true;
@@ -1793,15 +1828,21 @@ app.post('/chat', async (req, res) => {
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
           const context = dataResults.map(a => a.result.text).join('\n\n');
+          const followUpRequest = buildModernGenerateRequest({
+            dynamicSystemPrompt,
+            useSearch,
+            cachedContentName,
+            baseHistory,
+            userContent: { role: 'user', parts: [{ text: message }] }
+          });
+          followUpRequest.contents.push(
+            { role: 'model', parts: [{ text: spoken || '…' }] },
+            { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+          );
           const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
             model: chatModel,
-            contents: [
-              ...baseHistory,
-              { role: 'user', parts: [{ text: message }] },
-              { role: 'model', parts: [{ text: spoken || '…' }] },
-              { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-            ],
-            config: requestConfig
+            contents: followUpRequest.contents,
+            config: followUpRequest.config
           }));
           spoken = '';
           for await (const chunk of followUp.stream) {
@@ -1854,8 +1895,8 @@ app.post('/chat', async (req, res) => {
     // ── Non-streaming mode (JSON — backward compatible) ─────────────────
     const geminiRes = await trace.run('gemini.generateContent.nonstream', () => modernGenAI.models.generateContent({
       model: chatModel,
-      contents,
-      config: requestConfig
+      contents: initialRequest.contents,
+      config: initialRequest.config
     }));
 
     const rawText = geminiRes.text || '';
@@ -1873,15 +1914,21 @@ app.post('/chat', async (req, res) => {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
       const context = dataResults.map(a => a.result.text).join('\n\n');
+      const followUpRequest = buildModernGenerateRequest({
+        dynamicSystemPrompt,
+        useSearch,
+        cachedContentName,
+        baseHistory,
+        userContent: { role: 'user', parts: [{ text: message }] }
+      });
+      followUpRequest.contents.push(
+        { role: 'model', parts: [{ text: spoken || '…' }] },
+        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+      );
       const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
         model: chatModel,
-        contents: [
-          ...baseHistory,
-          { role: 'user', parts: [{ text: message }] },
-          { role: 'model', parts: [{ text: spoken || '…' }] },
-          { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-        ],
-        config: requestConfig
+        contents: followUpRequest.contents,
+        config: followUpRequest.config
       }));
       spoken = parseActions(followUp.text || '').spoken || context;
     }
