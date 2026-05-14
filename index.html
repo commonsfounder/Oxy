@@ -422,21 +422,21 @@ body::after {
 .msg-actions-bar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .msg-action-status {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
+  gap: 8px;
+  font-size: 11.5px;
   font-weight: 400;
-  padding: 11px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
-  background: rgba(255,255,255,0.018);
-  border-radius: 14px;
+  background: rgba(255,255,255,0.015);
+  border-radius: 12px;
   letter-spacing: 0;
 }
 
@@ -448,18 +448,21 @@ body::after {
 
 .msg-action-copy {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .msg-action-title {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .msg-action-sub {
-  margin-top: 4px;
   color: var(--sub);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 10.5px;
+  line-height: 1.3;
 }
 
 .msg-action-link {
@@ -493,23 +496,21 @@ body::after {
 .msg-action-status.ok  { border-color: rgba(76,175,130,0.18); }
 .msg-action-status.fail { border-color: rgba(192,80,62,0.22); }
 
-.msg-action-pill {
-  padding: 4px 8px;
+.msg-action-mark {
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.8px;
-  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--stone);
+  opacity: 0.8;
 }
 
-.msg-action-status.ok .msg-action-pill {
-  color: var(--green);
-  background: rgba(76,175,130,0.12);
+.msg-action-status.ok .msg-action-mark {
+  background: var(--green);
 }
 
-.msg-action-status.fail .msg-action-pill {
-  color: var(--red);
-  background: rgba(192,80,62,0.12);
+.msg-action-status.fail .msg-action-mark {
+  background: var(--red);
 }
 
 /* Typing indicator */
@@ -755,14 +756,14 @@ body::after {
 .live-status-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 64px 0;
-  font-size: 11.5px;
+  gap: 7px;
+  padding: 6px 64px 2px;
+  font-size: 11px;
   color: var(--sub);
   flex-shrink: 0;
 }
 
-@media (max-width: 768px) { .live-status-bar { padding: 10px 20px 0; } }
+@media (max-width: 768px) { .live-status-bar { padding: 6px 16px 2px; } }
 
 .live-status-dot {
   width: 7px;
@@ -823,11 +824,11 @@ body::after {
 /* ── INPUT ── */
 .chat-input-area {
   flex-shrink: 0;
-  padding: 12px 64px 28px;
+  padding: 8px 64px 12px;
   background: var(--bg);
 }
 
-@media (max-width: 768px) { .chat-input-area { padding: 10px 16px 20px; } }
+@media (max-width: 768px) { .chat-input-area { padding: 8px 12px 10px; } }
 
 .composer-stack {
   position: relative;
@@ -837,7 +838,7 @@ body::after {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 0 0 10px;
+  margin: 0 0 8px;
 }
 
 .attachment-pill {
@@ -873,8 +874,8 @@ body::after {
   gap: 8px;
   background: var(--s1);
   border: 1px solid var(--line2);
-  border-radius: 20px;
-  padding: 10px;
+  border-radius: 18px;
+  padding: 8px;
   transition: border-color 0.2s, box-shadow 0.2s;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
 }
@@ -891,8 +892,8 @@ body::after {
 
 .composer-plus,
 .composer-primary {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 12px;
   display: flex;
   align-items: center;
@@ -2874,11 +2875,20 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                                   : humanizeActionType(type);
                       const detail = a.result?.error || a.result?.text || '';
                       const repeatedDetail = !!(detail && msg.content && msg.content.includes(detail));
+                      const compactLabel = type === 'book_uber' ? 'Uber ready'
+                                        : type === 'create_calendar_event' ? 'Event added'
+                                        : type === 'get_emails' ? 'Emails loaded'
+                                        : type === 'get_calendar_events' ? 'Calendar loaded'
+                                        : type === 'send_telegram' ? 'Telegram sent'
+                                        : type === 'get_telegram_contacts' ? 'Contacts loaded'
+                                        : label;
+                      const showDetail = !artifactOnly && (!ok || (!repeatedDetail && !msg.content));
                       return (
                         <span key={j} className={`msg-action-status ${ok ? 'ok' : 'fail'} ${artifactOnly ? 'artifact-only' : ''}`}>
                           <span className="msg-action-copy">
-                            {!artifactOnly && <span className="msg-action-title">{label}</span>}
-                            {!artifactOnly && detail && !repeatedDetail && (
+                            {!artifactOnly && <span className="msg-action-mark"/>}
+                            {!artifactOnly && <span className="msg-action-title">{compactLabel}</span>}
+                            {!artifactOnly && detail && showDetail && (
                               <span className="msg-action-sub">
                                 {detail}
                               </span>
@@ -2896,7 +2906,6 @@ function ChatPage({ settings, memory, people, initialQuery, onRecordingChange, o
                               </a>
                             )}
                           </span>
-                          {!artifactOnly && <span className="msg-action-pill">{ok ? 'done' : 'failed'}</span>}
                         </span>
                       );
                     })}
