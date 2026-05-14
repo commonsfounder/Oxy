@@ -1290,7 +1290,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       config: initialRequest.config
     });
     let fullText = '';
-    for await (const chunk of stream.stream) {
+    for await (const chunk of stream) {
       const text = chunk.text || '';
       if (text) fullText += text;
     }
@@ -1796,7 +1796,7 @@ app.post('/chat', async (req, res) => {
         let firstChunk = true;
         let lastVisibleText = '';
         const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({ voiceName: settings.voice, sse, trace }) : null;
-        for await (const chunk of stream.stream) {
+        for await (const chunk of stream) {
           const text = chunk.text || '';
           if (text) {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
@@ -1845,7 +1845,7 @@ app.post('/chat', async (req, res) => {
             config: followUpRequest.config
           }));
           spoken = '';
-          for await (const chunk of followUp.stream) {
+          for await (const chunk of followUp) {
             const text = chunk.text || '';
             if (text) {
               spoken += text;
