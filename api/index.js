@@ -151,6 +151,13 @@ const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
 
+setTimeout(() => {
+  getPromptCacheName(null, STREAMING_CHAT_MODEL).catch(() => {});
+  if (PRIMARY_CHAT_MODEL !== STREAMING_CHAT_MODEL) {
+    getPromptCacheName(null, PRIMARY_CHAT_MODEL).catch(() => {});
+  }
+}, 0);
+
 function createRequestTrace(label) {
   const startedAt = Date.now();
   const prefix = `[trace:${label}]`;
@@ -445,7 +452,9 @@ ${userContext}`;
 
 function buildQuickTurnContext(preferences) {
   return `FAST TURN MODE:
-Reply in one short natural sentence.
+For tiny greetings or acknowledgements, reply in no more than two very short sentences.
+Make the first sentence a tiny acknowledgement of 1-3 words when possible.
+Keep the total reply under 10 words unless the user explicitly asks for more.
 Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
 Keep it warm, effortless, and concise.
 
@@ -525,6 +534,11 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
     config.systemInstruction = `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim();
   }
   if (useSearch) config.tools = [{ googleSearch: {} }];
+  const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
+  if (isQuickTurnMessage(firstUserText)) {
+    config.maxOutputTokens = 32;
+    config.temperature = 0.5;
+  }
 
   const dynamicContextParts = canUseCachedPrompt
     ? [{ text: `Persistent user context for this conversation:\n\n${dynamicSystemPrompt}` }]
@@ -1730,7 +1744,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const useSearch = message && needsSearch(message);
   if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
   return {
-    history: quickTurn ? history.slice(-6) : history,
+    history: quickTurn ? history.slice(-2) : history,
     availableActions,
     useSearch,
     dynamicSystemPrompt,
