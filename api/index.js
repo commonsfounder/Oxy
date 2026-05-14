@@ -26,6 +26,8 @@ const {
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const APP_URL = process.env.APP_URL || '';
+const ALLOWED_ORIGINS = [APP_URL].filter(Boolean);
 
 function escapeHtml(str) {
   return String(str)
@@ -47,7 +49,12 @@ function parseLooseJson(text) {
   try { return JSON.parse(cleaned); } catch { return null; }
 }
 
+function escapeIlikePattern(value) {
+  return String(value || '').replace(/[\\%_]/g, match => `\\${match}`);
+}
+
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+const MAX_PASSWORD_LENGTH = 1024;
 function isValidUserId(id) {
   return typeof id === 'string' && USER_ID_RE.test(id);
 }
@@ -87,8 +94,35 @@ function verifyOAuthState(state) {
   return isValidUserId(payload.userId) ? payload.userId : null;
 }
 
-app.use(cors());
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
 app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader('Vary', 'Origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: https:",
+      "connect-src 'self' https://generativelanguage.googleapis.com https://*.googleapis.com https://api.telegram.org ws: wss:",
+      "font-src 'self' data: https:",
+      "media-src 'self' blob: data:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'"
+    ].join('; ')
+  );
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 
 app.use((req, res, next) => {
   const publicPaths = new Set([
@@ -224,6 +258,7 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "order_deliveroo", "input": {"query": "food or restaurant", "restaurant": "optional restaurant name", "item": "optional dish"}},
     {"type": "search_netflix_title", "input": {"title": "show or film title"}},
     {"type": "add_to_netflix_list", "input": {"title": "show or film title"}},
+    {"type": "forget_memory", "input": {"scope": "recent|all", "query": "optional memory topic to forget"}},
     {"type": "generate_visual", "input": {"brief": "what to create", "style": "optional style", "usage": "where this visual will be used"}},
     {"type": "create_diagram", "input": {"topic": "what to explain", "goal": "what the diagram should help with"}},
     {"type": "create_presentation", "input": {"topic": "subject", "audience": "who it's for", "objective": "what the deck should achieve", "slide_count": 6}}
@@ -251,7 +286,9 @@ ABSOLUTE RULES:
 15. Emails to unknown or professional contacts should have a proper salutation, structured body, and sign-off.
 16. Emails to known contacts should match the established tone of that relationship.
 17. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
-18. Infer the appropriate format from context. The user should not need to specify formatting.`;
+18. Infer the appropriate format from context. The user should not need to specify formatting.
+19. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
+20. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -627,7 +664,7 @@ async function generateSpeech(text, voiceName = 'Aoede') {
     const timeoutId = setTimeout(() => controller.abort(), 9000);
     try {
       const resp = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${process.env.GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
         {
           contents: [{ parts: [{ text }] }],
           generationConfig: {
@@ -635,7 +672,7 @@ async function generateSpeech(text, voiceName = 'Aoede') {
             speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: safeVoiceName } } }
           }
         },
-        { signal: controller.signal }
+        { signal: controller.signal, headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY } }
       );
       const base64Audio = resp.data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (!base64Audio) {
@@ -669,6 +706,7 @@ const ACTION_STATUS_LABELS = {
   order_deliveroo: 'Opening Deliveroo',
   search_netflix_title: 'Searching Netflix',
   add_to_netflix_list: 'Opening Netflix list',
+  forget_memory: 'Updating memory',
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
   create_presentation: 'Building presentation'
@@ -694,7 +732,7 @@ async function* generateSpeechStream(text, voiceName = 'Aoede') {
     let sawAudio = false;
     try {
       const resp = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse&key=${process.env.GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse`,
         {
           contents: [{ parts: [{ text }] }],
           generationConfig: {
@@ -705,7 +743,10 @@ async function* generateSpeechStream(text, voiceName = 'Aoede') {
         {
           signal: controller.signal,
           responseType: 'stream',
-          headers: { Accept: 'text/event-stream' }
+          headers: {
+            Accept: 'text/event-stream',
+            'x-goog-api-key': process.env.GEMINI_API_KEY
+          }
         }
       );
 
@@ -1013,6 +1054,8 @@ Return strict JSON:
 
 async function executeAction(userId, action, params, context = {}) {
   switch (action) {
+    case 'forget_memory':
+      return forgetMemory(userId, params || {});
     case 'generate_visual': {
       const brief = params?.brief || params?.prompt || params?.topic;
       if (!brief) return { success: false, error: 'generate_visual needs a brief.' };
@@ -1111,6 +1154,76 @@ async function saveMemory(userId, content, source = 'fact') {
     .insert({ user_id: userId, content, source, created_at: new Date().toISOString() });
 }
 
+async function forgetMemory(userId, { scope = '', query = '' } = {}) {
+  const normalizedScope = String(scope || '').toLowerCase();
+  const normalizedQuery = String(query || '').trim();
+
+  if (normalizedScope === 'all') {
+    const { error } = await supabase.from('memories').delete().eq('user_id', userId);
+    if (error) throw error;
+    return { success: true, text: 'I cleared what I had in memory.' };
+  }
+
+  if (normalizedScope === 'recent') {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, content')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    if (!data?.length) return { success: true, text: 'There was nothing stored to forget.' };
+    const { error: deleteError } = await supabase.from('memories').delete().eq('id', data[0].id);
+    if (deleteError) throw deleteError;
+    return { success: true, text: 'I forgot the most recent memory.' };
+  }
+
+  if (normalizedQuery) {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, content')
+      .eq('user_id', userId)
+      .ilike('content', `%${escapeIlikePattern(normalizedQuery)}%`);
+    if (error) throw error;
+    if (!data?.length) {
+      return { success: true, text: `I couldn't find anything stored about "${normalizedQuery}".` };
+    }
+    const ids = data.map(row => row.id);
+    const { error: deleteError } = await supabase.from('memories').delete().in('id', ids);
+    if (deleteError) throw deleteError;
+    return {
+      success: true,
+      text: ids.length === 1
+        ? `I forgot what I had stored about "${normalizedQuery}".`
+        : `I removed ${ids.length} memories about "${normalizedQuery}".`
+    };
+  }
+
+  return { success: false, error: 'forget_memory needs scope "recent" or "all", or a query.' };
+}
+
+async function getMemorySummary(userId) {
+  const { data, error } = await supabase
+    .from('memories')
+    .select('content, source, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (error || !data) {
+    return { total: 0, profile: false, learned: 0, lastUpdated: null };
+  }
+
+  const manualProfile = data.find(m => m.source === 'manual_profile');
+  const learned = data.filter(m => m.source !== 'manual_profile');
+  return {
+    total: data.length,
+    profile: !!manualProfile,
+    learned: learned.length,
+    lastUpdated: data[0]?.created_at || null
+  };
+}
+
 async function extractMemoryFact(userId, text) {
   try {
     const model = genAI.getGenerativeModel({ model: FAST_MODEL });
@@ -1134,6 +1247,7 @@ async function extractMemoryFact(userId, text) {
 }
 
 function shouldSaveMemory(text) {
+  if (isMemoryDeletionRequest(text)) return false;
   const triggers = [
     'remember', 'my ', "i'm ", 'i am ', 'i work', 'i live',
     'i hate', 'i love', 'i need', 'i want', "i've got", 'i have',
@@ -1142,6 +1256,11 @@ function shouldSaveMemory(text) {
   ];
   const lower = text.toLowerCase();
   return triggers.some(t => lower.includes(t));
+}
+
+function isMemoryDeletionRequest(text) {
+  return /\b(forget|delete|remove|wipe|clear)\b.*\b(memory|remembered|know)\b/i.test(String(text || ''))
+    || /\bforget that\b/i.test(String(text || ''));
 }
 
 async function getHistory(userId, trace = null) {
@@ -1273,7 +1392,7 @@ function buildAvailableActions(enabled) {
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
   if (live.length === 0) return 'No connectors enabled. Only return the action block when asked — the user will handle it manually.';
   const active = live.flatMap(id => actionMap[id] || []);
-  return `Available actions: ${active.join(', ')}. Only use these — don't suggest actions for connectors that aren't enabled.`;
+  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
 }
 
 async function savePreference(userId, key, value) {
@@ -1364,8 +1483,8 @@ app.post('/auth/register', async (req, res) => {
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
-    if (typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    if (typeof password !== 'string' || password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: `Password must be between 8 and ${MAX_PASSWORD_LENGTH} characters.` });
     }
 
     const existing = await getUserAccount(userId);
@@ -1395,8 +1514,8 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
-    if (typeof password !== 'string' || !password) {
-      return res.status(400).json({ error: 'Password is required.' });
+    if (typeof password !== 'string' || !password || password.length > MAX_PASSWORD_LENGTH) {
+      return res.status(400).json({ error: 'Password is required and must be a reasonable length.' });
     }
 
     const account = await getUserAccount(userId);
@@ -1653,15 +1772,17 @@ app.post('/memory', async (req, res) => {
 app.get('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const { data, error } = await supabase
-      .from('memories')
-      .select('content, source')
-      .eq('user_id', req.params.userId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    
-    if (error || !data) return res.json({ memory: '' });
-    res.json({ memory: await getMemory(req.params.userId) });
+    res.json({ summary: await getMemorySummary(req.params.userId) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/memory/:userId', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const result = await forgetMemory(req.params.userId, req.body || { scope: 'all' });
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1672,6 +1793,7 @@ app.post('/action-log', async (req, res) => {
     const { userId, action, status = 'executed' } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     if (!action) return res.status(400).json({ error: 'action is required.' });
+    if (!ACTION_LOG_STATUSES.has(status)) return res.status(400).json({ error: 'Invalid status.' });
     
     await supabase.from('action_log').insert({
       user_id: userId,
@@ -1741,6 +1863,8 @@ CONNECTORS.splice(0, CONNECTORS.length,
   { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity',  implemented: false },
   { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',       implemented: false },
 );
+const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
+const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
@@ -1770,6 +1894,9 @@ app.post('/connectors', async (req, res) => {
   try {
     const { userId, connectorId, enabled } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
+    if (!KNOWN_CONNECTOR_IDS.has(connectorId)) {
+      return res.status(400).json({ error: 'Unknown connector.' });
+    }
     
     await supabase
       .from('connectors')
@@ -1842,13 +1969,14 @@ app.get('/history/:userId/search', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ results: [] });
+  const escapedQuery = escapeIlikePattern(q);
   try {
     const { data, error } = await supabase
       .from('conversations')
       .select('role, content, created_at')
       .eq('user_id', req.params.userId)
       .neq('role', 'system')
-      .ilike('content', `%${q}%`)
+      .ilike('content', `%${escapedQuery}%`)
       .order('created_at', { ascending: false })
       .limit(20);
     if (error) throw error;
@@ -2289,7 +2417,7 @@ app.get('/auth/google/redirect-uri', (req, res) => {
   res.json({ redirect_uri: `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback` });
 });
 
-app.get('/auth/google', (req, res) => {
+app.get('/auth/google/start', (req, res) => {
   const userId = req.query.userId;
   if (!requireMatchingUser(req, res, userId)) return;
   const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
@@ -2303,7 +2431,7 @@ app.get('/auth/google', (req, res) => {
     prompt: 'consent',
     state
   });
-  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+  res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
 });
 
 app.get('/auth/google/callback', async (req, res) => {
@@ -2311,12 +2439,15 @@ app.get('/auth/google/callback', async (req, res) => {
   const userId = verifyOAuthState(state);
 
   if (error) {
-    const appOrigin = process.env.APP_URL || '*';
+    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
     return res.send(`<script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
   }
 
   if (!userId) {
     return res.status(400).send('Invalid OAuth state');
+  }
+  if (!code || typeof code !== 'string') {
+    return res.status(400).send('Missing OAuth code');
   }
 
   try {
@@ -2342,7 +2473,7 @@ app.get('/auth/google/callback', async (req, res) => {
       { onConflict: 'user_id,connector_id' }
     );
 
-    const appOrigin = process.env.APP_URL || '*';
+    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
         <p style="font-size:18px">✓ Google connected</p>
@@ -2352,7 +2483,7 @@ app.get('/auth/google/callback', async (req, res) => {
     `);
   } catch (err) {
     console.error('/auth/google/callback error:', err.response?.data || err.message);
-    const appOrigin = process.env.APP_URL || '*';
+    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
     const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
@@ -2366,6 +2497,9 @@ app.get('/auth/google/callback', async (req, res) => {
 
 app.get('/debug/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
+  if (String(process.env.OXY_ENABLE_DEBUG || '').toLowerCase() !== 'true') {
+    return res.status(404).json({ error: 'Not found' });
+  }
   const userId = req.params.userId;
   try {
     const enabledConnectors = await getEnabledConnectors(userId);
@@ -2397,12 +2531,7 @@ app.get('/debug/:userId', async (req, res) => {
 
 app.get('/health', (_req, res) => {
   const missingEnv = getMissingRuntimeEnv();
-  res.json({
-    status: missingEnv.length ? 'degraded' : 'ok',
-    app: 'Oxy',
-    missingEnv,
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: missingEnv.length ? 'degraded' : 'ok' });
 });
 
 app.get('/install-shortcut', (_req, res) => {
@@ -2418,10 +2547,9 @@ app.get('/install-shortcut', (_req, res) => {
   }
 });
 
-const _indexHtml = require('fs').readFileSync(path.resolve(__dirname, '..', 'index.html'), 'utf8');
 app.get('/', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(_indexHtml);
+  res.sendFile(path.resolve(__dirname, '..', 'index.html'));
 });
 
 module.exports = app;

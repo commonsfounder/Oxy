@@ -149,8 +149,7 @@ async function execute(userId, action, params) {
         const contacts = result.users.map(u => ({
           id: u.id.toString(),
           name: `${u.firstName || ''} ${u.lastName || ''}`.trim(),
-          username: u.username || null,
-          phone: u.phone || null
+          username: u.username || null
         }));
         return { success: true, contacts, text: `Found ${contacts.length} Telegram contacts` };
       }

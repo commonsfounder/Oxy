@@ -28,8 +28,10 @@ function signPayload(payload, expiresInMs = SESSION_TTL_MS) {
 }
 
 function verifySignedPayload(token) {
-  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
-  const [encodedPayload, sig] = token.split('.', 2);
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [encodedPayload, sig] = parts;
   const secret = getSessionSecret();
   if (!secret) return null;
 
@@ -61,10 +63,6 @@ function getProvidedSessionToken(req) {
 
   const headerToken = req.get('X-Session-Token');
   if (headerToken) return headerToken;
-
-  if (typeof req.query?.authToken === 'string' && req.query.authToken) {
-    return req.query.authToken;
-  }
 
   return '';
 }

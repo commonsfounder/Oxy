@@ -1628,16 +1628,9 @@ const apiFetch = async (url, options = {}) => {
   return fetch(url, { ...options, headers });
 };
 
-function withAuthToken(url) {
-  if (!AUTH_TOKEN) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}authToken=${encodeURIComponent(AUTH_TOKEN)}`;
-}
-
 function getRealtimeVoiceSocketUrl() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const auth = AUTH_TOKEN ? `?authToken=${encodeURIComponent(AUTH_TOKEN)}` : '';
-  return `${protocol}//${window.location.host}/realtime-voice${auth}`;
+  return `${protocol}//${window.location.host}/realtime-voice`;
 }
 
 function persistSession(token, userId) {
@@ -2299,6 +2292,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     liveSocketRef.current = socket;
     mediaRecorderRef.current = liveCapture;
     liveInputRef.current = liveCapture;
+    socket.send(JSON.stringify({ type: 'auth', token: AUTH_TOKEN }));
     socket.send(JSON.stringify({ type: 'live-start', voice: settings.voice }));
 
     socket.onmessage = async (event) => {
@@ -3077,71 +3071,50 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   );
 }
 
-function MemoryPage({ memory, setMemory, people, setPeople }) {
-  const [newName, setNewName] = useState('');
-  const [newRel,  setNewRel]  = useState('');
-  const [toast,   setToast]   = useState(false);
+function MemoryPage() {
+  const [summary, setSummary] = useState({ total: 0, profile: false, learned: 0, lastUpdated: null });
 
   useEffect(() => {
     apiFetch('/memory/' + USER_ID)
       .then(r => r.json())
-      .then(d => { if (d.memory) setMemory(d.memory); })
+      .then(d => { if (d.summary) setSummary(d.summary); })
       .catch(() => {});
   }, []);
-
-  const showToast = () => { setToast(true); setTimeout(() => setToast(false), 2000); };
-
-  const saveMemory = async () => {
-    try {
-      await apiFetch('/memory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: USER_ID, content: memory })
-      });
-      showToast();
-    } catch (err) {}
-  };
-
-  const addPerson = () => {
-    if (!newName.trim()) return;
-    setPeople(prev => [...prev, { name: newName.trim(), rel: newRel.trim() || 'Contact' }]);
-    setNewName(''); setNewRel('');
-  };
 
   return (
     <div className="page-content">
       <div className="section">
-        <div className="section-title">About You</div>
+        <div className="section-title">Background Memory</div>
         <div className="memory-card">
-          <textarea className="memory-textarea" placeholder="Tell Oxy about yourself…" value={memory} onChange={e => setMemory(e.target.value)} />
-          <div className="memory-footer">
-            <button className="save-btn" onClick={saveMemory}>Save</button>
-          </div>
-        </div>
-      </div>
-
-      <div className="section">
-        <div className="section-title">People</div>
-        <div className="memory-card">
-          {people.map((p, i) => (
-            <div key={i} className="person-row">
-              <div className="person-avatar">{p.name[0].toUpperCase()}</div>
-              <div className="person-info">
-                <div className="person-name">{p.name}</div>
-                <div className="person-rel">{p.rel}</div>
-              </div>
-              <button className="person-delete" onClick={() => setPeople(prev => prev.filter((_,idx) => idx !== i))}>×</button>
+          <div style={{display:'grid',gap:'14px'}}>
+            <div style={{color:'var(--text)',fontSize:'15px',lineHeight:1.55}}>
+              Oxy keeps memory quietly in the background. You do not need to manage a big profile here.
             </div>
-          ))}
-          <div className="add-person-row">
-            <input className="mini-input" placeholder="Name" value={newName} onChange={e => setNewName(e.target.value)} />
-            <input className="mini-input" placeholder="Relationship" value={newRel} onChange={e => setNewRel(e.target.value)} />
-            <button className="mini-btn" onClick={addPerson}>Add</button>
+            <div style={{color:'var(--sub)',fontSize:'13px',lineHeight:1.6}}>
+              If you want something removed, just say things like <strong style={{color:'var(--text)',fontWeight:500}}>forget that</strong>, <strong style={{color:'var(--text)',fontWeight:500}}>delete that from memory</strong>, or <strong style={{color:'var(--text)',fontWeight:500}}>wipe what you know about X</strong> in chat.
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))',gap:'10px'}}>
+              <div className="hub-item" style={{pointerEvents:'none'}}>
+                <div className="connector-name">Stored Memories</div>
+                <div className="person-rel">{summary.total || 0}</div>
+              </div>
+              <div className="hub-item" style={{pointerEvents:'none'}}>
+                <div className="connector-name">Learned Facts</div>
+                <div className="person-rel">{summary.learned || 0}</div>
+              </div>
+              <div className="hub-item" style={{pointerEvents:'none'}}>
+                <div className="connector-name">Profile Anchor</div>
+                <div className="person-rel">{summary.profile ? 'Stored' : 'None'}</div>
+              </div>
+            </div>
+            <div style={{color:'var(--dim)',fontSize:'12px'}}>
+              {summary.lastUpdated
+                ? `Last memory update ${new Date(summary.lastUpdated).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`
+                : 'No memory stored yet.'}
+            </div>
           </div>
         </div>
       </div>
-
-      {toast && <div className="toast">Saved</div>}
     </div>
   );
 }
@@ -3265,9 +3238,16 @@ function ConnectorsPage() {
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
-  const connectGoogle = () => {
+  const connectGoogle = async () => {
     setGoogleStatus('connecting');
-    window.open(withAuthToken(`/auth/google?userId=${encodeURIComponent(USER_ID)}`), 'oxy_auth', 'width=500,height=600');
+    try {
+      const resp = await apiFetch(`/auth/google/start?userId=${encodeURIComponent(USER_ID)}`);
+      const data = await resp.json();
+      if (!resp.ok || !data.url) throw new Error(data.error || 'Google connect failed.');
+      window.open(data.url, 'oxy_auth', 'width=500,height=600');
+    } catch {
+      setGoogleStatus('error');
+    }
   };
 
   const toggle = async (id, enabled) => {
@@ -3630,7 +3610,7 @@ function App() {
         )}
         {page === 'history'    && <ActionHistoryPage />}
         {page === 'connectors' && <ConnectorsPage />}
-        {page === 'memory'     && <MemoryPage memory={memory} setMemory={setMemory} people={people} setPeople={setPeople} />}
+        {page === 'memory'     && <MemoryPage />}
         {page === 'settings'   && <SettingsPage settings={settings} setSettings={setSettings} />}
       </div>
 

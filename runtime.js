@@ -24,10 +24,13 @@ function logMissingRuntimeEnvOnce(context = 'runtime') {
 
 function createSupabaseServiceClient() {
   const missing = !process.env.SUPABASE_URL || !process.env.SUPABASE_KEY;
-  if (missing) logMissingRuntimeEnvOnce('supabase');
+  if (missing) {
+    logMissingRuntimeEnvOnce('supabase');
+    throw new Error('SUPABASE_URL and SUPABASE_KEY must be configured before startup.');
+  }
   return createClient(
-    process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.SUPABASE_KEY || 'placeholder-service-key'
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY
   );
 }
 

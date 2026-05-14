@@ -196,6 +196,18 @@ const LIVE_FUNCTION_DECLARATIONS = [
     }
   },
   {
+    name: 'forget_memory',
+    description: 'Delete something from Oxy memory.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string' },
+        query: { type: 'string' }
+      },
+      additionalProperties: false
+    }
+  },
+  {
     name: 'generate_visual',
     description: 'Generate a contextual visual for the conversation.',
     parametersJsonSchema: {
@@ -392,6 +404,7 @@ function buildLiveSystemInstruction(memory, recentConversation) {
     'You are Oxy, a proactive personal assistant speaking with the user in real time.',
     'Be concise, natural, and useful. Keep spoken replies fairly short unless the user asks for depth.',
     'If the user asks you to do something and a tool is available, call the tool instead of merely describing what you would do.',
+    'If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory.',
     'Do not repeat successful past actions unless the user explicitly asks you to repeat them.',
     'If an action fails and the user asks to retry, retry only the failed action unless they ask otherwise.',
     'If information is uncertain, say that plainly rather than guessing.',
@@ -408,6 +421,42 @@ function summarizeToolResult(result) {
   return 'Action completed successfully.';
 }
 
+async function forgetMemory(userId, args = {}) {
+  const scope = String(args.scope || '').toLowerCase();
+  const query = String(args.query || '').trim();
+
+  if (scope === 'all') {
+    await supabase.from('memories').delete().eq('user_id', userId);
+    return { success: true, text: 'I cleared what I had in memory.' };
+  }
+
+  if (scope === 'recent') {
+    const { data } = await supabase
+      .from('memories')
+      .select('id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (!data?.length) return { success: true, text: 'There was nothing stored to forget.' };
+    await supabase.from('memories').delete().eq('id', data[0].id);
+    return { success: true, text: 'I forgot the most recent memory.' };
+  }
+
+  if (query) {
+    const escaped = query.replace(/[\\%_]/g, match => `\\${match}`);
+    const { data } = await supabase
+      .from('memories')
+      .select('id')
+      .eq('user_id', userId)
+      .ilike('content', `%${escaped}%`);
+    if (!data?.length) return { success: true, text: `I couldn't find anything stored about "${query}".` };
+    await supabase.from('memories').delete().in('id', data.map(row => row.id));
+    return { success: true, text: `I removed what I had stored about "${query}".` };
+  }
+
+  return { success: false, error: 'forget_memory needs scope "recent" or "all", or a query.' };
+}
+
 async function executeFunctionCalls(userId, functionCalls = []) {
   const functionResponses = [];
   const actionResults = [];
@@ -418,7 +467,9 @@ async function executeFunctionCalls(userId, functionCalls = []) {
     let result;
 
     try {
-      result = await dispatch(userId, name, input);
+      result = name === 'forget_memory'
+        ? await forgetMemory(userId, input)
+        : await dispatch(userId, name, input);
     } catch (error) {
       result = { success: false, error: error?.message || `Failed to execute ${name}.` };
     }
@@ -582,23 +633,15 @@ function attachRealtimeVoiceServer(server) {
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname !== '/realtime-voice') return;
-
-    const token = url.searchParams.get('authToken') || '';
-    const payload = verifySignedPayload(token);
-    if (!payload || payload.type !== 'session' || !payload.userId) {
-      writeUnauthorized(socket);
-      return;
-    }
-
-    req.auth = { userId: payload.userId };
     wss.handleUpgrade(req, socket, head, ws => {
       wss.emit('connection', ws, req);
     });
   });
 
-  wss.on('connection', (socket, req) => {
-    const userId = req.auth.userId;
+  wss.on('connection', (socket) => {
     const state = {
+      userId: null,
+      authenticated: false,
       session: null,
       sessionPromise: null,
       userTranscript: '',
@@ -606,14 +649,45 @@ function attachRealtimeVoiceServer(server) {
       actionResults: [],
       pendingEvents: []
     };
+    const authTimeout = setTimeout(() => {
+      if (!state.authenticated) {
+        createSocketError(socket, 'Unauthorized');
+        socket.close();
+      }
+    }, 5000);
 
     socket.on('message', async raw => {
       try {
+        if (Buffer.byteLength(raw) > 512 * 1024) {
+          createSocketError(socket, 'Realtime message too large.');
+          socket.close();
+          return;
+        }
         const event = JSON.parse(String(raw));
+
+        if (event.type === 'auth') {
+          const payload = verifySignedPayload(event.token || '');
+          if (!payload || payload.type !== 'session' || !payload.userId) {
+            createSocketError(socket, 'Unauthorized');
+            socket.close();
+            return;
+          }
+          state.userId = payload.userId;
+          state.authenticated = true;
+          clearTimeout(authTimeout);
+          sendSocketEvent(socket, { type: 'live-authenticated' });
+          return;
+        }
+
+        if (!state.authenticated) {
+          createSocketError(socket, 'Unauthorized');
+          socket.close();
+          return;
+        }
 
         if (event.type === 'live-start') {
           if (!state.session && !state.sessionPromise) {
-            state.sessionPromise = createLiveSession(userId, event.voice, socket, state)
+            state.sessionPromise = createLiveSession(state.userId, event.voice, socket, state)
               .then(async session => {
                 state.session = session;
                 state.sessionPromise = null;
@@ -661,6 +735,7 @@ function attachRealtimeVoiceServer(server) {
     });
 
     socket.on('close', () => {
+      clearTimeout(authTimeout);
       try {
         state.session?.close();
       } catch {}

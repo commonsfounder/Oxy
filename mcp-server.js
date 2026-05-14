@@ -9,7 +9,16 @@ const path = require("path");
 const { requireSessionAuth } = require("./auth");
 
 const app = express();
-app.use(cors());
+const APP_URL = process.env.APP_URL || '';
+const ALLOWED_ORIGINS = [APP_URL].filter(Boolean);
+app.use(cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true);
+    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    return cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true
+}));
 app.use(express.json());
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
@@ -30,6 +39,20 @@ const HOME_ASSISTANT_URL = process.env.HOME_ASSISTANT_URL;
 const HOME_ASSISTANT_TOKEN = process.env.HOME_ASSISTANT_TOKEN;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const HOME_ASSISTANT_DOMAINS = new Set(['homeassistant', 'light', 'switch', 'scene', 'climate', 'media_player', 'cover']);
+const HOME_ASSISTANT_ACTIONS = new Set(['turn_on', 'turn_off', 'toggle', 'open_cover', 'close_cover', 'set_temperature', 'media_play', 'media_pause']);
+const ENTITY_ID_RE = /^[a-z_]+\.[a-zA-Z0-9_]+$/;
+
+function parseJsonEnv(name, value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`${name} is not valid JSON`);
+  }
+}
+
+const PARSED_GOOGLE_CALENDAR_CREDENTIALS = parseJsonEnv('GOOGLE_CALENDAR_CREDENTIALS', GOOGLE_CALENDAR_CREDENTIALS);
 
 // --- Spotify token cache ---
 let spotifyToken = null;
@@ -63,6 +86,7 @@ async function saveReminders(reminders) {
 // --- MCP Tools (simple POST /tools endpoint) ---
 app.post("/tools", async (req, res) => {
   const { name, arguments: args } = req.body;
+  const userId = req.auth?.userId;
   try {
     switch (name) {
       case "send_message": {
@@ -70,8 +94,7 @@ app.post("/tools", async (req, res) => {
         if (channel === "telegram") {
           await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
             chat_id: TELEGRAM_CHAT_ID,
-            text: `${contact}: ${message}`,
-            parse_mode: "HTML"
+            text: `${String(contact || '')}: ${String(message || '')}`
           });
           return res.json({ success: true, text: `Message sent to ${contact} via Telegram` });
         }
@@ -92,6 +115,7 @@ app.post("/tools", async (req, res) => {
         const reminders = await loadReminders();
         reminders.push({
           id: randomUUID(),
+          user_id: userId,
           title,
           due_date: due_date || null,
           notes: notes || "",
@@ -104,14 +128,14 @@ app.post("/tools", async (req, res) => {
 
       case "get_reminders": {
         const reminders = await loadReminders();
-        const active = reminders.filter(r => !r.done);
+        const active = reminders.filter(r => r.user_id === userId && !r.done);
         return res.json({ success: true, reminders: active });
       }
 
       case "complete_reminder": {
         const { id } = args;
         const reminders = await loadReminders();
-        const r = reminders.find(r => r.id === id);
+        const r = reminders.find(r => r.id === id && r.user_id === userId);
         if (r) { r.done = true; await saveReminders(reminders); }
         return res.json({ success: !!r, text: r ? `Marked done: ${r.title}` : "Reminder not found" });
       }
@@ -148,7 +172,8 @@ app.post("/tools", async (req, res) => {
 
       case "create_calendar_event": {
         const { title, start_date, end_date, location, notes } = args;
-        const credentials = JSON.parse(GOOGLE_CALENDAR_CREDENTIALS);
+        const credentials = PARSED_GOOGLE_CALENDAR_CREDENTIALS;
+        if (!credentials) return res.json({ success: false, error: "Google Calendar not configured" });
         const calendarId = credentials.calendar_id || "primary";
         const token = await getGoogleCalendarToken();
         await axios.post(
@@ -170,12 +195,18 @@ app.post("/tools", async (req, res) => {
         if (!HOME_ASSISTANT_URL || !HOME_ASSISTANT_TOKEN) {
           return res.json({ success: false, error: "Home Assistant not configured" });
         }
+        const safeDomain = String(domain || "homeassistant");
+        const safeAction = String(action || "");
+        const safeEntity = String(entity || "");
+        if (!HOME_ASSISTANT_DOMAINS.has(safeDomain) || !HOME_ASSISTANT_ACTIONS.has(safeAction) || !ENTITY_ID_RE.test(safeEntity)) {
+          return res.json({ success: false, error: "Invalid Home Assistant command" });
+        }
         await axios.post(
-          `${HOME_ASSISTANT_URL}/api/services/${domain || "homeassistant"}/${action}`,
-          { entity_id: entity },
+          `${HOME_ASSISTANT_URL}/api/services/${safeDomain}/${safeAction}`,
+          { entity_id: safeEntity },
           { headers: { Authorization: `Bearer ${HOME_ASSISTANT_TOKEN}`, "Content-Type": "application/json" } }
         );
-        return res.json({ success: true, text: `Home Assistant: ${action} on ${entity}` });
+        return res.json({ success: true, text: `Home Assistant: ${safeAction} on ${safeEntity}` });
       }
 
       default:
@@ -190,7 +221,8 @@ app.post("/tools", async (req, res) => {
 let gcalToken = null;
 async function getGoogleCalendarToken() {
   if (gcalToken && gcalToken.expires > Date.now()) return gcalToken.access_token;
-  const credentials = JSON.parse(GOOGLE_CALENDAR_CREDENTIALS);
+  const credentials = PARSED_GOOGLE_CALENDAR_CREDENTIALS;
+  if (!credentials) throw new Error("Google Calendar not configured");
   const resp = await axios.post("https://oauth2.googleapis.com/token", {
     grant_type: "refresh_token",
     refresh_token: credentials.refresh_token,
