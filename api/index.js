@@ -148,16 +148,14 @@ const GEMINI_TTS_VOICES = new Set([
 ]);
 
 // Prune stale rate-limit entries (skip in serverless — Maps are ephemeral per invocation)
-if (!process.env.VERCEL) {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [uid, timestamps] of audioRateLimit) {
-      const recent = timestamps.filter(t => now - t < 60000);
-      if (recent.length === 0) audioRateLimit.delete(uid);
-      else audioRateLimit.set(uid, recent);
-    }
-  }, 5 * 60 * 1000).unref();
-}
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, timestamps] of audioRateLimit) {
+    const recent = timestamps.filter(t => now - t < 60000);
+    if (recent.length === 0) audioRateLimit.delete(uid);
+    else audioRateLimit.set(uid, recent);
+  }
+}, 5 * 60 * 1000).unref();
 
 const supabase = createSupabaseServiceClient();
 const genAI = createGeminiServiceClient();
@@ -169,14 +167,12 @@ const CONTEXT_CACHE_MAX = 500;
 const contextCache = new Map();
 
 // Prune expired context cache entries (skip in serverless)
-if (!process.env.VERCEL) {
-  setInterval(() => {
-    const now = Date.now();
-    for (const [uid, entry] of contextCache) {
-      if (now - entry.ts > CONTEXT_CACHE_TTL) contextCache.delete(uid);
-    }
-  }, 10 * 60 * 1000).unref();
-}
+setInterval(() => {
+  const now = Date.now();
+  for (const [uid, entry] of contextCache) {
+    if (now - entry.ts > CONTEXT_CACHE_TTL) contextCache.delete(uid);
+  }
+}, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';

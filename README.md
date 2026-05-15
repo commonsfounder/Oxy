@@ -23,7 +23,7 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 ┌───────────────────▼─────────────────────────────────────┐
 │                   API Server (Express 5)                 │
 │  api/index.js — chat, audio, memory, connectors, auth   │
-│  api/proxy.js — action dispatch (Vercel serverless)     │
+│  api/proxy.js — action dispatch helper                  │
 └───────┬──────────────┬──────────────────────────────────┘
         │              │
 ┌───────▼──────┐ ┌─────▼──────────────────────────────────┐
@@ -64,7 +64,7 @@ The entire UI lives in a single `index.html` file — React 18 loaded from CDN, 
 
 ### Backend
 
-An Express 5 server deployed on Vercel (serverless) or as a standalone Node.js process.
+An Express 5 server deployed as a standard Node.js process on Cloud Run.
 
 **Core flow for a message:**
 1. User sends text or audio
@@ -164,19 +164,9 @@ Schema is in `supabase-migration.sql`.
 
    Open the app and register with a user ID and password. Oxy now uses per-user accounts and signed sessions instead of a shared API secret.
 
-### Deploying to Vercel
-
-The project includes a `vercel.json` configuration for serverless deployment:
-
-```bash
-vercel deploy
-```
-
-Set all environment variables in the Vercel dashboard under Project Settings → Environment Variables.
-
 ### Deploying to Cloud Run
 
-Cloud Run is the best fit if you want to get Oxy off Vercel and run the new realtime voice path cleanly. This repo now runs as a standard Node service and includes:
+Cloud Run is the primary deploy target for Oxy. This repo now runs as a standard Node service and includes:
 
 - `server.js` listening on `0.0.0.0:$PORT`
 - `Dockerfile` for Cloud Run source or container deploys
@@ -269,7 +259,6 @@ Cloud Run is the best fit if you want to get Oxy off Vercel and run the new real
    ```
 
 Notes:
-- `vercel.json` can stay in the repo while you migrate; Cloud Run ignores it.
 - `mcp-server.js` is a separate process. If you still want the MCP server in Cloud Run, deploy it as a second service instead of trying to run both processes in one container.
 
 ## Project Structure
@@ -281,7 +270,6 @@ Oxy/
 ├── sw.js                   # Service worker (offline + push notifications)
 ├── manifest.json           # PWA manifest
 ├── package.json            # Dependencies and scripts
-├── vercel.json             # Vercel deployment config
 ├── .env.example            # Environment variable template
 ├── supabase-migration.sql  # Database schema
 ├── mcp-server.js           # Standalone MCP tool server
@@ -289,7 +277,7 @@ Oxy/
 ├── Oxy.shortcut            # Pre-built Apple Shortcut file
 ├── api/
 │   ├── index.js            # Main API (chat, audio, memory, connectors, auth)
-│   ├── proxy.js            # Action dispatch proxy (Vercel serverless)
+│   ├── proxy.js            # Action dispatch helper
 │   └── geocoding.js        # Google Maps geocoding helper
 ├── connectors/
 │   ├── index.js            # Connector registry and dispatcher
