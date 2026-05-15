@@ -486,7 +486,37 @@ function splitCompleteSentences(text) {
   return matches.map(sentence => sentence.trim()).filter(Boolean);
 }
 
-function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext) {
+function extractAlreadyStatedContext(history = []) {
+  const seen = new Set();
+  const lines = [];
+  const recentAssistantTurns = history
+    .filter(entry => entry.role === 'assistant')
+    .slice(-8);
+
+  for (const turn of recentAssistantTurns) {
+    const content = stripActionMarkupForDisplay(turn.content || '').trim();
+    if (!content) continue;
+    const snippets = (content.match(/[^.!?]+[.!?]+(?:["')\]]+)?/g) || [content])
+      .map(s => s.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    for (const snippet of snippets) {
+      const normalized = snippet
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/[^\p{L}\p{N}\s:]/gu, '')
+        .trim();
+      if (!normalized || normalized.length < 12 || seen.has(normalized)) continue;
+      seen.add(normalized);
+      lines.push(snippet);
+      if (lines.length >= 6) return lines;
+    }
+  }
+
+  return lines;
+}
+
+function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
   const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
   return `WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
@@ -502,19 +532,31 @@ NATIVE CREATIVE TOOLS:
 - create_diagram for explaining systems, concepts, and workflows
 - create_presentation for slide structures and decks
 
-Current time: ${timeStr}
+CONTEXT YOU ALREADY STATED IN THIS CONVERSATION:
+${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : 'Nothing important has been stated yet.'}
+
+Current time for internal reasoning only: ${timeStr}
+
+RESPONSE RULES:
+- Do not repeat context you already stated earlier in this conversation.
+- Especially avoid repeating time/date, current plans, study topics, or personal brief details unless the user directly asks again.
+- Do not mention the current time or date unless the user asked for it or it is necessary for the action/result.
+- If an action is completed successfully, stop after one confirmation sentence. No follow-up question, no summary, no check-in.
 
 ---
 ${userContext}`;
 }
 
-function buildQuickTurnContext(preferences) {
+function buildQuickTurnContext(preferences, statedContext = []) {
   return `FAST TURN MODE:
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
 Make the first sentence a tiny acknowledgement of 1-3 words when possible.
 Keep the total reply under 10 words unless the user explicitly asks for more.
 Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
 Keep it warm, effortless, and concise.
+Do not repeat context you already mentioned earlier in this conversation.
+Already stated context:
+${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : '- none'}
 
 USER STYLE PREFERENCES:
 ${preferences || 'Still learning.'}`;
@@ -1675,6 +1717,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       });
       finalSpoken = parseActions(followUp.text || '').spoken || context;
     }
+    const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
+    if (conciseActionConfirmation) finalSpoken = conciseActionConfirmation;
     audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
       ttsError = err.message;
       console.error('[tts error]', err.message);
@@ -1783,6 +1827,8 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       });
       spoken = parseActions(followUp.text || '').spoken || spoken || context;
     }
+    const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
+    if (conciseActionConfirmation) spoken = conciseActionConfirmation;
 
     if (!spoken) {
       spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
@@ -2129,9 +2175,10 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     getPromptCacheName(trace, modelName)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
+  const statedContext = extractAlreadyStatedContext(history);
   const dynamicSystemPrompt = quickTurn
-    ? buildQuickTurnContext(preferences)
-    : buildDynamicSystemPrompt(memory, preferences, availableActions, userContext);
+    ? buildQuickTurnContext(preferences, statedContext)
+    : buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext);
   const useSearch = message && needsSearch(message);
   if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
   return {
@@ -2140,7 +2187,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     useSearch,
     dynamicSystemPrompt,
     cachedContentName,
-    quickTurn
+    quickTurn,
+    statedContext
   };
 }
 
@@ -2286,6 +2334,32 @@ function summarizeActionResults(actionResults) {
     .map(entry => entry.result?.text?.trim())
     .filter(Boolean)
     .join('\n\n');
+}
+
+function toSingleSentence(text) {
+  const cleaned = stripActionMarkupForDisplay(String(text || ''))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  const match = cleaned.match(/[^.!?]+[.!?]+(?:["')\]]+)?/);
+  const sentence = (match ? match[0] : cleaned).trim();
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+function summarizeCompletedActionsConcise(actionResults) {
+  const successful = actionResults.filter(entry => entry?.result?.success !== false);
+  if (!successful.length) return '';
+  const dataOnly = successful.every(entry => DATA_ACTIONS.has(entry.action));
+  if (dataOnly) return '';
+
+  const normalized = successful
+    .map(entry => toSingleSentence(entry.result?.text || humanizeActionType(entry.action)))
+    .filter(Boolean);
+  if (!normalized.length) return '';
+  if (normalized.length === 1) return normalized[0];
+  return `${normalized
+    .map(text => text.replace(/[.!?]+$/g, ''))
+    .join('; ')}.`;
 }
 
 function buildStructuredDataSummary(entry) {
@@ -2465,6 +2539,8 @@ app.post('/chat', async (req, res) => {
           }
           spoken = parseActions(spoken).spoken || spoken || context;
         }
+        const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
+        if (conciseActionConfirmation) spoken = conciseActionConfirmation;
 
         if (!spoken) {
           spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
