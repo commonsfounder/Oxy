@@ -184,6 +184,8 @@ const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL |
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
+const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
+const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
 
 setTimeout(() => {
   ensurePromptCacheWarm(null, STREAMING_CHAT_MODEL).catch(() => {});
@@ -213,6 +215,23 @@ function createRequestTrace(label) {
       }
     }
   };
+}
+
+function getLocalDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+function getLocalHour(date = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    hour: '2-digit',
+    hour12: false
+  }).format(date));
 }
 
 const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
@@ -654,6 +673,7 @@ function buildVoiceExcerpt(text) {
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
+  console.log(`[tts] generateSpeech start voice=${safeVoiceName} chars=${text.trim().length}`);
   const failures = [];
   const orderedModels = preferredTtsModel
     ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
@@ -680,9 +700,11 @@ async function generateSpeech(text, voiceName = 'Aoede') {
       }
       preferredTtsModel = modelName;
       console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
+      console.log(`[tts] generateSpeech ready voice=${safeVoiceName} bytes=${Buffer.from(base64Audio, 'base64').length}`);
       return pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
     } catch (err) {
       const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
+      console.error(`[tts] generateSpeech fail voice=${safeVoiceName} model=${modelName}`, detail);
       failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
     } finally {
       clearTimeout(timeoutId);
@@ -721,6 +743,7 @@ function getActionStatusLabel(actionType, phase = 'start') {
 async function* generateSpeechStream(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return;
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
+  console.log(`[tts] generateSpeechStream start voice=${safeVoiceName} chars=${text.trim().length}`);
   const failures = [];
   const orderedModels = preferredTtsModel
     ? [preferredTtsModel, ...GEMINI_TTS_MODELS.filter(name => name !== preferredTtsModel)]
@@ -771,6 +794,7 @@ async function* generateSpeechStream(text, voiceName = 'Aoede') {
                 preferredTtsModel = modelName;
                 console.log(`[tts] using model ${modelName} with voice ${safeVoiceName}`);
               }
+              console.log(`[tts] stream chunk ready voice=${safeVoiceName} bytes=${Buffer.from(base64Audio, 'base64').length}`);
               yield pcmToWav(Buffer.from(base64Audio, 'base64')).toString('base64');
             }
           }
@@ -783,6 +807,7 @@ async function* generateSpeechStream(text, voiceName = 'Aoede') {
       return;
     } catch (err) {
       const detail = err?.response?.data?.error?.message || err?.response?.data || err.message;
+      console.error(`[tts] generateSpeechStream fail voice=${safeVoiceName} model=${modelName}`, detail);
       failures.push(`${modelName}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
     } finally {
       clearTimeout(timeoutId);
@@ -809,7 +834,7 @@ function createSentenceTtsStreamer({ voiceName, sse, trace = null, onSpeakingSta
           speakingNotified = true;
           if (onSpeakingStart) onSpeakingStart();
         }
-        sse({ type: 'audio', data: audio, format: 'wav', seq: nextEmitIndex, chunk: chunkIndex });
+        sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: nextEmitIndex, chunk: chunkIndex });
         if (trace) trace.log(`tts.chunk_sent.${nextEmitIndex}.${chunkIndex}`);
       }
       if (!state.done) break;
@@ -1357,6 +1382,31 @@ async function getPreferences(userId, trace = null) {
   return data.map(p => `${p.key}: ${p.value}`).join('\n');
 }
 
+async function getPreferenceEntries(userId) {
+  const { data, error } = await supabase
+    .from('preferences')
+    .select('key, value')
+    .eq('user_id', userId);
+  if (error || !data) return [];
+  return data;
+}
+
+async function getPreferenceMap(userId) {
+  const entries = await getPreferenceEntries(userId);
+  return Object.fromEntries(entries.map(entry => [entry.key, entry.value]));
+}
+
+async function setPreferenceValue(userId, key, value) {
+  await supabase
+    .from('preferences')
+    .upsert({
+      user_id: userId,
+      key,
+      value,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,key' });
+}
+
 async function getEnabledConnectors(userId, trace = null) {
   const fetchConnectors = () => supabase
     .from('connectors')
@@ -1547,7 +1597,13 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
-  const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  const audioTraceId = `process-audio:${userId}:${Date.now()}`;
+  const sse = obj => {
+    if (obj?.type === 'audio') {
+      console.log(`[audio][backend:${audioTraceId}] sending audio event bytes=${Buffer.from(obj.data || '', 'base64').length} mime=${obj.mimeType || 'audio/wav'}`);
+    }
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  };
 
   try {
     const [userText, context] = await Promise.all([
@@ -1631,7 +1687,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     saveMessage(userId, 'assistant', { text: finalSpoken, actions: actionResults }).catch(() => {});
 
     sse({ type: 'response', text: finalSpoken, actions: actionResults });
-    if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav' });
+    if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav', mimeType: 'audio/wav' });
     if (ttsError) sse({ type: 'tts-error', error: ttsError });
     sse({ type: 'done' });
     res.end();
@@ -1742,7 +1798,12 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     if (wantsTTS) {
       try {
         const audio = await generateSpeech(buildVoiceExcerpt(spoken), settings.voice);
-        if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
+        if (audio) {
+          console.log(`[audio][backend:chat-image] returning tts audio bytes=${Buffer.from(audio, 'base64').length} mime=audio/wav`);
+          result.audio = audio;
+          result.audioFormat = 'wav';
+          result.audioMimeType = 'audio/wav';
+        }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
         result.ttsError = ttsErr.message;
@@ -1913,6 +1974,47 @@ app.post('/connectors', async (req, res) => {
   }
 });
 
+app.post('/tts-preview', async (req, res) => {
+  try {
+    const { voice = 'Aoede', text = 'Hi, it is lovely to meet you. This is how I sound.' } = req.body || {};
+    console.log(`[audio][backend:tts-preview] request voice=${voice} chars=${String(text || '').trim().length}`);
+    const audio = await generateSpeech(String(text || '').trim().slice(0, 180), voice);
+    if (!audio) {
+      return res.status(500).json({ error: 'No preview audio was generated.' });
+    }
+    console.log(`[audio][backend:tts-preview] returning bytes=${Buffer.from(audio, 'base64').length} mime=audio/wav`);
+    res.json({ audio, audioFormat: 'wav', audioMimeType: 'audio/wav' });
+  } catch (err) {
+    console.error('[audio][backend:tts-preview] error', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/briefing-legacy/:userId', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const userId = req.params.userId;
+    const history = await getHistory(userId);
+    const latestQueuedBriefing = [...history]
+      .reverse()
+      .find(entry => {
+        if (entry.role !== 'assistant') return false;
+        if (entry.kind !== 'briefing' && entry.kind !== 'proactive') return false;
+        return entry.created_at && (Date.now() - new Date(entry.created_at).getTime()) < 36 * 60 * 60 * 1000;
+      });
+
+    if (latestQueuedBriefing) {
+      return res.json({ text: latestQueuedBriefing.content, actions: latestQueuedBriefing.actions || [] });
+    }
+
+    const { spoken, actions } = await buildMorningBriefing(userId, new Date());
+    res.json({ text: spoken, actions });
+  } catch (err) {
+    console.error('/briefing error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/briefing/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
@@ -2049,6 +2151,134 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
 const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
 const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains']);
 
+async function buildMorningBriefing(userId, now = new Date()) {
+  const [memory, history] = await Promise.all([
+    getMemory(userId),
+    getHistory(userId)
+  ]);
+
+  const hour = getLocalHour(now);
+  const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
+  const systemPrompt = `You are Oxy. It's ${greeting} and you're checking in with your friend.
+
+Here's what you know about them:
+${memory || 'Not much yet — learn as you go.'}
+
+Recent conversation:
+${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
+
+Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
+- Only mention things that are directly supported by memory or recent conversation shown above.
+- Do not invent plans, meetings, news, weather, or tasks.
+- If there is no concrete update, just greet them and say it's a quiet start.
+
+The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
+
+  const model = genAI.getGenerativeModel({
+    model: PRIMARY_CHAT_MODEL,
+    systemInstruction: systemPrompt
+  });
+  const geminiRes = await model.generateContent('whats going on today?');
+  return parseActions(geminiRes.response.text());
+}
+
+async function maybeCreateMorningBriefing(userId, now = new Date()) {
+  const localHour = getLocalHour(now);
+  if (localHour < 6 || localHour > 11) return null;
+
+  const prefs = await getPreferenceMap(userId);
+  const todayKey = getLocalDateKey(now);
+  if (prefs[PROACTIVE_MORNING_PREF] === todayKey) return null;
+
+  const { data: latestConversation } = await supabase
+    .from('conversations')
+    .select('created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!latestConversation?.created_at) return null;
+  const lastConversationAt = new Date(latestConversation.created_at).getTime();
+  if (Number.isNaN(lastConversationAt) || (Date.now() - lastConversationAt) > 14 * 24 * 60 * 60 * 1000) {
+    return null;
+  }
+
+  const { spoken, actions } = await buildMorningBriefing(userId, now);
+  const text = stripActionMarkupForDisplay(spoken || '').trim();
+  if (!text) return null;
+
+  await saveMessage(userId, 'assistant', { text, actions, kind: 'briefing' });
+  await setPreferenceValue(userId, PROACTIVE_MORNING_PREF, todayKey);
+  return { type: 'morning_briefing', text };
+}
+
+async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
+  const prefs = await getPreferenceMap(userId);
+  const { data: failedAction } = await supabase
+    .from('action_log')
+    .select('id, action, error, created_at')
+    .eq('user_id', userId)
+    .eq('status', 'failed')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!failedAction?.id) return null;
+  if (prefs[PROACTIVE_FAILURE_PREF] === failedAction.id) return null;
+
+  const failedAt = new Date(failedAction.created_at).getTime();
+  if (Number.isNaN(failedAt) || (now.getTime() - failedAt) > 90 * 60 * 1000) {
+    return null;
+  }
+
+  const actionType = failedAction.action?.type || failedAction.action?.action?.type || failedAction.action?.action || failedAction.action?.type || 'that';
+  const actionLabel = humanizeActionType(actionType);
+  const detail = String(failedAction.error || '').trim();
+  const followUpText = `${actionLabel} hit a snag earlier${detail ? ` (${detail.slice(0, 80)})` : ''}. Want me to try again a different way?`;
+
+  await saveMessage(userId, 'assistant', { text: followUpText, kind: 'proactive' });
+  await setPreferenceValue(userId, PROACTIVE_FAILURE_PREF, failedAction.id);
+  return { type: 'failed_action_followup', text: followUpText };
+}
+
+async function runProactiveSweep(logger = console) {
+  const startedAt = Date.now();
+  const summary = {
+    usersScanned: 0,
+    morningBriefings: 0,
+    failureFollowUps: 0,
+    failures: 0
+  };
+
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('user_id');
+  if (error) throw error;
+
+  for (const user of users || []) {
+    summary.usersScanned += 1;
+    try {
+      const [morning, followUp] = await Promise.all([
+        maybeCreateMorningBriefing(user.user_id),
+        maybeCreateFailedActionFollowUp(user.user_id)
+      ]);
+      if (morning) summary.morningBriefings += 1;
+      if (followUp) summary.failureFollowUps += 1;
+      if (morning || followUp) {
+        logger.log(`[proactive] queued for ${user.user_id}: ${[morning?.type, followUp?.type].filter(Boolean).join(', ')}`);
+      }
+    } catch (sweepError) {
+      summary.failures += 1;
+      logger.error(`[proactive] failed for ${user.user_id}:`, sweepError.message);
+    }
+  }
+
+  summary.durationMs = Date.now() - startedAt;
+  logger.log(`[proactive] sweep complete: ${JSON.stringify(summary)}`);
+  return summary;
+}
+
 function canUseDirectActionSummary(actionResults) {
   return actionResults.length > 0 && actionResults.every(entry =>
     DIRECT_SUMMARY_ACTIONS.has(entry.action) && entry.result?.success && entry.result?.text
@@ -2146,7 +2376,12 @@ app.post('/chat', async (req, res) => {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
-      const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      const sse = obj => {
+        if (obj?.type === 'audio') {
+          console.log(`[audio][backend:chat-stream] sending audio event seq=${obj.seq ?? 'na'} chunk=${obj.chunk ?? 'na'} bytes=${Buffer.from(obj.data || '', 'base64').length} mime=${obj.mimeType || 'audio/wav'}`);
+        }
+        res.write(`data: ${JSON.stringify(obj)}\n\n`);
+      };
       const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
 
       try {
@@ -2325,7 +2560,12 @@ app.post('/chat', async (req, res) => {
     if (wantsTTS) {
       try {
         const audio = await trace.run('gemini.tts.generateSpeech.nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
-        if (audio) { result.audio = audio; result.audioFormat = 'wav'; }
+        if (audio) {
+          console.log(`[audio][backend:chat-json] returning tts audio bytes=${Buffer.from(audio, 'base64').length} mime=audio/wav`);
+          result.audio = audio;
+          result.audioFormat = 'wav';
+          result.audioMimeType = 'audio/wav';
+        }
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
         result.ttsError = ttsErr.message;
@@ -2553,3 +2793,4 @@ app.get('/', (_req, res) => {
 });
 
 module.exports = app;
+module.exports.runProactiveSweep = runProactiveSweep;

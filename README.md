@@ -241,6 +241,33 @@ Cloud Run is the best fit if you want to get Oxy off Vercel and run the new real
    - hold-to-talk voice
    - Google connector OAuth callback
 
+7. **Run proactive briefings as a separate Cloud Run Job**
+
+   The app now includes a standalone proactive runner at `npm run proactive:job`. Deploy that as a Cloud Run Job and schedule it every 15 minutes so morning briefings and background follow-ups are not tied to web requests:
+
+   ```bash
+   gcloud run jobs create oxy-proactive \
+     --source . \
+     --region europe-west2 \
+     --command npm \
+     --args run,proactive:job \
+     --tasks 1 \
+     --max-retries 1
+   ```
+
+   Give the job the same runtime env vars/secrets as the main `oxy` service.
+
+   Then schedule it:
+
+   ```bash
+   gcloud scheduler jobs create http oxy-proactive-every-15m \
+     --location europe-west2 \
+     --schedule "*/15 * * * *" \
+     --uri "https://run.googleapis.com/apis/run.googleapis.com/v1/namespaces/YOUR_PROJECT_ID/jobs/oxy-proactive:run" \
+     --http-method POST \
+     --oauth-service-account-email YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com
+   ```
+
 Notes:
 - `vercel.json` can stay in the repo while you migrate; Cloud Run ignores it.
 - `mcp-server.js` is a separate process. If you still want the MCP server in Cloud Run, deploy it as a second service instead of trying to run both processes in one container.

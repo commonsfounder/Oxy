@@ -1417,6 +1417,56 @@ body::after {
 }
 .autonomy-opt.active { background: rgba(200,184,154,0.1); border-color: rgba(200,184,154,0.3); color: var(--stone); }
 
+.voice-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.voice-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--s1);
+}
+
+.voice-option-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.voice-option-main input[type="radio"] {
+  accent-color: var(--stone);
+}
+
+.voice-option-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.voice-preview-btn {
+  border: 1px solid var(--line2);
+  background: var(--s2);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+.voice-preview-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Toast */
 .toast {
   position: fixed;
@@ -2072,76 +2122,9 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     jumpToDate(msg.created_at.slice(0, 10));
   }, [jumpToDate]);
 
-  const playAudioFromBase64 = useCallback(async (base64Audio) => {
-    if (!base64Audio) return;
-    try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      setSpeaking(true);
-      const bytes = new Uint8Array(atob(base64Audio).split('').map(c => c.charCodeAt(0)));
-      const url   = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-      const audio = new Audio(url);
-      audio.preload = 'auto';
-      audio.playsInline = true;
-      audioRef.current = audio;
-      const cleanup = () => {
-        setSpeaking(false);
-        if (audioRef.current === audio) audioRef.current = null;
-        URL.revokeObjectURL(url);
-      };
-      audio.onended = cleanup;
-      audio.onerror = cleanup;
-      await audio.play();
-    } catch (err) {
-      console.error('Audio playback error:', err);
-      setSpeaking(false);
-    }
+  const logAudioStage = useCallback((stage, extra = {}) => {
+    console.log('[audio][frontend]', stage, extra);
   }, []);
-
-  const playQueuedAudioFromBase64 = useCallback(async () => {
-    if (queuedAudioPlayingRef.current) return;
-    const nextAudio = queuedAudioRef.current.shift();
-    if (!nextAudio) return;
-    queuedAudioPlayingRef.current = true;
-    try {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      setSpeaking(true);
-      const bytes = new Uint8Array(atob(nextAudio).split('').map(c => c.charCodeAt(0)));
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
-      const audio = new Audio(url);
-      audio.preload = 'auto';
-      audio.playsInline = true;
-      audioRef.current = audio;
-      const cleanup = () => {
-        if (audioRef.current === audio) audioRef.current = null;
-        URL.revokeObjectURL(url);
-        queuedAudioPlayingRef.current = false;
-        if (queuedAudioRef.current.length) {
-          playQueuedAudioFromBase64();
-        } else {
-          setSpeaking(false);
-        }
-      };
-      audio.onended = cleanup;
-      audio.onerror = cleanup;
-      await audio.play();
-    } catch (err) {
-      console.error('Queued audio playback error:', err);
-      queuedAudioPlayingRef.current = false;
-      setSpeaking(false);
-    }
-  }, []);
-
-  const enqueueAudioFromBase64 = useCallback((base64Audio) => {
-    if (!base64Audio) return;
-    queuedAudioRef.current.push(base64Audio);
-    playQueuedAudioFromBase64();
-  }, [playQueuedAudioFromBase64]);
 
   const ensureRealtimeAudioContext = useCallback(async (sampleRateHint = 24000) => {
     let ctx = liveAudioContextRef.current;
@@ -2149,10 +2132,29 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
       ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: sampleRateHint });
       liveAudioContextRef.current = ctx;
       liveAudioCursorRef.current = ctx.currentTime;
+      logAudioStage('context_created', { state: ctx.state, sampleRate: ctx.sampleRate });
     }
-    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state === 'suspended') {
+      logAudioStage('context_resuming', { state: ctx.state });
+      await ctx.resume();
+      logAudioStage('context_resumed', { state: ctx.state });
+    }
     return ctx;
-  }, []);
+  }, [logAudioStage]);
+
+  const primeAudioPlayback = useCallback(async (source = 'unknown') => {
+    try {
+      const ctx = await ensureRealtimeAudioContext(24000);
+      const sourceNode = ctx.createBufferSource();
+      const silence = ctx.createBuffer(1, 1, ctx.sampleRate);
+      sourceNode.buffer = silence;
+      sourceNode.connect(ctx.destination);
+      sourceNode.start();
+      logAudioStage('playback_primed', { source, state: ctx.state });
+    } catch (err) {
+      console.error('[audio][frontend] prime_failed', source, err);
+    }
+  }, [ensureRealtimeAudioContext, logAudioStage]);
 
   const scheduleRealtimeSpeakingDrain = useCallback((ctx, endTime) => {
     if (liveAudioDrainTimerRef.current) clearTimeout(liveAudioDrainTimerRef.current);
@@ -2162,11 +2164,102 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     }, waitMs);
   }, []);
 
+  const playBase64AudioWithContext = useCallback(async (base64Audio, label = 'tts') => {
+    const bytes = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
+    logAudioStage('decode_start', { label, bytes: bytes.byteLength, format: 'audio/wav' });
+    const ctx = await ensureRealtimeAudioContext(24000);
+    const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const buffer = await ctx.decodeAudioData(arrayBuffer);
+    logAudioStage('decode_success', { label, duration: buffer.duration, sampleRate: buffer.sampleRate });
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const startAt = Math.max(ctx.currentTime + 0.02, liveAudioCursorRef.current || ctx.currentTime);
+    const endAt = startAt + buffer.duration;
+    liveAudioCursorRef.current = endAt;
+    setSpeaking(true);
+    logAudioStage('playback_scheduled', { label, startAt, endAt, currentTime: ctx.currentTime });
+    source.start(startAt);
+    await new Promise(resolve => {
+      source.onended = () => {
+        logAudioStage('playback_complete', { label, endAt });
+        scheduleRealtimeSpeakingDrain(ctx, endAt);
+        resolve();
+      };
+    });
+  }, [ensureRealtimeAudioContext, logAudioStage, scheduleRealtimeSpeakingDrain]);
+
+  const playBase64AudioWithElement = useCallback(async (base64Audio, label = 'tts') => {
+    const bytes = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+    const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.playsInline = true;
+    audioRef.current = audio;
+    setSpeaking(true);
+    logAudioStage('html_audio_play_attempt', { label, bytes: bytes.byteLength });
+    try {
+      await audio.play();
+      logAudioStage('html_audio_play_started', { label });
+      await new Promise((resolve, reject) => {
+        audio.onended = resolve;
+        audio.onerror = () => reject(new Error('Audio element playback failed.'));
+      });
+      logAudioStage('html_audio_play_complete', { label });
+    } finally {
+      if (audioRef.current === audio) audioRef.current = null;
+      URL.revokeObjectURL(url);
+    }
+  }, [logAudioStage]);
+
+  const playAudioFromBase64 = useCallback(async (base64Audio, label = 'single') => {
+    if (!base64Audio) return;
+    logAudioStage('audio_received', { label, bytes: base64Audio.length });
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      await playBase64AudioWithContext(base64Audio, label);
+    } catch (err) {
+      console.error('[audio][frontend] context_play_failed', label, err);
+      try {
+        await playBase64AudioWithElement(base64Audio, label);
+      } catch (fallbackErr) {
+        console.error('[audio][frontend] element_play_failed', label, fallbackErr);
+        setSpeaking(false);
+      }
+    }
+  }, [logAudioStage, playBase64AudioWithContext, playBase64AudioWithElement]);
+
+  const playQueuedAudioFromBase64 = useCallback(async () => {
+    if (queuedAudioPlayingRef.current) return;
+    queuedAudioPlayingRef.current = true;
+    try {
+      while (queuedAudioRef.current.length) {
+        const nextAudio = queuedAudioRef.current.shift();
+        if (!nextAudio) continue;
+        await playAudioFromBase64(nextAudio.data, nextAudio.label);
+      }
+    } finally {
+      queuedAudioPlayingRef.current = false;
+      if (!queuedAudioRef.current.length) setSpeaking(false);
+    }
+  }, [playAudioFromBase64]);
+
+  const enqueueAudioFromBase64 = useCallback((base64Audio, label = 'stream') => {
+    if (!base64Audio) return;
+    logAudioStage('audio_event_received', { label, bytes: base64Audio.length });
+    queuedAudioRef.current.push({ data: base64Audio, label });
+    playQueuedAudioFromBase64();
+  }, [logAudioStage, playQueuedAudioFromBase64]);
+
   const playRealtimeAudioChunk = useCallback(async (base64Audio, mimeType = 'audio/pcm;rate=24000') => {
     if (!base64Audio) return;
     const normalizedType = String(mimeType || '').toLowerCase();
     if (!/audio\/(pcm|l16)/.test(normalizedType)) {
-      await playAudioFromBase64(base64Audio);
+      logAudioStage('realtime_chunk_fallback_to_wav', { mimeType: normalizedType });
+      await playAudioFromBase64(base64Audio, 'realtime-wav');
       return;
     }
 
@@ -2176,6 +2269,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     const bytes = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
     const sampleCount = Math.floor(bytes.byteLength / 2);
     if (!sampleCount) return;
+    logAudioStage('realtime_chunk_received', { mimeType: normalizedType, bytes: bytes.byteLength, sampleRate, sampleCount });
 
     const buffer = ctx.createBuffer(1, sampleCount, sampleRate);
     const channel = buffer.getChannelData(0);
@@ -2192,8 +2286,9 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     const endAt = startAt + buffer.duration;
     liveAudioCursorRef.current = endAt;
     setSpeaking(true);
+    logAudioStage('realtime_chunk_scheduled', { startAt, endAt, duration: buffer.duration });
     source.onended = () => scheduleRealtimeSpeakingDrain(ctx, endAt);
-  }, [ensureRealtimeAudioContext, playAudioFromBase64, scheduleRealtimeSpeakingDrain]);
+  }, [ensureRealtimeAudioContext, logAudioStage, playAudioFromBase64, scheduleRealtimeSpeakingDrain]);
 
   const upsertLiveMessage = useCallback((slot, updater) => {
     const liveTurn = liveTurnRef.current;
@@ -2458,6 +2553,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     setLoadingWithCb(true);
     const placeholderId = Date.now();
     try {
+      await primeAudioPlayback('voice-upload');
       const wavBlob  = await webmToWav(new Blob(chunksRef.current, { type: 'audio/webm' }));
       const formData = new FormData();
       formData.append('audio', wavBlob, 'audio.wav');
@@ -2501,7 +2597,8 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
               revealPendingAssistant();
             }
             if (ev.type === 'audio') {
-              enqueueAudioFromBase64(ev.data);
+              console.log('[audio][frontend] process-audio SSE received', { mimeType: ev.mimeType || 'audio/wav', bytes: ev.data?.length || 0 });
+              enqueueAudioFromBase64(ev.data, 'process-audio');
               revealPendingAssistant();
             }
             if (ev.type === 'tts-error') {
@@ -2581,6 +2678,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     setMessages(prev => [...prev, { role: 'assistant', content: 'Looking through the image…', time: new Date(), _streamId: placeholderId }]);
 
     try {
+      await primeAudioPlayback('vision-message');
       const params = new URLSearchParams();
       if (settings.voiceOn) params.set('tts', 'true');
       const formData = new FormData();
@@ -2601,7 +2699,10 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
           : m
       ));
       if (data.actions?.length) maybeOpenActionResults(data.actions);
-      if (data.audio) enqueueAudioFromBase64(data.audio);
+      if (data.audio) {
+        console.log('[audio][frontend] chat-with-image JSON received', { mimeType: data.audioMimeType || 'audio/wav', bytes: data.audio.length });
+        enqueueAudioFromBase64(data.audio, 'chat-with-image');
+      }
       resetImageDraft();
     } catch (err) {
       setMessages(prev => prev.map(m =>
@@ -2612,7 +2713,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     } finally {
       setLoadingWithCb(false);
     }
-  }, [input, loading, selectedImage, settings, resetImageDraft, maybeOpenActionResults, enqueueAudioFromBase64]);
+  }, [input, loading, selectedImage, settings, resetImageDraft, maybeOpenActionResults, enqueueAudioFromBase64, primeAudioPlayback]);
 
   const sendMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
@@ -2624,6 +2725,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     stopSpeaking();
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     try {
+      await primeAudioPlayback('chat-message');
       const params = new URLSearchParams({ stream: 'true' });
       if (settings.voiceOn) params.set('tts', 'true');
       const resp = await apiFetch(`/chat?${params}`, {
@@ -2677,8 +2779,14 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
               maybeOpenActionResults(ev.results);
             }
             if (ev.type === 'audio') {
+              console.log('[audio][frontend] chat SSE received', {
+                seq: ev.seq,
+                chunk: ev.chunk,
+                mimeType: ev.mimeType || 'audio/wav',
+                bytes: ev.data?.length || 0
+              });
               publishStreamedText();
-              enqueueAudioFromBase64(ev.data);
+              enqueueAudioFromBase64(ev.data, `chat-stream-${ev.seq ?? 'na'}-${ev.chunk ?? 'na'}`);
             }
             if (ev.type === 'tts-error') {
               ttsError = ev.error || 'Voice unavailable.';
@@ -2713,7 +2821,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     }
     if (!speaking) clearCurrentStatus();
     setLoadingWithCb(false);
-  }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64, clearCurrentStatus, updateCurrentStatus, speaking]);
+  }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64, clearCurrentStatus, updateCurrentStatus, speaking, primeAudioPlayback]);
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -3389,14 +3497,25 @@ function ActionHistoryPage() {
   );
 }
 
-function SettingsPage({ settings, setSettings }) {
+function SettingsPage({ settings, setSettings, onPreviewVoice }) {
   const [toast, setToast] = useState(false);
+  const [previewingVoice, setPreviewingVoice] = useState('');
   const update = (k, v) => {
     setSettings(prev => {
       const next = { ...prev, [k]: v };
       localStorage.setItem('oxy_settings', JSON.stringify(next));
       return next;
     });
+  };
+
+  const previewVoice = async (voice) => {
+    if (!onPreviewVoice || previewingVoice) return;
+    setPreviewingVoice(voice);
+    try {
+      await onPreviewVoice(voice);
+    } finally {
+      setPreviewingVoice('');
+    }
   };
 
   return (
@@ -3428,9 +3547,32 @@ function SettingsPage({ settings, setSettings }) {
               <div className="setting-label">Gemini Voice</div>
               <div className="setting-desc">Choose the voice used for spoken replies</div>
             </div>
-            <select className="setting-input" value={settings.voice} onChange={e => update('voice', e.target.value)}>
-              {VOICE_OPTIONS.map(voice => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
-            </select>
+          </div>
+          <div className="voice-option-list">
+            {VOICE_OPTIONS.map(voice => (
+              <label key={voice.value} className="voice-option">
+                <div className="voice-option-main">
+                  <input
+                    type="radio"
+                    name="oxy-voice"
+                    checked={settings.voice === voice.value}
+                    onChange={() => update('voice', voice.value)}
+                  />
+                  <span className="voice-option-label">{voice.label}</span>
+                </div>
+                <button
+                  type="button"
+                  className="voice-preview-btn"
+                  disabled={previewingVoice === voice.value}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    previewVoice(voice.value);
+                  }}
+                >
+                  {previewingVoice === voice.value ? 'Playing…' : 'Play'}
+                </button>
+              </label>
+            ))}
           </div>
         </div>
       </div>
@@ -3482,7 +3624,8 @@ function App() {
 
   useEffect(() => {
     if (!isAuth) return;
-    apiFetch(`/briefing/${USER_ID}`)
+    let cancelled = false;
+    const fetchBriefing = () => apiFetch(`/briefing/${USER_ID}`)
       .then(async r => {
         if (r.status === 401) {
           clearSession();
@@ -3491,9 +3634,55 @@ function App() {
         }
         return r.json();
       })
-      .then(d => { if (d.text) setBriefing({ text: d.text, actions: d.actions || [] }); })
+      .then(d => {
+        if (!cancelled && d.text) setBriefing({ text: d.text, actions: d.actions || [] });
+      })
       .catch(() => {});
+
+    fetchBriefing();
+    const intervalId = setInterval(fetchBriefing, 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
   }, [isAuth]);
+
+  const previewVoice = useCallback(async (voice) => {
+    console.log('[audio][frontend] voice_preview_request', { voice });
+    const resp = await apiFetch('/tts-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.audio) {
+      throw new Error(data.error || 'Voice preview failed.');
+    }
+    console.log('[audio][frontend] voice_preview_received', {
+      voice,
+      mimeType: data.audioMimeType || 'audio/wav',
+      bytes: data.audio.length
+    });
+    const bytes = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: data.audioMimeType || 'audio/wav' }));
+    const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.playsInline = true;
+    try {
+      await audio.play();
+      console.log('[audio][frontend] voice_preview_started', { voice });
+      await new Promise((resolve, reject) => {
+        audio.onended = resolve;
+        audio.onerror = () => reject(new Error('Preview playback failed.'));
+      });
+      console.log('[audio][frontend] voice_preview_complete', { voice });
+    } catch (err) {
+      console.error('[audio][frontend] voice_preview_failed', { voice, error: err.message });
+      throw err;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }, []);
 
   const submitAuth = async () => {
     const userId = authUserId.trim();
@@ -3611,7 +3800,7 @@ function App() {
         {page === 'history'    && <ActionHistoryPage />}
         {page === 'connectors' && <ConnectorsPage />}
         {page === 'memory'     && <MemoryPage />}
-        {page === 'settings'   && <SettingsPage settings={settings} setSettings={setSettings} />}
+        {page === 'settings'   && <SettingsPage settings={settings} setSettings={setSettings} onPreviewVoice={previewVoice} />}
       </div>
 
       {/* Mobile nav */}
