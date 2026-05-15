@@ -243,6 +243,8 @@ CORE ETHOS:
 FACTUALITY:
 - Say what you know. Don't fill gaps with guesses or confident bullshit.
 - You sometimes have Google Search available for current/real-time questions. When search results are present, use them.
+- For factual questions about current events, recent news, company information, public figures, prices, schedules, or anything that could have changed recently, use Google Search grounding when it is available before answering.
+- Do not rely on training data alone for changeable real-world facts when search grounding is available.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
 - If the user asks for a factual answer and you are missing evidence, say that clearly and ask one short follow-up or say you don't know.
@@ -2157,10 +2159,47 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
-// Detect whether a message likely needs current/real-time information
-const SEARCH_PATTERNS = /\b(news|weather|forecast|score|stocks?|price|market|latest|current|today'?s?|tonight|yesterday|this week|this month|trending|who won|what happened|search|look up|find out|google|update on|how much is|exchange rate|live|breaking)\b/i;
+// Detect whether a message likely needs current/real-time information or other changeable facts.
+const SEARCH_KEYWORD_PATTERNS = [
+  { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
+  { reason: 'time-sensitive', pattern: /\b(weather|forecast|temperature|rain|snow|traffic|delay|delays|schedule|schedules|arrival|departure|when does|when is|opening hours|closing time|wait time|wait times|availability)\b/i },
+  { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|rate|rates|how much is)\b/i },
+  { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
+  { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach)\b/i },
+  { reason: 'explicit-search', pattern: /\b(search|look up|find out|google|check online|online)\b/i }
+];
+
+const CHANGEABLE_QUESTION_PATTERNS = [
+  /\bwho is\b/i,
+  /\bwhat is\b/i,
+  /\bwhat's\b/i,
+  /\bwhen is\b/i,
+  /\bwhen does\b/i,
+  /\bis .* (open|closed|available|released|launching)\b/i,
+  /\bare .* (open|closed|available)\b/i
+];
+
+function getSearchReason(message) {
+  const text = String(message || '').trim();
+  if (!text) return '';
+
+  for (const entry of SEARCH_KEYWORD_PATTERNS) {
+    if (entry.pattern.test(text)) return entry.reason;
+  }
+
+  const hasQuestion = /[?]/.test(text) || /^(who|what|when|where|why|how|is|are|did|does|do|can)\b/i.test(text);
+  const mentionsEntityLikeToken = /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}|[A-Z]{2,}|[A-Z][a-z]+AI|[A-Z][a-z]+Tech)\b/.test(text);
+  const asksChangeableQuestion = CHANGEABLE_QUESTION_PATTERNS.some(pattern => pattern.test(text));
+
+  if (hasQuestion && mentionsEntityLikeToken && asksChangeableQuestion) {
+    return 'entity-question';
+  }
+
+  return '';
+}
+
 function needsSearch(message) {
-  return SEARCH_PATTERNS.test(message);
+  return Boolean(getSearchReason(message));
 }
 
 // Shared logic for building the Gemini model + system prompt
@@ -2179,12 +2218,14 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
     : buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext);
-  const useSearch = message && needsSearch(message);
-  if (useSearch) console.log('[search] enabled for:', message.slice(0, 80));
+  const searchReason = getSearchReason(message);
+  const useSearch = Boolean(searchReason);
+  if (useSearch) console.log(`[search] enabled (${searchReason}) for:`, message.slice(0, 80));
   return {
     history: quickTurn ? history.slice(-2) : history,
     availableActions,
     useSearch,
+    searchReason,
     dynamicSystemPrompt,
     cachedContentName,
     quickTurn,
