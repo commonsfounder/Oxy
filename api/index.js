@@ -2173,26 +2173,56 @@ const CHANGEABLE_QUESTION_PATTERNS = [
   /\bwho is\b/i,
   /\bwhat is\b/i,
   /\bwhat's\b/i,
+  /\bwho are\b/i,
+  /\bwhat are\b/i,
   /\bwhen is\b/i,
   /\bwhen does\b/i,
+  /\bwhere is\b/i,
+  /\bwhere are\b/i,
+  /\bhow much is\b/i,
+  /\bhow much are\b/i,
+  /\bhow many\b/i,
+  /\bdoes .* (still|currently|now)\b/i,
+  /\bdid .* (recently|today|this week|this month|this year)\b/i,
   /\bis .* (open|closed|available|released|launching)\b/i,
   /\bare .* (open|closed|available)\b/i
 ];
+
+const NON_SEARCH_PATTERNS = [
+  /\b(send|text|message|email|call|ring|telegram|whatsapp|imessage)\b/i,
+  /\b(remind|reminder|calendar|event|schedule me|add to calendar)\b/i,
+  /\b(book|order|get me|take me|uber|ubereats|deliveroo|train|trainline)\b/i,
+  /\b(play|pause|skip|spotify|music)\b/i,
+  /\b(forget|delete from memory|wipe memory|remember)\b/i,
+  /\bmy\b.+\b(email|calendar|memory|reminder|messages?|settings|preferences)\b/i
+];
+
+const FACTUAL_QUESTION_START = /^(who|what|when|where|why|how|is|are|did|does|do|can|could|will|would)\b/i;
 
 function getSearchReason(message) {
   const text = String(message || '').trim();
   if (!text) return '';
 
+  const hasQuestion = /[?]/.test(text) || FACTUAL_QUESTION_START.test(text);
+  const looksLikeToolRequest = NON_SEARCH_PATTERNS.some(pattern => pattern.test(text));
+
   for (const entry of SEARCH_KEYWORD_PATTERNS) {
     if (entry.pattern.test(text)) return entry.reason;
   }
 
-  const hasQuestion = /[?]/.test(text) || /^(who|what|when|where|why|how|is|are|did|does|do|can)\b/i.test(text);
   const mentionsEntityLikeToken = /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}|[A-Z]{2,}|[A-Z][a-z]+AI|[A-Z][a-z]+Tech)\b/.test(text);
   const asksChangeableQuestion = CHANGEABLE_QUESTION_PATTERNS.some(pattern => pattern.test(text));
 
   if (hasQuestion && mentionsEntityLikeToken && asksChangeableQuestion) {
     return 'entity-question';
+  }
+
+  if (hasQuestion && asksChangeableQuestion && !looksLikeToolRequest) {
+    return 'factual-question-default';
+  }
+
+  if (hasQuestion && /\b(news|company|ceo|founder|price|stock|weather|forecast|launch|release|latest|current|today|tonight|yesterday|week|month|year)\b/i.test(text)) {
+    return 'factual-question-keyword';
   }
 
   return '';
