@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "proactive:job": "node proactive-job.js"
+    "proactive:job": "node proactive-job.js",
+    "benchmark:voice": "node scripts/benchmark-voice-pipelines.js"
   },
   "dependencies": {
     "@google/genai": "^2.2.0",

@@ -1,6 +1,7 @@
 const http = require('http');
 const app = require('./api/index.js');
 const { attachRealtimeVoiceServer } = require('./live');
+const { attachCompanionLivePrototypeServer } = require('./companion-live');
 const { getMissingRuntimeEnv, logMissingRuntimeEnvOnce } = require('./runtime');
 
 if (require.main === module) {
@@ -9,6 +10,7 @@ if (require.main === module) {
   const PORT = Number(process.env.PORT) || 3000;
   const server = http.createServer(app);
   attachRealtimeVoiceServer(server);
+  attachCompanionLivePrototypeServer(server);
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Oxy listening on :${PORT}`);
     if (missing.length) {
