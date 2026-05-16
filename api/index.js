@@ -643,29 +643,20 @@ function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
 }
 
 function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent }) {
-  const canUseCachedPrompt = Boolean(cachedContentName) && !useSearch;
-  const config = {};
-  if (canUseCachedPrompt) {
-    config.cachedContent = cachedContentName;
-  } else {
-    config.systemInstruction = `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim();
-  }
-  if (useSearch) config.tools = [{ googleSearch: {} }];
+  const config = {
+    systemInstruction: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
+    tools: [{ googleSearch: {} }]
+  };
   const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
   if (isQuickTurnMessage(firstUserText)) {
     config.maxOutputTokens = 32;
     config.temperature = 0.5;
   }
 
-  const dynamicContextParts = canUseCachedPrompt
-    ? [{ text: `Persistent user context for this conversation:\n\n${dynamicSystemPrompt}` }]
-    : [];
-
   return {
     config,
     contents: [
       ...baseHistory,
-      ...(dynamicContextParts.length ? [{ role: 'user', parts: dynamicContextParts }] : []),
       userContent
     ]
   };
@@ -2197,6 +2188,17 @@ const NON_SEARCH_PATTERNS = [
   /\bmy\b.+\b(email|calendar|memory|reminder|messages?|settings|preferences)\b/i
 ];
 
+const PERSONAL_CONTEXT_PATTERNS = [
+  /\bmy\b/i,
+  /\bi\b/i,
+  /\bme\b/i,
+  /\bmine\b/i,
+  /\bdo you remember\b/i,
+  /\bwhat did i\b/i,
+  /\bwhen did i\b/i,
+  /\bwho am i\b/i
+];
+
 const FACTUAL_QUESTION_START = /^(who|what|when|where|why|how|is|are|did|does|do|can|could|will|would)\b/i;
 
 function getSearchReason(message) {
@@ -2223,6 +2225,11 @@ function getSearchReason(message) {
 
   if (hasQuestion && /\b(news|company|ceo|founder|price|stock|weather|forecast|launch|release|latest|current|today|tonight|yesterday|week|month|year)\b/i.test(text)) {
     return 'factual-question-keyword';
+  }
+
+  const looksPersonal = PERSONAL_CONTEXT_PATTERNS.some(pattern => pattern.test(text));
+  if (hasQuestion && !looksLikeToolRequest && !looksPersonal && text.length >= 18) {
+    return 'question-default-search';
   }
 
   return '';

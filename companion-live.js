@@ -421,6 +421,7 @@ function buildCompanionSystemInstruction(snapshot) {
     'The session is audio-first: listen, think, act, and respond naturally with short spoken answers.',
     'Gemini Live handles the transcription, reasoning, and speech. Do not narrate internal steps.',
     'If the user asks you to perform an action and a function is available, call the function instead of only describing what you would do.',
+    'Google Search grounding is always available in this session. For current events, recent news, companies, public figures, schedules, prices, or anything that may have changed recently, search before answering.',
     'After a successful action such as sending a message, booking something, or creating an event, stop after one clear confirmation sentence.',
     'Do not repeat context you already stated earlier in the same conversation unless the user asks for it again.',
     'Prefer concise, warm spoken replies. For simple conversational questions, keep the response to a maximum of two sentences.',
@@ -531,7 +532,10 @@ async function createCompanionLiveSession(userId, voiceName, socket, state) {
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       systemInstruction: buildCompanionSystemInstruction(snapshot),
-      tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }]
+      tools: [
+        { googleSearch: {} },
+        { functionDeclarations: LIVE_FUNCTION_DECLARATIONS }
+      ]
     },
     callbacks: {
       onopen: () => {

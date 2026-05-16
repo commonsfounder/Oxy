@@ -404,6 +404,7 @@ function buildLiveSystemInstruction(memory, recentConversation) {
     'You are Oxy, a proactive personal assistant speaking with the user in real time.',
     'Be concise, natural, and useful. Keep spoken replies fairly short unless the user asks for depth.',
     'If the user asks you to do something and a tool is available, call the tool instead of merely describing what you would do.',
+    'Google Search grounding is always available in this session. For current events, recent news, companies, public figures, schedules, prices, or anything that may have changed recently, search before answering.',
     'If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory.',
     'Do not repeat successful past actions unless the user explicitly asks you to repeat them.',
     'If an action fails and the user asks to retry, retry only the failed action unless they ask otherwise.',
@@ -513,7 +514,10 @@ async function createLiveSession(userId, voiceName, socket, state) {
       inputAudioTranscription: {},
       outputAudioTranscription: {},
       systemInstruction: buildLiveSystemInstruction(memory, recentConversation),
-      tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }]
+      tools: [
+        { googleSearch: {} },
+        { functionDeclarations: LIVE_FUNCTION_DECLARATIONS }
+      ]
     },
     callbacks: {
       onopen: () => {
