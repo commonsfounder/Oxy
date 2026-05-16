@@ -2054,6 +2054,26 @@ app.get('/briefing/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const userId = req.params.userId;
+    const queuedHistory = await getHistory(userId);
+    const latestQueuedBriefing = [...queuedHistory]
+      .reverse()
+      .find(entry => {
+        if (entry.role !== 'assistant') return false;
+        if (entry.kind !== 'briefing' && entry.kind !== 'proactive') return false;
+        return entry.created_at && (Date.now() - new Date(entry.created_at).getTime()) < 36 * 60 * 60 * 1000;
+      });
+
+    if (!latestQueuedBriefing) {
+      return res.json({});
+    }
+
+    return res.json({
+      text: latestQueuedBriefing.content,
+      actions: latestQueuedBriefing.actions || [],
+      created_at: latestQueuedBriefing.created_at,
+      kind: latestQueuedBriefing.kind || 'briefing'
+    });
+
     const [memory, history] = await Promise.all([
       getMemory(userId),
       getHistory(userId)

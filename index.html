@@ -3635,15 +3635,18 @@ function App() {
         return r.json();
       })
       .then(d => {
-        if (!cancelled && d.text) setBriefing({ text: d.text, actions: d.actions || [] });
+        if (!cancelled && d.text) setBriefing({
+          text: d.text,
+          actions: d.actions || [],
+          created_at: d.created_at || null,
+          kind: d.kind || 'briefing'
+        });
       })
       .catch(() => {});
 
     fetchBriefing();
-    const intervalId = setInterval(fetchBriefing, 60 * 1000);
     return () => {
       cancelled = true;
-      clearInterval(intervalId);
     };
   }, [isAuth]);
 
