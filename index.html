@@ -1632,7 +1632,7 @@ body::after {
 
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
-const DEFAULT_SETTINGS = { name: 'Oxy', voice: 'Aoede', voiceOn: true, autonomy: 'Medium' };
+const DEFAULT_SETTINGS = { name: 'Oxy', voice: 'Aoede', voiceOn: true, voiceEngine: 'current', autonomy: 'Medium' };
 const VOICE_OPTIONS = [
   { value: 'Aoede', label: 'Breezy' },
   { value: 'Achernar', label: 'Soft' },
@@ -1678,9 +1678,10 @@ const apiFetch = async (url, options = {}) => {
   return fetch(url, { ...options, headers });
 };
 
-function getRealtimeVoiceSocketUrl() {
+function getRealtimeVoiceSocketUrl(engine = 'current') {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/realtime-voice`;
+  const path = engine === 'gemini-live-prototype' ? '/companion-live' : '/realtime-voice';
+  return `${protocol}//${window.location.host}${path}`;
 }
 
 function persistSession(token, userId) {
@@ -2332,7 +2333,8 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   }, []);
 
   const openRealtimeVoiceSession = useCallback(async (stream) => {
-    const socket = new WebSocket(getRealtimeVoiceSocketUrl());
+    const usingPrototype = settings.voiceEngine === 'gemini-live-prototype';
+    const socket = new WebSocket(getRealtimeVoiceSocketUrl(settings.voiceEngine));
 
     await new Promise((resolve, reject) => {
       socket.onopen = resolve;
@@ -2360,7 +2362,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
         inputContext.close().catch(() => {});
         stream.getTracks().forEach(t => t.stop());
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'audio-end' }));
+          socket.send(JSON.stringify({ type: usingPrototype ? 'audio.end' : 'audio-end' }));
         }
         setLoadingWithCb(true);
       }
@@ -2378,7 +2380,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
       let binary = '';
       for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
       socket.send(JSON.stringify({
-        type: 'audio-chunk',
+        type: usingPrototype ? 'audio.append' : 'audio-chunk',
         mimeType: `audio/l16;rate=${inputContext.sampleRate}`,
         data: btoa(binary)
       }));
@@ -2388,35 +2390,41 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     mediaRecorderRef.current = liveCapture;
     liveInputRef.current = liveCapture;
     socket.send(JSON.stringify({ type: 'auth', token: AUTH_TOKEN }));
-    socket.send(JSON.stringify({ type: 'live-start', voice: settings.voice }));
+    socket.send(JSON.stringify({ type: usingPrototype ? 'session.start' : 'live-start', voice: settings.voice }));
 
     socket.onmessage = async (event) => {
       try {
         const payload = JSON.parse(event.data);
-        if (payload.type === 'user-transcript') {
+        if (payload.type === 'status') {
+          updateCurrentStatus(payload.status, payload.label);
+        }
+        if (payload.type === 'telemetry') {
+          console.log('[voice][telemetry]', payload);
+        }
+        if (payload.type === 'user-transcript' || payload.type === 'transcript.user') {
           upsertLiveMessage('userId', msg => ({ ...msg, content: payload.text || '', _livePending: !payload.final }));
         }
-        if (payload.type === 'assistant-transcript') {
+        if (payload.type === 'assistant-transcript' || payload.type === 'transcript.assistant') {
           upsertLiveMessage('assistantId', msg => ({ ...msg, content: payload.text || '', _livePending: !payload.final }));
         }
-        if (payload.type === 'assistant-actions' && payload.results?.length) {
+        if ((payload.type === 'assistant-actions' || payload.type === 'actions') && payload.results?.length) {
           upsertLiveMessage('assistantId', msg => ({
             ...msg,
             actions: [...(msg.actions || []), ...payload.results]
           }));
           maybeOpenActionResults(payload.results);
         }
-        if (payload.type === 'assistant-audio') {
+        if (payload.type === 'assistant-audio' || payload.type === 'audio') {
           await playRealtimeAudioChunk(payload.data, payload.mimeType);
         }
-        if (payload.type === 'live-error') {
+        if (payload.type === 'live-error' || payload.type === 'error') {
           upsertLiveMessage('assistantId', msg => ({
             ...msg,
             content: msg.content || `[Voice unavailable: ${payload.error || 'Realtime voice failed.'}]`
           }));
           finalizeLiveTurn();
         }
-        if (payload.type === 'live-turn-complete') {
+        if (payload.type === 'live-turn-complete' || payload.type === 'turn.complete') {
           finalizeLiveTurn();
           if (socket.readyState === WebSocket.OPEN) socket.close();
         }
@@ -2434,7 +2442,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     };
     setRecordingWithCb(true);
     return { liveTurn, liveCapture };
-  }, [beginLiveTurn, finalizeLiveTurn, maybeOpenActionResults, playRealtimeAudioChunk, settings.voice, upsertLiveMessage]);
+  }, [beginLiveTurn, finalizeLiveTurn, maybeOpenActionResults, playRealtimeAudioChunk, settings.voice, settings.voiceEngine, updateCurrentStatus, upsertLiveMessage]);
 
   const openActionLink = useCallback((deepLink, webLink) => {
     const primary = deepLink || webLink;
@@ -3541,6 +3549,26 @@ function SettingsPage({ settings, setSettings, onPreviewVoice }) {
               <div className="setting-desc">Generate audio for responses</div>
             </div>
             <button className={`toggle ${settings.voiceOn ? 'on' : ''}`} onClick={() => update('voiceOn', !settings.voiceOn)} />
+          </div>
+          <div className="setting-row">
+            <div className="setting-info">
+              <div className="setting-label">Voice Engine</div>
+              <div className="setting-desc">Switch between the current voice path and the Gemini Live prototype</div>
+            </div>
+            <div className="autonomy-options">
+              {[
+                { value: 'current', label: 'Current' },
+                { value: 'gemini-live-prototype', label: 'Gemini Live' }
+              ].map(option => (
+                <button
+                  key={option.value}
+                  className={`autonomy-opt ${settings.voiceEngine === option.value ? 'active' : ''}`}
+                  onClick={() => update('voiceEngine', option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="setting-row">
             <div className="setting-info">
