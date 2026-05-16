@@ -649,20 +649,29 @@ function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
 }
 
 function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent }) {
-  const config = {
-    systemInstruction: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
-    tools: [{ googleSearch: {} }]
-  };
+  const canUseCachedPrompt = Boolean(cachedContentName) && !useSearch;
+  const config = {};
+  if (canUseCachedPrompt) {
+    config.cachedContent = cachedContentName;
+  } else {
+    config.systemInstruction = `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim();
+  }
+  if (useSearch) config.tools = [{ googleSearch: {} }];
   const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
   if (isQuickTurnMessage(firstUserText)) {
     config.maxOutputTokens = 32;
     config.temperature = 0.5;
   }
 
+  const dynamicContextParts = canUseCachedPrompt
+    ? [{ text: `Persistent user context for this conversation:\n\n${dynamicSystemPrompt}` }]
+    : [];
+
   return {
     config,
     contents: [
       ...baseHistory,
+      ...(dynamicContextParts.length ? [{ role: 'user', parts: dynamicContextParts }] : []),
       userContent
     ]
   };
