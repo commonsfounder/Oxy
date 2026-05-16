@@ -540,6 +540,10 @@ ${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : 'No
 Current time for internal reasoning only: ${timeStr}
 
 RESPONSE RULES:
+- The user leads the conversation. Follow their topic instead of steering into unrelated stored memory.
+- Treat stored memory as background context for understanding, not as content to surface by default.
+- Only mention stored memory when it is directly relevant to what the user just said, asked, or asked you to do.
+- For greetings or simple check-ins like "hi", "hey", or "ok", just respond naturally to that message. Do not surface legal cases, health goals, TV shows, or personal situations unless the user brings them up.
 - Do not repeat context you already stated earlier in this conversation.
 - Especially avoid repeating time/date, current plans, study topics, or personal brief details unless the user directly asks again.
 - Do not mention the current time or date unless the user asked for it or it is necessary for the action/result.
@@ -555,6 +559,8 @@ For tiny greetings or acknowledgements, reply in no more than two very short sen
 Make the first sentence a tiny acknowledgement of 1-3 words when possible.
 Keep the total reply under 10 words unless the user explicitly asks for more.
 Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
+The user leads the conversation. Reply to what they just said instead of surfacing unrelated memory.
+Treat memory as background context only. If the user just says hi, say hi back.
 Keep it warm, effortless, and concise.
 Do not repeat context you already mentioned earlier in this conversation.
 Already stated context:
