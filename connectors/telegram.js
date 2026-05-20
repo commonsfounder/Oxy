@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { Api } = require('telegram');
@@ -6,6 +7,52 @@ const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../ru
 
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('telegram connector bootstrap');
+
+// SECURITY NOTE: The Telegram session string is sensitive — it grants full account access.
+// It should be encrypted at rest. We use AES-256-GCM keyed from SESSION_ENCRYPTION_KEY.
+// If the key is not set, the session is stored as-is and a warning is logged once.
+let _sessionEncryptionWarnedOnce = false;
+
+function encryptSession(plaintext) {
+  const key = process.env.SESSION_ENCRYPTION_KEY;
+  if (!key) {
+    if (!_sessionEncryptionWarnedOnce) {
+      console.warn('[telegram] WARNING: SESSION_ENCRYPTION_KEY is not set. Telegram session stored as plaintext. Set this env var to encrypt sessions at rest.');
+      _sessionEncryptionWarnedOnce = true;
+    }
+    return plaintext;
+  }
+  const keyBuf = Buffer.from(key, 'hex').slice(0, 32);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `enc:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+function decryptSession(stored) {
+  if (!stored || !stored.startsWith('enc:')) return stored;
+  const key = process.env.SESSION_ENCRYPTION_KEY;
+  if (!key) {
+    console.warn('[telegram] WARNING: SESSION_ENCRYPTION_KEY is not set but an encrypted session was found. Cannot decrypt.');
+    return '';
+  }
+  try {
+    const parts = stored.slice(4).split(':');
+    if (parts.length !== 3) return stored;
+    const [ivHex, authTagHex, encryptedHex] = parts;
+    const keyBuf = Buffer.from(key, 'hex').slice(0, 32);
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const encryptedBuf = Buffer.from(encryptedHex, 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuf, iv);
+    decipher.setAuthTag(authTag);
+    return decipher.update(encryptedBuf).toString('utf8') + decipher.final('utf8');
+  } catch (err) {
+    console.error('[telegram] Failed to decrypt session:', err.message);
+    return '';
+  }
+}
 
 const SUPPORTED_ACTIONS = ['send_telegram', 'get_telegram_contacts'];
 
@@ -59,7 +106,7 @@ async function startAuth(userId, phone) {
   const client = await buildClient('');
   try {
     const result = await client.sendCode({ apiId, apiHash }, phone);
-    const partialSession = client.session.save();
+    const partialSession = encryptSession(client.session.save());
     await saveStoredTokens(userId, {
       pendingAuth: { phone, phoneCodeHash: result.phoneCodeHash, partialSession }
     });
@@ -75,16 +122,16 @@ async function verifyCode(userId, code) {
   if (!phone || !phoneCodeHash) throw new Error('No pending auth — call startAuth first');
 
   const { apiId, apiHash } = credentials();
-  const client = await buildClient(partialSession);
+  const client = await buildClient(decryptSession(partialSession));
   try {
     await client.invoke(new Api.auth.SignIn({ phoneNumber: phone, phoneCodeHash, phoneCode: code }));
-    const session = client.session.save();
+    const session = encryptSession(client.session.save());
     await saveStoredTokens(userId, { session });
     return { success: true, requires2FA: false };
   } catch (err) {
     if (err.errorMessage === 'SESSION_PASSWORD_NEEDED') {
       // Save session mid-flow so 2FA step can resume it
-      const partialSession2FA = client.session.save();
+      const partialSession2FA = encryptSession(client.session.save());
       await saveStoredTokens(userId, { pendingAuth: { ...tokens.pendingAuth, partialSession: partialSession2FA, needs2FA: true } });
       return { success: true, requires2FA: true };
     }
@@ -99,12 +146,12 @@ async function verify2FA(userId, password) {
   const { partialSession } = tokens.pendingAuth || {};
   if (!partialSession) throw new Error('No pending 2FA session — restart auth');
 
-  const client = await buildClient(partialSession);
+  const client = await buildClient(decryptSession(partialSession));
   try {
     const passwordInfo = await client.invoke(new Api.account.GetPassword());
     const passwordCheck = await computeCheck(passwordInfo, password);
     await client.invoke(new Api.auth.CheckPassword({ password: passwordCheck }));
-    const session = client.session.save();
+    const session = encryptSession(client.session.save());
     await saveStoredTokens(userId, { session });
     return { success: true };
   } finally {
@@ -122,7 +169,7 @@ async function execute(userId, action, params) {
 
   let client;
   try {
-    client = await buildClient(tokens.session);
+    client = await buildClient(decryptSession(tokens.session));
 
     switch (action) {
       case 'send_telegram': {

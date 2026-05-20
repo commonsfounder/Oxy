@@ -97,7 +97,8 @@ function verifyOAuthState(state) {
 app.use(cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    if (!ALLOWED_ORIGINS.length) return cb(new Error('CORS not configured'));
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
   credentials: true
@@ -138,7 +139,12 @@ app.use((req, res, next) => {
   return requireSessionAuth(req, res, next);
 });
 
+// In-memory only — not shared across replicas. Use a shared store (Redis/Supabase) for multi-instance deployments.
 const audioRateLimit = new Map();
+// Auth rate limiter: 5 attempts per 15 minutes per IP
+const authRateLimit = new Map();
+// TTS preview rate limiter: 10 requests per minute per userId
+const ttsRateLimit = new Map();
 const GEMINI_TTS_VOICES = new Set([
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
   'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
@@ -520,11 +526,16 @@ function extractAlreadyStatedContext(history = []) {
 
 function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
   const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
+  // NOTE: memory, preferences, and userContext are user-controlled content — treat as untrusted input
   return `WHAT YOU KNOW ABOUT THIS PERSON:
+<user_memory>
 ${memory || 'Nothing yet.'}
+</user_memory>
 
 HOW THE USER LIKES THINGS (learned over time):
+<user_preferences>
 ${preferences || 'Still learning.'}
+</user_preferences>
 
 CONNECTED APPS:
 ${availableActions}
@@ -550,7 +561,9 @@ RESPONSE RULES:
 - If an action is completed successfully, stop after one confirmation sentence. No follow-up question, no summary, no check-in.
 
 ---
-${userContext}`;
+<user_context>
+${userContext}
+</user_context>`;
 }
 
 function buildQuickTurnContext(preferences, statedContext = []) {
@@ -1306,7 +1319,7 @@ async function extractMemoryFact(userId, text) {
 
     // Skip if we already know this
     const { data: existing } = await supabase
-      .from('memories').select('content').eq('user_id', userId);
+      .from('memories').select('content').eq('user_id', userId).limit(200);
     const alreadyKnown = (existing || []).some(m =>
       m.content.toLowerCase().includes(fact.toLowerCase()) ||
       fact.toLowerCase().includes(m.content.toLowerCase())
@@ -1576,6 +1589,15 @@ Recent action outcomes: ${recentActions}`.slice(0, 2200);
 }
 
 app.post('/auth/register', async (req, res) => {
+  // Rate limit: 5 attempts per 15 minutes per IP
+  const authIp = req.ip || '';
+  const authNow = Date.now();
+  const authHits = (authRateLimit.get(authIp) || []).filter(t => authNow - t < 15 * 60 * 1000);
+  if (authHits.length >= 5) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
+  authRateLimit.set(authIp, [...authHits, authNow]);
+
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
@@ -1602,11 +1624,21 @@ app.post('/auth/register', async (req, res) => {
 
     res.json({ success: true, token: createSessionToken(userId), userId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/auth/register error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.post('/auth/login', async (req, res) => {
+  // Rate limit: 5 attempts per 15 minutes per IP
+  const authIp = req.ip || '';
+  const authNow = Date.now();
+  const authHits = (authRateLimit.get(authIp) || []).filter(t => authNow - t < 15 * 60 * 1000);
+  if (authHits.length >= 5) {
+    return res.status(429).json({ error: 'Too many attempts. Try again later.' });
+  }
+  authRateLimit.set(authIp, [...authHits, authNow]);
+
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
@@ -1615,13 +1647,19 @@ app.post('/auth/login', async (req, res) => {
     }
 
     const account = await getUserAccount(userId);
-    if (!account || !verifyPassword(password, account.password_hash)) {
+    if (!account) {
+      // Run dummy hash to normalize timing and prevent user enumeration
+      await hashPassword('dummy-password-for-timing');
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+    if (!verifyPassword(password, account.password_hash)) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
     res.json({ success: true, token: createSessionToken(userId), userId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/auth/login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1760,8 +1798,8 @@ app.post('/images/generate', upload.single('image'), async (req, res) => {
 
     res.json({ success: true, ...result, text: '' });
   } catch (err) {
-    console.error('/images/generate error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+    console.error('/images/generate error:', err.response?.data || err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1862,8 +1900,8 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
 
     res.json(result);
   } catch (err) {
-    console.error('/chat-with-image error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+    console.error('/chat-with-image error:', err.response?.data || err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1876,7 +1914,8 @@ app.post('/memory', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/memory POST error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1885,17 +1924,22 @@ app.get('/memory/:userId', async (req, res) => {
   try {
     res.json({ summary: await getMemorySummary(req.params.userId) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/memory/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.delete('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
+  if (!req.body || !req.body.scope) {
+    return res.status(400).json({ error: 'scope is required' });
+  }
   try {
-    const result = await forgetMemory(req.params.userId, req.body || { scope: 'all' });
+    const result = await forgetMemory(req.params.userId, req.body);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/memory/:userId DELETE error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1914,7 +1958,8 @@ app.post('/action-log', async (req, res) => {
     });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/action-log POST error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1935,7 +1980,8 @@ app.get('/action-log/:userId', async (req, res) => {
     }));
     res.json({ actions: parsed });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/action-log/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -1997,7 +2043,8 @@ app.get('/connectors/:userId', async (req, res) => {
     
     res.json({ connectors: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/connectors/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2020,11 +2067,21 @@ app.post('/connectors', async (req, res) => {
     
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/connectors POST error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.post('/tts-preview', async (req, res) => {
+  // Rate limit: 10 requests per minute per userId
+  const ttsUserId = getAuthenticatedUserId(req) || req.ip || '';
+  const ttsNow = Date.now();
+  const ttsHits = (ttsRateLimit.get(ttsUserId) || []).filter(t => ttsNow - t < 60000);
+  if (ttsHits.length >= 10) {
+    return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+  }
+  ttsRateLimit.set(ttsUserId, [...ttsHits, ttsNow]);
+
   try {
     const { voice = 'Aoede', text = 'Hi, it is lovely to meet you. This is how I sound.' } = req.body || {};
     console.log(`[audio][backend:tts-preview] request voice=${voice} chars=${String(text || '').trim().length}`);
@@ -2035,8 +2092,8 @@ app.post('/tts-preview', async (req, res) => {
     console.log(`[audio][backend:tts-preview] returning bytes=${Buffer.from(audio, 'base64').length} mime=audio/wav`);
     res.json({ audio, audioFormat: 'wav', audioMimeType: 'audio/wav' });
   } catch (err) {
-    console.error('[audio][backend:tts-preview] error', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('[audio][backend:tts-preview] error', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2060,8 +2117,8 @@ app.get('/briefing-legacy/:userId', async (req, res) => {
     const { spoken, actions } = await buildMorningBriefing(userId, new Date());
     res.json({ text: spoken, actions });
   } catch (err) {
-    console.error('/briefing error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('/briefing-legacy error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2088,42 +2145,9 @@ app.get('/briefing/:userId', async (req, res) => {
       created_at: latestQueuedBriefing.created_at,
       kind: latestQueuedBriefing.kind || 'briefing'
     });
-
-    const [memory, history] = await Promise.all([
-      getMemory(userId),
-      getHistory(userId)
-    ]);
-
-    const now = new Date();
-    const hour = now.getHours();
-    const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-
-    const systemPrompt = `You are Oxy. It's ${greeting} and you're checking in with your friend.
-
-Here's what you know about them:
-${memory || 'Not much yet — learn as you go.'}
-
-Recent conversation:
-${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
-
-Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
-- Only mention things that are directly supported by memory or recent conversation shown above.
-- Do not invent plans, meetings, news, weather, or tasks.
-- If there is no concrete update, just greet them and say it's a quiet start.
-
-The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
-
-    const model = genAI.getGenerativeModel({
-      model: PRIMARY_CHAT_MODEL,
-      systemInstruction: systemPrompt
-    });
-    const geminiRes = await model.generateContent('whats going on today?');
-    const { spoken, actions } = parseActions(geminiRes.response.text());
-
-    res.json({ text: spoken, actions });
   } catch (err) {
-    console.error('/briefing error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('/briefing error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2133,7 +2157,8 @@ app.get('/history/:userId', async (req, res) => {
     const history = await getHistory(req.params.userId);
     res.json({ history });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/history/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2158,7 +2183,8 @@ app.get('/history/:userId/search', async (req, res) => {
       .map(entry => ({ ...entry, content: conversationFallbackText(entry) }));
     res.json({ results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/history/:userId/search GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2181,7 +2207,8 @@ app.get('/history/:userId/date', async (req, res) => {
     if (error) throw error;
     res.json({ history: (data || []).map(normalizeConversationRow) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/history/:userId/date GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2408,9 +2435,11 @@ async function runProactiveSweep(logger = console) {
     failures: 0
   };
 
+  // Basic guard — should be paginated for large deployments
   const { data: users, error } = await supabase
     .from('users')
-    .select('user_id');
+    .select('user_id')
+    .limit(500);
   if (error) throw error;
 
   for (const user of users || []) {
@@ -2536,6 +2565,7 @@ app.post('/chat', async (req, res) => {
     if (!message?.trim()) {
       return res.status(400).json({ error: 'message is required.' });
     }
+    if (message.length > 10000) return res.status(400).json({ error: 'Message too long.' });
 
     const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
     trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
@@ -2763,8 +2793,8 @@ app.post('/chat', async (req, res) => {
 
   } catch (err) {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
-    console.error('/chat error:', err.message);
-    res.status(500).json({ error: err.message, text: `Error: ${err.message}` });
+    console.error('/chat error:', err);
+    res.status(500).json({ error: 'Internal server error', text: 'Internal server error' });
   }
 });
 
@@ -2779,7 +2809,8 @@ app.get('/preferences/:userId', async (req, res) => {
     if (error || !data) return res.json({ preferences: [] });
     res.json({ preferences: data });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/preferences/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2789,7 +2820,8 @@ app.delete('/preferences/:userId', async (req, res) => {
     await supabase.from('preferences').delete().eq('user_id', req.params.userId);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/preferences/:userId DELETE error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -2800,10 +2832,12 @@ app.post('/auth/telegram/start', async (req, res) => {
     const { userId, phone } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     if (!phone) return res.status(400).json({ error: 'phone is required' });
+    if (!/^\+\d{7,15}$/.test(phone)) return res.status(400).json({ error: 'Invalid phone number format.' });
     const result = await telegram.startAuth(userId, phone);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('/auth/telegram/start error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -2815,7 +2849,8 @@ app.post('/auth/telegram/verify', async (req, res) => {
     const result = await telegram.verifyCode(userId, code);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('/auth/telegram/verify error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -2827,7 +2862,8 @@ app.post('/auth/telegram/2fa', async (req, res) => {
     const result = await telegram.verify2FA(userId, password);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error('/auth/telegram/2fa error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -2839,13 +2875,17 @@ const GOOGLE_SCOPES = [
 ].join(' ');
 
 app.get('/auth/google/redirect-uri', (req, res) => {
-  res.json({ redirect_uri: `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback` });
+  const appOrigin = process.env.APP_URL;
+  if (!appOrigin) return res.status(500).json({ error: 'APP_URL is not configured' });
+  res.json({ redirect_uri: `${appOrigin}/auth/google/callback` });
 });
 
 app.get('/auth/google/start', (req, res) => {
   const userId = req.query.userId;
   if (!requireMatchingUser(req, res, userId)) return;
-  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
+  const appOrigin = process.env.APP_URL;
+  if (!appOrigin) return res.status(500).json({ error: 'APP_URL is not configured' });
+  const redirectUri = `${appOrigin}/auth/google/callback`;
   const state = signOAuthState(userId);
   const params = new URLSearchParams({
     client_id: process.env.GMAIL_CLIENT_ID,
@@ -2864,7 +2904,8 @@ app.get('/auth/google/callback', async (req, res) => {
   const userId = verifyOAuthState(state);
 
   if (error) {
-    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+    const appOrigin = process.env.APP_URL || '';
+    if (!appOrigin) return res.status(500).send('APP_URL is not configured');
     return res.send(`<script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
   }
 
@@ -2875,8 +2916,11 @@ app.get('/auth/google/callback', async (req, res) => {
     return res.status(400).send('Missing OAuth code');
   }
 
+  const appOrigin = process.env.APP_URL || '';
+  if (!appOrigin) return res.status(500).send('APP_URL is not configured');
+
   try {
-    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
+    const redirectUri = `${appOrigin}/auth/google/callback`;
     const resp = await axios.post('https://oauth2.googleapis.com/token', {
       code,
       client_id: process.env.GMAIL_CLIENT_ID,
@@ -2885,12 +2929,11 @@ app.get('/auth/google/callback', async (req, res) => {
       grant_type: 'authorization_code'
     });
 
+    // Do NOT store client_id or client_secret in the DB — read them from env at runtime
     const tokens = {
       access_token: resp.data.access_token,
       refresh_token: resp.data.refresh_token,
-      expires_at: Date.now() + resp.data.expires_in * 1000,
-      client_id: process.env.GMAIL_CLIENT_ID,
-      client_secret: process.env.GMAIL_CLIENT_SECRET
+      expires_at: Date.now() + resp.data.expires_in * 1000
     };
 
     await supabase.from('connectors').upsert(
@@ -2898,7 +2941,6 @@ app.get('/auth/google/callback', async (req, res) => {
       { onConflict: 'user_id,connector_id' }
     );
 
-    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
         <p style="font-size:18px">✓ Google connected</p>
@@ -2908,8 +2950,7 @@ app.get('/auth/google/callback', async (req, res) => {
     `);
   } catch (err) {
     console.error('/auth/google/callback error:', err.response?.data || err.message);
-    const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
-    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || 'An error occurred');
     res.send(`
       <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
         <p style="font-size:18px">✗ Connection failed</p>
@@ -2950,7 +2991,8 @@ app.get('/debug/:userId', async (req, res) => {
       envHasGeminiKey: !!process.env.GEMINI_API_KEY
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('/debug/:userId GET error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

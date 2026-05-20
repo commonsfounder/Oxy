@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const fs = require("fs").promises;
+const fsSync = require("fs");
 const { randomUUID } = require("crypto");
 const path = require("path");
 const { requireSessionAuth } = require("./auth");
@@ -54,6 +55,16 @@ function parseJsonEnv(name, value) {
 
 const PARSED_GOOGLE_CALENDAR_CREDENTIALS = parseJsonEnv('GOOGLE_CALENDAR_CREDENTIALS', GOOGLE_CALENDAR_CREDENTIALS);
 
+// Validate required fields in GOOGLE_CALENDAR_CREDENTIALS at startup
+if (PARSED_GOOGLE_CALENDAR_CREDENTIALS) {
+  const missing = ['client_id', 'client_secret', 'refresh_token'].filter(k => !PARSED_GOOGLE_CALENDAR_CREDENTIALS[k]);
+  if (missing.length > 0) {
+    console.error(`[mcp-server] GOOGLE_CALENDAR_CREDENTIALS is missing required field(s): ${missing.join(', ')}. Calendar tools will be disabled.`);
+    // Null out so calendar tools gracefully degrade
+    Object.assign(PARSED_GOOGLE_CALENDAR_CREDENTIALS, { _invalid: true });
+  }
+}
+
 // --- Spotify token cache ---
 let spotifyToken = null;
 async function getSpotifyToken() {
@@ -80,7 +91,10 @@ async function loadReminders() {
 }
 
 async function saveReminders(reminders) {
-  await fs.writeFile(REMINDERS_FILE, JSON.stringify(reminders, null, 2));
+  // Atomic write: write to a temp file first, then rename to prevent corruption on concurrent writes
+  const tmpFile = REMINDERS_FILE.replace(/\.json$/, '.tmp.json');
+  await fs.writeFile(tmpFile, JSON.stringify(reminders, null, 2));
+  fsSync.renameSync(tmpFile, REMINDERS_FILE);
 }
 
 // --- MCP Tools (simple POST /tools endpoint) ---
@@ -145,10 +159,14 @@ app.post("/tools", async (req, res) => {
         if (!contact.match(/^\+/)) {
           return res.json({ success: false, error: "Contact must be E.164 phone number (e.g. +447123456789)" });
         }
+        const twimlUrl = process.env.TWILIO_TWIML_URL || '';
+        if (!twimlUrl) {
+          return res.json({ success: false, error: "make_call is not configured: TWILIO_TWIML_URL is not set." });
+        }
         await twilioRequest("/Calls.json", {
           From: TWILIO_PHONE_NUMBER,
           To: contact,
-          Url: "https://handler.twilio.com/twiml/EH1b0b1b1b1b1b1b1b1b1b1b1b1b1b1b" // Replace with your TwiML
+          Url: twimlUrl
         });
         return res.json({ success: true, text: `Calling ${contact}...` });
       }
@@ -173,7 +191,7 @@ app.post("/tools", async (req, res) => {
       case "create_calendar_event": {
         const { title, start_date, end_date, location, notes } = args;
         const credentials = PARSED_GOOGLE_CALENDAR_CREDENTIALS;
-        if (!credentials) return res.json({ success: false, error: "Google Calendar not configured" });
+        if (!credentials || credentials._invalid) return res.json({ success: false, error: "Google Calendar not configured or missing required credentials" });
         const calendarId = credentials.calendar_id || "primary";
         const token = await getGoogleCalendarToken();
         await axios.post(
@@ -222,7 +240,7 @@ let gcalToken = null;
 async function getGoogleCalendarToken() {
   if (gcalToken && gcalToken.expires > Date.now()) return gcalToken.access_token;
   const credentials = PARSED_GOOGLE_CALENDAR_CREDENTIALS;
-  if (!credentials) throw new Error("Google Calendar not configured");
+  if (!credentials || credentials._invalid) throw new Error("Google Calendar not configured or missing required credentials (client_id, client_secret, refresh_token)");
   const resp = await axios.post("https://oauth2.googleapis.com/token", {
     grant_type: "refresh_token",
     refresh_token: credentials.refresh_token,

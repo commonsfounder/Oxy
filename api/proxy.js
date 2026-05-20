@@ -9,7 +9,10 @@ logMissingRuntimeEnvOnce('proxy bootstrap');
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 module.exports = async function handler(req, res) {
-  const allowedOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
+  const allowedOrigin = process.env.APP_URL || '';
+  if (!allowedOrigin) {
+    return res.status(500).json({ error: 'CORS not configured' });
+  }
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Token');

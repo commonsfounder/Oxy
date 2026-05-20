@@ -131,13 +131,15 @@ async function execute(userId, action, params) {
       }
 
       case 'search_emails': {
-        const { query, max_results = 5 } = params;
+        const { query } = params;
+        // Clamp max_results to prevent unbounded requests to the Gmail API
+        const maxResults = Math.min(Number(params.max_results) || 5, 20);
         if (!query) return { success: false, error: 'search_emails requires a query' };
         const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-          { headers, params: { q: query, maxResults: max_results }, timeout: 15000 });
+          { headers, params: { q: query, maxResults }, timeout: 15000 });
         if (!list.data.messages?.length) return { success: true, emails: [], text: `No emails matching "${query}"` };
 
-        const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
+        const emails = await Promise.all(list.data.messages.slice(0, maxResults).map(async msg => {
           const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
             { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
           const h = detail.data.payload?.headers || [];
