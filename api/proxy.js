@@ -31,6 +31,12 @@ module.exports = async function handler(req, res) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
+  // Action allowlist guard: validate action is a known own property of the registry
+  const { registry: connectorRegistry } = require('../connectors');
+  if (!Object.prototype.hasOwnProperty.call(connectorRegistry, action)) {
+    return res.status(400).json({ error: 'Unknown action' });
+  }
+
   try {
     const result = await dispatch(userId, action, params);
 
@@ -49,6 +55,7 @@ module.exports = async function handler(req, res) {
       status: 'failed',
       created_at: new Date().toISOString()
     });
-    res.status(500).json({ success: false, error: err.message });
+    console.error('[proxy] dispatch error:', err);
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 };

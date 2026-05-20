@@ -21,11 +21,10 @@ async function getTokens(userId) {
   }
 
   // Fall back to env vars (single-user setup), save to DB for next time
+  // Note: client_id and client_secret are intentionally NOT saved to the DB — read from env at runtime
   if (process.env.GMAIL_REFRESH_TOKEN) {
     const tokens = {
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN.replace(/^﻿/, '').trim(),
-      client_id: process.env.GMAIL_CLIENT_ID,
-      client_secret: process.env.GMAIL_CLIENT_SECRET
+      refresh_token: process.env.GMAIL_REFRESH_TOKEN.replace(/^﻿/, '').trim()
     };
     try { await saveTokens(userId, tokens); } catch (err) {
       console.error('[getTokens] failed to save env tokens:', err.message);
@@ -51,11 +50,12 @@ async function getAccessToken(userId) {
   }
 
   try {
+    // Always read client_id and client_secret from env vars — never from stored tokens
     const resp = await axios.post('https://oauth2.googleapis.com/token', {
       grant_type: 'refresh_token',
       refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
-      client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
-      client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
+      client_id: process.env.GOOGLE_CLIENT_ID || process.env.GMAIL_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET || process.env.GMAIL_CLIENT_SECRET
     }, { timeout: 10000 });
 
     const updated = {
@@ -114,12 +114,13 @@ async function execute(userId, action, params) {
       }
 
       case 'get_emails': {
-        const { max_results = 5 } = params;
+        // Clamp max_results to prevent unbounded requests to the Gmail API
+        const maxResults = Math.min(Number(params.max_results) || 5, 20);
         const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-          { headers, params: { maxResults: max_results }, timeout: 15000 });
+          { headers, params: { maxResults }, timeout: 15000 });
         if (!list.data.messages?.length) return { success: true, emails: [], text: 'No emails found' };
 
-        const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
+        const emails = await Promise.all(list.data.messages.slice(0, maxResults).map(async msg => {
           const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
             { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
           const h = detail.data.payload?.headers || [];

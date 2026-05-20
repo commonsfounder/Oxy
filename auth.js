@@ -3,7 +3,9 @@ const crypto = require('crypto');
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getSessionSecret() {
-  return process.env.OXY_SESSION_SECRET || process.env.SESSION_SECRET || process.env.OXY_API_KEY || '';
+  const secret = process.env.OXY_SESSION_SECRET || process.env.SESSION_SECRET;
+  if (!secret) throw new Error('Server auth is not configured: OXY_SESSION_SECRET or SESSION_SECRET must be set.');
+  return secret;
 }
 
 function encodeBase64Url(value) {
@@ -32,12 +34,13 @@ function verifySignedPayload(token) {
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [encodedPayload, sig] = parts;
-  const secret = getSessionSecret();
+  let secret;
+  try { secret = getSessionSecret(); } catch { return null; }
   if (!secret) return null;
 
   const expectedSig = crypto.createHmac('sha256', secret).update(encodedPayload).digest('base64url');
-  const sigBuf = Buffer.from(sig);
-  const expectedBuf = Buffer.from(expectedSig);
+  const sigBuf = Buffer.from(sig, 'base64url');
+  const expectedBuf = Buffer.from(expectedSig, 'base64url');
   if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     return null;
   }
@@ -68,7 +71,13 @@ function getProvidedSessionToken(req) {
 }
 
 function requireSessionAuth(req, res, next) {
-  if (!getSessionSecret()) {
+  let secret;
+  try {
+    secret = getSessionSecret();
+  } catch {
+    return res.status(500).json({ error: 'Server auth is not configured.' });
+  }
+  if (!secret) {
     return res.status(500).json({ error: 'Server auth is not configured.' });
   }
 
