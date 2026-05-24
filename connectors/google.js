@@ -50,6 +50,10 @@ async function getAccessToken(userId) {
     return tokens.access_token;
   }
 
+  if (!tokens.refresh_token) {
+    throw new Error('Google not authorized. Reconnect Google from Settings.');
+  }
+
   try {
     const resp = await axios.post('https://oauth2.googleapis.com/token', {
       grant_type: 'refresh_token',
