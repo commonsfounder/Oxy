@@ -2500,6 +2500,9 @@ function summarizeCompletedActionsConcise(actionResults) {
   const dataOnly = successful.every(entry => DATA_ACTIONS.has(entry.action));
   if (dataOnly) return '';
 
+  const resultText = summarizeActionResults(successful);
+  if (resultText) return resultText;
+
   const normalized = successful
     .map(entry => toSingleSentence(entry.result?.text || humanizeActionType(entry.action)))
     .filter(Boolean);

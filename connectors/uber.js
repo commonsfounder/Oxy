@@ -11,6 +11,15 @@ function isCurrentLocation(str) {
   return CURRENT_LOCATION_PHRASES.some(p => str.trim().toLowerCase() === p);
 }
 
+function shortAddress(address) {
+  return String(address || '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(', ');
+}
+
 async function execute(userId, action, params) {
   try {
     switch (action) {
@@ -51,7 +60,7 @@ async function execute(userId, action, params) {
 
         return {
           success: true,
-          text: `Opening Uber from ${fromLabel} to ${destCoords.formattedAddress} — confirm in the app`,
+          text: `Opening Uber to ${shortAddress(destCoords.formattedAddress)}. Confirm the ride in Uber.`,
           deepLink: `uber://?${query}`,
           webLink: `https://m.uber.com/ul/?${query}`
         };
