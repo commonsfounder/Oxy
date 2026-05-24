@@ -3330,18 +3330,27 @@ function ConnectorsPage() {
   const [loading, setLoading] = useState(true);
   const [googleStatus, setGoogleStatus] = useState('idle'); // idle | connecting | connected | error
   const [telegramModal, setTelegramModal] = useState(false);
+  const [error, setError] = useState('');
 
   const loadConnectors = () => {
     apiFetch(`/connectors/${USER_ID}`)
-      .then(r => r.json())
+      .then(async r => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || 'Failed to load connectors.');
+        return d;
+      })
       .then(d => {
         const list = d.connectors || [];
         setConnectors(list);
         const g = list.find(c => c.id === 'google');
-        if (g?.enabled) setGoogleStatus('connected');
+        setGoogleStatus(g?.enabled ? 'connected' : 'idle');
+        setError('');
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(err => {
+        setError(err.message || 'Failed to load connectors.');
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -3360,8 +3369,10 @@ function ConnectorsPage() {
       const resp = await apiFetch(`/auth/google/start?userId=${encodeURIComponent(USER_ID)}`);
       const data = await resp.json();
       if (!resp.ok || !data.url) throw new Error(data.error || 'Google connect failed.');
+      setError('');
       window.open(data.url, 'oxy_auth', 'width=500,height=600');
-    } catch {
+    } catch (err) {
+      setError(err.message || 'Google connect failed.');
       setGoogleStatus('error');
     }
   };
@@ -3371,21 +3382,33 @@ function ConnectorsPage() {
       setTelegramModal(true);
       return;
     }
-    await apiFetch('/connectors', {
+    const resp = await apiFetch('/connectors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: USER_ID, connectorId: id, enabled: !enabled })
     });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data.error || 'Connector update failed.');
+      return;
+    }
+    setError('');
     setConnectors(prev => prev.map(c => c.id === id ? { ...c, enabled: !c.enabled } : c));
   };
 
   const onTelegramSuccess = async () => {
     setTelegramModal(false);
-    await apiFetch('/connectors', {
+    const resp = await apiFetch('/connectors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: USER_ID, connectorId: 'telegram', enabled: true })
     });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      setError(data.error || 'Telegram connector update failed.');
+      return;
+    }
+    setError('');
     loadConnectors();
   };
 
@@ -3414,6 +3437,19 @@ function ConnectorsPage() {
           onSuccess={onTelegramSuccess}
           onClose={() => setTelegramModal(false)}
         />
+      )}
+      {error && (
+        <div style={{
+          marginBottom:'16px',
+          padding:'12px 14px',
+          border:'1px solid rgba(255,95,86,0.25)',
+          borderRadius:'12px',
+          background:'rgba(255,95,86,0.08)',
+          color:'var(--text)',
+          fontSize:'13px'
+        }}>
+          {error}
+        </div>
       )}
 
       <div className="section">

@@ -1984,7 +1984,8 @@ app.get('/connectors/:userId', async (req, res) => {
       .from('connectors')
       .select('connector_id, enabled')
       .eq('user_id', req.params.userId);
-    
+    if (error) throw error;
+
     const enabled = new Set();
     if (data) {
       data.forEach(c => { if (c.enabled) enabled.add(c.connector_id); });
@@ -2008,8 +2009,11 @@ app.post('/connectors', async (req, res) => {
     if (!KNOWN_CONNECTOR_IDS.has(connectorId)) {
       return res.status(400).json({ error: 'Unknown connector.' });
     }
-    
-    await supabase
+    if (typeof enabled !== 'boolean') {
+      return res.status(400).json({ error: 'enabled must be a boolean.' });
+    }
+
+    const { error } = await supabase
       .from('connectors')
       .upsert({
         user_id: userId,
@@ -2017,7 +2021,8 @@ app.post('/connectors', async (req, res) => {
         enabled,
         updated_at: new Date().toISOString()
       }, { onConflict: 'user_id,connector_id' });
-    
+    if (error) throw error;
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2814,6 +2819,9 @@ app.get('/auth/google/redirect-uri', (req, res) => {
 app.get('/auth/google/start', (req, res) => {
   const userId = req.query.userId;
   if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.GMAIL_CLIENT_ID || !process.env.GMAIL_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Google OAuth is not configured on the server.' });
+  }
   const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/google/callback`;
   const state = signOAuthState(userId);
   const params = new URLSearchParams({
@@ -2862,10 +2870,11 @@ app.get('/auth/google/callback', async (req, res) => {
       client_secret: process.env.GMAIL_CLIENT_SECRET
     };
 
-    await supabase.from('connectors').upsert(
+    const { error: upsertError } = await supabase.from('connectors').upsert(
       { user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
       { onConflict: 'user_id,connector_id' }
     );
+    if (upsertError) throw upsertError;
 
     const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
     res.send(`

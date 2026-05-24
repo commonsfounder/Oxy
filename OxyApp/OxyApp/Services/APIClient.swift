@@ -10,9 +10,9 @@ final class APIClient {
             return envURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
         #if DEBUG
-        return "http://localhost:3000"
+        return "https://oxy-151340634966.europe-west2.run.app"
         #else
-        return "https://your-oxy-service.a.run.app"
+        return "https://oxy-151340634966.europe-west2.run.app"
         #endif
     }
 

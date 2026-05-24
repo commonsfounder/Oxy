@@ -1,10 +1,15 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
     @State private var googleStatus: GoogleStatus = .idle
+    @State private var errorMessage: String?
 
     enum GoogleStatus: String {
         case idle, connecting, connected, error
@@ -21,6 +26,10 @@ struct ConnectorsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
+                            if let errorMessage {
+                                ErrorBanner(message: errorMessage)
+                            }
+
                             // Google section
                             googleSection
 
@@ -49,6 +58,11 @@ struct ConnectorsView: View {
             .refreshable {
                 await loadConnectors()
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active && googleStatus == .connecting {
+                    Task { await loadConnectors() }
+                }
+            }
         }
     }
 
@@ -63,22 +77,8 @@ struct ConnectorsView: View {
                 .tracking(0.5)
 
             HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color(red: 66/255, green: 133/255, blue: 244/255),
-                                         Color(red: 52/255, green: 168/255, blue: 83/255)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-
-                    Text("G")
-                        .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(.white)
-                }
+                AppIconView(candidates: [connectors.first(where: { $0.id == "google" })?.icon ?? "", "google"], fallbackSystemName: "envelope.fill")
+                    .frame(width: 44, height: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Google")
@@ -169,13 +169,21 @@ struct ConnectorsView: View {
                 path: "/connectors/\(appState.userId)"
             )
             let response = try JSONDecoder().decode(ConnectorsResponse.self, from: data)
-            connectors = response.connectors
-            if let google = connectors.first(where: { $0.id == "google" }), google.enabled {
-                googleStatus = .connected
+            await MainActor.run {
+                connectors = response.connectors
+                let googleConnected = connectors.first(where: { $0.id == "google" })?.enabled == true
+                googleStatus = googleConnected ? .connected : .idle
+                errorMessage = nil
+                isLoading = false
             }
-            isLoading = false
         } catch {
-            isLoading = false
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                if googleStatus == .connecting {
+                    googleStatus = .error
+                }
+                isLoading = false
+            }
         }
     }
 
@@ -191,13 +199,20 @@ struct ConnectorsView: View {
                    let urlStr = json["url"] as? String,
                    let url = URL(string: urlStr) {
                     await MainActor.run {
+                        errorMessage = nil
                         UIApplication.shared.open(url)
                     }
                 } else {
-                    googleStatus = .error
+                    await MainActor.run {
+                        googleStatus = .error
+                        errorMessage = "Google connect failed."
+                    }
                 }
             } catch {
-                googleStatus = .error
+                await MainActor.run {
+                    googleStatus = .error
+                    errorMessage = error.localizedDescription
+                }
             }
         }
     }
@@ -214,10 +229,17 @@ struct ConnectorsView: View {
                         "enabled": !connector.enabled
                     ]
                 )
-                if let idx = connectors.firstIndex(where: { $0.id == connector.id }) {
-                    connectors[idx].enabled.toggle()
+                await MainActor.run {
+                    if let idx = connectors.firstIndex(where: { $0.id == connector.id }) {
+                        connectors[idx].enabled.toggle()
+                        errorMessage = nil
+                    }
                 }
-            } catch {}
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 }
@@ -249,31 +271,10 @@ private struct ConnectorCard: View {
         }
     }
 
-    private var iconColor: Color {
-        switch connector.id {
-        case "google":    return Color(red: 66/255, green: 133/255, blue: 244/255)
-        case "imessage":  return Color.oxyGreen
-        case "whatsapp":  return Color(red: 37/255, green: 211/255, blue: 102/255)
-        case "spotify":   return Color(red: 30/255, green: 215/255, blue: 96/255)
-        case "uber":      return Color.oxyText
-        case "telegram":  return Color(red: 38/255, green: 166/255, blue: 228/255)
-        case "netflix":   return Color(red: 229/255, green: 9/255, blue: 20/255)
-        case "monzo":     return Color(red: 233/255, green: 96/255, blue: 79/255)
-        case "trainline": return Color(red: 3/255, green: 169/255, blue: 157/255)
-        default:          return Color.oxyStone
-        }
-    }
-
     var body: some View {
         VStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(iconColor.opacity(0.15))
-                    .frame(width: 40, height: 40)
-                Image(systemName: sfSymbol)
-                    .font(.system(size: 17))
-                    .foregroundStyle(iconColor)
-            }
+            AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol)
+                .frame(width: 40, height: 40)
 
             VStack(spacing: 2) {
                 Text(connector.name)
@@ -307,6 +308,74 @@ private struct ConnectorCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.oxyLine2, lineWidth: 1)
         )
+    }
+}
+
+private struct AppIconView: View {
+    let candidates: [String]
+    let fallbackSystemName: String
+
+    var body: some View {
+        ZStack {
+            if let url = firstURL(from: candidates) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        fallback
+                    }
+                }
+            } else if let img = firstAssetImage(from: candidates) {
+                Image(uiImage: img)
+                    .resizable()
+                    .scaledToFill()
+            } else if let emoji = firstEmoji(from: candidates) {
+                Text(emoji)
+                    .font(.system(size: 20))
+            } else {
+                fallback
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.oxySurface3)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.oxyLine2, lineWidth: 1)
+        )
+    }
+
+    private var fallback: some View {
+        Image(systemName: fallbackSystemName)
+            .font(.system(size: 17))
+            .foregroundStyle(Color.oxySub)
+    }
+
+    private func firstURL(from candidates: [String]) -> URL? {
+        for name in candidates {
+            if name.lowercased().hasPrefix("http"), let url = URL(string: name) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func firstAssetImage(from candidates: [String]) -> UIImage? {
+        #if canImport(UIKit)
+        for name in candidates where !name.isEmpty {
+            if let img = UIImage(named: name) { return img }
+        }
+        #endif
+        return nil
+    }
+
+    private func firstEmoji(from candidates: [String]) -> String? {
+        candidates.first { candidate in
+            candidate.unicodeScalars.contains { $0.properties.isEmojiPresentation }
+        }
     }
 }
 

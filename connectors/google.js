@@ -37,10 +37,11 @@ async function getTokens(userId) {
 }
 
 async function saveTokens(userId, tokens) {
-  await supabase
+  const { error } = await supabase
     .from('connectors')
     .upsert({ user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
              { onConflict: 'user_id,connector_id' });
+  if (error) throw error;
 }
 
 async function getAccessToken(userId) {

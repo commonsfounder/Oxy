@@ -47,7 +47,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let webLink: String?
 
     enum CodingKeys: String, CodingKey {
-        case action, success, text, error, deepLink, webLink
+        case action, result, success, text, error, deepLink, webLink
     }
 
     init(
@@ -69,11 +69,30 @@ struct ActionResult: Codable, Identifiable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         action = try container.decodeIfPresent(String.self, forKey: .action) ?? "unknown"
-        success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
-        text = try container.decodeIfPresent(String.self, forKey: .text)
-        error = try container.decodeIfPresent(String.self, forKey: .error)
-        deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
-        webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
+
+        if let result = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .result) {
+            success = try result.decodeIfPresent(Bool.self, forKey: .success) ?? false
+            text = try result.decodeIfPresent(String.self, forKey: .text)
+            error = try result.decodeIfPresent(String.self, forKey: .error)
+            deepLink = try result.decodeIfPresent(String.self, forKey: .deepLink)
+            webLink = try result.decodeIfPresent(String.self, forKey: .webLink)
+        } else {
+            success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
+            text = try container.decodeIfPresent(String.self, forKey: .text)
+            error = try container.decodeIfPresent(String.self, forKey: .error)
+            deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
+            webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encode(success, forKey: .success)
+        try container.encodeIfPresent(text, forKey: .text)
+        try container.encodeIfPresent(error, forKey: .error)
+        try container.encodeIfPresent(deepLink, forKey: .deepLink)
+        try container.encodeIfPresent(webLink, forKey: .webLink)
     }
 }
 
