@@ -1,4 +1,4 @@
-const { geocodeLocation } = require('../api/geocoding');
+const { geocodeLocation, resolvePlaceDestination } = require('../api/geocoding');
 
 const SUPPORTED_ACTIONS = ['book_uber'];
 
@@ -30,7 +30,7 @@ async function execute(userId, action, params) {
         }
 
         const enc = encodeURIComponent;
-        const destCoords = await geocodeLocation(destination);
+        const destCoords = await resolvePlaceDestination(destination, { location: params.location });
 
         // URLSearchParams percent-encodes brackets, breaking Uber's deep link format.
         // Build the query string manually so pickup[latitude] etc. stay literal.
@@ -60,7 +60,7 @@ async function execute(userId, action, params) {
 
         return {
           success: true,
-          text: `Opening Uber to ${shortAddress(destCoords.formattedAddress)}. Confirm the ride in Uber.`,
+          text: `Opening Uber to ${destCoords.name || shortAddress(destCoords.formattedAddress)}. Confirm the ride in Uber.`,
           deepLink: `uber://?${query}`,
           webLink: `https://m.uber.com/ul/?${query}`
         };

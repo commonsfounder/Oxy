@@ -4,10 +4,18 @@
 <dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Oxy uses your location to help with ride booking, directions, and local recommendations.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Oxy uses background location for useful reminders such as arriving near home.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Oxy uses the microphone for voice input so you can talk instead of typing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Oxy uses speech recognition to convert your voice into text messages.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Oxy reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Oxy uses contacts to prepare native message and FaceTime handoffs.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Oxy uses reminders to help create native Apple Reminders when you ask.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>uber</string>

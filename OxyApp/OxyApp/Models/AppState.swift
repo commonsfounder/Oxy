@@ -21,6 +21,9 @@ final class AppState {
         token = savedToken
         userId = savedUserId
         isAuthenticated = true
+        Task { @MainActor in
+            NativeIntegrationManager.shared.bootstrap(userId: savedUserId)
+        }
     }
 
     func login(userId: String, token: String) {
@@ -29,6 +32,9 @@ final class AppState {
         keychain.save(key: "session_token", value: token)
         keychain.save(key: "user_id", value: userId)
         isAuthenticated = true
+        Task { @MainActor in
+            NativeIntegrationManager.shared.bootstrap(userId: userId)
+        }
     }
 
     func logout() {

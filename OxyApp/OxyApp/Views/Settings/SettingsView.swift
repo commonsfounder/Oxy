@@ -104,6 +104,73 @@ struct SettingsView: View {
                                     }
                                 }
                             }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Briefings", description: "Wake, midday, and evening proactive updates") {
+                                Toggle("", isOn: $settings.proactiveBriefings)
+                                    .labelsHidden()
+                                    .tint(Color.oxyGreen)
+                                    .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Health Alerts", description: "Use HealthKit summaries for useful checks") {
+                                Toggle("", isOn: $settings.healthAlerts)
+                                    .labelsHidden()
+                                    .tint(Color.oxyGreen)
+                                    .onChange(of: settings.healthAlerts) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Location Reminders", description: "Food and context nudges near important places") {
+                                Toggle("", isOn: $settings.locationReminders)
+                                    .labelsHidden()
+                                    .tint(Color.oxyGreen)
+                                    .onChange(of: settings.locationReminders) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            Button {
+                                Task {
+                                    await NativeIntegrationManager.shared.requestNativePermissions(userId: appState.userId)
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
+                                    Text("Enable Native Context")
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.oxyDim)
+                                }
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Color.oxyText)
+                                .padding(.vertical, 4)
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            Button {
+                                Task {
+                                    await NativeIntegrationManager.shared.markCurrentLocationAsHome(userId: appState.userId)
+                                    await MainActor.run { loadSettings() }
+                                }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "house.and.flag.fill")
+                                    Text("Set Current Location as Home")
+                                    Spacer()
+                                    Image(systemName: settings.homeLatitude == nil ? "location" : "checkmark.circle.fill")
+                                        .foregroundStyle(settings.homeLatitude == nil ? Color.oxyDim : Color.oxyGreen)
+                                }
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Color.oxyText)
+                                .padding(.vertical, 4)
+                            }
                         }
 
                         // Account
@@ -212,6 +279,9 @@ struct SettingsView: View {
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "oxy_settings")
         }
+        Task {
+            await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
+        }
     }
 }
 
@@ -247,6 +317,11 @@ struct OxySettings: Codable {
     var voiceOn: Bool = true
     var voiceEngine: String = "current"
     var autonomy: String = "Medium"
+    var proactiveBriefings: Bool = true
+    var healthAlerts: Bool = true
+    var locationReminders: Bool = true
+    var homeLatitude: Double?
+    var homeLongitude: Double?
 
     struct VoiceOption: Identifiable {
         let value: String

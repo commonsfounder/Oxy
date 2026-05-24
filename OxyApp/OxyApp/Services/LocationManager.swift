@@ -24,6 +24,14 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
         manager.requestWhenInUseAuthorization()
     }
 
+    func requestAlwaysPermission() {
+        if authorizationStatus == .authorizedWhenInUse {
+            manager.requestAlwaysAuthorization()
+        } else {
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
     func requestLocation() {
         if isAuthorized {
             manager.requestLocation()

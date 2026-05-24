@@ -25,7 +25,8 @@ final class ChatViewModel {
 
     private static let autoOpenActions: Set<String> = [
         "book_uber", "order_deliveroo", "order_uber_eats",
-        "play_music", "search_netflix_title", "add_to_netflix_list"
+        "play_music", "search_netflix_title", "add_to_netflix_list",
+        "send_message", "make_call"
     ]
 
     func loadHistory(userId: String) async {

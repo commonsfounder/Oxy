@@ -70,6 +70,49 @@ CREATE TABLE IF NOT EXISTS preferences (
 
 CREATE INDEX IF NOT EXISTS idx_preferences_user ON preferences(user_id);
 
+-- Native device registrations for push notifications
+CREATE TABLE IF NOT EXISTS devices (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  push_token TEXT NOT NULL,
+  timezone TEXT DEFAULT 'Europe/London',
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, push_token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
+
+-- Latest permission-backed native context sent by the iOS app
+CREATE TABLE IF NOT EXISTS native_context (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL UNIQUE,
+  location JSONB,
+  health JSONB,
+  capabilities JSONB,
+  settings JSONB,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_native_context_user ON native_context(user_id);
+
+-- Proactive briefing feed
+CREATE TABLE IF NOT EXISTS briefings (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  source TEXT DEFAULT 'proactive',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  read BOOLEAN DEFAULT false,
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_briefings_user ON briefings(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_briefings_unread ON briefings(user_id, read, created_at DESC);
+
 -- Backfill columns for older deployments
 ALTER TABLE action_log ADD COLUMN IF NOT EXISTS error TEXT;
 ALTER TABLE connectors ADD COLUMN IF NOT EXISTS tokens JSONB;

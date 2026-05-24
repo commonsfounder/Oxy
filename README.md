@@ -145,7 +145,9 @@ Schema is in `supabase-migration.sql`.
    - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` — SMS/calls
    - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN` — Music
    - `TRANSPORT_API_APP_ID`, `TRANSPORT_API_APP_KEY` — Live train times
-   - `GOOGLE_MAPS_API_KEY` — Geocoding for Uber
+   - `GOOGLE_MAPS_API_KEY` — Geocoding + Google Places lookup for Uber/local destinations
+   - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY` — iOS proactive push notifications
+   - `APNS_USE_SANDBOX=true` — use APNs sandbox while testing development builds
    - `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN` — Smart home
 
 4. **Run the database migration**

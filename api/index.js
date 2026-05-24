@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
+const crypto = require('crypto');
 const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
@@ -182,6 +183,12 @@ const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
 const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
 const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
+const PROACTIVE_WINDOWS = [
+  { id: 'wake', label: 'Wake briefing', start: 6, end: 10 },
+  { id: 'midday', label: 'Midday briefing', start: 12, end: 14 },
+  { id: 'evening', label: 'Evening briefing', start: 17, end: 20 }
+];
+const DEVICE_PLATFORM_ALLOWLIST = new Set(['ios', 'web']);
 
 setTimeout(() => {
   ensurePromptCacheWarm(null, STREAMING_CHAT_MODEL).catch(() => {});
@@ -228,6 +235,111 @@ function getLocalHour(date = new Date()) {
     hour: '2-digit',
     hour12: false
   }).format(date));
+}
+
+function getLocalMinute(date = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    minute: '2-digit'
+  }).format(date));
+}
+
+function getBriefingWindow(now = new Date()) {
+  const hour = getLocalHour(now);
+  return PROACTIVE_WINDOWS.find(window => hour >= window.start && hour <= window.end) || null;
+}
+
+function parseJsonObject(value) {
+  const parsed = safeParseJSON(value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+}
+
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function apnsAuthToken() {
+  const keyId = process.env.APNS_KEY_ID;
+  const teamId = process.env.APNS_TEAM_ID;
+  const privateKey = (process.env.APNS_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  if (!keyId || !teamId || !privateKey) return '';
+  const header = base64UrlJson({ alg: 'ES256', kid: keyId });
+  const payload = base64UrlJson({ iss: teamId, iat: Math.floor(Date.now() / 1000) });
+  const signingInput = `${header}.${payload}`;
+  const signature = crypto.sign('sha256', Buffer.from(signingInput), privateKey).toString('base64url');
+  return `${signingInput}.${signature}`;
+}
+
+async function sendPushToUser(userId, briefing) {
+  const bundleId = process.env.APNS_BUNDLE_ID;
+  const token = apnsAuthToken();
+  if (!bundleId || !token) return { sent: 0, skipped: true };
+
+  const { data: devices, error } = await supabase
+    .from('devices')
+    .select('push_token, platform')
+    .eq('user_id', userId);
+  if (error || !Array.isArray(devices)) return { sent: 0, error: error?.message || 'No devices' };
+
+  const host = process.env.APNS_USE_SANDBOX === 'true' ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
+  let sent = 0;
+  await Promise.all(devices
+    .filter(device => device.platform === 'ios' && device.push_token)
+    .map(async device => {
+      try {
+        await axios.post(
+          `${host}/3/device/${device.push_token}`,
+          {
+            aps: {
+              alert: {
+                title: briefing.title || 'Oxy',
+                body: briefing.body || briefing.text || ''
+              },
+              sound: 'default',
+              'mutable-content': 1
+            },
+            briefingId: briefing.id,
+            kind: briefing.kind
+          },
+          {
+            headers: {
+              authorization: `bearer ${token}`,
+              'apns-topic': bundleId,
+              'apns-push-type': 'alert',
+              'content-type': 'application/json'
+            },
+            timeout: 10000
+          }
+        );
+        sent += 1;
+      } catch (err) {
+        console.warn('[push] APNs send failed:', err?.response?.data || err.message);
+      }
+    }));
+  return { sent };
+}
+
+async function createBriefing(userId, { kind, title, body, source = 'proactive', metadata = {}, push = true }) {
+  const insert = {
+    user_id: userId,
+    kind,
+    title,
+    body,
+    source,
+    metadata,
+    read: false,
+    created_at: new Date().toISOString()
+  };
+  const { data, error } = await supabase
+    .from('briefings')
+    .insert(insert)
+    .select('id, kind, title, body, source, metadata, read, created_at')
+    .single();
+  if (error) throw error;
+
+  await saveMessage(userId, 'assistant', { text: body, kind: 'briefing' });
+  if (push) await sendPushToUser(userId, data).catch(err => console.warn('[push] failed:', err.message));
+  return data;
 }
 
 const OXCY_SYSTEM_PROMPT = `You are Oxy. Your friend. Actually helpful.
@@ -312,9 +424,10 @@ ABSOLUTE RULES:
 19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
 20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
 21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
-22. Infer the appropriate format from context. The user should not need to specify formatting.
-23. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
-24. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
+22. For Uber/local place requests like "nearest gym to me", pass the user's phrase as the destination and let the Uber/place layer resolve it. Do not invent branch addresses.
+23. Infer the appropriate format from context. The user should not need to specify formatting.
+24. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
+25. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -591,6 +704,16 @@ RESPONSE RULES:
 
 ---
 ${userContext}`;
+}
+
+function buildLocationContext(location) {
+  const lat = Number(location?.latitude ?? location?.lat);
+  const lng = Number(location?.longitude ?? location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+  return `CURRENT DEVICE LOCATION:
+Latitude: ${lat}
+Longitude: ${lng}
+Use these coordinates for "near me", "nearest", "closest", pickup, traffic, and local place requests. Do not invent a place; use a tool/action that can resolve it.`;
 }
 
 function buildQuickTurnContext(preferences, statedContext = []) {
@@ -1180,7 +1303,30 @@ Return strict JSON:
 }
 
 async function executeAction(userId, action, params, context = {}) {
+  const enrichedParams = {
+    ...(params || {}),
+    ...(context.location ? { location: context.location } : {})
+  };
   switch (action) {
+    case 'send_message': {
+      const contact = String(params?.contact || '').trim();
+      const message = String(params?.message || '').trim();
+      if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
+      return {
+        success: true,
+        text: `Opening Messages for ${contact}. Review and send it in Messages.`,
+        deepLink: `sms:${encodeURIComponent(contact)}&body=${encodeURIComponent(message)}`
+      };
+    }
+    case 'make_call': {
+      const contact = String(params?.contact || '').trim();
+      if (!contact) return { success: false, error: 'make_call requires a contact' };
+      return {
+        success: true,
+        text: `Opening FaceTime for ${contact}.`,
+        deepLink: `facetime://${encodeURIComponent(contact)}`
+      };
+    }
     case 'forget_memory':
       return forgetMemory(userId, params || {});
     case 'generate_visual': {
@@ -1208,7 +1354,7 @@ async function executeAction(userId, action, params, context = {}) {
     case 'create_presentation':
       return createPresentationArtifact(params || {}, context.imageFile || null);
     default:
-      return dispatch(userId, action, params);
+      return dispatch(userId, action, enrichedParams);
   }
 }
 
@@ -1997,39 +2143,39 @@ app.get('/action-log/:userId', async (req, res) => {
 });
 
 const CONNECTORS = [
-  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google',       implemented: true },
-  { id: 'imessage',  name: 'iMessage',                  icon: '💬', category: 'Messages',     implemented: false },
-  { id: 'whatsapp',  name: 'WhatsApp',                  icon: '💚', category: 'Messages',     implemented: false },
-  { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',        implemented: false },
-  { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity', implemented: false },
-  { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',         implemented: false },
-  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',    implemented: true },
-  { id: 'telegram',  name: 'Telegram',                  icon: '✈️', category: 'Messages',     implemented: true },
-  { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',      implemented: false },
-  { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',         implemented: false },
-  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',    implemented: true },
-  { id: 'maps',      name: 'Google Maps',               icon: '📍', category: 'Navigation',   implemented: false },
-  { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity', implemented: false },
-  { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',      implemented: false },
+  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',       implemented: true },
+  { id: 'imessage',  name: 'iMessage',                  icon: 'imessage', category: 'Messages',     implemented: false },
+  { id: 'whatsapp',  name: 'WhatsApp',                  icon: 'whatsapp', category: 'Messages',     implemented: false },
+  { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Music',        implemented: false },
+  { id: 'reminders', name: 'Apple Reminders',           icon: 'reminders', category: 'Productivity', implemented: false },
+  { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',         implemented: false },
+  { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',    implemented: true },
+  { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',     implemented: true },
+  { id: 'monzo',     name: 'Monzo',                     icon: 'monzo', category: 'Finance',      implemented: false },
+  { id: 'homekit',   name: 'Apple HomeKit',             icon: 'homekit', category: 'Home',         implemented: false },
+  { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',    implemented: true },
+  { id: 'maps',      name: 'Google Maps',               icon: 'maps', category: 'Navigation',   implemented: false },
+  { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity', implemented: false },
+  { id: 'betfair',   name: 'Betfair',                   icon: 'betfair', category: 'Finance',      implemented: false },
 ];
 
 CONNECTORS.splice(0, CONNECTORS.length,
-  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: '🔵', category: 'Google',        implemented: true },
-  { id: 'imessage',  name: 'iMessage',                  icon: '💬', category: 'Messages',      implemented: false },
-  { id: 'whatsapp',  name: 'WhatsApp',                  icon: '💚', category: 'Messages',      implemented: false },
-  { id: 'netflix',   name: 'Netflix',                   icon: '🎬', category: 'Entertainment', implemented: true },
-  { id: 'spotify',   name: 'Spotify',                   icon: '🎵', category: 'Music',         implemented: false },
-  { id: 'reminders', name: 'Apple Reminders',           icon: '📝', category: 'Productivity',  implemented: false },
-  { id: 'deliveroo', name: 'Deliveroo',                 icon: '🛵', category: 'Food',          implemented: true },
-  { id: 'ubereats',  name: 'Uber Eats',                 icon: '🍔', category: 'Food',          implemented: true },
-  { id: 'uber',      name: 'Uber',                      icon: '🚗', category: 'Transport',     implemented: true },
-  { id: 'telegram',  name: 'Telegram',                  icon: '✈️', category: 'Messages',      implemented: true },
-  { id: 'monzo',     name: 'Monzo',                     icon: '🏦', category: 'Finance',       implemented: false },
-  { id: 'homekit',   name: 'Apple HomeKit',             icon: '🏠', category: 'Home',          implemented: false },
-  { id: 'trainline', name: 'Trainline',                 icon: '🚂', category: 'Transport',     implemented: true },
-  { id: 'maps',      name: 'Google Maps',               icon: '📍', category: 'Navigation',    implemented: false },
-  { id: 'notion',    name: 'Notion',                    icon: '📓', category: 'Productivity',  implemented: false },
-  { id: 'betfair',   name: 'Betfair',                   icon: '🎰', category: 'Finance',       implemented: false },
+  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
+  { id: 'imessage',  name: 'iMessage',                  icon: 'imessage', category: 'Messages',      implemented: false },
+  { id: 'whatsapp',  name: 'WhatsApp',                  icon: 'whatsapp', category: 'Messages',      implemented: false },
+  { id: 'netflix',   name: 'Netflix',                   icon: 'netflix', category: 'Entertainment', implemented: true },
+  { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Music',         implemented: false },
+  { id: 'reminders', name: 'Apple Reminders',           icon: 'reminders', category: 'Productivity',  implemented: false },
+  { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',          implemented: true },
+  { id: 'ubereats',  name: 'Uber Eats',                 icon: 'ubereats', category: 'Food',          implemented: true },
+  { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
+  { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
+  { id: 'monzo',     name: 'Monzo',                     icon: 'monzo', category: 'Finance',       implemented: false },
+  { id: 'homekit',   name: 'Apple HomeKit',             icon: 'homekit', category: 'Home',          implemented: false },
+  { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
+  { id: 'maps',      name: 'Google Maps',               icon: 'maps', category: 'Navigation',    implemented: false },
+  { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity',  implemented: false },
+  { id: 'betfair',   name: 'Betfair',                   icon: 'betfair', category: 'Finance',       implemented: false },
 );
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
@@ -2081,6 +2227,84 @@ app.post('/connectors', async (req, res) => {
     if (error) throw error;
 
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/devices/register', async (req, res) => {
+  try {
+    const { userId, platform = 'ios', pushToken, timezone = TIMEZONE } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!DEVICE_PLATFORM_ALLOWLIST.has(platform)) {
+      return res.status(400).json({ error: 'Unsupported device platform.' });
+    }
+    if (!pushToken || typeof pushToken !== 'string') {
+      return res.status(400).json({ error: 'pushToken is required.' });
+    }
+
+    const { error } = await supabase.from('devices').upsert({
+      user_id: userId,
+      platform,
+      push_token: pushToken,
+      timezone,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,push_token' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/native/context', async (req, res) => {
+  try {
+    const { userId, location = null, health = {}, capabilities = {}, settings = {} } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { error } = await supabase.from('native_context').upsert({
+      user_id: userId,
+      location,
+      health,
+      capabilities,
+      settings,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+    if (error) throw error;
+    invalidateUserContextCache(userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/briefings/:userId', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    const { data, error } = await supabase
+      .from('briefings')
+      .select('id, kind, title, body, source, metadata, read, created_at')
+      .eq('user_id', req.params.userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    res.json({ briefings: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/briefings/:id/read', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { error } = await supabase
+      .from('briefings')
+      .update({ read: true, read_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .eq('user_id', userId);
+    if (error) throw error;
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -2310,7 +2534,7 @@ function needsSearch(message) {
 }
 
 // Shared logic for building the Gemini model + system prompt
-async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL) {
+async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = isQuickTurnMessage(message);
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
@@ -2324,7 +2548,13 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const statedContext = extractAlreadyStatedContext(history);
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
-    : buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext);
+    : buildDynamicSystemPrompt(
+      memory,
+      preferences,
+      availableActions,
+      [userContext, buildLocationContext(requestContext.location)].filter(Boolean).join('\n\n'),
+      statedContext
+    );
   const searchReason = getSearchReason(message);
   const useSearch = Boolean(searchReason);
   if (useSearch) console.log(`[search] enabled (${searchReason}) for:`, message.slice(0, 80));
@@ -2405,6 +2635,149 @@ async function maybeCreateMorningBriefing(userId, now = new Date()) {
   return { type: 'morning_briefing', text };
 }
 
+async function getLatestNativeContext(userId) {
+  const { data } = await supabase
+    .from('native_context')
+    .select('location, health, capabilities, settings, updated_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return data || null;
+}
+
+async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
+  const [memory, history, preferences] = await Promise.all([
+    getMemory(userId),
+    getHistory(userId),
+    getPreferences(userId)
+  ]);
+
+  const health = parseJsonObject(nativeContext?.health);
+  const location = parseJsonObject(nativeContext?.location);
+  const systemPrompt = `You are Oxy writing a useful, concise ${window.label.toLowerCase()} for the user.
+
+Use only the information shown here. Do not invent weather, traffic, calendar events, health facts, or plans.
+If there is nothing useful, write one warm quiet-start sentence.
+
+Memory:
+${memory || 'none'}
+
+Preferences:
+${preferences || 'none'}
+
+Recent conversation:
+${history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none'}
+
+Native context:
+Location: ${location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : 'not available'}
+Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
+Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
+
+Keep it under 70 words. Include only useful items.`;
+
+  const model = genAI.getGenerativeModel({
+    model: PRIMARY_CHAT_MODEL,
+    systemInstruction: systemPrompt
+  });
+  const geminiRes = await model.generateContent(`${window.label} now`);
+  return stripActionMarkupForDisplay(geminiRes.response.text() || '').trim();
+}
+
+async function maybeCreateIntervalBriefing(userId, now = new Date()) {
+  const window = getBriefingWindow(now);
+  if (!window) return null;
+
+  const nativeContext = await getLatestNativeContext(userId);
+  const settings = parseJsonObject(nativeContext?.settings);
+  if (settings.proactiveBriefings === false) return null;
+
+  const todayKey = getLocalDateKey(now);
+  const key = `proactive.briefing.${window.id}.${todayKey}`;
+  const prefs = await getPreferenceMap(userId);
+  if (prefs[key] === 'sent') return null;
+
+  const text = await buildIntervalBriefing(userId, window, nativeContext, now);
+  if (!text) return null;
+  const briefing = await createBriefing(userId, {
+    kind: `${window.id}_briefing`,
+    title: window.label,
+    body: text,
+    source: 'schedule',
+    metadata: { window: window.id, date: todayKey }
+  });
+  await setPreferenceValue(userId, key, 'sent');
+  return { type: `${window.id}_briefing`, text: briefing.body };
+}
+
+async function maybeCreateHealthAlert(userId, nativeContext, now = new Date()) {
+  const health = parseJsonObject(nativeContext?.health);
+  const settings = parseJsonObject(nativeContext?.settings);
+  if (!settings.healthAlerts) return null;
+  const latest = Number(health.latestHeartRate);
+  const resting = Number(health.restingHeartRate);
+  const lowValue = [latest, resting].filter(Number.isFinite).find(value => value > 0 && value < 45);
+  if (!lowValue) return null;
+
+  const todayKey = getLocalDateKey(now);
+  const key = `proactive.health.low_hr.${todayKey}`;
+  const prefs = await getPreferenceMap(userId);
+  if (prefs[key] === 'sent') return null;
+
+  const body = `Your heart rate data looks unusually low at ${Math.round(lowValue)} bpm. If that does not feel normal for you, check in with how you're feeling.`;
+  const briefing = await createBriefing(userId, {
+    kind: 'health_alert',
+    title: 'Health check',
+    body,
+    source: 'healthkit',
+    metadata: { heartRate: lowValue }
+  });
+  await setPreferenceValue(userId, key, 'sent');
+  return { type: 'health_alert', text: briefing.body };
+}
+
+async function maybeCreateHomeFoodReminder(userId, nativeContext, now = new Date()) {
+  const settings = parseJsonObject(nativeContext?.settings);
+  if (!settings.locationReminders) return null;
+  const hour = getLocalHour(now);
+  if (hour < 17 || hour > 21) return null;
+
+  const location = parseJsonObject(nativeContext?.location);
+  const home = parseJsonObject(settings.homeLocation);
+  const lat = Number(location.latitude);
+  const lng = Number(location.longitude);
+  const homeLat = Number(home.latitude);
+  const homeLng = Number(home.longitude);
+  if (![lat, lng, homeLat, homeLng].every(Number.isFinite)) return null;
+
+  const metres = haversineMetres(lat, lng, homeLat, homeLng);
+  if (metres > 600) return null;
+
+  const todayKey = getLocalDateKey(now);
+  const key = `proactive.food.near_home.${todayKey}`;
+  const prefs = await getPreferenceMap(userId);
+  if (prefs[key] === 'sent') return null;
+
+  const body = "You're close to home. If you haven't eaten yet, this is a good moment to sort food before you fully land.";
+  const briefing = await createBriefing(userId, {
+    kind: 'location_food_reminder',
+    title: 'Food reminder',
+    body,
+    source: 'location',
+    metadata: { distanceMetres: Math.round(metres) }
+  });
+  await setPreferenceValue(userId, key, 'sent');
+  return { type: 'location_food_reminder', text: briefing.body };
+}
+
+function haversineMetres(lat1, lon1, lat2, lon2) {
+  const radius = 6371000;
+  const toRad = degrees => degrees * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * radius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   const prefs = await getPreferenceMap(userId);
   const { data: failedAction } = await supabase
@@ -2429,7 +2802,13 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   const detail = String(failedAction.error || '').trim();
   const followUpText = `${actionLabel} hit a snag earlier${detail ? ` (${detail.slice(0, 80)})` : ''}. Want me to try again a different way?`;
 
-  await saveMessage(userId, 'assistant', { text: followUpText, kind: 'proactive' });
+  await createBriefing(userId, {
+    kind: 'failed_action_followup',
+    title: 'Action follow-up',
+    body: followUpText,
+    source: 'action_log',
+    metadata: { actionLogId: failedAction.id, actionType }
+  });
   await setPreferenceValue(userId, PROACTIVE_FAILURE_PREF, failedAction.id);
   return { type: 'failed_action_followup', text: followUpText };
 }
@@ -2438,8 +2817,10 @@ async function runProactiveSweep(logger = console) {
   const startedAt = Date.now();
   const summary = {
     usersScanned: 0,
-    morningBriefings: 0,
+    briefings: 0,
     failureFollowUps: 0,
+    healthAlerts: 0,
+    locationReminders: 0,
     failures: 0
   };
 
@@ -2451,14 +2832,19 @@ async function runProactiveSweep(logger = console) {
   for (const user of users || []) {
     summary.usersScanned += 1;
     try {
-      const [morning, followUp] = await Promise.all([
-        maybeCreateMorningBriefing(user.user_id),
-        maybeCreateFailedActionFollowUp(user.user_id)
+      const nativeContext = await getLatestNativeContext(user.user_id);
+      const [briefing, followUp, healthAlert, foodReminder] = await Promise.all([
+        maybeCreateIntervalBriefing(user.user_id),
+        maybeCreateFailedActionFollowUp(user.user_id),
+        nativeContext ? maybeCreateHealthAlert(user.user_id, nativeContext) : Promise.resolve(null),
+        nativeContext ? maybeCreateHomeFoodReminder(user.user_id, nativeContext) : Promise.resolve(null)
       ]);
-      if (morning) summary.morningBriefings += 1;
+      if (briefing) summary.briefings += 1;
       if (followUp) summary.failureFollowUps += 1;
-      if (morning || followUp) {
-        logger.log(`[proactive] queued for ${user.user_id}: ${[morning?.type, followUp?.type].filter(Boolean).join(', ')}`);
+      if (healthAlert) summary.healthAlerts += 1;
+      if (foodReminder) summary.locationReminders += 1;
+      if (briefing || followUp || healthAlert || foodReminder) {
+        logger.log(`[proactive] queued for ${user.user_id}: ${[briefing?.type, followUp?.type, healthAlert?.type, foodReminder?.type].filter(Boolean).join(', ')}`);
       }
     } catch (sweepError) {
       summary.failures += 1;
@@ -2581,7 +2967,7 @@ app.post('/chat', async (req, res) => {
   const streaming = req.query.stream === 'true';
 
   try {
-    const { message, userId, settings = {} } = req.body;
+    const { message, userId, settings = {}, location = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
 
@@ -2639,7 +3025,8 @@ app.post('/chat', async (req, res) => {
     }
 
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
-    const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel));
+    const requestContext = { location };
+    const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({
       dynamicSystemPrompt,
@@ -2694,7 +3081,7 @@ app.post('/chat', async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, { userMessage: message }, trace, {
+          actionResults = await executeActions(userId, actions, { userMessage: message, location }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
               action: action.type,
@@ -2751,7 +3138,9 @@ app.post('/chat', async (req, res) => {
         }
 
         if (!spoken) {
-          spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
+          spoken = actionResults.length
+            ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
+            : 'I hit an empty response. Try that again.';
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (!actionResults.length && !dataResults.length) {
@@ -2802,7 +3191,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { userMessage: message }, trace);
+      actionResults = await executeActions(userId, actions, { userMessage: message, location }, trace);
     }
 
     // For data-fetching actions, re-prompt Gemini with results
@@ -2833,7 +3222,9 @@ app.post('/chat', async (req, res) => {
     if (actionConfirmation) spoken = actionConfirmation;
 
     if (!spoken) {
-      spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
+      spoken = actionResults.length
+        ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
+        : 'I hit an empty response. Try that again.';
     }
 
     // Don't block on saving assistant message
