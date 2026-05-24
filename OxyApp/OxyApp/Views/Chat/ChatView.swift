@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = ChatViewModel()
+    @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
     @State private var showSearch = false
     @State private var isIncognito = false
@@ -76,13 +77,42 @@ struct ChatView: View {
                         }
                     }
 
+                    // Voice recording overlay
+                    if voiceInput.isRecording {
+                        VoiceRecordingBar(
+                            transcript: voiceInput.transcript,
+                            onStop: {
+                                voiceInput.stopRecording()
+                                if !voiceInput.transcript.isEmpty {
+                                    viewModel.inputText = voiceInput.transcript
+                                    viewModel.sendMessage(userId: appState.userId)
+                                }
+                            },
+                            onCancel: {
+                                voiceInput.stopRecording()
+                            }
+                        )
+                    }
+
                     // Input bar
                     ChatInputBar(
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending,
+                        isRecording: voiceInput.isRecording,
                         isFocused: $isInputFocused,
                         onSend: {
                             viewModel.sendMessage(userId: appState.userId)
+                        },
+                        onVoice: {
+                            if voiceInput.isRecording {
+                                voiceInput.stopRecording()
+                                if !voiceInput.transcript.isEmpty {
+                                    viewModel.inputText = voiceInput.transcript
+                                    viewModel.sendMessage(userId: appState.userId)
+                                }
+                            } else {
+                                voiceInput.startRecording()
+                            }
                         }
                     )
                 }
@@ -143,6 +173,11 @@ struct ChatView: View {
                                 systemImage: isIncognito ? "eye.fill" : "eye.slash.fill"
                             )
                         }
+                        Button(action: {
+                            viewModel.requestLocationAccess()
+                        }) {
+                            Label("Share Location", systemImage: "location.fill")
+                        }
                         Divider()
                         Button(role: .destructive, action: { appState.logout() }) {
                             Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
@@ -163,6 +198,67 @@ struct ChatView: View {
         .task {
             await viewModel.loadHistory(userId: appState.userId)
         }
+        .onAppear {
+            viewModel.requestLocationAccess()
+        }
+    }
+}
+
+// MARK: - Voice Recording Bar
+
+private struct VoiceRecordingBar: View {
+    let transcript: String
+    let onStop: () -> Void
+    let onCancel: () -> Void
+
+    @State private var pulse = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Divider().overlay(Color.oxyLine2)
+
+            HStack(spacing: 12) {
+                Button(action: onCancel) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundStyle(Color.oxyDim)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.oxyRed)
+                            .frame(width: 8, height: 8)
+                            .scaleEffect(pulse ? 1.2 : 0.8)
+                            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+                        Text("Listening...")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.oxyText)
+                    }
+                    if !transcript.isEmpty {
+                        Text(transcript)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.oxySub)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer()
+
+                Button(action: onStop) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.oxyBg)
+                        .frame(width: 36, height: 36)
+                        .background(Color.oxyStone)
+                        .clipShape(Circle())
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(Color.oxySurface1)
+        .onAppear { pulse = true }
     }
 }
 
@@ -415,8 +511,10 @@ private struct QuickChip: View {
 private struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
+    let isRecording: Bool
     var isFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
+    let onVoice: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -424,6 +522,14 @@ private struct ChatInputBar: View {
                 .overlay(Color.oxyLine2)
 
             HStack(alignment: .bottom, spacing: 10) {
+                // Mic button
+                Button(action: onVoice) {
+                    Image(systemName: isRecording ? "mic.fill" : "mic")
+                        .font(.system(size: 17))
+                        .foregroundStyle(isRecording ? Color.oxyRed : Color.oxySub)
+                        .frame(width: 36, height: 36)
+                }
+
                 HStack(spacing: 8) {
                     TextField("Message Oxy...", text: $text, axis: .vertical)
                         .font(.system(size: 15))

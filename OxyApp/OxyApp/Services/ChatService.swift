@@ -7,6 +7,7 @@ struct ChatService {
         userId: String,
         message: String,
         settings: OxySettings? = nil,
+        location: [String: Double]? = nil,
         tts: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
@@ -22,6 +23,10 @@ struct ChatService {
                 "voiceEngine": settings.voiceEngine,
                 "autonomy": settings.autonomy
             ]
+        }
+
+        if let location {
+            body["location"] = location
         }
 
         var queryItems = [URLQueryItem(name: "stream", value: "true")]

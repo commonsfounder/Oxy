@@ -99,44 +99,67 @@ struct MessageBubble: View {
 struct ActionCard: View {
     let action: ActionResult
 
+    private var hasLink: Bool {
+        action.deepLink != nil || action.webLink != nil
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(action.success ? Color.oxyGreen.opacity(0.15) : Color.oxyRed.opacity(0.15))
-                    .frame(width: 32, height: 32)
+        Button(action: openLink) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(action.success ? Color.oxyGreen.opacity(0.15) : Color.oxyRed.opacity(0.15))
+                        .frame(width: 32, height: 32)
 
-                Image(systemName: action.success ? "checkmark" : "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
-            }
+                    Image(systemName: action.success ? "checkmark" : "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
+                }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(humanize(action.action))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(humanize(action.action))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.oxyText)
 
-                if let text = action.text ?? action.error {
-                    Text(text)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
-                        .lineLimit(3)
+                    if let text = action.text ?? action.error {
+                        Text(text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.oxySub)
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+
+                Spacer()
+
+                if hasLink {
+                    Image(systemName: "arrow.up.right.square.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.oxyStone)
+                } else {
+                    Image(systemName: iconForAction(action.action))
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.oxyDim)
                 }
             }
-
-            Spacer()
-
-            Image(systemName: iconForAction(action.action))
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyDim)
+            .padding(12)
+            .background(Color.oxySurface2)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(hasLink ? Color.oxyStone.opacity(0.3) : Color.oxyLine2, lineWidth: 1)
+            )
         }
-        .padding(12)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
+        .buttonStyle(.plain)
+        .disabled(!hasLink)
+    }
+
+    private func openLink() {
+        if let link = action.deepLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else if let link = action.webLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        }
     }
 
     private func humanize(_ type: String) -> String {
@@ -192,7 +215,13 @@ private struct TypingIndicator: View {
             MessageBubble(message: Message(
                 role: .assistant,
                 content: "On it! Opening Uber for you.",
-                actions: [ActionResult(action: "book_uber", success: true, text: "Uber link opened")]
+                actions: [ActionResult(
+                    action: "book_uber",
+                    success: true,
+                    text: "Opening Uber to Kings Cross",
+                    deepLink: "uber://?action=setPickup",
+                    webLink: "https://m.uber.com/ul/"
+                )]
             ))
             MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
         }
