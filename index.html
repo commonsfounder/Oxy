@@ -3425,7 +3425,7 @@ function ConnectorsPage() {
     return acc;
   }, {});
 
-  const googleBtnLabel = { idle: 'Connect', connecting: 'Connecting…', connected: 'Connected', error: 'Retry' }[googleStatus];
+  const googleBtnLabel = { idle: 'Connect', connecting: 'Connecting…', connected: 'Reconnect', error: 'Retry' }[googleStatus];
   const googleBtnStyle = googleStatus === 'connected'
     ? { background: 'rgba(52,168,83,0.15)', color: '#34A853', border: '1px solid rgba(52,168,83,0.3)' }
     : {};
@@ -3464,7 +3464,7 @@ function ConnectorsPage() {
               <div className="hub-desc">Gmail · Calendar{googleStatus === 'connected' ? ' · Connected ✓' : ''}</div>
             </div>
           </div>
-          <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting' || googleStatus === 'connected'}>
+          <button className="save-btn" style={googleBtnStyle} onClick={connectGoogle} disabled={googleStatus === 'connecting'}>
             {googleBtnLabel}
           </button>
         </div>

@@ -114,7 +114,7 @@ struct ConnectorsView: View {
                                 )
                         )
                 }
-                .disabled(googleStatus == .connecting || googleStatus == .connected)
+                .disabled(googleStatus == .connecting)
             }
             .padding(14)
             .background(Color.oxySurface2)
@@ -130,7 +130,7 @@ struct ConnectorsView: View {
         switch googleStatus {
         case .idle: return "Connect"
         case .connecting: return "Connecting…"
-        case .connected: return "Connected"
+        case .connected: return "Reconnect"
         case .error: return "Retry"
         }
     }

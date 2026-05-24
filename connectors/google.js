@@ -13,6 +13,7 @@ async function getTokens(userId) {
       .select('tokens')
       .eq('user_id', userId)
       .eq('connector_id', 'google')
+      .eq('enabled', true)
       .limit(1);
 
     if (!error && data?.length > 0 && data[0].tokens) return data[0].tokens;
@@ -41,6 +42,22 @@ async function saveTokens(userId, tokens) {
     .from('connectors')
     .upsert({ user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
              { onConflict: 'user_id,connector_id' });
+  if (error) throw error;
+}
+
+async function markGoogleDisconnected(userId, tokens = {}) {
+  const { error } = await supabase
+    .from('connectors')
+    .upsert({
+      user_id: userId,
+      connector_id: 'google',
+      enabled: false,
+      tokens: {
+        client_id: tokens.client_id,
+        client_secret: tokens.client_secret
+      },
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,connector_id' });
   if (error) throw error;
 }
 
@@ -74,7 +91,7 @@ async function getAccessToken(userId) {
     const desc = err.response?.data?.error_description || err.message;
     if (typeof desc === 'string' && (desc.includes('expired') || desc.includes('revoked'))) {
       // Refresh token is dead — clear it so the connector shows as disconnected
-      try { await saveTokens(userId, { client_id: tokens.client_id, client_secret: tokens.client_secret }); } catch {}
+      try { await markGoogleDisconnected(userId, tokens); } catch {}
       throw new Error('Failed to refresh Google token: Token has been expired or revoked. Reconnect Google from Settings.');
     }
     throw new Error(`Failed to refresh Google token: ${desc}`);
