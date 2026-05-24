@@ -2187,19 +2187,40 @@ app.get('/connectors/:userId', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('connectors')
-      .select('connector_id, enabled')
+      .select('connector_id, enabled, tokens')
       .eq('user_id', req.params.userId);
     if (error) throw error;
 
-    const enabled = new Set();
+    const rowsById = new Map();
     if (data) {
-      data.forEach(c => { if (c.enabled) enabled.add(c.connector_id); });
+      data.forEach(c => rowsById.set(c.connector_id, c));
     }
     
-    const result = CONNECTORS.map(c => ({
-      ...c,
-      enabled: enabled.has(c.id)
-    }));
+    const result = CONNECTORS.map(c => {
+      const row = rowsById.get(c.id);
+      const enabled = row?.enabled === true;
+      const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session);
+      const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
+      const connectionState = !c.implemented
+        ? 'coming_soon'
+        : needsReconnect
+          ? 'needs_reconnect'
+          : enabled
+            ? 'connected'
+            : 'available';
+      return {
+        ...c,
+        enabled,
+        connectionState,
+        statusText: connectionState === 'coming_soon'
+          ? 'Coming soon'
+          : connectionState === 'needs_reconnect'
+            ? 'Reconnect needed'
+            : connectionState === 'connected'
+              ? 'Connected'
+              : 'Available'
+      };
+    });
     
     res.json({ connectors: result });
   } catch (err) {

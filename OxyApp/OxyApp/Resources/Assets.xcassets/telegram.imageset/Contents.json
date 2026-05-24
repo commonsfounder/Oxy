@@ -1,1 +1,12 @@
-{"images":[{"filename":"telegram.svg","idiom":"universal"}],"info":{"author":"xcode","version":1}}
+{
+  "images": [
+    {
+      "filename": "telegram.svg",
+      "idiom": "universal"
+    }
+  ],
+  "info": {
+    "author": "xcode",
+    "version": 1
+  }
+}

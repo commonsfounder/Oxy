@@ -12,7 +12,7 @@ struct ConnectorsView: View {
     @State private var errorMessage: String?
 
     enum GoogleStatus: String {
-        case idle, connecting, connected, error
+        case idle, connecting, connected, needsReconnect, error
     }
 
     var body: some View {
@@ -85,7 +85,7 @@ struct ConnectorsView: View {
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(Color.oxyText)
 
-                    Text("Gmail · Calendar" + (googleStatus == .connected ? " · Connected" : ""))
+                    Text(googleSubtitle)
                         .font(.system(size: 13))
                         .foregroundStyle(Color.oxySub)
                 }
@@ -93,28 +93,13 @@ struct ConnectorsView: View {
                 Spacer()
 
                 Button(action: connectGoogle) {
-                    Text(googleButtonLabel)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(googleStatus == .connected ? Color.oxyGreen : Color.oxyStone)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(
-                            googleStatus == .connected
-                                ? Color.oxyGreen.opacity(0.12)
-                                : Color.oxyStone.opacity(0.12)
-                        )
-                        .clipShape(Capsule())
-                        .overlay(
-                            Capsule()
-                                .stroke(
-                                    googleStatus == .connected
-                                        ? Color.oxyGreen.opacity(0.3)
-                                        : Color.oxyStone.opacity(0.3),
-                                    lineWidth: 1
-                                )
-                        )
+                    ConnectorPill(
+                        label: googleButtonLabel,
+                        tint: googleStatus == .connected ? Color.oxyGreen : Color.oxyStone,
+                        isBusy: googleStatus == .connecting
+                    )
                 }
-                .disabled(googleStatus == .connecting)
+                .disabled(googleStatus == .connecting || googleStatus == .connected)
             }
             .padding(14)
             .background(Color.oxySurface2)
@@ -130,8 +115,20 @@ struct ConnectorsView: View {
         switch googleStatus {
         case .idle: return "Connect"
         case .connecting: return "Connecting…"
-        case .connected: return "Reconnect"
+        case .connected: return "Connected"
+        case .needsReconnect: return "Reconnect"
         case .error: return "Retry"
+        }
+    }
+
+    private var googleSubtitle: String {
+        switch googleStatus {
+        case .connected:
+            return "Gmail · Calendar · Connected"
+        case .needsReconnect:
+            return "Gmail · Calendar · Reconnect needed"
+        default:
+            return "Gmail · Calendar"
         }
     }
 
@@ -152,10 +149,8 @@ struct ConnectorsView: View {
                 ForEach(connectors) { connector in
                     ConnectorCard(
                         connector: connector,
-                        onToggle: { toggleConnector(connector) }
+                        onAction: { handleConnectorAction(connector) }
                     )
-                    .opacity(connector.implemented ? 1.0 : 0.4)
-                    .allowsHitTesting(connector.implemented)
                 }
             }
         }
@@ -171,8 +166,11 @@ struct ConnectorsView: View {
             let response = try JSONDecoder().decode(ConnectorsResponse.self, from: data)
             await MainActor.run {
                 connectors = response.connectors
-                let googleConnected = connectors.first(where: { $0.id == "google" })?.enabled == true
-                googleStatus = googleConnected ? .connected : .idle
+                if let google = connectors.first(where: { $0.id == "google" }) {
+                    googleStatus = GoogleStatus(connector: google)
+                } else {
+                    googleStatus = .idle
+                }
                 errorMessage = nil
                 isLoading = false
             }
@@ -217,7 +215,16 @@ struct ConnectorsView: View {
         }
     }
 
-    private func toggleConnector(_ connector: Connector) {
+    private func handleConnectorAction(_ connector: Connector) {
+        guard connector.implemented else { return }
+        if connector.id == "google" && (!connector.enabled || connector.connectionState == "needs_reconnect") {
+            connectGoogle()
+            return
+        }
+        updateConnector(connector, enabled: !connector.enabled)
+    }
+
+    private func updateConnector(_ connector: Connector, enabled: Bool) {
         Task {
             do {
                 let _ = try await APIClient.shared.request(
@@ -226,12 +233,17 @@ struct ConnectorsView: View {
                     body: [
                         "userId": appState.userId,
                         "connectorId": connector.id,
-                        "enabled": !connector.enabled
+                        "enabled": enabled
                     ]
                 )
                 await MainActor.run {
                     if let idx = connectors.firstIndex(where: { $0.id == connector.id }) {
-                        connectors[idx].enabled.toggle()
+                        connectors[idx].enabled = enabled
+                        connectors[idx].connectionState = enabled ? "connected" : "available"
+                        connectors[idx].statusText = enabled ? "Connected" : "Available"
+                        if connector.id == "google" {
+                            googleStatus = enabled ? .connected : .idle
+                        }
                         errorMessage = nil
                     }
                 }
@@ -248,7 +260,7 @@ struct ConnectorsView: View {
 
 private struct ConnectorCard: View {
     let connector: Connector
-    let onToggle: () -> Void
+    let onAction: () -> Void
 
     private var sfSymbol: String {
         switch connector.id {
@@ -272,9 +284,9 @@ private struct ConnectorCard: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol)
-                .frame(width: 40, height: 40)
+                .frame(width: 44, height: 44)
 
             VStack(spacing: 2) {
                 Text(connector.name)
@@ -282,31 +294,53 @@ private struct ConnectorCard: View {
                     .foregroundStyle(Color.oxyText)
                     .lineLimit(1)
 
-                if !connector.implemented {
-                    Text("coming soon")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.oxyDim)
-                }
+                Text(connector.statusText)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(connector.statusColor)
             }
 
-            if connector.implemented {
-                Toggle("", isOn: Binding(
-                    get: { connector.enabled },
-                    set: { _ in onToggle() }
-                ))
-                .labelsHidden()
-                .tint(Color.oxyGreen)
-                .scaleEffect(0.8)
+            Button(action: onAction) {
+                ConnectorPill(label: connector.actionLabel, tint: connector.actionTint, isBusy: false)
             }
+            .disabled(!connector.implemented)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
         .background(Color.oxySurface2)
+        .opacity(connector.implemented ? 1.0 : 0.45)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.oxyLine2, lineWidth: 1)
+        )
+    }
+}
+
+private struct ConnectorPill: View {
+    let label: String
+    let tint: Color
+    let isBusy: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if isBusy {
+                ProgressView()
+                    .scaleEffect(0.65)
+                    .tint(tint)
+            }
+            Text(label)
+                .font(.system(size: 12, weight: .semibold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(tint.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(tint.opacity(0.28), lineWidth: 1)
         )
     }
 }
@@ -388,9 +422,11 @@ struct Connector: Codable, Identifiable {
     let category: String
     var enabled: Bool
     let implemented: Bool
+    var connectionState: String
+    var statusText: String
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, category, enabled, implemented
+        case id, name, icon, category, enabled, implemented, connectionState, statusText
     }
 
     init(from decoder: Decoder) throws {
@@ -401,6 +437,41 @@ struct Connector: Codable, Identifiable {
         category = try c.decodeIfPresent(String.self, forKey: .category) ?? "Other"
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         implemented = try c.decodeIfPresent(Bool.self, forKey: .implemented) ?? false
+        connectionState = try c.decodeIfPresent(String.self, forKey: .connectionState) ?? (enabled ? "connected" : "available")
+        statusText = try c.decodeIfPresent(String.self, forKey: .statusText) ?? (enabled ? "Connected" : "Available")
+    }
+
+    var actionLabel: String {
+        if !implemented { return "Coming soon" }
+        if connectionState == "needs_reconnect" { return "Reconnect" }
+        return enabled ? "Disconnect" : "Connect"
+    }
+
+    var actionTint: Color {
+        if !implemented { return Color.oxyDim }
+        if connectionState == "needs_reconnect" { return Color.oxyStone }
+        return enabled ? Color.oxySub : Color.oxyGreen
+    }
+
+    var statusColor: Color {
+        switch connectionState {
+        case "connected": return Color.oxyGreen
+        case "needs_reconnect": return Color.oxyStone
+        case "coming_soon": return Color.oxyDim
+        default: return Color.oxySub
+        }
+    }
+}
+
+private extension ConnectorsView.GoogleStatus {
+    init(connector: Connector) {
+        if connector.connectionState == "needs_reconnect" {
+            self = .needsReconnect
+        } else if connector.enabled {
+            self = .connected
+        } else {
+            self = .idle
+        }
     }
 }
 
