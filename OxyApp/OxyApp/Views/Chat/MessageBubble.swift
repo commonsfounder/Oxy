@@ -109,10 +109,19 @@ struct ActionCard: View {
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
         if !action.success && action.action == "book_uber" {
+            if compact.localizedCaseInsensitiveContains("need your current location") ||
+                compact.localizedCaseInsensitiveContains("enable location") {
+                return "Enable location and try again."
+            }
+            if compact.localizedCaseInsensitiveContains("places api") ||
+                compact.localizedCaseInsensitiveContains("google places is not ready") {
+                return "Google Places needs to be enabled on the server."
+            }
             if compact.localizedCaseInsensitiveContains("nearby match") ||
+                compact.localizedCaseInsensitiveContains("couldn't find a nearby") ||
                 compact.localizedCaseInsensitiveContains("geocoding error") ||
                 compact.localizedCaseInsensitiveContains("no results found") {
-                return "Send the exact branch or address."
+                return "Try a different place name or enable location."
             }
         }
         return compact

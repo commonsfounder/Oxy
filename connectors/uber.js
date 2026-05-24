@@ -20,6 +20,15 @@ function shortAddress(address) {
     .join(', ');
 }
 
+function destinationLabel(place) {
+  const name = place?.name || '';
+  const area = shortAddress(place?.formattedAddress || '');
+  if (name && area && !area.toLowerCase().startsWith(name.toLowerCase())) {
+    return `${name}, ${area}`;
+  }
+  return name || area || 'that destination';
+}
+
 async function execute(userId, action, params) {
   try {
     switch (action) {
@@ -60,7 +69,7 @@ async function execute(userId, action, params) {
 
         return {
           success: true,
-          text: `Opening Uber to ${destCoords.name || shortAddress(destCoords.formattedAddress)}. Confirm the ride in Uber.`,
+          text: `Opening Uber to ${destinationLabel(destCoords)}. Confirm in Uber.`,
           deepLink: `uber://?${query}`,
           webLink: `https://m.uber.com/ul/?${query}`
         };

@@ -29,6 +29,13 @@ final class ChatViewModel {
         "send_message", "make_call"
     ]
 
+    private static let localRequestTerms = [
+        "uber", "ride", "taxi", "nearest", "closest", "near me", "nearby",
+        "mcdonald", "john lewis", "gym", "restaurant", "cafe", "coffee",
+        "shop", "supermarket", "store", "pharmacy", "station", "cinema",
+        "bank", "atm"
+    ]
+
     func loadHistory(userId: String) async {
         do {
             let entries = try await chatService.loadHistory(userId: userId)
@@ -62,9 +69,17 @@ final class ChatViewModel {
         let assistantIndex = messages.count - 1
 
         let settings = currentSettings
-        let location = locationManager.locationDict
+        let needsFreshLocation = Self.localRequestTerms.contains { text.localizedCaseInsensitiveContains($0) }
 
         Task {
+            var location = locationManager.locationDict
+            if needsFreshLocation {
+                await MainActor.run {
+                    statusLabel = "Checking location"
+                }
+                location = await locationManager.currentLocationForLocalRequest() ?? location
+            }
+
             let stream = chatService.sendMessage(
                 userId: userId,
                 message: text,

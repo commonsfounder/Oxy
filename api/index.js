@@ -384,7 +384,7 @@ If key details are missing, ask for the smallest missing detail instead of inven
     {"type": "send_email", "input": {"to": "email", "subject": "specific subject", "body": "specific complete email body based on the user's provided content"}},
     {"type": "get_emails", "input": {"max_results": 5}},
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
-    {"type": "book_uber", "input": {"destination": "destination address"}},
+    {"type": "book_uber", "input": {"destination": "natural place or address phrase"}},
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
     {"type": "get_telegram_contacts", "input": {}},
     {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
@@ -2911,11 +2911,17 @@ function userFacingActionFailure(entry) {
   const action = entry?.action || '';
   const rawError = String(entry?.result?.error || '').trim();
   if (action === 'book_uber') {
-    if (/couldn't find a nearby match/i.test(rawError) || /No place results found/i.test(rawError)) {
-      return 'I could not find that place nearby. Send the exact branch or address.';
+    if (/Google Places is not ready|Places API|Google Places is not configured/i.test(rawError)) {
+      return 'Google Places is not ready on the server. Enable Places API for the Google Maps key.';
+    }
+    if (/need your current location|enable location/i.test(rawError)) {
+      return 'I need your current location to find that nearby place. Enable location and try again.';
+    }
+    if (/couldn't find a nearby|No place results found/i.test(rawError)) {
+      return 'I could not find that nearby place from your current location. Try a different place name or enable location.';
     }
     if (/Geocoding error|No results found/i.test(rawError)) {
-      return 'I could not find that address. Send the exact branch or address.';
+      return 'I could not find that destination. Try a different place name.';
     }
   }
   return rawError || 'That action failed.';

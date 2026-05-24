@@ -10,7 +10,42 @@ function normalizeLocation(location) {
 function looksLikeNearbyPlaceQuery(query) {
   const text = String(query || '').toLowerCase();
   return /\b(nearest|closest|near me|nearby|around me)\b/.test(text) ||
-    /\b(gym|restaurant|cafe|coffee|shop|supermarket|store|pharmacy|station|hospital|hotel|school|college|cinema|bank|atm)\b/.test(text);
+    /\b(gym|restaurant|cafe|coffee|shop|supermarket|store|pharmacy|station|hospital|hotel|school|college|cinema|bank|atm|mcdonald'?s|john lewis|the gym group)\b/.test(text);
+}
+
+function isExplicitNearbyQuery(query) {
+  return /\b(nearest|closest|near me|nearby|around me|to me|from me)\b/i.test(String(query || ''));
+}
+
+function cleanPlaceSearchQuery(query) {
+  let cleaned = String(query || '')
+    .replace(/\b(get|take|send|book|open)\s+(me\s+)?(an?\s+)?(uber|ride|car|taxi)\s+(to|for)\b/gi, ' ')
+    .replace(/\b(get|take|send)\s+me\s+to\b/gi, ' ')
+    .replace(/\b(the\s+)?nearest\b/gi, ' ')
+    .replace(/\b(the\s+)?closest\b/gi, ' ')
+    .replace(/\bnear\s+me\b/gi, ' ')
+    .replace(/\bnearby\b/gi, ' ')
+    .replace(/\baround\s+me\b/gi, ' ')
+    .replace(/\b(to|from)\s+me\b/gi, ' ')
+    .replace(/\bmy\s+location\b/gi, ' ')
+    .replace(/\bcurrent\s+location\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || String(query || '').trim();
+}
+
+function distanceMeters(a, b) {
+  const locA = normalizeLocation(a);
+  const locB = normalizeLocation(b);
+  if (!locA || !locB) return Number.POSITIVE_INFINITY;
+  const toRad = deg => deg * Math.PI / 180;
+  const r = 6371000;
+  const dLat = toRad(locB.latitude - locA.latitude);
+  const dLng = toRad(locB.longitude - locA.longitude);
+  const lat1 = toRad(locA.latitude);
+  const lat2 = toRad(locB.latitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * r * Math.asin(Math.sqrt(h));
 }
 
 async function geocodeWithGoogle(locationString) {
@@ -51,17 +86,19 @@ async function geocodeWithNominatim(locationString) {
 
 async function searchPlaceWithGoogle(query, location = null) {
   if (!process.env.GOOGLE_MAPS_API_KEY) {
-    throw new Error('Google Places is not configured');
+    const err = new Error('Google Places is not configured. Set GOOGLE_MAPS_API_KEY and enable Places API.');
+    err.code = 'PLACES_NOT_CONFIGURED';
+    throw err;
   }
 
+  const normalizedLocation = normalizeLocation(location);
   const body = {
-    textQuery: query,
-    maxResultCount: 3,
+    textQuery: cleanPlaceSearchQuery(query),
+    pageSize: 8,
     regionCode: 'GB',
     languageCode: 'en-GB'
   };
 
-  const normalizedLocation = normalizeLocation(location);
   if (normalizedLocation) {
     body.locationBias = {
       circle: {
@@ -81,15 +118,27 @@ async function searchPlaceWithGoogle(query, location = null) {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri'
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow'
       },
       timeout: 10000
     }
   );
 
   const places = response.data?.places || [];
-  const openPlaces = places.filter(place => place.businessStatus !== 'CLOSED_PERMANENTLY');
-  const place = openPlaces[0] || places[0];
+  const openPlaces = places.filter(place =>
+    place.businessStatus !== 'CLOSED_PERMANENTLY' &&
+    place.currentOpeningHours?.openNow !== false
+  );
+  const candidates = (openPlaces.length ? openPlaces : places)
+    .filter(place => place?.location)
+    .map(place => ({
+      ...place,
+      distanceMeters: normalizedLocation
+        ? distanceMeters(normalizedLocation, { latitude: place.location.latitude, longitude: place.location.longitude })
+        : Number.POSITIVE_INFINITY
+    }))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const place = candidates[0];
   if (!place?.location) {
     throw new Error(`No place results found for "${query}"`);
   }
@@ -100,6 +149,7 @@ async function searchPlaceWithGoogle(query, location = null) {
     formattedAddress: place.formattedAddress || place.displayName?.text || query,
     name: place.displayName?.text || '',
     googleMapsUri: place.googleMapsUri || null,
+    distanceMeters: Number.isFinite(place.distanceMeters) ? Math.round(place.distanceMeters) : null,
     source: 'google_places'
   };
 }
@@ -130,14 +180,17 @@ async function resolvePlaceDestination(destination, options = {}) {
 
   const location = normalizeLocation(options.location);
   if (looksLikeNearbyPlaceQuery(query)) {
-    if (!location && /\b(nearest|closest|near me|nearby|around me)\b/i.test(query)) {
-      throw new Error(`I need your current location to find "${query}".`);
+    if (!location && isExplicitNearbyQuery(query)) {
+      throw new Error(`I need your current location to find a nearby ${cleanPlaceSearchQuery(query)}.`);
     }
     try {
       return await searchPlaceWithGoogle(query, location);
     } catch (err) {
-      if (/\b(nearest|closest|near me|nearby|around me)\b/i.test(query)) {
-        throw new Error(`I couldn't find a nearby match for "${query}". Send the exact branch or address.`);
+      if (err.code === 'PLACES_NOT_CONFIGURED' || /Places API has not been used|API has not been enabled|REQUEST_DENIED|PERMISSION_DENIED/i.test(err.response?.data?.error?.message || err.message)) {
+        throw new Error('Google Places is not ready on the server. Enable Places API for the Google Maps key.');
+      }
+      if (isExplicitNearbyQuery(query)) {
+        throw new Error(`I couldn't find a nearby ${cleanPlaceSearchQuery(query)} from your current location. Try a different place name or enable location.`);
       }
       console.warn('[places] Google Places failed, falling back to geocoding:', err.message);
     }
@@ -146,4 +199,4 @@ async function resolvePlaceDestination(destination, options = {}) {
   return geocodeLocation(query);
 }
 
-module.exports = { geocodeLocation, resolvePlaceDestination, looksLikeNearbyPlaceQuery };
+module.exports = { geocodeLocation, resolvePlaceDestination, looksLikeNearbyPlaceQuery, cleanPlaceSearchQuery, distanceMeters };

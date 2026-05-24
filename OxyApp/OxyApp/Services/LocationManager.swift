@@ -12,6 +12,7 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
     }
 
     private let manager = CLLocationManager()
+    private var pendingLocationContinuations: [CheckedContinuation<[String: Double]?, Never>] = []
 
     override init() {
         super.init()
@@ -40,6 +41,23 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    func currentLocationForLocalRequest(timeoutNanoseconds: UInt64 = 1_500_000_000) async -> [String: Double]? {
+        if let locationDict { return locationDict }
+        if !isAuthorized {
+            requestPermission()
+            return nil
+        }
+
+        manager.requestLocation()
+        return await withCheckedContinuation { continuation in
+            pendingLocationContinuations.append(continuation)
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                self?.resolvePendingLocationContinuations(with: self?.locationDict)
+            }
+        }
+    }
+
     var locationDict: [String: Double]? {
         guard let loc = lastLocation else { return nil }
         return [
@@ -52,14 +70,26 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         lastLocation = locations.last
+        resolvePendingLocationContinuations(with: locationDict)
     }
 
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        resolvePendingLocationContinuations(with: nil)
+    }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         authorizationStatus = manager.authorizationStatus
         if isAuthorized {
             manager.requestLocation()
+        } else {
+            resolvePendingLocationContinuations(with: nil)
         }
+    }
+
+    private func resolvePendingLocationContinuations(with location: [String: Double]?) {
+        guard !pendingLocationContinuations.isEmpty else { return }
+        let continuations = pendingLocationContinuations
+        pendingLocationContinuations.removeAll()
+        continuations.forEach { $0.resume(returning: location) }
     }
 }
