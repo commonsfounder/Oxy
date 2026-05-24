@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AVFoundation
 import UIKit
 
 @Observable
@@ -8,6 +9,8 @@ final class ChatViewModel {
     var inputText = ""
     var isSending = false
     var statusLabel: String?
+
+    @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -95,11 +98,11 @@ final class ChatViewModel {
                         messages[assistantIndex].content = error
                         statusLabel = nil
 
-                    case .audio:
-                        break
+                    case .audio(let base64Audio, _):
+                        playAudio(base64Audio)
 
-                    case .ttsError:
-                        break
+                    case .ttsError(let error):
+                        statusLabel = "Voice unavailable: \(error)"
 
                     case .done:
                         messages[assistantIndex].isStreaming = false
@@ -147,5 +150,55 @@ final class ChatViewModel {
                 UIApplication.shared.open(url)
             }
         }
+    }
+
+    // MARK: - Audio Playback
+
+    private func playAudio(_ base64Audio: String) {
+        audioPlayback.play(base64Audio) { [weak self] message in
+            Task { @MainActor in
+                self?.statusLabel = message
+            }
+        }
+    }
+}
+
+private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
+    private var audioPlayer: AVAudioPlayer?
+    private var pendingAudio: [Data] = []
+    private var onError: ((String) -> Void)?
+
+    func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
+        guard let data = Data(base64Encoded: base64Audio) else { return }
+        self.onError = onError
+        pendingAudio.append(data)
+        playNextAudioIfNeeded()
+    }
+
+    private func playNextAudioIfNeeded() {
+        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
+        let data = pendingAudio.removeFirst()
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            player.prepareToPlay()
+            audioPlayer = player
+            player.play()
+        } catch {
+            onError?("Voice playback failed")
+            playNextAudioIfNeeded()
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if audioPlayer === player {
+            audioPlayer = nil
+        }
+        playNextAudioIfNeeded()
     }
 }
