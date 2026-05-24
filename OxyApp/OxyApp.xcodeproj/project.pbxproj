@@ -21,6 +21,11 @@
 		A10000010000000000000012 /* Color+Oxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000012; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013; };
 		A10000010000000000000014 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000014; };
+		A10000010000000000000015 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015; };
+		A10000010000000000000016 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000016; };
+		A10000010000000000000017 /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000017; };
+		A10000010000000000000018 /* ConnectorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000018; };
+		A10000010000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019; };
 		A10000010000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000020; };
 /* End PBXBuildFile section */
 
@@ -39,6 +44,11 @@
 		A20000010000000000000012 /* Color+Oxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Oxy.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		A20000010000000000000014 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
+		A20000010000000000000015 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		A20000010000000000000016 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		A20000010000000000000017 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
+		A20000010000000000000018 /* ConnectorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorsView.swift; sourceTree = "<group>"; };
+		A20000010000000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -106,11 +116,48 @@
 		A50000010000000000000005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				A20000010000000000000015 /* MainTabView.swift */,
 				A50000010000000000000006 /* Auth */,
 				A50000010000000000000007 /* Chat */,
+				A50000010000000000000011 /* History */,
+				A50000010000000000000012 /* Memory */,
+				A50000010000000000000013 /* Connectors */,
+				A50000010000000000000014 /* Settings */,
 				A50000010000000000000008 /* Components */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000011 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000016 /* HistoryView.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000012 /* Memory */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000017 /* MemoryView.swift */,
+			);
+			path = Memory;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000013 /* Connectors */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000018 /* ConnectorsView.swift */,
+			);
+			path = Connectors;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000014 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000019 /* SettingsView.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000006 /* Auth */ = {
@@ -239,6 +286,11 @@
 				A10000010000000000000012 /* Color+Oxy.swift in Sources */,
 				A10000010000000000000013 /* LoadingIndicator.swift in Sources */,
 				A10000010000000000000014 /* ErrorBanner.swift in Sources */,
+				A10000010000000000000015 /* MainTabView.swift in Sources */,
+				A10000010000000000000016 /* HistoryView.swift in Sources */,
+				A10000010000000000000017 /* MemoryView.swift in Sources */,
+				A10000010000000000000018 /* ConnectorsView.swift in Sources */,
+				A10000010000000000000019 /* SettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
