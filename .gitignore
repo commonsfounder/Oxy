@@ -8,3 +8,14 @@ build/
 .vercel/
 .next/
 .lazyweb/
+
+# iOS / Xcode
+OxyApp/build/
+OxyApp/DerivedData/
+OxyApp/*.xcodeproj/xcuserdata/
+OxyApp/*.xcodeproj/project.xcworkspace/xcuserdata/
+OxyApp/*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.ipa
+*.dSYM.zip
+*.dSYM
