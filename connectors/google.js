@@ -103,6 +103,26 @@ function buildMime(to, subject, body) {
   return Buffer.from(msg).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+function isGenericPlaceholderEmail(subject, body) {
+  const normalizedSubject = String(subject || '').trim().toLowerCase();
+  const normalizedBody = String(body || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const bodyWithoutGreeting = normalizedBody
+    .replace(/^dear [^,]+,\s*/, '')
+    .replace(/best regards,?\s*$/i, '')
+    .trim();
+
+  if (normalizedBody.length < 120) return true;
+  if (/^(formal introduction|hello|greetings|introduction)$/.test(normalizedSubject)) return true;
+  if (
+    bodyWithoutGreeting.includes('i hope this email finds you well') &&
+    bodyWithoutGreeting.includes('i look forward to the possibility of connecting') &&
+    bodyWithoutGreeting.length < 260
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function summarizeEmails(emails = [], emptyText = 'No emails found') {
   if (!Array.isArray(emails) || emails.length === 0) return emptyText;
   const lines = emails.map((email, index) => {
@@ -136,6 +156,12 @@ async function execute(userId, action, params) {
       case 'send_email': {
         const { to, subject, body } = params;
         if (!to || !subject || !body) return { success: false, error: 'send_email requires to, subject, and body' };
+        if (isGenericPlaceholderEmail(subject, body)) {
+          return {
+            success: false,
+            error: 'Email content is too generic. Ask the user for the actual message or draft it for approval before sending.'
+          };
+        }
         await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
           { raw: buildMime(to, subject, body) }, { headers, timeout: 15000 });
         return { success: true, text: `Email sent to ${to}` };

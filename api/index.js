@@ -267,7 +267,7 @@ Always return an action block when doing any of these. Never say you can't — j
     {"type": "play_music", "input": {"query": "search term"}},
     {"type": "create_calendar_event", "input": {"title": "event", "start_date": "ISO date", "end_date": "ISO date"}},
     {"type": "get_calendar_events", "input": {"max_results": 5}},
-    {"type": "send_email", "input": {"to": "email", "subject": "subject", "body": "body"}},
+    {"type": "send_email", "input": {"to": "email", "subject": "specific subject", "body": "specific complete email body based on the user's provided content"}},
     {"type": "get_emails", "input": {"max_results": 5}},
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
     {"type": "book_uber", "input": {"destination": "destination address"}},
@@ -306,9 +306,12 @@ ABSOLUTE RULES:
 15. Emails to unknown or professional contacts should have a proper salutation, structured body, and sign-off.
 16. Emails to known contacts should match the established tone of that relationship.
 17. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
-18. Infer the appropriate format from context. The user should not need to specify formatting.
-19. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
-20. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
+18. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email.
+19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
+20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
+21. Infer the appropriate format from context. The user should not need to specify formatting.
+22. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
+23. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
