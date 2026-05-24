@@ -591,6 +591,19 @@ function isQuickTurnMessage(message) {
   return /^(hi|hey|hello|yo|sup|hiya|haha|lol|huh|what|wait|ok|okay|kk|cool|nice|great|sure|yep|yes|nah|no|thanks|thank you|morning|good morning|afternoon|good afternoon|evening|good evening)$/.test(normalized);
 }
 
+function getDeterministicQuickReply(message) {
+  const normalized = String(message || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
+  if (/^(hi|hey|hello|yo|sup|hiya)$/.test(normalized)) return 'Hey.';
+  if (/^(morning|good morning)$/.test(normalized)) return 'Morning.';
+  if (/^(afternoon|good afternoon)$/.test(normalized)) return 'Afternoon.';
+  if (/^(evening|good evening)$/.test(normalized)) return 'Evening.';
+  if (/^(thanks|thank you)$/.test(normalized)) return 'Anytime.';
+  if (/^(haha|lol)$/.test(normalized)) return 'Yeah.';
+  if (/^(ok|okay|kk|cool|nice|great|sure|yep|yes)$/.test(normalized)) return 'Got it.';
+  if (/^(nah|no)$/.test(normalized)) return 'Got you.';
+  return '';
+}
+
 function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
   const cacheKey = `${modelName}:${OXCY_SYSTEM_PROMPT}`;
   let cacheState = promptCacheStates.get(cacheKey);
@@ -2531,6 +2544,50 @@ app.post('/chat', async (req, res) => {
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+
+    const deterministicQuickReply = getDeterministicQuickReply(message);
+    if (deterministicQuickReply) {
+      saveMessage(userId, 'assistant', { text: deterministicQuickReply, actions: [] }, trace)
+        .catch(err => trace.log('supabase.conversations.insert_assistant.quick_async_fail', err.message));
+      postResponseTasks(userId, message);
+
+      if (streaming) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        sse({ type: 'text', chunk: deterministicQuickReply });
+        if (wantsTTS) {
+          try {
+            const audio = await trace.run('gemini.tts.generateSpeech.quick', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
+            if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
+          } catch (ttsErr) {
+            console.error('[tts error]', ttsErr.message);
+            sse({ type: 'tts-error', error: ttsErr.message });
+          }
+        }
+        sse({ type: 'done' });
+        res.end();
+        return;
+      }
+
+      const result = { text: deterministicQuickReply, actions: [] };
+      if (wantsTTS) {
+        try {
+          const audio = await trace.run('gemini.tts.generateSpeech.quick_nonstream', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
+          if (audio) {
+            result.audio = audio;
+            result.audioMimeType = 'audio/wav';
+          }
+        } catch (ttsErr) {
+          console.error('[tts error]', ttsErr.message);
+          result.ttsError = ttsErr.message;
+        }
+      }
+      return res.json(result);
+    }
+
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel));
     const baseHistory = normalizeGeminiHistory(history);
