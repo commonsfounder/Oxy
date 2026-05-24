@@ -11,75 +11,153 @@ struct LoginView: View {
     private let authService = AuthService()
 
     var body: some View {
-        ZStack {
-            Color.oxyBg.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.oxyBg, Color.oxySurface1],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Spacer().frame(height: 80)
 
-                // Logo
-                VStack(spacing: 8) {
-                    Text("Oxy")
-                        .font(.system(size: 34, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
+                        // App icon
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.oxyStone.opacity(0.3), Color.oxyStone.opacity(0.1)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 88, height: 88)
 
-                    Text("Your AI assistant")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.oxyDim)
-                }
-                .padding(.bottom, 48)
+                            Image(systemName: "waveform.circle.fill")
+                                .font(.system(size: 44))
+                                .foregroundStyle(Color.oxyStone)
+                        }
+                        .padding(.bottom, 20)
 
-                // Form
-                VStack(spacing: 16) {
-                    OxyTextField(
-                        placeholder: "User ID",
-                        text: $userId,
-                        isSecure: false
-                    )
+                        Text("Oxy")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundStyle(Color.oxyText)
 
-                    OxyTextField(
-                        placeholder: "Password",
-                        text: $password,
-                        isSecure: true
-                    )
+                        Text("Your AI assistant")
+                            .font(.subheadline)
+                            .foregroundStyle(Color.oxySub)
+                            .padding(.top, 4)
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.oxyRed)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
-                    }
+                        Spacer().frame(height: 48)
 
-                    Button(action: submit) {
-                        Group {
-                            if isLoading {
-                                ProgressView()
-                                    .tint(Color.oxyBg)
-                            } else {
-                                Text(isRegistering ? "Create Account" : "Log In")
-                                    .font(.system(size: 14, weight: .medium))
+                        // Form card
+                        VStack(spacing: 20) {
+                            VStack(spacing: 14) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(Color.oxySub)
+                                        .frame(width: 20)
+
+                                    TextField("User ID", text: $userId)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(Color.oxyText)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(height: 52)
+                                .background(Color.oxySurface2)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.oxyLine2, lineWidth: 1)
+                                )
+
+                                HStack(spacing: 12) {
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(Color.oxySub)
+                                        .frame(width: 20)
+
+                                    SecureField("Password", text: $password)
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(Color.oxyText)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(height: 52)
+                                .background(Color.oxySurface2)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.oxyLine2, lineWidth: 1)
+                                )
+                            }
+
+                            if let errorMessage {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(Color.oxyRed)
+                                    Text(errorMessage)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(Color.oxyRed)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
+
+                            Button(action: submit) {
+                                HStack(spacing: 8) {
+                                    if isLoading {
+                                        ProgressView()
+                                            .tint(.white)
+                                            .scaleEffect(0.85)
+                                    } else {
+                                        Text(isRegistering ? "Create Account" : "Sign In")
+                                            .font(.system(size: 16, weight: .semibold))
+                                        Image(systemName: "arrow.right")
+                                            .font(.system(size: 14, weight: .semibold))
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .foregroundStyle(Color.oxyBg)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .shadow(color: Color.oxyStone.opacity(0.3), radius: 8, y: 4)
+                            }
+                            .disabled(isLoading || userId.isEmpty || password.isEmpty)
+                            .opacity(userId.isEmpty || password.isEmpty ? 0.6 : 1)
+                            .animation(.easeInOut(duration: 0.2), value: userId.isEmpty || password.isEmpty)
+
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isRegistering.toggle()
+                                    errorMessage = nil
+                                }
+                            }) {
+                                Text(isRegistering ? "Already have an account? **Sign in**" : "New to Oxy? **Create account**")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(Color.oxySub)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(Color.oxyText)
-                        .foregroundStyle(Color.oxyBg)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isLoading || userId.isEmpty || password.isEmpty)
-                    .opacity(userId.isEmpty || password.isEmpty ? 0.5 : 1)
+                        .padding(.horizontal, 28)
 
-                    Button(action: { isRegistering.toggle(); errorMessage = nil }) {
-                        Text(isRegistering ? "Already have an account? Log in" : "Don't have an account? Register")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.oxySub)
+                        Spacer().frame(height: 60)
                     }
                 }
-                .padding(.horizontal, 32)
-
-                Spacer()
-                Spacer()
+                .scrollDismissesKeyboard(.interactively)
             }
         }
     }
@@ -104,52 +182,17 @@ struct LoginView: View {
                     }
                 } else {
                     await MainActor.run {
-                        errorMessage = response.error ?? "Authentication failed"
+                        withAnimation { errorMessage = response.error ?? "Authentication failed" }
                         isLoading = false
                     }
                 }
-            } catch let error as APIError {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isLoading = false
-                }
             } catch {
                 await MainActor.run {
-                    errorMessage = error.localizedDescription
+                    withAnimation { errorMessage = error.localizedDescription }
                     isLoading = false
                 }
             }
         }
-    }
-}
-
-// MARK: - Custom Text Field
-
-private struct OxyTextField: View {
-    let placeholder: String
-    @Binding var text: String
-    let isSecure: Bool
-
-    var body: some View {
-        Group {
-            if isSecure {
-                SecureField(placeholder, text: $text)
-            } else {
-                TextField(placeholder, text: $text)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-        }
-        .font(.system(size: 14))
-        .foregroundStyle(Color.oxyText)
-        .padding(.horizontal, 16)
-        .frame(height: 48)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.oxyLine, lineWidth: 1)
-        )
     }
 }
 
