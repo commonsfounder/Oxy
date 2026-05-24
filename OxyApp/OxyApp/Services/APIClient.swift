@@ -57,12 +57,13 @@ final class APIClient {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.unknown
         }
-        if http.statusCode == 401 {
-            throw APIError.unauthorized
-        }
         guard (200...299).contains(http.statusCode) else {
             let errorBody = try? JSONDecoder().decode(ErrorBody.self, from: data)
-            throw APIError.server(http.statusCode, errorBody?.error ?? "Request failed")
+            let message = errorBody?.error ?? "Request failed"
+            if http.statusCode == 401 {
+                throw APIError.server(401, message)
+            }
+            throw APIError.server(http.statusCode, message)
         }
         return data
     }
@@ -196,7 +197,6 @@ enum SSEEvent {
 
 enum APIError: LocalizedError {
     case invalidURL
-    case unauthorized
     case server(Int, String)
     case unknown
 
@@ -204,13 +204,16 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidURL:
             return "Invalid URL"
-        case .unauthorized:
-            return "Session expired. Please log in again."
-        case .server(let code, let message):
-            return "Error \(code): \(message)"
+        case .server(_, let message):
+            return message
         case .unknown:
             return "An unknown error occurred"
         }
+    }
+
+    var isUnauthorized: Bool {
+        if case .server(401, _) = self { return true }
+        return false
     }
 }
 
