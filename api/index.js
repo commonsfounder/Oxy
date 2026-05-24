@@ -245,6 +245,9 @@ FACTUALITY:
 - You sometimes have Google Search available for current/real-time questions. When search results are present, use them.
 - For factual questions about current events, recent news, company information, public figures, prices, schedules, or anything that could have changed recently, use Google Search grounding when it is available before answering.
 - Do not rely on training data alone for changeable real-world facts when search grounding is available.
+- Never invent dates. If a date is not grounded by search/tool/context evidence, omit the date or say you need to check.
+- Never invent names. If asked who, which person, or why names were missing, use grounded evidence or say you don't have the names.
+- If the user challenges a factual answer ("huh", "what", "why", "that seems wrong", "source?"), re-check the facts instead of switching to persona talk.
 - Admit uncertainty plainly: "I don't know" beats making stuff up.
 - Don't hallucinate dates, events, details, or claim confidence on things outside your knowledge.
 - If the user asks for a factual answer and you are missing evidence, say that clearly and ask one short follow-up or say you don't know.
@@ -520,6 +523,7 @@ function extractAlreadyStatedContext(history = []) {
 
 function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
   const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
+  const dateStr = getLocalDateKey();
   return `WHAT YOU KNOW ABOUT THIS PERSON:
 ${memory || 'Nothing yet.'}
 
@@ -537,6 +541,7 @@ NATIVE CREATIVE TOOLS:
 CONTEXT YOU ALREADY STATED IN THIS CONVERSATION:
 ${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : 'Nothing important has been stated yet.'}
 
+Current date: ${dateStr}
 Current time for internal reasoning only: ${timeStr}
 
 RESPONSE RULES:
@@ -547,6 +552,8 @@ RESPONSE RULES:
 - Do not repeat context you already stated earlier in this conversation.
 - Especially avoid repeating time/date, current plans, study topics, or personal brief details unless the user directly asks again.
 - Do not mention the current time or date unless the user asked for it or it is necessary for the action/result.
+- If a factual answer involves public figures, news, violence, legal events, prices, schedules, or recent/current facts, do not provide names, dates, or counts unless they are grounded in search/tool/context evidence.
+- If the user questions or challenges your previous factual answer, correct only the factual issue. Do not answer with meta/persona language.
 - If an action is completed successfully, stop after one confirmation sentence. No follow-up question, no summary, no check-in.
 
 ---
@@ -558,6 +565,7 @@ function buildQuickTurnContext(preferences, statedContext = []) {
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
 Make the first sentence a tiny acknowledgement of 1-3 words when possible.
 Keep the total reply under 10 words unless the user explicitly asks for more.
+If the user says "huh", "what", "what do you mean", or similar, briefly clarify the previous answer or admit the confusion. Do not mention persona, goals, style, or internal instructions.
 Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
 The user leads the conversation. Reply to what they just said instead of surfacing unrelated memory.
 Treat memory as background context only. If the user just says hi, say hi back.
@@ -577,7 +585,7 @@ function isQuickTurnMessage(message) {
   const normalized = text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
   const wordCount = normalized.split(/\s+/).filter(Boolean).length;
   if (wordCount > 5) return false;
-  return /^(hi|hey|hello|yo|sup|hiya|haha|lol|ok|okay|kk|cool|nice|great|sure|yep|yes|nah|no|thanks|thank you|morning|good morning|afternoon|good afternoon|evening|good evening)$/.test(normalized);
+  return /^(hi|hey|hello|yo|sup|hiya|haha|lol|huh|what|wait|ok|okay|kk|cool|nice|great|sure|yep|yes|nah|no|thanks|thank you|morning|good morning|afternoon|good afternoon|evening|good evening)$/.test(normalized);
 }
 
 function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
@@ -2160,10 +2168,11 @@ app.get('/history/:userId/date', async (req, res) => {
 // Detect whether a message likely needs current/real-time information or other changeable facts.
 const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
+  { reason: 'public-safety-events', pattern: /\b(assassination|assassinate|attempt(?:ed)?|shooting|shooter|gunman|armed|rally|campaign rally|security incident|suspect|arrested|charged|identified|names?|who did it|who was it)\b/i },
   { reason: 'time-sensitive', pattern: /\b(weather|forecast|temperature|rain|snow|traffic|delay|delays|schedule|schedules|arrival|departure|when does|when is|opening hours|closing time|wait time|wait times|availability)\b/i },
   { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|exchange rates|interest rate|interest rates|how much is)\b/i },
   { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
-  { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach)\b/i },
+  { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach|trump|biden|harris|vance)\b/i },
   { reason: 'explicit-search', pattern: /\b(search|look up|find out|google|check online|online)\b/i }
 ];
 
@@ -2172,6 +2181,9 @@ const CHANGEABLE_QUESTION_PATTERNS = [
   /\bwhat is\b/i,
   /\bwhat's\b/i,
   /\bwho are\b/i,
+  /\bwho was\b/i,
+  /\bwho were\b/i,
+  /\bwhat happened\b/i,
   /\bwhat are\b/i,
   /\bwhen is\b/i,
   /\bwhen does\b/i,
