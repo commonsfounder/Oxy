@@ -38,24 +38,32 @@ struct Message: Identifiable, Equatable {
 }
 
 struct ActionResult: Codable, Identifiable, Equatable {
-    var id: String { action }
+    var id: String { action + (text ?? "") }
     let action: String
     let success: Bool
     let text: String?
     let error: String?
+    let deepLink: String?
+    let webLink: String?
 
     enum CodingKeys: String, CodingKey {
-        case action
-        case success
-        case text
-        case error
+        case action, success, text, error, deepLink, webLink
     }
 
-    init(action: String, success: Bool, text: String? = nil, error: String? = nil) {
+    init(
+        action: String,
+        success: Bool,
+        text: String? = nil,
+        error: String? = nil,
+        deepLink: String? = nil,
+        webLink: String? = nil
+    ) {
         self.action = action
         self.success = success
         self.text = text
         self.error = error
+        self.deepLink = deepLink
+        self.webLink = webLink
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +72,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
         text = try container.decodeIfPresent(String.self, forKey: .text)
         error = try container.decodeIfPresent(String.self, forKey: .error)
+        deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
+        webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
     }
 }
 

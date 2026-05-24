@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 @Observable
 final class ChatViewModel {
@@ -9,6 +10,7 @@ final class ChatViewModel {
     var statusLabel: String?
 
     private let chatService = ChatService()
+    private let locationManager = LocationManager.shared
 
     private var currentSettings: OxySettings {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
@@ -17,6 +19,11 @@ final class ChatViewModel {
         }
         return OxySettings()
     }
+
+    private static let autoOpenActions: Set<String> = [
+        "book_uber", "order_deliveroo", "order_uber_eats",
+        "play_music", "search_netflix_title", "add_to_netflix_list"
+    ]
 
     func loadHistory(userId: String) async {
         do {
@@ -51,12 +58,14 @@ final class ChatViewModel {
         let assistantIndex = messages.count - 1
 
         let settings = currentSettings
+        let location = locationManager.locationDict
 
         Task {
             let stream = chatService.sendMessage(
                 userId: userId,
                 message: text,
-                settings: settings
+                settings: settings,
+                location: location
             )
             var fullText = ""
 
@@ -74,6 +83,7 @@ final class ChatViewModel {
 
                     case .actions(let results):
                         messages[assistantIndex].actions = results
+                        openDeepLinks(results)
 
                     case .status(_, let label):
                         statusLabel = label
@@ -120,5 +130,22 @@ final class ChatViewModel {
         inputText = ""
         isSending = false
         statusLabel = nil
+    }
+
+    func requestLocationAccess() {
+        locationManager.requestPermission()
+    }
+
+    // MARK: - Deep Links
+
+    private func openDeepLinks(_ results: [ActionResult]) {
+        for result in results {
+            guard Self.autoOpenActions.contains(result.action) else { continue }
+            if let link = result.deepLink, let url = URL(string: link) {
+                UIApplication.shared.open(url)
+            } else if let link = result.webLink, let url = URL(string: link) {
+                UIApplication.shared.open(url)
+            }
+        }
     }
 }
