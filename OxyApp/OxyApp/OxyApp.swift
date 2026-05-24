@@ -9,6 +9,7 @@ struct OxyApp: App {
             RootView()
                 .environment(appState)
                 .preferredColorScheme(.dark)
+                .tint(Color.oxyStone)
         }
     }
 }
@@ -24,7 +25,7 @@ struct RootView: View {
                 LoginView()
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: appState.isAuthenticated)
+        .animation(.easeInOut(duration: 0.3), value: appState.isAuthenticated)
         .task {
             appState.restoreSession()
         }

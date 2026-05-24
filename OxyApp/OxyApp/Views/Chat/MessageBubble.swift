@@ -6,29 +6,61 @@ struct MessageBubble: View {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
             // Message content
             if !message.content.isEmpty {
-                Text(message.content)
-                    .font(.system(size: 14))
-                    .foregroundStyle(isUser ? Color.oxyBg : Color.oxyText)
-                    .lineSpacing(3)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(isUser ? Color.oxyText : Color.oxySurface2)
-                    .clipShape(
-                        RoundedRectangle(cornerRadius: 16)
+                HStack {
+                    if isUser { Spacer(minLength: 60) }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(message.content)
+                            .font(.system(size: 15))
+                            .foregroundStyle(isUser ? .white : Color.oxyText)
+                            .lineSpacing(4)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        isUser
+                            ? AnyShapeStyle(
+                                LinearGradient(
+                                    colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            : AnyShapeStyle(Color.oxySurface2)
                     )
-                    .frame(maxWidth: 280, alignment: isUser ? .trailing : .leading)
+                    .clipShape(
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: isUser ? 20 : 6,
+                            bottomLeadingRadius: 20,
+                            bottomTrailingRadius: isUser ? 6 : 20,
+                            topTrailingRadius: 20
+                        )
+                    )
+
+                    if !isUser { Spacer(minLength: 60) }
+                }
             }
 
             // Streaming indicator
             if message.isStreaming && message.content.isEmpty {
-                TypingIndicator()
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(Color.oxySurface2)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                HStack {
+                    TypingIndicator()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .background(Color.oxySurface2)
+                        .clipShape(
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 6,
+                                bottomLeadingRadius: 20,
+                                bottomTrailingRadius: 20,
+                                topTrailingRadius: 20
+                            )
+                        )
+                    Spacer(minLength: 60)
+                }
             }
 
             // Action cards
@@ -41,12 +73,24 @@ struct MessageBubble: View {
             }
 
             // Timestamp
-            Text(message.timestamp, style: .time)
-                .font(.system(size: 10))
-                .foregroundStyle(Color.oxyDim)
-                .padding(.horizontal, 4)
+            HStack(spacing: 4) {
+                if isUser {
+                    Spacer()
+                    if !message.isStreaming {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.oxyDim)
+                    }
+                }
+                Text(message.timestamp, style: .time)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color.oxyDim)
+                if !isUser { Spacer() }
+            }
+            .padding(.horizontal, 4)
         }
-        .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 }
 
@@ -56,73 +100,102 @@ struct ActionCard: View {
     let action: ActionResult
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: action.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(action.success ? Color.oxyGreen.opacity(0.15) : Color.oxyRed.opacity(0.15))
+                    .frame(width: 32, height: 32)
 
-            VStack(alignment: .leading, spacing: 2) {
+                Image(systemName: action.success ? "checkmark" : "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(humanize(action.action))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
 
                 if let text = action.text ?? action.error {
                     Text(text)
-                        .font(.system(size: 11))
+                        .font(.system(size: 12))
                         .foregroundStyle(Color.oxySub)
                         .lineLimit(3)
                 }
             }
+
+            Spacer()
+
+            Image(systemName: iconForAction(action.action))
+                .font(.system(size: 14))
+                .foregroundStyle(Color.oxyDim)
         }
-        .padding(10)
-        .frame(maxWidth: 280, alignment: .leading)
-        .background(Color.oxySurface3)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(12)
+        .background(Color.oxySurface2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color.oxyLine2, lineWidth: 1)
+        )
     }
 
     private func humanize(_ type: String) -> String {
         type.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func iconForAction(_ type: String) -> String {
+        switch type {
+        case "send_email", "get_emails", "search_emails": return "envelope.fill"
+        case "create_calendar_event", "get_calendar_events": return "calendar"
+        case "book_uber": return "car.fill"
+        case "send_telegram", "get_telegram_contacts": return "paperplane.fill"
+        case "search_trains": return "tram.fill"
+        case "order_uber_eats", "order_deliveroo": return "fork.knife"
+        case "search_netflix_title", "add_to_netflix_list": return "play.tv.fill"
+        case "create_reminder": return "bell.fill"
+        case "send_message": return "message.fill"
+        case "play_music": return "music.note"
+        default: return "bolt.fill"
+        }
     }
 }
 
 // MARK: - Typing Indicator
 
 private struct TypingIndicator: View {
-    @State private var phase = 0.0
+    @State private var phase = false
 
     var body: some View {
         HStack(spacing: 5) {
             ForEach(0..<3, id: \.self) { i in
                 Circle()
                     .fill(Color.oxySub)
-                    .frame(width: 6, height: 6)
-                    .scaleEffect(dotScale(for: i))
+                    .frame(width: 7, height: 7)
+                    .scaleEffect(phase ? 1.0 : 0.5)
+                    .opacity(phase ? 1.0 : 0.4)
                     .animation(
                         .easeInOut(duration: 0.5)
-                            .repeatForever()
+                            .repeatForever(autoreverses: true)
                             .delay(Double(i) * 0.15),
                         value: phase
                     )
             }
         }
-        .onAppear { phase = 1 }
-    }
-
-    private func dotScale(for index: Int) -> CGFloat {
-        phase == 0 ? 0.5 : 1.0
+        .onAppear { phase = true }
     }
 }
 
 #Preview {
-    VStack(spacing: 16) {
-        MessageBubble(message: Message(role: .user, content: "Book me an Uber to Kings Cross"))
-        MessageBubble(message: Message(
-            role: .assistant,
-            content: "On it! Opening Uber for you.",
-            actions: [ActionResult(action: "book_uber", success: true, text: "Uber link opened")]
-        ))
-        MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
+    ScrollView {
+        VStack(spacing: 4) {
+            MessageBubble(message: Message(role: .user, content: "Book me an Uber to Kings Cross"))
+            MessageBubble(message: Message(
+                role: .assistant,
+                content: "On it! Opening Uber for you.",
+                actions: [ActionResult(action: "book_uber", success: true, text: "Uber link opened")]
+            ))
+            MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
+        }
     }
-    .padding()
     .background(Color.oxyBg)
 }
