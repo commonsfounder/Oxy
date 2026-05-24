@@ -9,6 +9,16 @@ logMissingRuntimeEnvOnce('telegram connector bootstrap');
 
 const SUPPORTED_ACTIONS = ['send_telegram', 'get_telegram_contacts'];
 
+function normalizeContactSearch(value) {
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s_@.]/gu, '')
+    .replace(/^@/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function credentials() {
   const apiId = parseInt(process.env.TELEGRAM_API_ID, 10);
   const apiHash = process.env.TELEGRAM_API_HASH;
@@ -128,12 +138,13 @@ async function execute(userId, action, params) {
       case 'send_telegram': {
         const { contact, message } = params;
         if (!contact || !message) return { success: false, error: 'send_telegram requires contact and message' };
+        const search = normalizeContactSearch(contact);
+        if (!search) return { success: false, error: 'send_telegram requires a valid contact name' };
 
         const result = await client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
         const match = result.users.find(u => {
-          const fullName = `${u.firstName || ''} ${u.lastName || ''}`.trim().toLowerCase();
-          const username = (u.username || '').toLowerCase();
-          const search = contact.toLowerCase();
+          const fullName = normalizeContactSearch(`${u.firstName || ''} ${u.lastName || ''}`);
+          const username = normalizeContactSearch(u.username || '');
           return fullName.includes(search) || username === search || username.includes(search);
         });
 

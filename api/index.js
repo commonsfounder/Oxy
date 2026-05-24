@@ -311,9 +311,10 @@ ABSOLUTE RULES:
 18. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email.
 19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
 20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
-21. Infer the appropriate format from context. The user should not need to specify formatting.
-22. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
-23. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
+21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
+22. Infer the appropriate format from context. The user should not need to specify formatting.
+23. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
+24. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -351,6 +352,33 @@ function parseActions(fullResponse) {
   }
 
   return { spoken, actions };
+}
+
+function containsUrl(text) {
+  return /\bhttps?:\/\/\S+/i.test(String(text || ''));
+}
+
+function isLinkSendRequest(message) {
+  return /\b(send|text|message|telegram|whatsapp|imessage|email)\b/i.test(String(message || '')) &&
+    /\blink\b/i.test(String(message || ''));
+}
+
+function validateActionAgainstUserRequest(action, originalMessage = '') {
+  const type = action?.type || '';
+  const input = action?.input || {};
+  if (['send_message', 'send_telegram'].includes(type) && isLinkSendRequest(originalMessage) && !containsUrl(input.message)) {
+    return {
+      success: false,
+      error: 'The user asked to send a link, but no actual URL was provided or found. Ask for the exact link before sending.'
+    };
+  }
+  if (type === 'send_email' && isLinkSendRequest(originalMessage) && !containsUrl(`${input.subject || ''} ${input.body || ''}`)) {
+    return {
+      success: false,
+      error: 'The user asked to send a link, but the email does not contain an actual URL. Ask for the exact link before sending.'
+    };
+  }
+  return null;
 }
 
 function pcmToWav(pcmBuffer, sampleRate = 24000) {
@@ -1188,9 +1216,10 @@ async function executeActions(userId, actions, context = {}, trace = null, callb
   if (!actions?.length) return [];
   const results = await Promise.all(actions.map(async action => {
     if (callbacks.onActionStart) callbacks.onActionStart(action);
-    const result = trace
+    const validationError = validateActionAgainstUserRequest(action, context.userMessage || '');
+    const result = validationError || (trace
       ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
-      : await executeAction(userId, action.type, action.input || {}, context);
+      : await executeAction(userId, action.type, action.input || {}, context));
     const insertActionLog = () => supabase.from('action_log').insert({
       user_id: userId,
       action: serializeLoggedAction(action, result),
@@ -1729,7 +1758,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     let audioBase64 = null;
     let ttsError = '';
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions);
+      actionResults = await executeActions(userId, actions, { userMessage: userText });
     }
     const dataResults = getStructuredDataResults(actionResults);
     let finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
@@ -1831,7 +1860,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     let { spoken, actions } = parseActions(geminiRes.text || '');
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { imageFile: req.file });
+      actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message });
     }
 
     const dataResults = getStructuredDataResults(actionResults);
@@ -2641,7 +2670,6 @@ app.post('/chat', async (req, res) => {
         }));
         let fullText = '';
         let firstChunk = true;
-        let lastVisibleText = '';
         const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({
           voiceName: settings.voice,
           sse,
@@ -2653,20 +2681,17 @@ app.post('/chat', async (req, res) => {
           if (text) {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
             fullText += text;
-            const nextVisibleText = stripActionMarkupForDisplay(fullText);
-            const visibleChunk = nextVisibleText.slice(lastVisibleText.length);
-            lastVisibleText = nextVisibleText;
-            if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
           }
         }
         trace.log('gemini.initial_complete');
 
         let { spoken, actions } = parseActions(fullText);
+        spoken = stripActionMarkupForDisplay(spoken).trim();
 
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, {}, trace, {
+          actionResults = await executeActions(userId, actions, { userMessage: message }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
               action: action.type,
@@ -2686,7 +2711,6 @@ app.post('/chat', async (req, res) => {
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
           sse({ type: 'replace', text: '' });
-          lastVisibleText = '';
           const context = dataResults.map(a => a.text).join('\n\n');
           const followUpRequest = buildModernGenerateRequest({
             dynamicSystemPrompt,
@@ -2725,6 +2749,9 @@ app.post('/chat', async (req, res) => {
 
         if (!spoken) {
           spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
+          sse({ type: 'text', chunk: spoken });
+          if (ttsStreamer) ttsStreamer.ingest(spoken);
+        } else if (!actionResults.length && !dataResults.length) {
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
@@ -2772,7 +2799,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, {}, trace);
+      actionResults = await executeActions(userId, actions, { userMessage: message }, trace);
     }
 
     // For data-fetching actions, re-prompt Gemini with results
