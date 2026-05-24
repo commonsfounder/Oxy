@@ -2088,39 +2088,6 @@ app.get('/briefing/:userId', async (req, res) => {
       created_at: latestQueuedBriefing.created_at,
       kind: latestQueuedBriefing.kind || 'briefing'
     });
-
-    const [memory, history] = await Promise.all([
-      getMemory(userId),
-      getHistory(userId)
-    ]);
-
-    const now = new Date();
-    const hour = now.getHours();
-    const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-
-    const systemPrompt = `You are Oxy. It's ${greeting} and you're checking in with your friend.
-
-Here's what you know about them:
-${memory || 'Not much yet — learn as you go.'}
-
-Recent conversation:
-${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
-
-Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
-- Only mention things that are directly supported by memory or recent conversation shown above.
-- Do not invent plans, meetings, news, weather, or tasks.
-- If there is no concrete update, just greet them and say it's a quiet start.
-
-The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
-
-    const model = genAI.getGenerativeModel({
-      model: PRIMARY_CHAT_MODEL,
-      systemInstruction: systemPrompt
-    });
-    const geminiRes = await model.generateContent('whats going on today?');
-    const { spoken, actions } = parseActions(geminiRes.response.text());
-
-    res.json({ text: spoken, actions });
   } catch (err) {
     console.error('/briefing error:', err.message);
     res.status(500).json({ error: err.message });
@@ -2189,7 +2156,7 @@ app.get('/history/:userId/date', async (req, res) => {
 const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
   { reason: 'time-sensitive', pattern: /\b(weather|forecast|temperature|rain|snow|traffic|delay|delays|schedule|schedules|arrival|departure|when does|when is|opening hours|closing time|wait time|wait times|availability)\b/i },
-  { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|rate|rates|how much is)\b/i },
+  { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|exchange rates|interest rate|interest rates|how much is)\b/i },
   { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
   { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach)\b/i },
   { reason: 'explicit-search', pattern: /\b(search|look up|find out|google|check online|online)\b/i }
@@ -2228,6 +2195,8 @@ const PERSONAL_CONTEXT_PATTERNS = [
   /\bi\b/i,
   /\bme\b/i,
   /\bmine\b/i,
+  /\bwe\b/i,
+  /\byou\b/i,
   /\bdo you remember\b/i,
   /\bwhat did i\b/i,
   /\bwhen did i\b/i,
