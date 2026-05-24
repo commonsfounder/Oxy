@@ -33,12 +33,20 @@ struct ChatView: View {
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: viewModel.messages.count) {
                         withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(viewModel.messages.last?.id ?? "status", anchor: .bottom)
+                            if let lastId = viewModel.messages.last?.id {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            } else {
+                                proxy.scrollTo("status", anchor: .bottom)
+                            }
                         }
                     }
                     .onChange(of: viewModel.messages.last?.content) {
                         withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(viewModel.messages.last?.id ?? "status", anchor: .bottom)
+                            if let lastId = viewModel.messages.last?.id {
+                                proxy.scrollTo(lastId, anchor: .bottom)
+                            } else {
+                                proxy.scrollTo("status", anchor: .bottom)
+                            }
                         }
                     }
                 }
