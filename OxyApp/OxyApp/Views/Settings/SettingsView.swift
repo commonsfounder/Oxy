@@ -24,6 +24,41 @@ struct SettingsView: View {
                             }
                         }
 
+                        settingsSection(title: "Appearance Lab") {
+                            VStack(alignment: .leading, spacing: 16) {
+                                DesignPreview(
+                                    template: settings.designTemplate,
+                                    palette: settings.designPalette,
+                                    motion: settings.designMotion
+                                )
+
+                                DesignChoiceGroup(
+                                    title: "Template",
+                                    selection: $settings.designTemplate,
+                                    options: OxySettings.designTemplates,
+                                    onChange: saveSettings
+                                )
+
+                                Divider().overlay(Color.oxyLine)
+
+                                DesignChoiceGroup(
+                                    title: "Palette",
+                                    selection: $settings.designPalette,
+                                    options: OxySettings.designPalettes,
+                                    onChange: saveSettings
+                                )
+
+                                Divider().overlay(Color.oxyLine)
+
+                                DesignChoiceGroup(
+                                    title: "Motion",
+                                    selection: $settings.designMotion,
+                                    options: OxySettings.designMotions,
+                                    onChange: saveSettings
+                                )
+                            }
+                        }
+
                         // Voice
                         settingsSection(title: "Voice") {
                             settingRow(label: "Voice Playback", description: "Generate audio for responses") {
@@ -322,6 +357,9 @@ struct OxySettings: Codable {
     var locationReminders: Bool = true
     var homeLatitude: Double?
     var homeLongitude: Double?
+    var designTemplate: String = "compact"
+    var designPalette: String = "stone"
+    var designMotion: String = "calm"
 
     struct VoiceOption: Identifiable {
         let value: String
@@ -361,6 +399,150 @@ struct OxySettings: Codable {
         VoiceOption(value: "Zephyr", label: "Spark"),
         VoiceOption(value: "Zubenelgenubi", label: "Casual"),
     ]
+
+    static let designTemplates = ["compact", "glass", "dense"]
+    static let designPalettes = ["stone", "mint", "ember", "mono"]
+    static let designMotions = ["calm", "snappy", "none"]
+}
+
+// MARK: - Appearance Lab
+
+private struct DesignChoiceGroup: View {
+    let title: String
+    @Binding var selection: String
+    let options: [String]
+    let onChange: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxyText)
+
+            HStack(spacing: 8) {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        withAnimation(animation) {
+                            selection = option
+                            onChange()
+                        }
+                    } label: {
+                        Text(option.capitalized)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(selection == option ? Color.oxyBg : Color.oxySub)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(selection == option ? Color.oxyStone : Color.oxySurface3)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(selection == option ? Color.clear : Color.oxyLine2, lineWidth: 1)
+                            )
+                    }
+                }
+            }
+        }
+    }
+
+    private var animation: Animation? {
+        selection == "none" ? nil : .easeInOut(duration: 0.18)
+    }
+}
+
+private struct DesignPreview: View {
+    let template: String
+    let palette: String
+    let motion: String
+
+    private var accent: Color {
+        switch palette {
+        case "mint": return Color.oxyGreen
+        case "ember": return Color.oxyRed
+        case "mono": return Color.oxyText
+        default: return Color.oxyStone
+        }
+    }
+
+    private var cornerRadius: CGFloat {
+        switch template {
+        case "dense": return 8
+        case "glass": return 18
+        default: return 12
+        }
+    }
+
+    private var rowSpacing: CGFloat {
+        template == "dense" ? 8 : 12
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: rowSpacing) {
+            HStack {
+                Circle()
+                    .fill(accent.opacity(0.18))
+                    .frame(width: 34, height: 34)
+                    .overlay(
+                        Image(systemName: "waveform")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(accent)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Oxy")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.oxyText)
+                    Text("Online")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.oxySub)
+                }
+
+                Spacer()
+
+                Text(motion.capitalized)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(accent.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            Text("I found the nearest McDonald's and opened Uber. Confirm in Uber.")
+                .font(.system(size: template == "dense" ? 13 : 14, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+                .padding(template == "dense" ? 10 : 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(template == "glass" ? Color.oxySurface3.opacity(0.72) : Color.oxySurface3)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+
+            HStack(spacing: 8) {
+                previewChip("Connectors", selected: true)
+                previewChip("Memory", selected: false)
+                previewChip("Settings", selected: false)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: cornerRadius + 4)
+                .fill(template == "glass" ? Color.oxySurface2.opacity(0.72) : Color.oxySurface2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius + 4)
+                .stroke(accent.opacity(template == "mono" ? 0.18 : 0.32), lineWidth: 1)
+        )
+        .animation(motion == "none" ? nil : .easeInOut(duration: motion == "snappy" ? 0.12 : 0.28), value: template)
+        .animation(motion == "none" ? nil : .easeInOut(duration: motion == "snappy" ? 0.12 : 0.28), value: palette)
+    }
+
+    private func previewChip(_ label: String, selected: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(selected ? Color.oxyBg : Color.oxySub)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(selected ? accent : Color.oxySurface3)
+            .clipShape(Capsule())
+    }
 }
 
 #Preview {

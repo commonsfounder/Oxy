@@ -2145,40 +2145,14 @@ app.get('/action-log/:userId', async (req, res) => {
 });
 
 const CONNECTORS = [
-  { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',       implemented: true },
-  { id: 'imessage',  name: 'iMessage',                  icon: 'imessage', category: 'Messages',     implemented: false },
-  { id: 'whatsapp',  name: 'WhatsApp',                  icon: 'whatsapp', category: 'Messages',     implemented: false },
-  { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Music',        implemented: false },
-  { id: 'reminders', name: 'Apple Reminders',           icon: 'reminders', category: 'Productivity', implemented: false },
-  { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',         implemented: false },
-  { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',    implemented: true },
-  { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',     implemented: true },
-  { id: 'monzo',     name: 'Monzo',                     icon: 'monzo', category: 'Finance',      implemented: false },
-  { id: 'homekit',   name: 'Apple HomeKit',             icon: 'homekit', category: 'Home',         implemented: false },
-  { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',    implemented: true },
-  { id: 'maps',      name: 'Google Maps',               icon: 'maps', category: 'Navigation',   implemented: false },
-  { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity', implemented: false },
-  { id: 'betfair',   name: 'Betfair',                   icon: 'betfair', category: 'Finance',      implemented: false },
-];
-
-CONNECTORS.splice(0, CONNECTORS.length,
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
-  { id: 'imessage',  name: 'iMessage',                  icon: 'imessage', category: 'Messages',      implemented: false },
-  { id: 'whatsapp',  name: 'WhatsApp',                  icon: 'whatsapp', category: 'Messages',      implemented: false },
   { id: 'netflix',   name: 'Netflix',                   icon: 'netflix', category: 'Entertainment', implemented: true },
-  { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Music',         implemented: false },
-  { id: 'reminders', name: 'Apple Reminders',           icon: 'reminders', category: 'Productivity',  implemented: false },
   { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',          implemented: true },
   { id: 'ubereats',  name: 'Uber Eats',                 icon: 'ubereats', category: 'Food',          implemented: true },
   { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
-  { id: 'monzo',     name: 'Monzo',                     icon: 'monzo', category: 'Finance',       implemented: false },
-  { id: 'homekit',   name: 'Apple HomeKit',             icon: 'homekit', category: 'Home',          implemented: false },
   { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
-  { id: 'maps',      name: 'Google Maps',               icon: 'maps', category: 'Navigation',    implemented: false },
-  { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity',  implemented: false },
-  { id: 'betfair',   name: 'Betfair',                   icon: 'betfair', category: 'Finance',       implemented: false },
-);
+];
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 
@@ -2201,9 +2175,7 @@ app.get('/connectors/:userId', async (req, res) => {
       const enabled = row?.enabled === true;
       const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session);
       const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
-      const connectionState = !c.implemented
-        ? 'coming_soon'
-        : needsReconnect
+      const connectionState = needsReconnect
           ? 'needs_reconnect'
           : enabled
             ? 'connected'
@@ -2212,9 +2184,7 @@ app.get('/connectors/:userId', async (req, res) => {
         ...c,
         enabled,
         connectionState,
-        statusText: connectionState === 'coming_soon'
-          ? 'Coming soon'
-          : connectionState === 'needs_reconnect'
+        statusText: connectionState === 'needs_reconnect'
             ? 'Reconnect needed'
             : connectionState === 'connected'
               ? 'Connected'

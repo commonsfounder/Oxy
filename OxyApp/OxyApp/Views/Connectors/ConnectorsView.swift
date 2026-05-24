@@ -34,7 +34,7 @@ struct ConnectorsView: View {
                             googleSection
 
                             // Grouped connectors
-                            let nonGoogle = connectors.filter { $0.id != "google" }
+                            let nonGoogle = connectors.filter { $0.id != "google" && $0.implemented }
                             let grouped = Dictionary(grouping: nonGoogle) { $0.category }
 
                             ForEach(grouped.keys.sorted(), id: \.self) { category in
@@ -442,7 +442,6 @@ struct Connector: Codable, Identifiable {
     }
 
     var actionLabel: String {
-        if !implemented { return "Coming soon" }
         if connectionState == "needs_reconnect" { return "Reconnect" }
         return enabled ? "Disconnect" : "Connect"
     }
@@ -457,7 +456,6 @@ struct Connector: Codable, Identifiable {
         switch connectionState {
         case "connected": return Color.oxyGreen
         case "needs_reconnect": return Color.oxyStone
-        case "coming_soon": return Color.oxyDim
         default: return Color.oxySub
         }
     }
