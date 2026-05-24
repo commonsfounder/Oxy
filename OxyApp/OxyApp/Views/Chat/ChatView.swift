@@ -15,11 +15,13 @@ struct ChatView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 2) {
-                                // Welcome message
                                 if viewModel.messages.isEmpty && !viewModel.isSending {
-                                    WelcomeCard()
-                                        .padding(.top, 40)
-                                        .padding(.bottom, 20)
+                                    WelcomeCard(onQuickAction: { action in
+                                        viewModel.inputText = action
+                                        viewModel.sendMessage(userId: appState.userId)
+                                    })
+                                    .padding(.top, 40)
+                                    .padding(.bottom, 20)
                                 }
 
                                 ForEach(viewModel.messages) { message in
@@ -71,6 +73,14 @@ struct ChatView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: { viewModel.clearChat() }) {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 17))
+                            .foregroundStyle(Color.oxySub)
+                    }
+                }
+
                 ToolbarItem(placement: .principal) {
                     HStack(spacing: 10) {
                         ZStack {
@@ -107,6 +117,9 @@ struct ChatView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button(action: { viewModel.clearChat() }) {
+                            Label("New Chat", systemImage: "plus.bubble")
+                        }
                         Button(role: .destructive, action: { appState.logout() }) {
                             Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
                         }
@@ -129,6 +142,8 @@ struct ChatView: View {
 // MARK: - Welcome Card
 
 private struct WelcomeCard: View {
+    let onQuickAction: (String) -> Void
+
     var body: some View {
         VStack(spacing: 16) {
             ZStack {
@@ -158,11 +173,16 @@ private struct WelcomeCard: View {
                     .multilineTextAlignment(.center)
             }
 
-            // Quick action chips
             HStack(spacing: 8) {
-                QuickChip(icon: "envelope.fill", label: "Check emails")
-                QuickChip(icon: "calendar", label: "My schedule")
-                QuickChip(icon: "car.fill", label: "Book a ride")
+                QuickChip(icon: "envelope.fill", label: "Check emails") {
+                    onQuickAction("Check my emails")
+                }
+                QuickChip(icon: "calendar", label: "My schedule") {
+                    onQuickAction("What's my schedule today?")
+                }
+                QuickChip(icon: "car.fill", label: "Book a ride") {
+                    onQuickAction("Book me a ride")
+                }
             }
         }
         .padding(.horizontal, 32)
@@ -172,24 +192,28 @@ private struct WelcomeCard: View {
 private struct QuickChip: View {
     let icon: String
     let label: String
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(Color.oxyStone)
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Color.oxySub)
+        Button(action: onTap) {
+            VStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.oxyStone)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.oxySub)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(Color.oxySurface2)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.oxyLine2, lineWidth: 1)
+            )
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
+        .buttonStyle(.plain)
     }
 }
 

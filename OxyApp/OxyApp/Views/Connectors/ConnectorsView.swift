@@ -228,10 +228,52 @@ private struct ConnectorCard: View {
     let connector: Connector
     let onToggle: () -> Void
 
+    private var sfSymbol: String {
+        switch connector.id {
+        case "google":    return "envelope.fill"
+        case "imessage":  return "message.fill"
+        case "whatsapp":  return "phone.fill"
+        case "spotify":   return "music.note"
+        case "reminders": return "checklist"
+        case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
+        case "uber":      return "car.fill"
+        case "telegram":  return "paperplane.fill"
+        case "monzo":     return "banknote.fill"
+        case "homekit":   return "house.fill"
+        case "trainline": return "tram.fill"
+        case "maps":      return "map.fill"
+        case "notion":    return "doc.text.fill"
+        case "betfair":   return "chart.line.uptrend.xyaxis"
+        case "netflix":   return "play.tv.fill"
+        default:          return "puzzlepiece.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch connector.id {
+        case "google":    return Color(red: 66/255, green: 133/255, blue: 244/255)
+        case "imessage":  return Color.oxyGreen
+        case "whatsapp":  return Color(red: 37/255, green: 211/255, blue: 102/255)
+        case "spotify":   return Color(red: 30/255, green: 215/255, blue: 96/255)
+        case "uber":      return Color.oxyText
+        case "telegram":  return Color(red: 38/255, green: 166/255, blue: 228/255)
+        case "netflix":   return Color(red: 229/255, green: 9/255, blue: 20/255)
+        case "monzo":     return Color(red: 233/255, green: 96/255, blue: 79/255)
+        case "trainline": return Color(red: 3/255, green: 169/255, blue: 157/255)
+        default:          return Color.oxyStone
+        }
+    }
+
     var body: some View {
         VStack(spacing: 10) {
-            Text(connector.icon)
-                .font(.system(size: 24))
+            ZStack {
+                Circle()
+                    .fill(iconColor.opacity(0.15))
+                    .frame(width: 40, height: 40)
+                Image(systemName: sfSymbol)
+                    .font(.system(size: 17))
+                    .foregroundStyle(iconColor)
+            }
 
             VStack(spacing: 2) {
                 Text(connector.name)
