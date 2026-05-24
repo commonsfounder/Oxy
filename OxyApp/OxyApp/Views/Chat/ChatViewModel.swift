@@ -10,6 +10,14 @@ final class ChatViewModel {
 
     private let chatService = ChatService()
 
+    private var currentSettings: OxySettings {
+        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+           let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
+            return saved
+        }
+        return OxySettings()
+    }
+
     func loadHistory(userId: String) async {
         do {
             let entries = try await chatService.loadHistory(userId: userId)
@@ -24,9 +32,7 @@ final class ChatViewModel {
             await MainActor.run {
                 messages = loaded
             }
-        } catch {
-            // History load failure is non-fatal — start with empty chat
-        }
+        } catch {}
     }
 
     func sendMessage(userId: String) {
@@ -44,10 +50,15 @@ final class ChatViewModel {
         messages.append(assistantMessage)
         let assistantIndex = messages.count - 1
 
+        let settings = currentSettings
+
         Task {
-            let stream = chatService.sendMessage(userId: userId, message: text)
+            let stream = chatService.sendMessage(
+                userId: userId,
+                message: text,
+                settings: settings
+            )
             var fullText = ""
-            var actionResults: [ActionResult] = []
 
             for await event in stream {
                 await MainActor.run {
@@ -62,7 +73,6 @@ final class ChatViewModel {
                         messages[assistantIndex].content = fullText
 
                     case .actions(let results):
-                        actionResults = results
                         messages[assistantIndex].actions = results
 
                     case .status(_, let label):
@@ -76,7 +86,6 @@ final class ChatViewModel {
                         statusLabel = nil
 
                     case .audio:
-                        // Phase 2: audio playback
                         break
 
                     case .ttsError:
@@ -104,5 +113,12 @@ final class ChatViewModel {
                 statusLabel = nil
             }
         }
+    }
+
+    func clearChat() {
+        messages.removeAll()
+        inputText = ""
+        isSending = false
+        statusLabel = nil
     }
 }

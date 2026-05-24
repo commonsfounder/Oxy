@@ -33,7 +33,7 @@ struct MainTabView: View {
 
             MemoryView()
                 .tabItem {
-                    Image(systemName: "brain.fill")
+                    Image(systemName: "brain.head.profile")
                     Text("Memory")
                 }
                 .tag(Tab.memory)

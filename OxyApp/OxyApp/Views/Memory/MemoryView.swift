@@ -12,10 +12,29 @@ struct MemoryView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
+                        // Header icon
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.oxyStone.opacity(0.2), Color.oxyStone.opacity(0.05)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 72, height: 72)
+
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 32))
+                                .foregroundStyle(Color.oxyStone)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 12)
+
                         // Info card
                         VStack(alignment: .leading, spacing: 14) {
                             HStack(spacing: 10) {
-                                Image(systemName: "brain.fill")
+                                Image(systemName: "brain.head.profile")
                                     .font(.system(size: 18))
                                     .foregroundStyle(Color.oxyStone)
                                 Text("Background Memory")
