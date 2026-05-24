@@ -1905,6 +1905,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     let ttsError = '';
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { userMessage: userText });
+      actionResults = normalizeActionResultsForClient(actionResults);
     }
     const dataResults = getStructuredDataResults(actionResults);
     let finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
@@ -2007,6 +2008,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     let actionResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message });
+      actionResults = normalizeActionResultsForClient(actionResults);
     }
 
     const dataResults = getStructuredDataResults(actionResults);
@@ -2870,6 +2872,34 @@ function summarizeActionResults(actionResults) {
     .join('\n\n');
 }
 
+function normalizeActionResultsForClient(actionResults) {
+  const seen = new Set();
+  const out = [];
+  for (const entry of actionResults || []) {
+    const error = entry?.result?.error || '';
+    const text = entry?.result?.text || '';
+    const key = `${entry?.action || ''}:${entry?.result?.success === false ? error : text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+  }
+  return out;
+}
+
+function userFacingActionFailure(entry) {
+  const action = entry?.action || '';
+  const rawError = String(entry?.result?.error || '').trim();
+  if (action === 'book_uber') {
+    if (/couldn't find a nearby match/i.test(rawError) || /No place results found/i.test(rawError)) {
+      return 'I could not find that place nearby. Send the exact branch or address.';
+    }
+    if (/Geocoding error|No results found/i.test(rawError)) {
+      return 'I could not find that address. Send the exact branch or address.';
+    }
+  }
+  return rawError || 'That action failed.';
+}
+
 function toSingleSentence(text) {
   const cleaned = stripActionMarkupForDisplay(String(text || ''))
     .replace(/\s+/g, ' ')
@@ -2900,17 +2930,18 @@ function summarizeCompletedActionsConcise(actionResults) {
 }
 
 function summarizeFinishedActionsForUser(actionResults) {
-  if (!actionResults.length) return '';
-  const failures = actionResults.filter(entry => entry?.result?.success === false);
+  const normalizedResults = normalizeActionResultsForClient(actionResults);
+  if (!normalizedResults.length) return '';
+  const failures = normalizedResults.filter(entry => entry?.result?.success === false);
   if (failures.length) {
     return failures
       .map(entry => {
-        const error = entry?.result?.error || 'That action failed.';
+        const error = userFacingActionFailure(entry);
         return `${humanizeActionType(entry.action)} failed: ${error}`;
       })
       .join('\n');
   }
-  return summarizeCompletedActionsConcise(actionResults);
+  return summarizeCompletedActionsConcise(normalizedResults);
 }
 
 function buildStructuredDataSummary(entry) {
@@ -3088,6 +3119,7 @@ app.post('/chat', async (req, res) => {
               success: result?.success !== false
             })
           });
+          actionResults = normalizeActionResultsForClient(actionResults);
           sse({ type: 'actions', results: actionResults });
           trace.log('actions.complete');
         }
@@ -3192,6 +3224,7 @@ app.post('/chat', async (req, res) => {
     let actionResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { userMessage: message, location }, trace);
+      actionResults = normalizeActionResultsForClient(actionResults);
     }
 
     // For data-fetching actions, re-prompt Gemini with results

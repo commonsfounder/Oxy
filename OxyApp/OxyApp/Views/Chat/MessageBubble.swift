@@ -103,6 +103,21 @@ struct ActionCard: View {
         action.deepLink != nil || action.webLink != nil
     }
 
+    private var detailText: String? {
+        guard let raw = action.text ?? action.error else { return nil }
+        let compact = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "  ", with: " ")
+        if !action.success && action.action == "book_uber" {
+            if compact.localizedCaseInsensitiveContains("nearby match") ||
+                compact.localizedCaseInsensitiveContains("geocoding error") ||
+                compact.localizedCaseInsensitiveContains("no results found") {
+                return "Send the exact branch or address."
+            }
+        }
+        return compact
+    }
+
     var body: some View {
         Button(action: openLink) {
             HStack(spacing: 12) {
@@ -121,7 +136,7 @@ struct ActionCard: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.oxyText)
 
-                    if let text = action.text ?? action.error {
+                    if let text = detailText {
                         Text(text)
                             .font(.system(size: 12))
                             .foregroundStyle(Color.oxySub)
