@@ -458,7 +458,10 @@ async function executeFunctionCalls(userId, functionCalls, socket, trace) {
     trace.telemetry('tool_start', { action: name });
 
     try {
-      result = await dispatch(userId, name, input);
+      const allowedNames = new Set(LIVE_FUNCTION_DECLARATIONS.map(f => f.name));
+      result = allowedNames.has(name)
+        ? await dispatch(userId, name, input)
+        : { success: false, error: `Function "${name}" is not available in this session.` };
     } catch (error) {
       result = { success: false, error: error?.message || `Failed to execute ${name}.` };
     }
@@ -610,7 +613,7 @@ async function createCompanionLiveSession(userId, voiceName, socket, state) {
               state.actionResults.push(...actionResults);
               sendSocketEvent(socket, { type: 'actions', results: actionResults });
             }
-            state.session.sendToolResponse({ functionResponses });
+            await state.session.sendToolResponse({ functionResponses });
           }
 
           if (message.serverContent?.interrupted) {
@@ -668,7 +671,7 @@ function attachCompanionLivePrototypeServer(server) {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     if (url.pathname !== COMPANION_LIVE_PATH) return;
     wss.handleUpgrade(req, socket, head, ws => {
       wss.emit('connection', ws, req);
@@ -752,6 +755,11 @@ function attachCompanionLivePrototypeServer(server) {
 
         if (!state.session) {
           if (state.sessionPromise && (event.type === 'audio.append' || event.type === 'audio.end')) {
+            if (state.pendingEvents.length >= 50) {
+              createSocketError(socket, 'Companion live: too many pending audio events.');
+              socket.close();
+              return;
+            }
             state.pendingEvents.push(event);
             return;
           }
@@ -775,8 +783,13 @@ function attachCompanionLivePrototypeServer(server) {
         }
 
         if (event.type === 'session.stop') {
-          state.session.close();
-          state.session = null;
+          if (state.session) {
+            state.session.close();
+            state.session = null;
+          } else if (state.sessionPromise) {
+            state.sessionPromise.then(session => { try { session?.close(); } catch {} }).catch(() => {});
+            state.sessionPromise = null;
+          }
         }
       } catch (error) {
         createSocketError(socket, error);

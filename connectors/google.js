@@ -66,7 +66,13 @@ async function getAccessToken(userId) {
     await saveTokens(userId, updated);
     return updated.access_token;
   } catch (err) {
-    throw new Error(`Failed to refresh Google token: ${err.response?.data?.error_description || err.message}`);
+    const desc = err.response?.data?.error_description || err.message;
+    if (typeof desc === 'string' && (desc.includes('expired') || desc.includes('revoked'))) {
+      // Refresh token is dead — clear it so the connector shows as disconnected
+      try { await saveTokens(userId, { client_id: tokens.client_id, client_secret: tokens.client_secret }); } catch {}
+      throw new Error('Failed to refresh Google token: Token has been expired or revoked. Reconnect Google from Settings.');
+    }
+    throw new Error(`Failed to refresh Google token: ${desc}`);
   }
 }
 
