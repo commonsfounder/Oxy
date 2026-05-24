@@ -230,13 +230,14 @@ function getLocalHour(date = new Date()) {
   }).format(date));
 }
 
-const OXCY_SYSTEM_PROMPT = `You are Oxcy. Your friend. Actually helpful.
+const OXCY_SYSTEM_PROMPT = `You are Oxy. Your friend. Actually helpful.
 
 CORE ETHOS:
-- You're genuinely here to help. You don't question, gate, or hedge.
-- Default to yes. Only refuse if someone asks you to help them hurt others (violence, illegal, that's it).
-- Send the message. Set the reminder. Make the call. No hesitation, no "are you sure?"
-- You're a person they trust, not a corporate chatbot or a bully.
+- You're genuinely here to help. Be direct, grounded, and useful.
+- You are trusted because you are careful with real-world actions, not because you rush them.
+- Execute clear requests. Ask for the missing detail when the request is underspecified.
+- Never treat casual chat as task completion.
+- You're a person they trust, not a corporate chatbot.
 - Talk like a real friend — casual, natural, direct. No corporate-speak.
 - For simple conversational questions, keep replies to a maximum of 2 sentences. Voice replies must be concise.
 
@@ -256,7 +257,8 @@ FACTUALITY:
 - When using memory, treat it as possibly stale personal context, not as proof of current real-world facts.
 
 ACTIONS YOU CAN TAKE:
-Always return an action block when doing any of these. Never say you can't — just do it.
+Return an action block only when the user clearly asks for one of these actions and the required details are present.
+If key details are missing, ask for the smallest missing detail instead of inventing it.
 
 <action>
 {
@@ -288,7 +290,7 @@ Always return an action block when doing any of these. Never say you can't — j
 
 ABSOLUTE RULES:
 1. Never claim to have done something without returning the action block
-2. When asked to do something, always return the action block — no hesitation
+2. Use action blocks only for clear action requests, not greetings, reactions, drafts, explanations, or vague intent.
 3. Never refuse an action unless it's actively harmful
 4. Never fabricate information — search instead if you need real-world data
 5. Never say you "can't" do something that's in the actions list above
@@ -673,18 +675,20 @@ function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
 }
 
 function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedContentName, baseHistory, userContent }) {
-  const canUseCachedPrompt = Boolean(cachedContentName) && !useSearch;
-  const config = {};
-  if (canUseCachedPrompt) {
-    config.cachedContent = cachedContentName;
-  } else {
-    config.systemInstruction = `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim();
-  }
+  // Keep control instructions authoritative. Cached prompts force dynamic rules into
+  // conversation content, which is too weak for tool use and factuality.
+  const canUseCachedPrompt = false;
+  const config = {
+    systemInstruction: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
+    temperature: useSearch ? 0.1 : 0.2,
+    topP: 0.8,
+    topK: 20
+  };
   if (useSearch) config.tools = [{ googleSearch: {} }];
   const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
   if (isQuickTurnMessage(firstUserText)) {
     config.maxOutputTokens = 32;
-    config.temperature = 0.5;
+    config.temperature = 0.1;
   }
 
   const dynamicContextParts = canUseCachedPrompt
@@ -1749,8 +1753,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       });
       finalSpoken = parseActions(followUp.text || '').spoken || context;
     }
-    const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
-    if (conciseActionConfirmation) finalSpoken = conciseActionConfirmation;
+    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
+    if (actionConfirmation) finalSpoken = actionConfirmation;
     audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
       ttsError = err.message;
       console.error('[tts error]', err.message);
@@ -1859,8 +1863,8 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
       });
       spoken = parseActions(followUp.text || '').spoken || spoken || context;
     }
-    const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
-    if (conciseActionConfirmation) spoken = conciseActionConfirmation;
+    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
+    if (actionConfirmation) spoken = actionConfirmation;
 
     if (!spoken) {
       spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
@@ -2477,6 +2481,20 @@ function summarizeCompletedActionsConcise(actionResults) {
     .join('; ')}.`;
 }
 
+function summarizeFinishedActionsForUser(actionResults) {
+  if (!actionResults.length) return '';
+  const failures = actionResults.filter(entry => entry?.result?.success === false);
+  if (failures.length) {
+    return failures
+      .map(entry => {
+        const error = entry?.result?.error || 'That action failed.';
+        return `${humanizeActionType(entry.action)} failed: ${error}`;
+      })
+      .join('\n');
+  }
+  return summarizeCompletedActionsConcise(actionResults);
+}
+
 function buildStructuredDataSummary(entry) {
   const result = entry?.result || {};
   if (entry?.action === 'get_emails' || entry?.action === 'search_emails') {
@@ -2639,7 +2657,6 @@ app.post('/chat', async (req, res) => {
             const visibleChunk = nextVisibleText.slice(lastVisibleText.length);
             lastVisibleText = nextVisibleText;
             if (visibleChunk) sse({ type: 'text', chunk: visibleChunk });
-            if (ttsStreamer) ttsStreamer.ingest(nextVisibleText);
           }
         }
         trace.log('gemini.initial_complete');
@@ -2698,8 +2715,13 @@ app.post('/chat', async (req, res) => {
           }
           spoken = parseActions(spoken).spoken || spoken || context;
         }
-        const conciseActionConfirmation = summarizeCompletedActionsConcise(actionResults);
-        if (conciseActionConfirmation) spoken = conciseActionConfirmation;
+        const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
+        if (actionConfirmation) {
+          spoken = actionConfirmation;
+          sse({ type: 'replace', text: spoken });
+          sse({ type: 'text', chunk: spoken });
+          if (ttsStreamer) ttsStreamer.ingest(spoken);
+        }
 
         if (!spoken) {
           spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
@@ -2777,6 +2799,8 @@ app.post('/chat', async (req, res) => {
       }));
       spoken = parseActions(followUp.text || '').spoken || context;
     }
+    const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
+    if (actionConfirmation) spoken = actionConfirmation;
 
     if (!spoken) {
       spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'Done.';
