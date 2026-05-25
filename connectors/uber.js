@@ -29,6 +29,26 @@ function destinationLabel(place) {
   return name || area || 'that destination';
 }
 
+function isPlacesSetupError(err) {
+  return /Google Places|Places API|GOOGLE_MAPS_API_KEY|PERMISSION_DENIED|REQUEST_DENIED/i.test(String(err?.message || err || ''));
+}
+
+function fallbackUberLink(destination) {
+  const enc = encodeURIComponent;
+  const query = [
+    'action=setPickup',
+    'pickup=my_location',
+    `dropoff[formatted_address]=${enc(destination)}`
+  ].join('&');
+  return {
+    success: true,
+    text: `Opening Uber to search for ${destination}. Confirm the exact destination in Uber.`,
+    cardText: 'Confirm destination in Uber',
+    deepLink: `uber://?${query}`,
+    webLink: `https://m.uber.com/ul/?${query}`
+  };
+}
+
 async function execute(userId, action, params) {
   try {
     switch (action) {
@@ -39,7 +59,13 @@ async function execute(userId, action, params) {
         }
 
         const enc = encodeURIComponent;
-        const destCoords = await resolvePlaceDestination(destination, { location: params.location });
+        let destCoords;
+        try {
+          destCoords = await resolvePlaceDestination(destination, { location: params.location });
+        } catch (err) {
+          if (isPlacesSetupError(err)) return fallbackUberLink(destination);
+          throw err;
+        }
 
         // URLSearchParams percent-encodes brackets, breaking Uber's deep link format.
         // Build the query string manually so pickup[latitude] etc. stay literal.

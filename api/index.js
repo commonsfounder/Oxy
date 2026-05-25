@@ -382,7 +382,7 @@ If key details are missing, ask for the smallest missing detail instead of inven
     {"type": "play_music", "input": {"query": "search term"}},
     {"type": "create_calendar_event", "input": {"title": "event", "start_date": "ISO date", "end_date": "ISO date"}},
     {"type": "get_calendar_events", "input": {"max_results": 5}},
-    {"type": "send_email", "input": {"to": "email", "subject": "specific subject", "body": "specific complete email body based on the user's provided content"}},
+    {"type": "send_email", "input": {"to": "email", "subject": "optional subject inferred from the user's message if omitted", "body": "specific complete email body based on the user's provided content"}},
     {"type": "get_emails", "input": {"max_results": 5}},
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
     {"type": "book_uber", "input": {"destination": "natural place or address phrase"}},
@@ -424,6 +424,7 @@ ABSOLUTE RULES:
 17. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
 18. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email.
 19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
+19a. If the user says "email X saying Y" or otherwise gives the message content, use that content. Do not ask for a subject; infer a short subject if the user did not provide one.
 20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
 21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
 22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
@@ -2931,7 +2932,7 @@ function userFacingActionFailure(entry) {
   const rawError = String(entry?.result?.error || '').trim();
   if (action === 'book_uber' || action === 'find_place') {
     if (/Google Places is not ready|Places API|Google Places is not configured/i.test(rawError)) {
-      return 'Google Places is not ready on the server. Enable Places API for the Google Maps key.';
+      return 'Nearby place ranking needs Google Places enabled on the server. Uber itself does not need an API key.';
     }
     if (/need your current location|enable location/i.test(rawError)) {
       return 'I need your current location to find that nearby place. Enable location and try again.';

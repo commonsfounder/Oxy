@@ -111,7 +111,7 @@ function isGenericPlaceholderEmail(subject, body) {
     .replace(/best regards,?\s*$/i, '')
     .trim();
 
-  if (normalizedBody.length < 120) return true;
+  if (normalizedBody.length < 8) return true;
   if (/^(formal introduction|hello|greetings|introduction)$/.test(normalizedSubject)) return true;
   if (
     bodyWithoutGreeting.includes('i hope this email finds you well') &&
@@ -121,6 +121,17 @@ function isGenericPlaceholderEmail(subject, body) {
     return true;
   }
   return false;
+}
+
+function inferEmailSubject(body, fallback = 'Quick note') {
+  const cleaned = String(body || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return fallback;
+  const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+  const source = firstSentence || cleaned;
+  const subject = source.length > 54 ? `${source.slice(0, 51).trim()}...` : source;
+  return subject || fallback;
 }
 
 function summarizeEmails(emails = [], emptyText = 'No emails found') {
@@ -154,12 +165,14 @@ async function execute(userId, action, params) {
   try {
     switch (action) {
       case 'send_email': {
-        const { to, subject, body } = params;
-        if (!to || !subject || !body) return { success: false, error: 'send_email requires to, subject, and body' };
+        const to = params.to || params.email || params.recipient;
+        const body = params.body || params.message || params.content;
+        const subject = params.subject || inferEmailSubject(body);
+        if (!to || !body) return { success: false, error: 'send_email requires a recipient and message body' };
         if (isGenericPlaceholderEmail(subject, body)) {
           return {
             success: false,
-            error: 'Email content is too generic. Ask the user for the actual message or draft it for approval before sending.'
+            error: 'Email content is too generic. Ask for the actual message before sending.'
           };
         }
         await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',

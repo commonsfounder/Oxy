@@ -115,7 +115,7 @@ struct ActionCard: View {
             }
             if compact.localizedCaseInsensitiveContains("places api") ||
                 compact.localizedCaseInsensitiveContains("google places is not ready") {
-                return "Google Places needs to be enabled on the server."
+                return "Nearby place ranking needs Google Places."
             }
             if compact.localizedCaseInsensitiveContains("nearby match") ||
                 compact.localizedCaseInsensitiveContains("couldn't find a nearby") ||
