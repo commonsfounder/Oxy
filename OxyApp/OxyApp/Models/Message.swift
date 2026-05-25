@@ -45,9 +45,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let error: String?
     let deepLink: String?
     let webLink: String?
+    let cardText: String?
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink
+        case action, result, success, text, error, deepLink, webLink, cardText
     }
 
     init(
@@ -56,7 +57,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         text: String? = nil,
         error: String? = nil,
         deepLink: String? = nil,
-        webLink: String? = nil
+        webLink: String? = nil,
+        cardText: String? = nil
     ) {
         self.action = action
         self.success = success
@@ -64,6 +66,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.error = error
         self.deepLink = deepLink
         self.webLink = webLink
+        self.cardText = cardText
     }
 
     init(from decoder: Decoder) throws {
@@ -76,12 +79,14 @@ struct ActionResult: Codable, Identifiable, Equatable {
             error = try result.decodeIfPresent(String.self, forKey: .error)
             deepLink = try result.decodeIfPresent(String.self, forKey: .deepLink)
             webLink = try result.decodeIfPresent(String.self, forKey: .webLink)
+            cardText = try result.decodeIfPresent(String.self, forKey: .cardText)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
             error = try container.decodeIfPresent(String.self, forKey: .error)
             deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
             webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
+            cardText = try container.decodeIfPresent(String.self, forKey: .cardText)
         }
     }
 
@@ -93,6 +98,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(error, forKey: .error)
         try container.encodeIfPresent(deepLink, forKey: .deepLink)
         try container.encodeIfPresent(webLink, forKey: .webLink)
+        try container.encodeIfPresent(cardText, forKey: .cardText)
     }
 }
 

@@ -31,7 +31,7 @@ final class ChatViewModel {
 
     private static let localRequestTerms = [
         "uber", "ride", "taxi", "nearest", "closest", "near me", "nearby",
-        "mcdonald", "john lewis", "gym", "restaurant", "cafe", "coffee",
+        "place", "maps", "mcdonald", "john lewis", "gym", "restaurant", "cafe", "coffee",
         "shop", "supermarket", "store", "pharmacy", "station", "cinema",
         "bank", "atm"
     ]

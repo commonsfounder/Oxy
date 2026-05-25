@@ -443,19 +443,21 @@ struct Connector: Codable, Identifiable {
 
     var actionLabel: String {
         if connectionState == "needs_reconnect" { return "Reconnect" }
+        if connectionState == "needs_setup" { return "Setup" }
+        if connectionState == "degraded" { return enabled ? "Enabled" : "Enable" }
         return enabled ? "Disconnect" : "Connect"
     }
 
     var actionTint: Color {
         if !implemented { return Color.oxyDim }
-        if connectionState == "needs_reconnect" { return Color.oxyStone }
+        if connectionState == "needs_reconnect" || connectionState == "needs_setup" || connectionState == "degraded" { return Color.oxyStone }
         return enabled ? Color.oxySub : Color.oxyGreen
     }
 
     var statusColor: Color {
         switch connectionState {
         case "connected": return Color.oxyGreen
-        case "needs_reconnect": return Color.oxyStone
+        case "needs_reconnect", "needs_setup", "degraded": return Color.oxyStone
         default: return Color.oxySub
         }
     }

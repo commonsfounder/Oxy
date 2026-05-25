@@ -5,6 +5,7 @@ const deliveroo = require('./deliveroo');
 const netflix = require('./netflix');
 const telegram = require('./telegram');
 const trainline = require('./trainline');
+const maps = require('./maps');
 
 // Registry: action name → connector module
 // To add a new connector: create connectors/myservice.js and register its actions here
@@ -17,9 +18,10 @@ for (const action of deliveroo.SUPPORTED_ACTIONS) registry[action] = deliveroo;
 for (const action of netflix.SUPPORTED_ACTIONS) registry[action] = netflix;
 for (const action of telegram.SUPPORTED_ACTIONS) registry[action] = telegram;
 for (const action of trainline.SUPPORTED_ACTIONS) registry[action] = trainline;
+for (const action of maps.SUPPORTED_ACTIONS) registry[action] = maps;
 
 // Set of connector IDs that have a live implementation
-const IMPLEMENTED_CONNECTORS = new Set(['google', 'uber', 'ubereats', 'deliveroo', 'netflix', 'telegram', 'trainline']);
+const IMPLEMENTED_CONNECTORS = new Set(['google', 'uber', 'ubereats', 'deliveroo', 'netflix', 'telegram', 'trainline', 'maps']);
 
 async function dispatch(userId, action, params) {
   const connector = registry[action];

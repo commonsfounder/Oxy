@@ -9,6 +9,7 @@ const axios = require('axios');
 const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
+const { inferDeterministicAction } = require('./intent-router');
 const {
   createGeminiServiceClient,
   createSupabaseServiceClient,
@@ -385,6 +386,7 @@ If key details are missing, ask for the smallest missing detail instead of inven
     {"type": "get_emails", "input": {"max_results": 5}},
     {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
     {"type": "book_uber", "input": {"destination": "natural place or address phrase"}},
+    {"type": "find_place", "input": {"query": "natural place or address phrase"}},
     {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
     {"type": "get_telegram_contacts", "input": {}},
     {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
@@ -424,7 +426,10 @@ ABSOLUTE RULES:
 19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
 20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
 21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
-22. For Uber/local place requests like "nearest gym to me", pass the user's phrase as the destination and let the Uber/place layer resolve it. Do not invent branch addresses.
+22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
+22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
+22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
+22c. Action risk policy: searches, place lookup, train lookup, and opening apps are low risk; drafting is medium risk; sending messages/emails, spending money, booking rides, or placing orders require a clear user request and must not be inferred from vague curiosity.
 23. Infer the appropriate format from context. The user should not need to specify formatting.
 24. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
 25. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
@@ -492,6 +497,37 @@ function validateActionAgainstUserRequest(action, originalMessage = '') {
     };
   }
   return null;
+}
+
+function buildActionRecovery(action, result) {
+  const type = action?.type || action?.action || '';
+  const error = String(result?.error || '').trim();
+  if (result?.success !== false) return {};
+
+  if ((type === 'find_place' || type === 'book_uber') && /need your current location|enable location/i.test(error)) {
+    return {
+      cardText: 'Enable location and try again.',
+      retryable: true,
+      retryAction: { type, input: action?.input || {} }
+    };
+  }
+
+  if ((type === 'find_place' || type === 'book_uber') && /Places API|Google Places|PERMISSION_DENIED|REQUEST_DENIED/i.test(error)) {
+    return {
+      cardText: 'Places search needs server setup.',
+      retryable: false
+    };
+  }
+
+  if (/No results found|couldn't find a nearby|Geocoding error/i.test(error)) {
+    return {
+      cardText: 'Try a different place name.',
+      retryable: true,
+      retryAction: { type, input: action?.input || {} }
+    };
+  }
+
+  return {};
 }
 
 function pcmToWav(pcmBuffer, sampleRate = 24000) {
@@ -946,6 +982,7 @@ const ACTION_STATUS_LABELS = {
   create_calendar_event: 'Creating calendar event',
   get_calendar_events: 'Checking calendar',
   book_uber: 'Booking Uber',
+  find_place: 'Finding place',
   send_telegram: 'Sending Telegram message',
   get_telegram_contacts: 'Checking Telegram contacts',
   search_trains: 'Checking train times',
@@ -1366,6 +1403,7 @@ async function executeActions(userId, actions, context = {}, trace = null, callb
     const result = validationError || (trace
       ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
       : await executeAction(userId, action.type, action.input || {}, context));
+    Object.assign(result, buildActionRecovery(action, result));
     const insertActionLog = () => supabase.from('action_log').insert({
       user_id: userId,
       action: serializeLoggedAction(action, result),
@@ -1677,7 +1715,7 @@ function buildAvailableActions(enabled) {
     reminders: ['create_reminder'],
     spotify: ['play_music'],
     homekit: ['homekit_control'],
-    maps: ['get_directions'],
+    maps: ['find_place'],
     uber: ['book_uber'],
     ubereats: ['order_uber_eats'],
     netflix: ['search_netflix_title', 'add_to_netflix_list'],
@@ -1689,9 +1727,9 @@ function buildAvailableActions(enabled) {
     trainline: ['search_trains']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
-  if (live.length === 0) return 'No connectors enabled. Only return the action block when asked — the user will handle it manually.';
+  if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, generate_visual, create_diagram, create_presentation.';
   const active = live.flatMap(id => actionMap[id] || []);
-  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
+  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, find_place, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
 }
 
 async function savePreference(userId, key, value) {
@@ -2150,6 +2188,7 @@ const CONNECTORS = [
   { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',          implemented: true },
   { id: 'ubereats',  name: 'Uber Eats',                 icon: 'ubereats', category: 'Food',          implemented: true },
   { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
+  { id: 'maps',      name: 'Maps',                      icon: 'maps', category: 'Travel',        implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
   { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
 ];
@@ -2175,20 +2214,30 @@ app.get('/connectors/:userId', async (req, res) => {
       const enabled = row?.enabled === true;
       const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session);
       const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
+      const needsSetup = c.id === 'maps' && !process.env.GOOGLE_MAPS_API_KEY;
+      const degraded = c.id === 'trainline' && (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY);
       const connectionState = needsReconnect
-          ? 'needs_reconnect'
-          : enabled
-            ? 'connected'
-            : 'available';
+        ? 'needs_reconnect'
+        : needsSetup
+          ? 'needs_setup'
+          : degraded
+            ? 'degraded'
+            : enabled
+              ? 'connected'
+              : 'available';
       return {
         ...c,
         enabled,
         connectionState,
         statusText: connectionState === 'needs_reconnect'
-            ? 'Reconnect needed'
-            : connectionState === 'connected'
-              ? 'Connected'
-              : 'Available'
+          ? 'Reconnect needed'
+          : connectionState === 'needs_setup'
+            ? 'Setup needed'
+            : connectionState === 'degraded'
+              ? 'Fallback only'
+              : connectionState === 'connected'
+                ? 'Connected'
+                : 'Available'
       };
     });
     
@@ -2880,7 +2929,7 @@ function normalizeActionResultsForClient(actionResults) {
 function userFacingActionFailure(entry) {
   const action = entry?.action || '';
   const rawError = String(entry?.result?.error || '').trim();
-  if (action === 'book_uber') {
+  if (action === 'book_uber' || action === 'find_place') {
     if (/Google Places is not ready|Places API|Google Places is not configured/i.test(rawError)) {
       return 'Google Places is not ready on the server. Enable Places API for the Google Maps key.';
     }
@@ -3052,6 +3101,70 @@ app.post('/chat', async (req, res) => {
       return res.json(result);
     }
 
+    const deterministicAction = inferDeterministicAction(message);
+    if (deterministicAction) {
+      trace.log(`intent_router.match ${deterministicAction.reason}`);
+
+      if (streaming) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+        const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
+        sendStatus('action_start', getActionStatusLabel(deterministicAction.actions[0].type, 'start'), { action: deterministicAction.actions[0].type });
+        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location }, trace, {
+          onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
+            action: action.type,
+            success: result?.success !== false
+          })
+        });
+        actionResults = normalizeActionResultsForClient(actionResults);
+        const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
+        sse({ type: 'actions', results: actionResults });
+        sse({ type: 'replace', text: spoken });
+        if (wantsTTS) {
+          try {
+            const audio = await trace.run('gemini.tts.generateSpeech.intent_router', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+            if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
+          } catch (ttsErr) {
+            console.error('[tts error]', ttsErr.message);
+            sse({ type: 'tts-error', error: ttsErr.message });
+          }
+        }
+        sse({ type: 'done' });
+        res.end();
+
+        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+          .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
+        postResponseTasks(userId, message);
+        return;
+      }
+
+      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location }, trace);
+      actionResults = normalizeActionResultsForClient(actionResults);
+      const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
+      saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+        .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
+      const result = { text: spoken, actions: actionResults };
+      if (wantsTTS) {
+        try {
+          const audio = await trace.run('gemini.tts.generateSpeech.intent_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+          if (audio) {
+            result.audio = audio;
+            result.audioFormat = 'wav';
+            result.audioMimeType = 'audio/wav';
+          }
+        } catch (ttsErr) {
+          console.error('[tts error]', ttsErr.message);
+          result.ttsError = ttsErr.message;
+        }
+      }
+      res.json(result);
+      postResponseTasks(userId, message);
+      return;
+    }
+
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
     const requestContext = { location };
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
@@ -3126,7 +3239,6 @@ app.post('/chat', async (req, res) => {
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
           sse({ type: 'replace', text: spoken });
-          sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
           sse({ type: 'replace', text: '' });
@@ -3159,10 +3271,9 @@ app.post('/chat', async (req, res) => {
           spoken = parseActions(spoken).spoken || spoken || context;
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
-        if (actionConfirmation) {
+        if (actionConfirmation && actionConfirmation !== spoken) {
           spoken = actionConfirmation;
           sse({ type: 'replace', text: spoken });
-          sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
 

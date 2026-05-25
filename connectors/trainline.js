@@ -165,6 +165,8 @@ async function execute(userId, action, params) {
       return {
         success: true,
         text: `I couldn't check live departures for ${origin} to ${destination} because live rail data isn't configured right now. I can still open Trainline for the route.`,
+        cardText: 'Open route in Trainline',
+        webLink: bookingUrl,
         bookingUrl
       };
     }
@@ -175,6 +177,8 @@ async function execute(userId, action, params) {
       return {
         success: true,
         text: `I couldn't access live departures for ${origin} to ${destination} with the current rail data permissions, but I can open the route in Trainline for you.`,
+        cardText: 'Open route in Trainline',
+        webLink: bookingUrl,
         bookingUrl,
         trains: []
       };
@@ -184,6 +188,8 @@ async function execute(userId, action, params) {
       return {
         success: true,
         text: `I couldn't find any matching live departures from ${origin} to ${destination} in the current feed. That doesn't necessarily mean there are no trains at all, so I've included Trainline to double-check.`,
+        cardText: 'Open route in Trainline',
+        webLink: bookingUrl,
         bookingUrl
       };
     }
@@ -206,6 +212,8 @@ async function execute(userId, action, params) {
       success: true,
       text: `Next trains from ${origin} to ${destination}:\n${lines.join('\n')}`,
       trains,
+      cardText: 'Open route in Trainline',
+      webLink: bookingUrl,
       bookingUrl,
     };
   } catch (err) {

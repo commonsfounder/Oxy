@@ -104,7 +104,7 @@ struct ActionCard: View {
     }
 
     private var detailText: String? {
-        guard let raw = action.text ?? action.error else { return nil }
+        guard let raw = action.cardText ?? action.text ?? action.error else { return nil }
         let compact = raw
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
@@ -195,6 +195,7 @@ struct ActionCard: View {
         case "send_email", "get_emails", "search_emails": return "envelope.fill"
         case "create_calendar_event", "get_calendar_events": return "calendar"
         case "book_uber": return "car.fill"
+        case "find_place": return "map.fill"
         case "send_telegram", "get_telegram_contacts": return "paperplane.fill"
         case "search_trains": return "tram.fill"
         case "order_uber_eats", "order_deliveroo": return "fork.knife"
