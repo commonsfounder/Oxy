@@ -878,13 +878,13 @@ final class NativeIntegrationManager {
 
         func hint(from contact: CNContact) -> NativeContactHint {
             let names = [
+                "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
                 contact.givenName,
                 contact.familyName,
-                "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
                 contact.nickname
             ].filter { !$0.isEmpty }
             return NativeContactHint(
-                displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
+                displayName: names.first ?? "Contact",
                 phone: contact.phoneNumbers.first?.value.stringValue,
                 email: contact.emailAddresses.first.map { String($0.value) }
             )
