@@ -689,6 +689,14 @@ Longitude: ${lng}
 Use these coordinates for "near me", "nearest", "closest", pickup, traffic, and local place requests. Do not invent a place; use a tool/action that can resolve it.`;
 }
 
+function buildPendingActionContext(pendingAction) {
+  if (!pendingAction?.action) return '';
+  return `PENDING ACTION AWAITING REVIEW:
+${JSON.stringify(pendingAction.action, null, 2)}
+
+If the user is revising it, return the full revised action block and keep it in review. Do not execute, send, book, call, or order until they confirm. If the user is asking a question about it, answer briefly without returning an action.`;
+}
+
 function buildQuickTurnContext(preferences, statedContext = []) {
   return `FAST TURN MODE:
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
@@ -1678,12 +1686,24 @@ async function clearPendingAction(userId) {
 }
 
 function isPendingConfirmMessage(message) {
-  return /^(yes|yeah|yep|ok|okay|sure|confirm|send it|send|go ahead|do it|book it|order it|call|call them|open it|proceed)$/i
-    .test(String(message || '').trim());
+  const text = String(message || '').trim().toLowerCase();
+  if (!text) return false;
+  if (/\b(wait|hold on|actually|change|edit|instead|but|before|not yet|don't|do not|stop|cancel)\b/i.test(text)) {
+    return false;
+  }
+  return /^(yes|yeah|yep|yup|ok|okay|sure|confirm|confirmed|approve|approved|proceed)$/i.test(text) ||
+    /\b(yes please|looks good|go ahead|do it|send it|send now|book it|order it|call them|open it|that's fine|that is fine|all good)\b/i.test(text);
 }
 
 function isPendingCancelMessage(message) {
-  return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it)$/i
+  const text = String(message || '').trim();
+  return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it|not now|not yet)$/i
+    .test(text) ||
+    /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text);
+}
+
+function isPendingRevisionMessage(message) {
+  return /\b(change|edit|rewrite|make it|instead|actually|wait|hold on|tone|shorter|longer|more|less|add|remove|don't|do not)\b/i
     .test(String(message || '').trim());
 }
 
@@ -1725,7 +1745,7 @@ function buildPendingReviewResult(action) {
   return applyActionContractResultMetadata(action, {
     success: true,
     pending: true,
-    text: `${reviewTitleForAction(action)}. Say "confirm" to continue or "cancel" to stop.`,
+    text: `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`,
     cardText: reviewDetailForAction(action) || 'Ready for review.',
     actionSummary: reviewTitleForAction(action),
     risk: contract.risk || 'high',
@@ -2657,7 +2677,7 @@ function needsSearch(message) {
 
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
-  const quickTurn = isQuickTurnMessage(message);
+  const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
     getHistory(userId, trace),
@@ -2674,7 +2694,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
       memory,
       preferences,
       availableActions,
-      [userContext, buildLocationContext(requestContext.location)].filter(Boolean).join('\n\n'),
+      [userContext, buildLocationContext(requestContext.location), buildPendingActionContext(requestContext.pendingAction)].filter(Boolean).join('\n\n'),
       statedContext
     );
   const searchReason = getSearchReason(message);
@@ -3338,7 +3358,10 @@ app.post('/chat', async (req, res) => {
     }
 
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
-    const requestContext = { location };
+    const requestContext = {
+      location,
+      pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
+    };
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({

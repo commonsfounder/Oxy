@@ -131,8 +131,21 @@ struct ActionCard: View {
     }
 
     var body: some View {
-        Button(action: openLink) {
-            VStack(alignment: .leading, spacing: action.pending ? 10 : 0) {
+        Group {
+            if action.pending {
+                cardContent
+            } else {
+                Button(action: openLink) {
+                    cardContent
+                }
+                .buttonStyle(.plain)
+                .disabled(!hasLink)
+            }
+        }
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: action.pending ? 10 : 0) {
             HStack(spacing: 10) {
                 Image(systemName: action.success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .font(.system(size: 16, weight: .semibold))
@@ -165,48 +178,45 @@ struct ActionCard: View {
                 }
             }
 
-                if action.pending, let onCommand {
-                    HStack(spacing: 8) {
-                        Button {
-                            onCommand("confirm")
-                        } label: {
-                            Label("Confirm", systemImage: "checkmark")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.oxyBg)
-                        .padding(.vertical, 8)
-                        .background(Color.oxyStone)
-                        .clipShape(RoundedRectangle(cornerRadius: 9))
-
-                        Button {
-                            onCommand("cancel")
-                        } label: {
-                            Label("Cancel", systemImage: "xmark")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(Color.oxySub)
-                        .padding(.vertical, 8)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 9))
+            if action.pending, let onCommand {
+                HStack(spacing: 8) {
+                    Button {
+                        onCommand("confirm")
+                    } label: {
+                        Label("Confirm", systemImage: "checkmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.oxyBg)
+                    .padding(.vertical, 8)
+                    .background(Color.oxyStone)
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+
+                    Button {
+                        onCommand("cancel")
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.oxySub)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(action.success ? Color.white.opacity(0.08) : Color.oxyRed.opacity(0.22), lineWidth: 1)
-            )
-            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
         }
-        .buttonStyle(.plain)
-        .disabled(!hasLink && !action.pending)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(action.success ? Color.white.opacity(0.08) : Color.oxyRed.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
     }
 
     private func openLink() {
