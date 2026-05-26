@@ -4,6 +4,7 @@ struct MessageBubble: View {
     let message: Message
     var showsTypingIndicator: Bool = true
     var onActionCommand: ((String) -> Void)? = nil
+    var onOpenAction: ((ActionResult) -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
     private var bubbleStyle: String {
@@ -77,7 +78,7 @@ struct MessageBubble: View {
             if !message.actions.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(message.actions) { action in
-                        ActionCard(action: action, onCommand: onActionCommand)
+                        ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                     }
                 }
             }
@@ -109,6 +110,7 @@ struct MessageBubble: View {
 struct ActionCard: View {
     let action: ActionResult
     var onCommand: ((String) -> Void)? = nil
+    var onOpenAction: ((ActionResult) -> Void)? = nil
 
     private var hasLink: Bool {
         action.deepLink != nil || action.webLink != nil
@@ -229,6 +231,10 @@ struct ActionCard: View {
 
     private func openLink() {
         guard !action.pending else { return }
+        if let onOpenAction {
+            onOpenAction(action)
+            return
+        }
         if let link = action.deepLink, let url = URL(string: link) {
             UIApplication.shared.open(url)
         } else if let link = action.webLink, let url = URL(string: link) {

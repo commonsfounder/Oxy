@@ -1,3 +1,4 @@
+import MessageUI
 import SwiftUI
 
 struct ChatView: View {
@@ -8,6 +9,8 @@ struct ChatView: View {
     @State private var showSearch = false
     @State private var isIncognito = false
     @State private var pendingReviewAction: ActionResult?
+    @State private var messageDraft: MessageDraft?
+    @State private var messageComposerAlert: String?
     @State private var handledReviewActionIDs = Set<String>()
 
     var body: some View {
@@ -49,6 +52,9 @@ struct ChatView: View {
                                         showsTypingIndicator: viewModel.statusLabel == nil,
                                         onActionCommand: { command in
                                             viewModel.sendCommand(command, userId: appState.userId)
+                                        },
+                                        onOpenAction: { action in
+                                            handleActionOpen(action)
                                         }
                                     )
                                         .id(message.id)
@@ -228,6 +234,20 @@ struct ChatView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
+            .sheet(item: $messageDraft) { draft in
+                MessageComposeSheet(draft: draft) { result in
+                    messageDraft = nil
+                    handleMessageComposeResult(result)
+                }
+            }
+            .alert("Messages unavailable", isPresented: Binding(
+                get: { messageComposerAlert != nil },
+                set: { if !$0 { messageComposerAlert = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(messageComposerAlert ?? "")
+            }
             .onChange(of: pendingReviewAction) { oldValue, newValue in
                 if let oldValue, newValue == nil {
                     handledReviewActionIDs.insert(oldValue.id)
@@ -252,6 +272,95 @@ struct ChatView: View {
         }
         handledReviewActionIDs.insert(action.id)
         pendingReviewAction = action
+    }
+
+    private func handleActionOpen(_ action: ActionResult) {
+        if action.action == "send_message", let draft = MessageDraft(action: action) {
+            presentMessageDraft(draft)
+            return
+        }
+        viewModel.openActionLink(action)
+    }
+
+    private func presentMessageDraft(_ draft: MessageDraft) {
+        guard MFMessageComposeViewController.canSendText() else {
+            messageComposerAlert = "This device cannot send text messages from an in-app composer."
+            return
+        }
+        messageDraft = draft
+    }
+
+    private func handleMessageComposeResult(_ result: MessageComposeResult) {
+        switch result {
+        case .sent:
+            viewModel.statusLabel = "Message sent"
+        case .cancelled:
+            viewModel.statusLabel = nil
+        case .failed:
+            viewModel.statusLabel = "Message failed"
+        @unknown default:
+            viewModel.statusLabel = nil
+        }
+    }
+}
+
+struct MessageDraft: Identifiable, Equatable {
+    let id = UUID()
+    let recipients: [String]
+    let body: String
+
+    init(recipients: [String], body: String) {
+        self.recipients = recipients
+        self.body = body
+    }
+
+    init?(action: ActionResult) {
+        guard let link = action.deepLink ?? action.webLink,
+              let components = URLComponents(string: link),
+              components.scheme == "sms" else { return nil }
+        let recipient = components.path.removingPercentEncoding ?? components.path
+        let body = components.queryItems?.first(where: { $0.name == "body" })?.value ?? ""
+        guard !recipient.isEmpty || !body.isEmpty else { return nil }
+        self.recipients = recipient.isEmpty ? [] : [recipient]
+        self.body = body
+    }
+}
+
+private struct MessageComposeSheet: UIViewControllerRepresentable {
+    let draft: MessageDraft
+    let onFinish: @MainActor @Sendable (MessageComposeResult) -> Void
+
+    func makeUIViewController(context: Context) -> MFMessageComposeViewController {
+        let controller = MFMessageComposeViewController()
+        controller.messageComposeDelegate = context.coordinator
+        controller.recipients = draft.recipients
+        controller.body = draft.body
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: MFMessageComposeViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onFinish: onFinish)
+    }
+
+    final class Coordinator: NSObject, MFMessageComposeViewControllerDelegate {
+        let onFinish: @MainActor @Sendable (MessageComposeResult) -> Void
+
+        init(onFinish: @escaping @MainActor @Sendable (MessageComposeResult) -> Void) {
+            self.onFinish = onFinish
+        }
+
+        func messageComposeViewController(
+            _ controller: MFMessageComposeViewController,
+            didFinishWith result: MessageComposeResult
+        ) {
+            let finish = onFinish
+            MainActor.assumeIsolated {
+                controller.dismiss(animated: true)
+                finish(result)
+            }
+        }
     }
 }
 

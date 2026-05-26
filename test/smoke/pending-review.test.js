@@ -12,6 +12,8 @@ const {
 test('pending review accepts natural confirmation phrases', () => {
   assert.equal(isPendingConfirmMessage('yes please'), true);
   assert.equal(isPendingConfirmMessage('looks good send it'), true);
+  assert.equal(isPendingConfirmMessage('send the message'), true);
+  assert.equal(isPendingConfirmMessage('send that message'), true);
   assert.equal(isPendingConfirmMessage('go ahead'), true);
 });
 

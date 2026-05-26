@@ -29,7 +29,7 @@ final class ChatViewModel {
     private static let autoOpenActions: Set<String> = [
         "book_uber", "order_deliveroo", "order_uber_eats",
         "play_music", "search_netflix_title", "add_to_netflix_list",
-        "send_message", "make_call"
+        "make_call"
     ]
 
     private static let localRequestTerms = [
@@ -219,11 +219,15 @@ final class ChatViewModel {
         if currentSettings.reviewBeforeOpeningApps { return }
         for result in results {
             guard Self.autoOpenActions.contains(result.action) else { continue }
-            if let link = result.deepLink, let url = URL(string: link) {
-                UIApplication.shared.open(url)
-            } else if let link = result.webLink, let url = URL(string: link) {
-                UIApplication.shared.open(url)
-            }
+            openActionLink(result)
+        }
+    }
+
+    func openActionLink(_ result: ActionResult) {
+        if let link = result.deepLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else if let link = result.webLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
         }
     }
 

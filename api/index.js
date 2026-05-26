@@ -1339,7 +1339,9 @@ async function executeAction(userId, action, params, context = {}) {
       if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
       return {
         success: true,
-        text: `Opening Messages for ${contact}. Review and send it in Messages.`,
+        text: `Message ready for ${contact}. Review and tap Send.`,
+        cardText: `To ${contact} · ${message}`,
+        actionSummary: 'Message ready',
         deepLink: `sms:${encodeURIComponent(contact)}&body=${encodeURIComponent(message)}`
       };
     }
