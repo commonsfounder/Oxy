@@ -977,7 +977,12 @@ const ACTION_STATUS_LABELS = {
 function getActionStatusLabel(actionType, phase = 'start') {
   const base = ACTION_STATUS_LABELS[actionType] || humanizeActionType(actionType);
   if (phase === 'complete') return `${base} complete`;
+  if (phase === 'failed') return `${base} failed`;
   return base;
+}
+
+function actionCompletionPhase(result) {
+  return result?.success === false ? 'failed' : 'complete';
 }
 
 async function* generateSpeechStream(text, voiceName = 'Aoede') {
@@ -1317,6 +1322,45 @@ Return strict JSON:
   };
 }
 
+function normalizeContactLookup(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9+@.]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function looksLikeMessageAddress(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  return /^\+?[0-9][0-9\s().-]{5,}$/.test(text) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
+}
+
+function resolveNativeMessageContact(contact, nativeHints) {
+  if (looksLikeMessageAddress(contact)) {
+    return { label: contact, value: contact };
+  }
+  const normalizedContact = normalizeContactLookup(contact);
+  const contacts = Array.isArray(nativeHints?.contacts) ? nativeHints.contacts : [];
+  const match = contacts.find(candidate => {
+    const names = [
+      candidate.displayName,
+      candidate.phone,
+      candidate.email
+    ].map(normalizeContactLookup).filter(Boolean);
+    return names.some(name => (
+      name === normalizedContact ||
+      name.includes(normalizedContact) ||
+      normalizedContact.includes(name)
+    ));
+  });
+  const value = match?.phone || match?.email || '';
+  return {
+    label: match?.displayName || contact,
+    value: looksLikeMessageAddress(value) ? value : ''
+  };
+}
+
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
@@ -1338,12 +1382,19 @@ async function executeAction(userId, action, params, context = {}) {
       const contact = String(params?.contact || '').trim();
       const message = String(params?.message || '').trim();
       if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
+      const resolvedContact = resolveNativeMessageContact(contact, context.nativeHints);
+      if (!resolvedContact.value) {
+        return {
+          success: false,
+          error: `I need a phone number for ${contact}. Turn on Contacts access for Oxy or include the number.`
+        };
+      }
       return {
         success: true,
-        text: `Message ready for ${contact}. Review and tap Send.`,
-        cardText: `To ${contact} · ${message}`,
+        text: `Message ready for ${resolvedContact.label}. Review and tap Send.`,
+        cardText: `To ${resolvedContact.label} · ${message}`,
         actionSummary: 'Message ready',
-        deepLink: `sms:${encodeURIComponent(contact)}?&body=${encodeURIComponent(message)}`
+        deepLink: `sms:${encodeURIComponent(resolvedContact.value)}?&body=${encodeURIComponent(message)}`
       };
     }
     case 'make_call': {
@@ -1718,7 +1769,8 @@ async function setPendingAction(userId, action, context = {}) {
   const payload = {
     action,
     createdAt: new Date().toISOString(),
-    userMessage: context.userMessage || ''
+    userMessage: context.userMessage || '',
+    nativeHints: context.nativeHints || null
   };
   await setPreferenceValue(userId, PENDING_ACTION_PREF, JSON.stringify(payload));
   return payload;
@@ -3278,6 +3330,7 @@ app.post('/chat', async (req, res) => {
       let actionResults = await executeActions(userId, [pendingAction.action], {
         userMessage: pendingAction.userMessage || message,
         location,
+        nativeHints: pendingAction.nativeHints || nativeHints,
         bypassReview: true,
         trace
       }, trace);
@@ -3355,8 +3408,8 @@ app.post('/chat', async (req, res) => {
         const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
         sendStatus('action_start', getActionStatusLabel(deterministicAction.actions[0].type, 'start'), { action: deterministicAction.actions[0].type });
-        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, trace }, trace, {
-          onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
+        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace }, trace, {
+          onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
             action: action.type,
             success: result?.success !== false
           })
@@ -3383,7 +3436,7 @@ app.post('/chat', async (req, res) => {
         return;
       }
 
-      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, trace }, trace);
+      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
       const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
       saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
@@ -3502,9 +3555,9 @@ app.post('/chat', async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, { userMessage: message, location, trace }, trace, {
+          actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
-            onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
+            onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
               action: action.type,
               success: result?.success !== false
             })
@@ -3618,7 +3671,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { userMessage: message, location, trace }, trace);
+      actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 

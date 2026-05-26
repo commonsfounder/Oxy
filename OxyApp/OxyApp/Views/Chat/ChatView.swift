@@ -395,7 +395,7 @@ private struct MessageComposeSheet: UIViewControllerRepresentable {
             didFinishWith result: MessageComposeResult
         ) {
             let finish = onFinish
-            MainActor.assumeIsolated {
+            Task { @MainActor in
                 controller.dismiss(animated: true)
                 finish(result)
             }
