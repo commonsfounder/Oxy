@@ -143,20 +143,11 @@ final class NativeIntegrationManager {
 
     func localContextHints(for message: String) async -> [String: Any] {
         var hints: [String: Any] = [:]
-        let contacts = await contactHints(in: message)
-        if !contacts.isEmpty {
-            hints["contacts"] = contacts.map(\.dictionary)
-        }
-        if let place = await searchPlace(for: message), isLocalPlaceRequest(message) {
-            var placeHint: [String: Any] = [
-                "name": place.name,
-                "address": place.address,
-                "mapURL": place.mapURL.absoluteString
-            ]
-            if let distanceMeters = place.distanceMeters {
-                placeHint["distanceMeters"] = distanceMeters
+        if isContactResolutionRequest(message) {
+            let contacts = await contactHints(in: message)
+            if !contacts.isEmpty {
+                hints["contacts"] = contacts.map(\.dictionary)
             }
-            hints["place"] = placeHint
         }
         return hints
     }
@@ -181,7 +172,7 @@ final class NativeIntegrationManager {
             return result
         }
 
-        if isLocalPlaceRequest(normalized), let result = await findNativePlace(for: normalized) {
+        if shouldUseNativePlaceSearch(normalized), let result = await findNativePlace(for: normalized) {
             return result
         }
 
@@ -332,6 +323,24 @@ final class NativeIntegrationManager {
             || lower.contains("nearby")
             || lower.hasPrefix("where is")
             || lower.hasPrefix("where's")
+    }
+
+    private func shouldUseNativePlaceSearch(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("open maps")
+            || lower.contains("open in maps")
+            || lower.contains("show me on maps")
+            || lower.contains("apple maps")
+    }
+
+    private func isContactResolutionRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("text ")
+            || lower.contains("message ")
+            || lower.contains("call ")
+            || lower.contains("facetime")
+            || lower.contains("email ")
+            || lower.contains("send ")
     }
 
     private func isDirectionsRequest(_ text: String) -> Bool {

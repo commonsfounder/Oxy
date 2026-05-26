@@ -8,7 +8,7 @@ struct ChatView: View {
     @State private var showSearch = false
     @State private var isIncognito = false
     @State private var pendingReviewAction: ActionResult?
-    @State private var dismissedReviewActionIDs = Set<String>()
+    @State private var handledReviewActionIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -215,18 +215,23 @@ struct ChatView: View {
                 ActionReviewSheet(
                     action: action,
                     onConfirm: {
-                        dismissedReviewActionIDs.insert(action.id)
+                        handledReviewActionIDs.insert(action.id)
                         pendingReviewAction = nil
                         viewModel.sendCommand("confirm", userId: appState.userId)
                     },
                     onCancel: {
-                        dismissedReviewActionIDs.insert(action.id)
+                        handledReviewActionIDs.insert(action.id)
                         pendingReviewAction = nil
                         viewModel.sendCommand("cancel", userId: appState.userId)
                     }
                 )
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            }
+            .onChange(of: pendingReviewAction) { oldValue, newValue in
+                if let oldValue, newValue == nil {
+                    handledReviewActionIDs.insert(oldValue.id)
+                }
             }
         }
         .task {
@@ -240,10 +245,12 @@ struct ChatView: View {
     private func presentPendingReviewIfNeeded() {
         guard pendingReviewAction == nil else { return }
         guard let action = viewModel.messages
+            .suffix(3)
             .flatMap(\.actions)
-            .first(where: { $0.pending && !dismissedReviewActionIDs.contains($0.id) }) else {
+            .last(where: { $0.pending && !handledReviewActionIDs.contains($0.id) }) else {
             return
         }
+        handledReviewActionIDs.insert(action.id)
         pendingReviewAction = action
     }
 }

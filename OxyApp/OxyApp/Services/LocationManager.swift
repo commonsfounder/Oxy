@@ -43,8 +43,8 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
         }
     }
 
-    func currentLocationForLocalRequest(timeoutNanoseconds: UInt64 = 2_500_000_000) async -> [String: Double]? {
-        if let lastLocation, abs(lastLocation.timestamp.timeIntervalSinceNow) < 90 {
+    func currentLocationForLocalRequest(timeoutNanoseconds: UInt64 = 900_000_000) async -> [String: Double]? {
+        if let lastLocation, abs(lastLocation.timestamp.timeIntervalSinceNow) < 180 {
             return locationDict
         }
         if !isAuthorized {
