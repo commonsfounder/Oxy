@@ -49,9 +49,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let actionSummary: String?
     let risk: String?
     let confirmation: String?
+    let pending: Bool
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation
+        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending
     }
 
     init(
@@ -64,7 +65,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         cardText: String? = nil,
         actionSummary: String? = nil,
         risk: String? = nil,
-        confirmation: String? = nil
+        confirmation: String? = nil,
+        pending: Bool = false
     ) {
         self.action = action
         self.success = success
@@ -76,6 +78,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.actionSummary = actionSummary
         self.risk = risk
         self.confirmation = confirmation
+        self.pending = pending
     }
 
     init(from decoder: Decoder) throws {
@@ -92,6 +95,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             actionSummary = try result.decodeIfPresent(String.self, forKey: .actionSummary)
             risk = try result.decodeIfPresent(String.self, forKey: .risk)
             confirmation = try result.decodeIfPresent(String.self, forKey: .confirmation)
+            pending = try result.decodeIfPresent(Bool.self, forKey: .pending) ?? false
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -102,6 +106,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             actionSummary = try container.decodeIfPresent(String.self, forKey: .actionSummary)
             risk = try container.decodeIfPresent(String.self, forKey: .risk)
             confirmation = try container.decodeIfPresent(String.self, forKey: .confirmation)
+            pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
         }
     }
 
@@ -117,6 +122,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(actionSummary, forKey: .actionSummary)
         try container.encodeIfPresent(risk, forKey: .risk)
         try container.encodeIfPresent(confirmation, forKey: .confirmation)
+        try container.encode(pending, forKey: .pending)
     }
 }
 

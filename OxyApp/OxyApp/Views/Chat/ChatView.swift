@@ -42,7 +42,13 @@ struct ChatView: View {
                                 }
 
                                 ForEach(viewModel.messages) { message in
-                                    MessageBubble(message: message, showsTypingIndicator: viewModel.statusLabel == nil)
+                                    MessageBubble(
+                                        message: message,
+                                        showsTypingIndicator: viewModel.statusLabel == nil,
+                                        onActionCommand: { command in
+                                            viewModel.sendCommand(command, userId: appState.userId)
+                                        }
+                                    )
                                         .id(message.id)
                                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                                 }

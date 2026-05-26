@@ -148,6 +148,12 @@ final class ChatViewModel {
         }
     }
 
+    func sendCommand(_ command: String, userId: String) {
+        guard !isSending else { return }
+        inputText = command
+        sendMessage(userId: userId)
+    }
+
     func clearChat() {
         messages.removeAll()
         inputText = ""
