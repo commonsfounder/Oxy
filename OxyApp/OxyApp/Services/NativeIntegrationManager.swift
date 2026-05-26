@@ -536,18 +536,19 @@ final class NativeIntegrationManager {
             request.region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
         }
         let mode = transportMode(for: message)
-        let launchOptions: [String: Any] = [MKLaunchOptionsDirectionsModeKey: mode]
         let response = try? await MKLocalSearch(request: request).start()
         let item = response?.mapItems.first
-        if let item {
-            item.openInMaps(launchOptions: launchOptions)
-        } else if let url = appleDirectionsURL(destination: destination, mode: mode) {
-            await UIApplication.shared.open(url)
-        }
+        let destinationName = item?.name ?? destination
+        let address = item.map { mapItemAddress($0) } ?? ""
+        let detailParts = [
+            directionsModeLabel(mode).capitalized,
+            destinationName,
+            address.isEmpty ? nil : address
+        ].compactMap { $0 }
         return NativeLocalActionResult(
             action: "get_directions",
-            text: "Opening \(directionsModeLabel(mode)) directions to \(item?.name ?? destination).",
-            cardText: "Open \(directionsModeLabel(mode)) directions in Maps",
+            text: "\(directionsModeLabel(mode).capitalized) directions to \(destinationName) are ready.",
+            cardText: detailParts.joined(separator: " · "),
             actionSummary: "Directions ready",
             deepLink: appleDirectionsURL(destination: item?.placemark.title ?? destination, mode: mode)?.absoluteString
         )
@@ -637,6 +638,13 @@ final class NativeIntegrationManager {
         default: flag = "d"
         }
         return URL(string: "https://maps.apple.com/?daddr=\(encoded)&dirflg=\(flag)")
+    }
+
+    private func mapItemAddress(_ item: MKMapItem) -> String {
+        let placemark = item.placemark
+        return [placemark.thoroughfare, placemark.locality, placemark.postalCode]
+            .compactMap { $0 }
+            .joined(separator: ", ")
     }
 
     private func createNativeReminder(from message: String) async -> NativeLocalActionResult? {
