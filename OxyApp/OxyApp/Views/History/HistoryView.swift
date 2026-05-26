@@ -49,7 +49,6 @@ struct HistoryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .task {
                 await loadActions()
             }

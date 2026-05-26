@@ -1,46 +1,55 @@
 import SwiftUI
+import UIKit
 
 extension Color {
-    /// Background — #0C0C0C
+    /// Background. Dark stays true black; Light/System adapt to the user's appearance.
     static var oxyBg: Color {
-        oxyTheme == "softDark"
-            ? Color(red: 17/255, green: 18/255, blue: 20/255)
-            : Color(red: 12/255, green: 12/255, blue: 12/255)
+        dynamicColor(light: UIColor(red: 247/255, green: 247/255, blue: 244/255, alpha: 1),
+                     dark: UIColor(red: 12/255, green: 12/255, blue: 12/255, alpha: 1))
     }
-    /// Surface 1 — #151515
+    /// Surface 1.
     static var oxySurface1: Color {
-        oxyTheme == "softDark"
-            ? Color(red: 25/255, green: 27/255, blue: 30/255)
-            : Color(red: 21/255, green: 21/255, blue: 21/255)
+        dynamicColor(light: UIColor(red: 255/255, green: 255/255, blue: 252/255, alpha: 1),
+                     dark: UIColor(red: 21/255, green: 21/255, blue: 21/255, alpha: 1))
     }
-    /// Surface 2 — #1E1E1E
+    /// Surface 2.
     static var oxySurface2: Color {
-        oxyTheme == "softDark"
-            ? Color(red: 34/255, green: 37/255, blue: 41/255)
-            : Color(red: 30/255, green: 30/255, blue: 30/255)
+        dynamicColor(light: UIColor(red: 239/255, green: 239/255, blue: 235/255, alpha: 1),
+                     dark: UIColor(red: 30/255, green: 30/255, blue: 30/255, alpha: 1))
     }
-    /// Surface 3 — #282828
+    /// Surface 3.
     static var oxySurface3: Color {
-        oxyTheme == "softDark"
-            ? Color(red: 45/255, green: 49/255, blue: 54/255)
-            : Color(red: 40/255, green: 40/255, blue: 40/255)
+        dynamicColor(light: UIColor(red: 226/255, green: 226/255, blue: 221/255, alpha: 1),
+                     dark: UIColor(red: 40/255, green: 40/255, blue: 40/255, alpha: 1))
     }
-    /// Surface 4 — #333333
+    /// Surface 4.
     static var oxySurface4: Color {
-        oxyTheme == "softDark"
-            ? Color(red: 57/255, green: 62/255, blue: 68/255)
-            : Color(red: 51/255, green: 51/255, blue: 51/255)
+        dynamicColor(light: UIColor(red: 211/255, green: 211/255, blue: 205/255, alpha: 1),
+                     dark: UIColor(red: 51/255, green: 51/255, blue: 51/255, alpha: 1))
     }
-    /// Line — rgba(255,255,255,0.06)
-    static let oxyLine = Color.white.opacity(0.06)
-    /// Line 2 — rgba(255,255,255,0.10)
-    static let oxyLine2 = Color.white.opacity(0.10)
-    /// Primary text — #F2F2F2
-    static let oxyText = Color(red: 242/255, green: 242/255, blue: 242/255)
-    /// Subtitle — #888888
-    static let oxySub = Color(red: 136/255, green: 136/255, blue: 136/255)
-    /// Dim — #505050
-    static let oxyDim = Color(red: 80/255, green: 80/255, blue: 80/255)
+    static var oxyLine: Color {
+        dynamicColor(light: UIColor.black.withAlphaComponent(0.08),
+                     dark: UIColor.white.withAlphaComponent(0.06))
+    }
+    static var oxyLine2: Color {
+        dynamicColor(light: UIColor.black.withAlphaComponent(0.12),
+                     dark: UIColor.white.withAlphaComponent(0.10))
+    }
+    static var oxyText: Color {
+        dynamicColor(light: UIColor(red: 22/255, green: 22/255, blue: 21/255, alpha: 1),
+                     dark: UIColor(red: 242/255, green: 242/255, blue: 242/255, alpha: 1))
+    }
+    static var oxySub: Color {
+        dynamicColor(light: UIColor(red: 99/255, green: 99/255, blue: 94/255, alpha: 1),
+                     dark: UIColor(red: 136/255, green: 136/255, blue: 136/255, alpha: 1))
+    }
+    static var oxyDim: Color {
+        dynamicColor(light: UIColor(red: 145/255, green: 145/255, blue: 138/255, alpha: 1),
+                     dark: UIColor(red: 80/255, green: 80/255, blue: 80/255, alpha: 1))
+    }
+    static var oxyOnAccent: Color {
+        Color(red: 12/255, green: 12/255, blue: 12/255)
+    }
     /// Stone accent — #C8B89A
     static let oxyDefaultStone = Color(red: 200/255, green: 184/255, blue: 154/255)
     static var oxyStone: Color { oxyAccent }
@@ -58,12 +67,22 @@ extension Color {
         default: return oxyDefaultStone
         }
     }
-    private static var oxyTheme: String {
-        (oxySettingsObject?["appTheme"] as? String) ?? "trueBlack"
-    }
     private static var oxySettingsObject: [String: Any]? {
         guard let data = UserDefaults.standard.data(forKey: "oxy_settings") else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+    private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+        Color(UIColor { traits in
+            isLightMode(traits) ? light : dark
+        })
+    }
+    private static func isLightMode(_ traits: UITraitCollection) -> Bool {
+        let theme = UserDefaults.standard.string(forKey: "oxy_appTheme")
+            ?? (oxySettingsObject?["appTheme"] as? String)
+            ?? "dark"
+        if theme == "light" { return true }
+        if theme == "system" { return traits.userInterfaceStyle == .light }
+        return false
     }
     /// Green — #4CAF82
     static let oxyGreen = Color(red: 76/255, green: 175/255, blue: 130/255)

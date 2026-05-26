@@ -107,7 +107,6 @@ struct MemoryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .task {
                 await loadMemory()
             }

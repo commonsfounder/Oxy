@@ -198,7 +198,7 @@ struct ActionCard: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.oxyBg)
+                    .foregroundStyle(Color.oxyOnAccent)
                     .padding(.vertical, 8)
                     .background(Color.oxyStone)
                     .clipShape(RoundedRectangle(cornerRadius: 9))
@@ -213,7 +213,7 @@ struct ActionCard: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.oxySub)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.06))
+                    .background(Color.oxySurface3)
                     .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
             }
@@ -224,7 +224,7 @@ struct ActionCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(action.success ? Color.white.opacity(0.08) : Color.oxyRed.opacity(0.22), lineWidth: 1)
+                .stroke(action.success ? Color.oxyLine2 : Color.oxyRed.opacity(0.22), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
     }

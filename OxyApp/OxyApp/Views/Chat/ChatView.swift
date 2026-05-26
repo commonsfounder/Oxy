@@ -404,7 +404,7 @@ private struct ActionReviewSheet: View {
                     .lineSpacing(5)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
-                    .background(Color.white.opacity(0.06))
+                    .background(Color.oxySurface3)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
 
@@ -417,7 +417,7 @@ private struct ActionReviewSheet: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.oxySub)
-                .background(Color.white.opacity(0.06))
+                .background(Color.oxySurface3)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 Button(action: onConfirm) {
@@ -427,7 +427,7 @@ private struct ActionReviewSheet: View {
                         .padding(.vertical, 13)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.oxyBg)
+                .foregroundStyle(Color.oxyOnAccent)
                 .background(Color.oxyStone)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
@@ -492,7 +492,7 @@ private struct VoiceRecordingBar: View {
                 Button(action: onStop) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.oxyBg)
+                        .foregroundStyle(Color.oxyOnAccent)
                         .frame(width: 36, height: 36)
                         .background(Color.oxyStone)
                         .clipShape(Circle())
@@ -576,7 +576,6 @@ struct ChatSearchView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -803,7 +802,7 @@ private struct ChatInputBar: View {
                 Button(action: onSend) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(canSend ? Color.oxyBg : Color.oxyDim)
+                        .foregroundStyle(canSend ? Color.oxyOnAccent : Color.oxyDim)
                         .frame(width: 36, height: 36)
                         .background(canSend ? Color.oxyStone : Color.oxySurface3)
                         .clipShape(Circle())

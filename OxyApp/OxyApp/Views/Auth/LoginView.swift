@@ -133,7 +133,7 @@ struct LoginView: View {
                                         endPoint: .trailing
                                     )
                                 )
-                                .foregroundStyle(Color.oxyBg)
+                                .foregroundStyle(Color.oxyOnAccent)
                                 .clipShape(RoundedRectangle(cornerRadius: 14))
                                 .shadow(color: Color.oxyStone.opacity(0.3), radius: 8, y: 4)
                             }

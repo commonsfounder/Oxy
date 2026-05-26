@@ -121,14 +121,14 @@ private struct ProactiveHeader: View {
             Button(action: onCheckNow) {
                 if isChecking {
                     ProgressView()
-                        .tint(Color.oxyBg)
+                        .tint(Color.oxyOnAccent)
                 } else {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 14, weight: .semibold))
                 }
             }
             .frame(width: 38, height: 34)
-            .foregroundStyle(Color.oxyBg)
+            .foregroundStyle(Color.oxyOnAccent)
             .background(Color.oxyStone)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .disabled(isChecking)
@@ -138,7 +138,7 @@ private struct ProactiveHeader: View {
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                .stroke(Color.oxyLine, lineWidth: 1)
         )
     }
 }
@@ -182,7 +182,7 @@ private struct BriefingCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                .stroke(Color.oxyLine2, lineWidth: 1)
         )
     }
 

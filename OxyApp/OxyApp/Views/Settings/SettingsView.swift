@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
     @State private var voicePreview = VoicePreviewPlayer()
@@ -51,8 +52,9 @@ struct SettingsView: View {
 
                             settingRow(label: "Theme", description: "Chat surface") {
                                 Picker("Theme", selection: $settings.appTheme) {
-                                    Text("True Black").tag("trueBlack")
-                                    Text("Soft Dark").tag("softDark")
+                                    Text("Light").tag("light")
+                                    Text("Dark").tag("dark")
+                                    Text("System").tag("system")
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
@@ -190,7 +192,6 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .alert("Sign Out", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}
@@ -264,10 +265,14 @@ struct SettingsView: View {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
             settings = saved
+            settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
+            appTheme = settings.appTheme
         }
     }
 
     private func saveSettings() {
+        settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
+        appTheme = settings.appTheme
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "oxy_settings")
         }
@@ -415,7 +420,7 @@ struct OxySettings: Codable {
     var designPalette: String = "stone"
     var designMotion: String = "calm"
     var accentColor: String = "stone"
-    var appTheme: String = "trueBlack"
+    var appTheme: String = "dark"
     var bubbleStyle: String = "comfort"
     var preferredMapsApp: String = "apple"
     var preferredTransportMode: String = "driving"
@@ -445,7 +450,7 @@ struct OxySettings: Codable {
         designPalette = try container.decodeIfPresent(String.self, forKey: .designPalette) ?? "stone"
         designMotion = try container.decodeIfPresent(String.self, forKey: .designMotion) ?? "calm"
         accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? designPalette
-        appTheme = try container.decodeIfPresent(String.self, forKey: .appTheme) ?? "trueBlack"
+        appTheme = Self.normalizedTheme(try container.decodeIfPresent(String.self, forKey: .appTheme) ?? "dark")
         bubbleStyle = try container.decodeIfPresent(String.self, forKey: .bubbleStyle) ?? "comfort"
         preferredMapsApp = try container.decodeIfPresent(String.self, forKey: .preferredMapsApp) ?? "apple"
         preferredTransportMode = try container.decodeIfPresent(String.self, forKey: .preferredTransportMode) ?? "driving"
@@ -501,6 +506,14 @@ struct OxySettings: Codable {
     static let designTemplates = ["compact", "glass", "dense"]
     static let designPalettes = ["stone", "mint", "ember", "mono"]
     static let designMotions = ["calm", "snappy", "none"]
+    static func normalizedTheme(_ theme: String) -> String {
+        switch theme {
+        case "light", "system":
+            return theme
+        default:
+            return "dark"
+        }
+    }
     static let accentOptions = [
         AccentOption(value: "stone", label: "Stone", color: Color.oxyDefaultStone),
         AccentOption(value: "mint", label: "Mint", color: Color.oxyGreen),
@@ -535,7 +548,7 @@ private struct DesignChoiceGroup: View {
                     } label: {
                         Text(option.capitalized)
                             .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(selection == option ? Color.oxyBg : Color.oxySub)
+                            .foregroundStyle(selection == option ? Color.oxyOnAccent : Color.oxySub)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 9)
                             .background(selection == option ? Color.oxyStone : Color.oxySurface3)
@@ -643,7 +656,7 @@ private struct DesignPreview: View {
     private func previewChip(_ label: String, selected: Bool) -> some View {
         Text(label)
             .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(selected ? Color.oxyBg : Color.oxySub)
+            .foregroundStyle(selected ? Color.oxyOnAccent : Color.oxySub)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(selected ? accent : Color.oxySurface3)
