@@ -5,7 +5,7 @@ struct MainTabView: View {
     @State private var selectedTab = Tab.chat
 
     enum Tab: String {
-        case chat, history, connectors, memory, settings
+        case chat, proactive, history, connectors, memory, settings
     }
 
     var body: some View {
@@ -16,6 +16,13 @@ struct MainTabView: View {
                     Text("Chat")
                 }
                 .tag(Tab.chat)
+
+            ProactiveView()
+                .tabItem {
+                    Image(systemName: "sparkles")
+                    Text("Today")
+                }
+                .tag(Tab.proactive)
 
             HistoryView()
                 .tabItem {

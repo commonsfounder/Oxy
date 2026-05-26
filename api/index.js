@@ -263,6 +263,13 @@ function getBriefingWindow(now = new Date()) {
   return PROACTIVE_WINDOWS.find(window => hour >= window.start && hour <= window.end) || null;
 }
 
+function proactiveSweepAuthorized(req) {
+  const configuredSecret = process.env.PROACTIVE_SWEEP_SECRET;
+  if (!configuredSecret) return true;
+  const provided = req.get('x-proactive-secret') || req.query.secret || req.body?.secret;
+  return provided === configuredSecret;
+}
+
 function parseJsonObject(value) {
   const parsed = safeParseJSON(value);
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
@@ -2384,6 +2391,29 @@ app.post('/briefings/:id/read', async (req, res) => {
   }
 });
 
+app.post('/proactive/:userId/run', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const summary = await runProactiveForUser(userId);
+    res.json({ ok: true, summary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.all('/proactive/sweep', async (req, res) => {
+  try {
+    if (!proactiveSweepAuthorized(req)) {
+      return res.status(401).json({ error: 'Invalid proactive sweep secret.' });
+    }
+    const summary = await runProactiveSweep(console);
+    res.json({ ok: true, summary });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/tts-preview', async (req, res) => {
   try {
     const { voice = 'Aoede', text = 'Hi, it is lovely to meet you. This is how I sound.' } = req.body || {};
@@ -2803,6 +2833,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const nativeContext = await getLatestNativeContext(userId);
   const settings = parseJsonObject(nativeContext?.settings);
   if (settings.proactiveBriefings === false) return null;
+  if (settings.autonomy === 'Low') return null;
 
   const todayKey = getLocalDateKey(now);
   const key = `proactive.briefing.${window.id}.${todayKey}`;
@@ -2851,6 +2882,7 @@ async function maybeCreateHealthAlert(userId, nativeContext, now = new Date()) {
 async function maybeCreateHomeFoodReminder(userId, nativeContext, now = new Date()) {
   const settings = parseJsonObject(nativeContext?.settings);
   if (!settings.locationReminders) return null;
+  if (settings.autonomy !== 'High') return null;
   const hour = getLocalHour(now);
   if (hour < 17 || hour > 21) return null;
 
@@ -2927,9 +2959,8 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   return { type: 'failed_action_followup', text: followUpText };
 }
 
-async function runProactiveSweep(logger = console) {
-  const startedAt = Date.now();
-  const summary = {
+function emptyProactiveSummary() {
+  return {
     usersScanned: 0,
     briefings: 0,
     failureFollowUps: 0,
@@ -2937,6 +2968,41 @@ async function runProactiveSweep(logger = console) {
     locationReminders: 0,
     failures: 0
   };
+}
+
+async function runProactiveForUser(userId, logger = console, now = new Date()) {
+  const summary = emptyProactiveSummary();
+  summary.usersScanned = 1;
+  try {
+    const nativeContext = await getLatestNativeContext(userId);
+    const [briefing, followUp, healthAlert, foodReminder] = await Promise.all([
+      maybeCreateIntervalBriefing(userId, now),
+      maybeCreateFailedActionFollowUp(userId, now),
+      nativeContext ? maybeCreateHealthAlert(userId, nativeContext, now) : Promise.resolve(null),
+      nativeContext ? maybeCreateHomeFoodReminder(userId, nativeContext, now) : Promise.resolve(null)
+    ]);
+    if (briefing) summary.briefings += 1;
+    if (followUp) summary.failureFollowUps += 1;
+    if (healthAlert) summary.healthAlerts += 1;
+    if (foodReminder) summary.locationReminders += 1;
+    const created = [briefing?.type, followUp?.type, healthAlert?.type, foodReminder?.type].filter(Boolean);
+    if (created.length) logger.log(`[proactive] queued for ${userId}: ${created.join(', ')}`);
+  } catch (sweepError) {
+    summary.failures += 1;
+    logger.error(`[proactive] failed for ${userId}:`, sweepError.message);
+  }
+  return summary;
+}
+
+function mergeProactiveSummary(target, source) {
+  for (const key of Object.keys(emptyProactiveSummary())) {
+    target[key] = (target[key] || 0) + (source[key] || 0);
+  }
+}
+
+async function runProactiveSweep(logger = console) {
+  const startedAt = Date.now();
+  const summary = emptyProactiveSummary();
 
   const { data: users, error } = await supabase
     .from('users')
@@ -2944,26 +3010,8 @@ async function runProactiveSweep(logger = console) {
   if (error) throw error;
 
   for (const user of users || []) {
-    summary.usersScanned += 1;
-    try {
-      const nativeContext = await getLatestNativeContext(user.user_id);
-      const [briefing, followUp, healthAlert, foodReminder] = await Promise.all([
-        maybeCreateIntervalBriefing(user.user_id),
-        maybeCreateFailedActionFollowUp(user.user_id),
-        nativeContext ? maybeCreateHealthAlert(user.user_id, nativeContext) : Promise.resolve(null),
-        nativeContext ? maybeCreateHomeFoodReminder(user.user_id, nativeContext) : Promise.resolve(null)
-      ]);
-      if (briefing) summary.briefings += 1;
-      if (followUp) summary.failureFollowUps += 1;
-      if (healthAlert) summary.healthAlerts += 1;
-      if (foodReminder) summary.locationReminders += 1;
-      if (briefing || followUp || healthAlert || foodReminder) {
-        logger.log(`[proactive] queued for ${user.user_id}: ${[briefing?.type, followUp?.type, healthAlert?.type, foodReminder?.type].filter(Boolean).join(', ')}`);
-      }
-    } catch (sweepError) {
-      summary.failures += 1;
-      logger.error(`[proactive] failed for ${user.user_id}:`, sweepError.message);
-    }
+    const userSummary = await runProactiveForUser(user.user_id, logger);
+    mergeProactiveSummary(summary, userSummary);
   }
 
   summary.durationMs = Date.now() - startedAt;

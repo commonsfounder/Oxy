@@ -180,3 +180,26 @@ struct HistoryEntry: Codable, Identifiable {
 struct HistoryResponse: Codable {
     let history: [HistoryEntry]
 }
+
+struct Briefing: Codable, Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let title: String?
+    let body: String
+    let source: String?
+    let read: Bool?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, body, source, read
+        case createdAt = "created_at"
+    }
+
+    var isUnread: Bool {
+        read == false
+    }
+}
+
+struct BriefingsResponse: Codable {
+    let briefings: [Briefing]
+}

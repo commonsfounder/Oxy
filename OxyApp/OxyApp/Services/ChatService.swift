@@ -81,6 +81,30 @@ struct ChatService {
             ]
         )
     }
+
+    func loadBriefings(userId: String, limit: Int = 30) async throws -> [Briefing] {
+        let data = try await api.request(
+            path: "/briefings/\(userId)",
+            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+        )
+        return try JSONDecoder().decode(BriefingsResponse.self, from: data).briefings
+    }
+
+    func markBriefingRead(userId: String, briefingId: String) async {
+        _ = try? await api.request(
+            path: "/briefings/\(briefingId)/read",
+            method: "POST",
+            body: ["userId": userId]
+        )
+    }
+
+    func runProactiveCheck(userId: String) async throws {
+        _ = try await api.request(
+            path: "/proactive/\(userId)/run",
+            method: "POST",
+            body: ["userId": userId]
+        )
+    }
 }
 
 private extension Encodable {

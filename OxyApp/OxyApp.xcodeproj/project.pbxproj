@@ -31,6 +31,7 @@
 		A10000010000000000000022 /* VoiceInputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000022 /* VoiceInputManager.swift */; };
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
+		A10000010000000000000025 /* ProactiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000027 /* ProactiveView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +61,7 @@
 		A20000010000000000000024 /* NativeIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIntegrationManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000025 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000010000000000000026 /* OxyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OxyApp.entitlements; sourceTree = "<group>"; };
+		A20000010000000000000027 /* ProactiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveView.swift; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -128,6 +130,7 @@
 				A50000010000000000000006 /* Auth */,
 				A50000010000000000000007 /* Chat */,
 				A50000010000000000000011 /* History */,
+				A50000010000000000000015 /* Proactive */,
 				A50000010000000000000012 /* Memory */,
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
@@ -209,6 +212,14 @@
 				A20000010000000000000019 /* SettingsView.swift */,
 			);
 			path = Settings;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000015 /* Proactive */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000027 /* ProactiveView.swift */,
+			);
+			path = Proactive;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000099 /* Products */ = {
@@ -311,6 +322,7 @@
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,
+				A10000010000000000000025 /* ProactiveView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
