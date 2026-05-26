@@ -11,6 +11,7 @@ test('connector health maps core actions to owning connector', () => {
   assert.equal(connectorForAction('send_email'), 'google');
   assert.equal(connectorForAction('search_emails'), 'google');
   assert.equal(connectorForAction('find_place'), 'maps');
+  assert.equal(connectorForAction('get_directions'), 'maps');
   assert.equal(connectorForAction('book_uber'), 'uber');
   assert.equal(connectorForAction('search_trains'), 'trainline');
 });

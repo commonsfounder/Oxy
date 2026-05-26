@@ -18,7 +18,8 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = 25
         authorizationStatus = manager.authorizationStatus
     }
 
@@ -42,8 +43,10 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
         }
     }
 
-    func currentLocationForLocalRequest(timeoutNanoseconds: UInt64 = 1_500_000_000) async -> [String: Double]? {
-        if let locationDict { return locationDict }
+    func currentLocationForLocalRequest(timeoutNanoseconds: UInt64 = 2_500_000_000) async -> [String: Double]? {
+        if let lastLocation, abs(lastLocation.timestamp.timeIntervalSinceNow) < 90 {
+            return locationDict
+        }
         if !isAuthorized {
             requestPermission()
             return nil

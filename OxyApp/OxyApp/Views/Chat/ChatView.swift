@@ -7,6 +7,8 @@ struct ChatView: View {
     @FocusState private var isInputFocused: Bool
     @State private var showSearch = false
     @State private var isIncognito = false
+    @State private var pendingReviewAction: ActionResult?
+    @State private var dismissedReviewActionIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -80,6 +82,9 @@ struct ChatView: View {
                                     proxy.scrollTo("status", anchor: .bottom)
                                 }
                             }
+                        }
+                        .onChange(of: viewModel.messages) {
+                            presentPendingReviewIfNeeded()
                         }
                     }
 
@@ -206,12 +211,123 @@ struct ChatView: View {
                     }
                 }
             }
+            .sheet(item: $pendingReviewAction) { action in
+                ActionReviewSheet(
+                    action: action,
+                    onConfirm: {
+                        dismissedReviewActionIDs.insert(action.id)
+                        pendingReviewAction = nil
+                        viewModel.sendCommand("confirm", userId: appState.userId)
+                    },
+                    onCancel: {
+                        dismissedReviewActionIDs.insert(action.id)
+                        pendingReviewAction = nil
+                        viewModel.sendCommand("cancel", userId: appState.userId)
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
         }
         .task {
             await viewModel.loadHistory(userId: appState.userId)
         }
         .onAppear {
             viewModel.requestLocationAccess()
+        }
+    }
+
+    private func presentPendingReviewIfNeeded() {
+        guard pendingReviewAction == nil else { return }
+        guard let action = viewModel.messages
+            .flatMap(\.actions)
+            .first(where: { $0.pending && !dismissedReviewActionIDs.contains($0.id) }) else {
+            return
+        }
+        pendingReviewAction = action
+    }
+}
+
+private struct ActionReviewSheet: View {
+    let action: ActionResult
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    private var title: String {
+        action.actionSummary ?? {
+            switch action.action {
+            case "send_email": return "Review email"
+            case "send_message": return "Review message"
+            case "send_telegram": return "Review Telegram"
+            case "make_call": return "Review call"
+            default: return "Review action"
+            }
+        }()
+    }
+
+    private var detail: String {
+        action.cardText ?? action.text ?? "Ready for review."
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color.oxyStone)
+                Text(title)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                Spacer()
+            }
+
+            ScrollView {
+                Text(detail)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Color.oxyText)
+                    .lineSpacing(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            HStack(spacing: 10) {
+                Button(action: onCancel) {
+                    Label("Cancel", systemImage: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.oxySub)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Button(action: onConfirm) {
+                    Label("Confirm", systemImage: "checkmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.oxyBg)
+                .background(Color.oxyStone)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.oxySurface1)
+    }
+
+    private var iconName: String {
+        switch action.action {
+        case "send_email": return "envelope.fill"
+        case "send_message": return "message.fill"
+        case "send_telegram": return "paperplane.fill"
+        case "make_call": return "phone.fill"
+        default: return "checkmark.seal.fill"
         }
     }
 }
