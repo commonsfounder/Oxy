@@ -468,7 +468,10 @@ async function executeFunctionCalls(userId, functionCalls, socket, trace) {
 
     try {
       await logAction(userId, name, input, result);
-    } catch {}
+    } catch (error) {
+      trace.log(`action_log.fail ${name}`, error?.message || error);
+      console.warn('[companion-live] action_log failed:', error?.message || error);
+    }
 
     sendStatus(socket, 'action_complete', humanizeActionLabel(name, 'complete'), {
       action: name,
@@ -613,7 +616,16 @@ async function createCompanionLiveSession(userId, voiceName, socket, state) {
               state.actionResults.push(...actionResults);
               sendSocketEvent(socket, { type: 'actions', results: actionResults });
             }
-            await state.session.sendToolResponse({ functionResponses });
+            if (state.session) {
+              try {
+                await state.session.sendToolResponse({ functionResponses });
+              } catch (error) {
+                state.trace.log('tool_response.fail', error?.message || error);
+                console.warn('[companion-live] sendToolResponse failed:', error?.message || error);
+              }
+            } else {
+              state.trace.log('tool_response.skip session_closed');
+            }
           }
 
           if (message.serverContent?.interrupted) {

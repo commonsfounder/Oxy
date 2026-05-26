@@ -10,6 +10,24 @@ final class AppState {
     var errorMessage: String?
 
     private let keychain = KeychainHelper.shared
+    @ObservationIgnored private var sessionExpiredObserver: NSObjectProtocol?
+
+    init() {
+        sessionExpiredObserver = NotificationCenter.default.addObserver(
+            forName: .oxySessionExpired,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.logout()
+            self?.errorMessage = "Session expired. Please sign in again."
+        }
+    }
+
+    deinit {
+        if let sessionExpiredObserver {
+            NotificationCenter.default.removeObserver(sessionExpiredObserver)
+        }
+    }
 
     func restoreSession() {
         guard let savedToken = keychain.read(key: "session_token"),
@@ -29,9 +47,19 @@ final class AppState {
     func login(userId: String, token: String) {
         self.userId = userId
         self.token = token
-        keychain.save(key: "session_token", value: token)
-        keychain.save(key: "user_id", value: userId)
+        let savedToken = keychain.save(key: "session_token", value: token)
+        let savedUserId = keychain.save(key: "user_id", value: userId)
+        guard savedToken, savedUserId else {
+            keychain.delete(key: "session_token")
+            keychain.delete(key: "user_id")
+            self.token = ""
+            self.userId = ""
+            isAuthenticated = false
+            errorMessage = "Could not save your session securely. Please unlock your device and try again."
+            return
+        }
         isAuthenticated = true
+        errorMessage = nil
         Task { @MainActor in
             NativeIntegrationManager.shared.bootstrap(userId: userId)
         }

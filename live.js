@@ -578,7 +578,13 @@ async function createLiveSession(userId, voiceName, socket, state) {
               state.actionResults.push(...actionResults);
               sendSocketEvent(socket, { type: 'assistant-actions', results: actionResults });
             }
-            state.session.sendToolResponse({ functionResponses });
+            if (state.session) {
+              try {
+                await state.session.sendToolResponse({ functionResponses });
+              } catch (error) {
+                console.warn('[live] sendToolResponse failed:', error?.message || error);
+              }
+            }
           }
 
           if (message.serverContent?.interrupted) {

@@ -12,6 +12,7 @@ final class ChatViewModel {
     var statusLabel: String?
 
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
+    @ObservationIgnored private var currentSendTask: Task<Void, Never>?
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -71,12 +72,12 @@ final class ChatViewModel {
 
         let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
         messages.append(assistantMessage)
-        let assistantIndex = messages.count - 1
+        let assistantID = assistantMessage.id
 
         let settings = currentSettings
         let needsFreshLocation = Self.localRequestTerms.contains { text.localizedCaseInsensitiveContains($0) }
 
-        Task {
+        currentSendTask = Task {
             var location = locationManager.locationDict
             if needsFreshLocation {
                 await MainActor.run {
@@ -94,19 +95,20 @@ final class ChatViewModel {
             var fullText = ""
 
             for await event in stream {
+                if Task.isCancelled { break }
                 await MainActor.run {
                     switch event {
                     case .text(let chunk):
                         fullText += chunk
-                        messages[assistantIndex].content = fullText
+                        guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
                         statusLabel = nil
 
                     case .replace(let replacement):
                         fullText = replacement
-                        messages[assistantIndex].content = fullText
+                        guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
 
                     case .actions(let results):
-                        messages[assistantIndex].actions = results
+                        guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
 
                     case .status(_, let label):
@@ -116,7 +118,7 @@ final class ChatViewModel {
                         break
 
                     case .transcriptionError(let error):
-                        messages[assistantIndex].content = error
+                        guard updateAssistantMessage(id: assistantID, { $0.content = error }) else { return }
                         statusLabel = nil
 
                     case .audio(let base64Audio, _):
@@ -126,25 +128,28 @@ final class ChatViewModel {
                         statusLabel = "Voice unavailable: \(error)"
 
                     case .done:
-                        messages[assistantIndex].isStreaming = false
+                        _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         statusLabel = nil
                         isSending = false
+                        currentSendTask = nil
 
                     case .error(let error):
                         if fullText.isEmpty {
-                            messages[assistantIndex].content = "Something went wrong: \(error)"
+                            _ = updateAssistantMessage(id: assistantID, { $0.content = "Something went wrong: \(error)" })
                         }
-                        messages[assistantIndex].isStreaming = false
+                        _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         statusLabel = nil
                         isSending = false
+                        currentSendTask = nil
                     }
                 }
             }
 
             await MainActor.run {
-                messages[assistantIndex].isStreaming = false
+                _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                 isSending = false
                 statusLabel = nil
+                currentSendTask = nil
             }
         }
     }
@@ -156,6 +161,8 @@ final class ChatViewModel {
     }
 
     func clearChat() {
+        currentSendTask?.cancel()
+        currentSendTask = nil
         messages.removeAll()
         inputText = ""
         isSending = false
@@ -176,6 +183,13 @@ final class ChatViewModel {
                 actions: entry.actions ?? []
             )
         }
+    }
+
+    @discardableResult
+    private func updateAssistantMessage(id: UUID, _ update: (inout Message) -> Void) -> Bool {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
+        update(&messages[index])
+        return true
     }
 
     // MARK: - Deep Links

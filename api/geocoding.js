@@ -71,7 +71,7 @@ async function geocodeWithGoogle(locationString) {
 
 async function geocodeWithNominatim(locationString) {
   const response = await axios.get('https://nominatim.openstreetmap.org/search', {
-    params: { q: locationString, format: 'json', limit: 1, countrycodes: 'gb' },
+    params: { q: locationString, format: 'json', limit: 1 },
     headers: { 'User-Agent': 'Oxy-Assistant/1.0' },
     timeout: 10000
   });
@@ -84,6 +84,11 @@ async function geocodeWithNominatim(locationString) {
     lng: parseFloat(result.lon),
     formattedAddress: result.display_name
   };
+}
+
+function isPermanentGoogleGeocodingConfigError(err) {
+  const message = String(err?.response?.data?.error_message || err?.message || '');
+  return /REQUEST_DENIED|API_KEY_INVALID|PERMISSION_DENIED|has not been used|not been enabled|billing/i.test(message);
 }
 
 async function searchPlaceWithGoogle(query, location = null) {
@@ -163,8 +168,7 @@ const geocodeLocation = async (locationString) => {
       return await geocodeWithGoogle(locationString);
     }
   } catch (err) {
-    // Fall through to Nominatim if Google fails or key is invalid
-    if (!err.message.includes('REQUEST_DENIED') && !err.message.includes('INVALID_REQUEST')) {
+    if (isPermanentGoogleGeocodingConfigError(err)) {
       throw new Error(`Geocoding error: ${err.message}`);
     }
     console.warn('[geocoding] Google Maps failed, falling back to Nominatim:', err.message);

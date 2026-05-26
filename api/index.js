@@ -37,6 +37,7 @@ const {
   verifyPassword,
   verifySignedPayload
 } = require('../auth');
+const { connectorForAction } = require('./services/connector-health');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1286,6 +1287,17 @@ Return strict JSON:
 }
 
 async function executeAction(userId, action, params, context = {}) {
+  const connectorId = connectorForAction(action);
+  if (connectorId && connectorId !== 'maps') {
+    const enabledConnectors = await getEnabledConnectors(userId, context.trace || null);
+    if (!enabledConnectors.includes(connectorId)) {
+      return {
+        success: false,
+        error: `${connectorId} is disabled. Re-enable it in Connectors before confirming this action.`
+      };
+    }
+  }
+
   const enrichedParams = {
     ...(params || {}),
     ...(context.location ? { location: context.location } : {})
@@ -3136,7 +3148,8 @@ app.post('/chat', async (req, res) => {
       let actionResults = await executeActions(userId, [pendingAction.action], {
         userMessage: pendingAction.userMessage || message,
         location,
-        bypassReview: true
+        bypassReview: true,
+        trace
       }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
       await clearPendingAction(userId);
@@ -3212,7 +3225,7 @@ app.post('/chat', async (req, res) => {
         const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
         sendStatus('action_start', getActionStatusLabel(deterministicAction.actions[0].type, 'start'), { action: deterministicAction.actions[0].type });
-        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location }, trace, {
+        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, trace }, trace, {
           onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
             action: action.type,
             success: result?.success !== false
@@ -3240,7 +3253,7 @@ app.post('/chat', async (req, res) => {
         return;
       }
 
-      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location }, trace);
+      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, trace }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
       const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
       saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
@@ -3303,6 +3316,38 @@ app.post('/chat', async (req, res) => {
         }));
         let fullText = '';
         let firstChunk = true;
+        let hasStreamedText = false;
+        let actionMarkupStarted = false;
+        let heldDisplayText = '';
+        const emitSafeDisplayText = text => {
+          if (!text || actionMarkupStarted) return;
+          heldDisplayText += text;
+          const actionIndex = heldDisplayText.search(/<action\b/i);
+          if (actionIndex >= 0) {
+            const visible = heldDisplayText.slice(0, actionIndex);
+            if (visible) {
+              hasStreamedText = true;
+              sse({ type: 'text', chunk: visible });
+            }
+            heldDisplayText = '';
+            actionMarkupStarted = true;
+            return;
+          }
+          if (heldDisplayText.length > 8) {
+            const visible = heldDisplayText.slice(0, -8);
+            heldDisplayText = heldDisplayText.slice(-8);
+            if (visible) {
+              hasStreamedText = true;
+              sse({ type: 'text', chunk: visible });
+            }
+          }
+        };
+        const flushSafeDisplayText = () => {
+          if (actionMarkupStarted || !heldDisplayText) return;
+          hasStreamedText = true;
+          sse({ type: 'text', chunk: heldDisplayText });
+          heldDisplayText = '';
+        };
         const ttsStreamer = wantsTTS ? createSentenceTtsStreamer({
           voiceName: settings.voice,
           sse,
@@ -3314,8 +3359,10 @@ app.post('/chat', async (req, res) => {
           if (text) {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
             fullText += text;
+            emitSafeDisplayText(text);
           }
         }
+        flushSafeDisplayText();
         trace.log('gemini.initial_complete');
 
         let { spoken, actions } = parseActions(fullText);
@@ -3324,7 +3371,7 @@ app.post('/chat', async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, { userMessage: message, location }, trace, {
+          actionResults = await executeActions(userId, actions, { userMessage: message, location, trace }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, 'complete'), {
               action: action.type,
@@ -3362,14 +3409,19 @@ app.post('/chat', async (req, res) => {
             config: followUpRequest.config
           }));
           spoken = '';
+          heldDisplayText = '';
+          actionMarkupStarted = false;
+          hasStreamedText = false;
           for await (const chunk of followUp) {
             const text = chunk.text || '';
             if (text) {
               spoken += text;
+              emitSafeDisplayText(text);
             }
           }
+          flushSafeDisplayText();
           spoken = stripActionMarkupForDisplay(parseActions(spoken).spoken || spoken || context).trim();
-          sse({ type: 'replace', text: spoken });
+          if (!hasStreamedText) sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
@@ -3385,9 +3437,11 @@ app.post('/chat', async (req, res) => {
             : 'I hit an empty response. Try that again.';
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
-        } else if (!actionResults.length && !dataResults.length) {
+        } else if (!actionResults.length && !dataResults.length && !hasStreamedText) {
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
+        } else if (!actionResults.length && !dataResults.length && ttsStreamer) {
+          ttsStreamer.ingest(spoken);
         }
 
         if (wantsTTS && ttsStreamer) {
@@ -3433,7 +3487,7 @@ app.post('/chat', async (req, res) => {
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { userMessage: message, location }, trace);
+      actionResults = await executeActions(userId, actions, { userMessage: message, location, trace }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 

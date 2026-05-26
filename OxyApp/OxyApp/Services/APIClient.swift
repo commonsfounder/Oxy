@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let oxySessionExpired = Notification.Name("oxy.sessionExpired")
+}
+
 final class APIClient: @unchecked Sendable {
     static let shared = APIClient()
 
@@ -61,6 +65,7 @@ final class APIClient: @unchecked Sendable {
             let errorBody = try? JSONDecoder().decode(ErrorBody.self, from: data)
             let message = errorBody?.error ?? "Request failed"
             if http.statusCode == 401 {
+                handleUnauthorized()
                 throw APIError.server(401, message)
             }
             throw APIError.server(http.statusCode, message)
@@ -114,9 +119,18 @@ final class APIClient: @unchecked Sendable {
                     req.timeoutInterval = 120
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
-                    guard let http = response as? HTTPURLResponse,
-                          (200...299).contains(http.statusCode) else {
+                    guard let http = response as? HTTPURLResponse else {
                         continuation.yield(.error("Server error"))
+                        continuation.finish()
+                        return
+                    }
+                    guard (200...299).contains(http.statusCode) else {
+                        if http.statusCode == 401 {
+                            self.handleUnauthorized()
+                            continuation.yield(.error("Session expired. Please sign in again."))
+                        } else {
+                            continuation.yield(.error("Server error"))
+                        }
                         continuation.finish()
                         return
                     }
@@ -144,6 +158,12 @@ final class APIClient: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    private func handleUnauthorized() {
+        KeychainHelper.shared.delete(key: "session_token")
+        KeychainHelper.shared.delete(key: "user_id")
+        NotificationCenter.default.post(name: .oxySessionExpired, object: nil)
     }
 }
 

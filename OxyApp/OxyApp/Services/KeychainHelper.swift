@@ -7,8 +7,9 @@ final class KeychainHelper: @unchecked Sendable {
 
     private init() {}
 
-    func save(key: String, value: String) {
-        guard let data = value.data(using: .utf8) else { return }
+    @discardableResult
+    func save(key: String, value: String) -> Bool {
+        guard let data = value.data(using: .utf8) else { return false }
         delete(key: key)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -17,7 +18,8 @@ final class KeychainHelper: @unchecked Sendable {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        return status == errSecSuccess
     }
 
     func read(key: String) -> String? {
