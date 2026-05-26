@@ -1,6 +1,6 @@
 import Foundation
 
-final class APIClient {
+final class APIClient: @unchecked Sendable {
     static let shared = APIClient()
 
     /// Base URL of the Oxy backend. Set via the OXY_BASE_URL build setting or

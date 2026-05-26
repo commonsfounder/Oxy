@@ -146,11 +146,17 @@ final class NativeIntegrationManager {
         let contactStatus = CNContactStore.authorizationStatus(for: .contacts)
         let reminderStatus = EKEventStore.authorizationStatus(for: .reminder)
         let locationStatus = LocationManager.shared.authorizationStatus
+        let remindersAuthorized: Bool
+        if #available(iOS 17.0, *) {
+            remindersAuthorized = reminderStatus == .fullAccess || reminderStatus == .writeOnly
+        } else {
+            remindersAuthorized = reminderStatus == .authorized
+        }
         return NativeCapabilities(
             notifications: notificationSettings.authorizationStatus == .authorized || notificationSettings.authorizationStatus == .provisional,
             healthKit: HKHealthStore.isHealthDataAvailable(),
             contacts: contactStatus == .authorized,
-            reminders: reminderStatus == .authorized || reminderStatus == .fullAccess,
+            reminders: remindersAuthorized,
             locationAlways: locationStatus == .authorizedAlways
         )
     }

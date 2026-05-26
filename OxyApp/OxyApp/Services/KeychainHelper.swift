@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-final class KeychainHelper {
+final class KeychainHelper: @unchecked Sendable {
     static let shared = KeychainHelper()
     private let service = "ai.oxy.app"
 

@@ -4,6 +4,7 @@ import AVFoundation
 import UIKit
 
 @Observable
+@MainActor
 final class ChatViewModel {
     var messages: [Message] = []
     var inputText = ""

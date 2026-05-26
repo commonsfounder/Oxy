@@ -2,7 +2,8 @@ import CoreLocation
 import Observation
 
 @Observable
-final class LocationManager: NSObject, CLLocationManagerDelegate {
+@MainActor
+final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate {
     static let shared = LocationManager()
 
     var lastLocation: CLLocation?
