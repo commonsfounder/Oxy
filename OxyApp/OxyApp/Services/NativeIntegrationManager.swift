@@ -181,10 +181,6 @@ final class NativeIntegrationManager {
             return result
         }
 
-        if isDirectionsRequest(normalized), let result = await openNativeDirections(for: normalized) {
-            return result
-        }
-
         if shouldUseNativePlaceSearch(normalized), let result = await findNativePlace(for: normalized) {
             return result
         }
@@ -498,21 +494,6 @@ final class NativeIntegrationManager {
             || lower.contains("send ")
     }
 
-    private func isDirectionsRequest(_ text: String) -> Bool {
-        let lower = text.lowercased()
-        return lower.contains("directions")
-            || lower.contains("navigate")
-            || lower.contains("route")
-            || lower.contains("bus")
-            || lower.contains("buses")
-            || lower.contains("transit")
-            || lower.contains("public transport")
-            || lower.contains("walk to")
-            || lower.contains("drive to")
-            || lower.contains("get me to")
-            || lower.contains("need to be at")
-    }
-
     private func findNativePlace(for message: String) async -> NativeLocalActionResult? {
         guard let place = await searchPlace(for: message) else { return nil }
         let distance = place.distanceMeters.map(formatDistance) ?? ""
@@ -524,33 +505,6 @@ final class NativeIntegrationManager {
             cardText: detail.isEmpty ? "Open in Maps" : detail,
             actionSummary: "Place found",
             deepLink: place.mapURL.absoluteString
-        )
-    }
-
-    private func openNativeDirections(for message: String) async -> NativeLocalActionResult? {
-        let destination = cleanPlaceQuery(message)
-        guard !destination.isEmpty else { return nil }
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = destination
-        if let location = LocationManager.shared.lastLocation {
-            request.region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
-        }
-        let mode = transportMode(for: message)
-        let response = try? await MKLocalSearch(request: request).start()
-        let item = response?.mapItems.first
-        let destinationName = item?.name ?? destination
-        let address = item.map { mapItemAddress($0) } ?? ""
-        let detailParts = [
-            directionsModeLabel(mode).capitalized,
-            destinationName,
-            address.isEmpty ? nil : address
-        ].compactMap { $0 }
-        return NativeLocalActionResult(
-            action: "get_directions",
-            text: "\(directionsModeLabel(mode).capitalized) directions to \(destinationName) are ready.",
-            cardText: detailParts.joined(separator: " · "),
-            actionSummary: "Directions ready",
-            deepLink: appleDirectionsURL(destination: item?.placemark.title ?? destination, mode: mode)?.absoluteString
         )
     }
 
@@ -608,43 +562,6 @@ final class NativeIntegrationManager {
         text = text.replacingOccurrences(of: "\\b\\d{1,2}:\\d{2}\\b", with: " ", options: .regularExpression)
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-    }
-
-    private func transportMode(for message: String) -> String {
-        let lower = message.lowercased()
-        if lower.contains("bus") || lower.contains("transit") || lower.contains("public transport") {
-            return MKLaunchOptionsDirectionsModeTransit
-        }
-        if lower.contains("walk") {
-            return MKLaunchOptionsDirectionsModeWalking
-        }
-        return MKLaunchOptionsDirectionsModeDriving
-    }
-
-    private func directionsModeLabel(_ mode: String) -> String {
-        switch mode {
-        case MKLaunchOptionsDirectionsModeTransit: return "transit"
-        case MKLaunchOptionsDirectionsModeWalking: return "walking"
-        default: return "driving"
-        }
-    }
-
-    private func appleDirectionsURL(destination: String, mode: String) -> URL? {
-        let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? destination
-        let flag: String
-        switch mode {
-        case MKLaunchOptionsDirectionsModeTransit: flag = "r"
-        case MKLaunchOptionsDirectionsModeWalking: flag = "w"
-        default: flag = "d"
-        }
-        return URL(string: "https://maps.apple.com/?daddr=\(encoded)&dirflg=\(flag)")
-    }
-
-    private func mapItemAddress(_ item: MKMapItem) -> String {
-        let placemark = item.placemark
-        return [placemark.thoroughfare, placemark.locality, placemark.postalCode]
-            .compactMap { $0 }
-            .joined(separator: ", ")
     }
 
     private func createNativeReminder(from message: String) async -> NativeLocalActionResult? {

@@ -22,11 +22,18 @@ function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
 }
 
+function looksLikeDirectionsRequest(message) {
+  return DIRECTIONS_TERMS.test(normalizeText(message));
+}
+
 function cleanDestinationPhrase(message) {
   const text = normalizeText(message)
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, '')
     .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, '')
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, '')
+    .replace(/^(what|which)\s+(bus|buses|public transport|transit)\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
+    .replace(/^how\s+do\s+i\s+get\s+to\s+/i, '')
+    .replace(/^how\s+can\s+i\s+get\s+to\s+/i, '')
     .replace(/^where\s+(is|are)\s+/i, '')
     .replace(/^(what|which)\s+(is\s+)?/i, '')
     .replace(/^i\s+need\s+to\s+be\s+at\s+/i, '')
@@ -57,9 +64,8 @@ function extractArrivalTime(message) {
 
 function inferDeterministicAction(message) {
   const text = normalizeText(message);
-  if (!looksLikeLocalPlaceRequest(text)) return null;
 
-  if (looksLikeRideRequest(text)) {
+  if (looksLikeRideRequest(text) && looksLikeLocalPlaceRequest(text)) {
     return {
       reason: 'ride_to_local_place',
       spoken: "I'll open that in Uber.",
@@ -67,7 +73,7 @@ function inferDeterministicAction(message) {
     };
   }
 
-  if (DIRECTIONS_TERMS.test(text)) {
+  if (looksLikeDirectionsRequest(text)) {
     const input = {
       destination: cleanDestinationPhrase(text),
       mode: TRANSIT_TERMS.test(text) ? 'transit' : 'driving'
@@ -81,6 +87,8 @@ function inferDeterministicAction(message) {
     };
   }
 
+  if (!looksLikeLocalPlaceRequest(text)) return null;
+
   return {
     reason: 'find_local_place',
     spoken: "I'll find that nearby.",
@@ -91,5 +99,6 @@ function inferDeterministicAction(message) {
 module.exports = {
   inferDeterministicAction,
   looksLikeLocalPlaceRequest,
+  looksLikeDirectionsRequest,
   cleanDestinationPhrase
 };

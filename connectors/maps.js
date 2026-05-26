@@ -71,7 +71,7 @@ function mapsDirectionsFallback(destination, params = {}) {
   const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
   return {
     success: true,
-    text: `Opening ${modeLabel} directions to ${cleanedDestination}.`,
+    text: `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${cleanedDestination} are ready.`,
     actionSummary: 'Directions ready',
     cardText: `Open ${modeLabel} directions in Maps`,
     deepLink: link,
@@ -179,7 +179,7 @@ async function execute(userId, action, params) {
         ? `https://maps.apple.com/?daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
         : `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
       const label = placeLabel(place, destination);
-      const routeText = route?.headline ? `${route.headline}: ${route.detail}` : `Opening ${modeLabel} directions to ${label}.`;
+      const routeText = route?.headline ? `${route.headline}: ${route.detail}` : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`;
       return {
         success: true,
         text: routeText,

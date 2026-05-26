@@ -42,6 +42,16 @@ test('bus requests route to transit directions instead of place lookup', () => {
   });
 });
 
+test('bus requests to arbitrary destinations route to transit directions', () => {
+  const routed = inferDeterministicAction('what bus can i take to selfridges birmingham');
+  assert.equal(routed.reason, 'transit_directions_to_place');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.deepEqual(routed.actions[0].input, {
+    destination: 'selfridges birmingham',
+    mode: 'transit'
+  });
+});
+
 test('plain factual question does not become local place action', () => {
   assert.equal(inferDeterministicAction('what is McDonald’s revenue?'), null);
 });
