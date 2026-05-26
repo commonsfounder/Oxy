@@ -84,14 +84,14 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   book_uber: {
-    risk: 'high',
+    risk: 'low',
     required: ['destination'],
     aliases: { destination: ['query', 'place', 'address'] },
     inputExample: { destination: 'natural place or address phrase' },
     successSummary: 'Uber opened',
     failureSummary: 'Uber needs attention',
-    confirmation: 'review_required',
-    executionMode: 'review'
+    confirmation: 'none',
+    executionMode: 'direct'
   },
   find_place: {
     risk: 'low',

@@ -54,10 +54,16 @@ test('Core actions validate required fields consistently', () => {
 });
 
 test('high-risk communication actions require review', () => {
-  for (const action of ['send_message', 'send_email', 'book_uber', 'make_call']) {
+  for (const action of ['send_message', 'send_email', 'make_call']) {
     assert.equal(ACTION_CONTRACTS[action].confirmation, 'review_required');
     assert.equal(ACTION_CONTRACTS[action].executionMode, 'review');
   }
+});
+
+test('Uber open action executes directly because payment is confirmed in Uber', () => {
+  assert.equal(ACTION_CONTRACTS.book_uber.risk, 'low');
+  assert.equal(ACTION_CONTRACTS.book_uber.confirmation, 'none');
+  assert.equal(ACTION_CONTRACTS.book_uber.executionMode, 'direct');
 });
 
 test('email saying Y can omit subject but not body', () => {

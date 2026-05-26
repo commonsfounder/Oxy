@@ -38,13 +38,13 @@ test('pending email card shows recipient, subject, and body for review', () => {
   assert.equal(detail, 'josh@example.com · Catch up · Can we meet Friday?');
 });
 
-test('pending review result owns concise final wording', () => {
+test('pending review result owns concise final wording for high-risk actions', () => {
   const result = buildPendingReviewResult({
-    type: 'book_uber',
-    input: { destination: "nearest McDonald's" }
+    type: 'send_message',
+    input: { contact: 'Josh', message: 'Can we meet Friday?' }
   });
   assert.equal(result.pending, true);
   assert.equal(result.confirmation, 'review_required');
-  assert.equal(result.cardText, "Destination: nearest McDonald's");
-  assert.match(result.text, /^Review Uber\./);
+  assert.equal(result.cardText, 'Josh · Can we meet Friday?');
+  assert.match(result.text, /^Review message\./);
 });
