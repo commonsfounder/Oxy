@@ -12,6 +12,7 @@ struct ChatView: View {
     @State private var messageDraft: MessageDraft?
     @State private var messageComposerAlert: String?
     @State private var handledReviewActionIDs = Set<String>()
+    @State private var handledMessageComposeActionIDs = Set<String>()
 
     var body: some View {
         NavigationStack {
@@ -91,6 +92,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages) {
                             presentPendingReviewIfNeeded()
+                            presentMessageComposerIfNeeded()
                         }
                     }
 
@@ -274,6 +276,30 @@ struct ChatView: View {
         pendingReviewAction = action
     }
 
+    private func presentMessageComposerIfNeeded() {
+        guard pendingReviewAction == nil, messageDraft == nil else { return }
+        let cutoff = Date().addingTimeInterval(-90)
+        guard let action = viewModel.messages
+            .suffix(3)
+            .filter({ $0.timestamp >= cutoff })
+            .flatMap(\.actions)
+            .last(where: {
+                $0.action == "send_message"
+                    && $0.success
+                    && !$0.pending
+                    && !handledMessageComposeActionIDs.contains($0.id)
+            }) else {
+            return
+        }
+        handledMessageComposeActionIDs.insert(action.id)
+        guard let draft = MessageDraft(action: action) else { return }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard pendingReviewAction == nil, messageDraft == nil else { return }
+            presentMessageDraft(draft)
+        }
+    }
+
     private func handleActionOpen(_ action: ActionResult) {
         if action.action == "send_message", let draft = MessageDraft(action: action) {
             presentMessageDraft(draft)
@@ -316,13 +342,26 @@ struct MessageDraft: Identifiable, Equatable {
 
     init?(action: ActionResult) {
         guard let link = action.deepLink ?? action.webLink,
-              let components = URLComponents(string: link),
-              components.scheme == "sms" else { return nil }
-        let recipient = components.path.removingPercentEncoding ?? components.path
-        let body = components.queryItems?.first(where: { $0.name == "body" })?.value ?? ""
+              link.lowercased().hasPrefix("sms:") else { return nil }
+        let rawPayload = String(link.dropFirst(4))
+        let parts = rawPayload.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let rawRecipientAndMaybeBody = String(parts.first ?? "")
+        let rawQuery = parts.count > 1 ? String(parts[1]) : ""
+        let legacyPieces = rawRecipientAndMaybeBody.split(separator: "&", maxSplits: 1, omittingEmptySubsequences: false)
+        let rawRecipient = String(legacyPieces.first ?? "")
+        let query = rawQuery.isEmpty && legacyPieces.count > 1 ? String(legacyPieces[1]) : rawQuery
+        let recipient = rawRecipient.removingPercentEncoding ?? rawRecipient
+        let body = MessageDraft.body(from: query)
         guard !recipient.isEmpty || !body.isEmpty else { return nil }
         self.recipients = recipient.isEmpty ? [] : [recipient]
         self.body = body
+    }
+
+    private static func body(from query: String) -> String {
+        guard !query.isEmpty else { return "" }
+        var components = URLComponents()
+        components.percentEncodedQuery = query.trimmingCharacters(in: CharacterSet(charactersIn: "&?"))
+        return components.queryItems?.first(where: { $0.name == "body" })?.value ?? ""
     }
 }
 

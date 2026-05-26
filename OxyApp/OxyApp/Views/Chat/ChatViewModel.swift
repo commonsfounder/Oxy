@@ -28,7 +28,7 @@ final class ChatViewModel {
 
     private static let autoOpenActions: Set<String> = [
         "book_uber", "order_deliveroo", "order_uber_eats",
-        "play_music", "search_netflix_title", "add_to_netflix_list",
+        "search_netflix_title", "add_to_netflix_list",
         "make_call"
     ]
 

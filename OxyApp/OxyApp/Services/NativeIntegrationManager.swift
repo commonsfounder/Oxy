@@ -244,8 +244,8 @@ final class NativeIntegrationManager {
                     deepLink: "music://"
                 )
             }
-            let player = ApplicationMusicPlayer.shared
-            player.queue = ApplicationMusicPlayer.Queue(for: [song])
+            let player = SystemMusicPlayer.shared
+            player.queue = SystemMusicPlayer.Queue(for: [song])
             try await player.play()
             return NativeLocalActionResult(
                 action: "play_music",

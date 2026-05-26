@@ -1343,7 +1343,7 @@ async function executeAction(userId, action, params, context = {}) {
         text: `Message ready for ${contact}. Review and tap Send.`,
         cardText: `To ${contact} · ${message}`,
         actionSummary: 'Message ready',
-        deepLink: `sms:${encodeURIComponent(contact)}&body=${encodeURIComponent(message)}`
+        deepLink: `sms:${encodeURIComponent(contact)}?&body=${encodeURIComponent(message)}`
       };
     }
     case 'make_call': {
