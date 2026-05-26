@@ -27,3 +27,10 @@ test('Uber to nearest McDonald’s routes to book_uber', () => {
 test('plain factual question does not become local place action', () => {
   assert.equal(inferDeterministicAction('what is McDonald’s revenue?'), null);
 });
+
+test('casual nearest-place question strips filler wording', () => {
+  const routed = inferDeterministicAction("can you tell me where the nearest mcdonald's is");
+  assert.equal(routed.reason, 'find_local_place');
+  assert.equal(routed.actions[0].type, 'find_place');
+  assert.equal(routed.actions[0].input.query, "the nearest mcdonald's");
+});

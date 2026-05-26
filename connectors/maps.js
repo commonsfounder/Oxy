@@ -42,7 +42,8 @@ function mapsSearchFallback(query) {
   const link = `https://maps.apple.com/?q=${encodeURIComponent(query)}`;
   return {
     success: true,
-    text: `I can open a Maps search for ${query}. Exact nearby ranking needs Places search enabled on the server.`,
+    text: `I can open Maps for ${query}. Exact nearest-place ranking needs Places enabled on the server.`,
+    actionSummary: 'Maps search ready',
     cardText: 'Open search in Maps',
     deepLink: link,
     webLink: link

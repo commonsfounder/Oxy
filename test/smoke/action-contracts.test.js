@@ -4,6 +4,7 @@ const test = require('node:test');
 const {
   ACTION_CONTRACTS,
   buildActionRecovery,
+  applyActionContractResultMetadata,
   validateActionWithContract
 } = require('../../api/action-contracts');
 
@@ -87,4 +88,18 @@ test('Places server setup failure is explicit and not retryable', () => {
   );
   assert.equal(recovery.cardText, 'Nearby ranking needs Places setup.');
   assert.equal(recovery.retryable, false);
+});
+
+test('connector fallback summaries are not overwritten by generic contract text', () => {
+  const result = applyActionContractResultMetadata(
+    { type: 'find_place', input: { query: "the nearest mcdonald's" } },
+    {
+      success: true,
+      text: "I can open Maps for the nearest mcdonald's.",
+      actionSummary: 'Maps search ready',
+      cardText: 'Open search in Maps'
+    }
+  );
+
+  assert.equal(result.actionSummary, 'Maps search ready');
 });

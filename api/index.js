@@ -3365,11 +3365,11 @@ app.post('/chat', async (req, res) => {
             const text = chunk.text || '';
             if (text) {
               spoken += text;
-              sse({ type: 'text', chunk: text });
-              if (ttsStreamer) ttsStreamer.ingest(spoken);
             }
           }
-          spoken = parseActions(spoken).spoken || spoken || context;
+          spoken = stripActionMarkupForDisplay(parseActions(spoken).spoken || spoken || context).trim();
+          sse({ type: 'replace', text: spoken });
+          if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
         if (actionConfirmation && actionConfirmation !== spoken) {

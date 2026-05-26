@@ -7,7 +7,8 @@ function normalizeText(text) {
 }
 
 function isQuestionOnly(text) {
-  return /^(what|who|when|why|explain|tell me)\b/i.test(text);
+  return /^(what|who|when|why|explain)\b/i.test(text) &&
+    !/\b(nearest|closest|near me|nearby|around me)\b/i.test(text);
 }
 
 function looksLikeLocalPlaceRequest(message) {
@@ -23,10 +24,15 @@ function looksLikeRideRequest(message) {
 function cleanDestinationPhrase(message) {
   const text = normalizeText(message)
     .replace(/^(can you|could you|please|pls)\s+/i, '')
+    .replace(/^(tell me|show me)\s+(where\s+)?/i, '')
+    .replace(/^where\s+(is|are)\s+/i, '')
+    .replace(/^where\s+the\s+/i, 'the ')
     .replace(/\b(book|get|order|call|send|open)\s+(me\s+)?(an?\s+)?(uber|ride|taxi|cab|car)\s+(to|for)?\b/i, ' ')
     .replace(/\b(take|drive)\s+me\s+(to)?\b/i, ' ')
     .replace(/\b(show|find|search for|look for|open)\s+(me\s+)?\b/i, ' ')
     .replace(/\b(in|on)\s+(apple\s+)?maps\b/i, ' ')
+    .replace(/\bis\s+(located|at)\b/i, ' ')
+    .replace(/\s+is$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
   return text || normalizeText(message);

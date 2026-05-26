@@ -42,7 +42,8 @@ function fallbackUberLink(destination) {
   ].join('&');
   return {
     success: true,
-    text: `Opening Uber to search for ${destination}. Confirm the exact destination in Uber.`,
+    text: `Opening Uber to search for ${destination}. Pick the exact destination in Uber.`,
+    actionSummary: 'Uber search ready',
     cardText: 'Confirm destination in Uber',
     deepLink: `uber://?${query}`,
     webLink: `https://m.uber.com/ul/?${query}`

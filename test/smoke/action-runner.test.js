@@ -25,6 +25,27 @@ test('action runner parks high-risk actions for review', async () => {
   assert.equal(logs[0].result.pending, true);
 });
 
+test('action runner parks Uber requests before connector fallback can open', async () => {
+  let executed = false;
+  const executeActions = createActionRunner({
+    executeAction: async () => {
+      executed = true;
+      return { success: true, text: 'Opening Uber.' };
+    },
+    setPendingAction: async () => {},
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'book_uber', input: { destination: "the nearest McDonald's" } }
+  ], { userMessage: "get me an Uber to the nearest McDonald's" });
+
+  assert.equal(executed, false);
+  assert.equal(result[0].result.pending, true);
+  assert.equal(result[0].result.actionSummary, 'Review Uber');
+});
+
 test('action runner executes reviewed action when bypassReview is set', async () => {
   const executed = [];
   const executeActions = createActionRunner({
