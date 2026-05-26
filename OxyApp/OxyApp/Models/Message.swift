@@ -46,9 +46,12 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let deepLink: String?
     let webLink: String?
     let cardText: String?
+    let actionSummary: String?
+    let risk: String?
+    let confirmation: String?
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink, cardText
+        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation
     }
 
     init(
@@ -58,7 +61,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
         error: String? = nil,
         deepLink: String? = nil,
         webLink: String? = nil,
-        cardText: String? = nil
+        cardText: String? = nil,
+        actionSummary: String? = nil,
+        risk: String? = nil,
+        confirmation: String? = nil
     ) {
         self.action = action
         self.success = success
@@ -67,6 +73,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.deepLink = deepLink
         self.webLink = webLink
         self.cardText = cardText
+        self.actionSummary = actionSummary
+        self.risk = risk
+        self.confirmation = confirmation
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +89,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
             deepLink = try result.decodeIfPresent(String.self, forKey: .deepLink)
             webLink = try result.decodeIfPresent(String.self, forKey: .webLink)
             cardText = try result.decodeIfPresent(String.self, forKey: .cardText)
+            actionSummary = try result.decodeIfPresent(String.self, forKey: .actionSummary)
+            risk = try result.decodeIfPresent(String.self, forKey: .risk)
+            confirmation = try result.decodeIfPresent(String.self, forKey: .confirmation)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -87,6 +99,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
             deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
             webLink = try container.decodeIfPresent(String.self, forKey: .webLink)
             cardText = try container.decodeIfPresent(String.self, forKey: .cardText)
+            actionSummary = try container.decodeIfPresent(String.self, forKey: .actionSummary)
+            risk = try container.decodeIfPresent(String.self, forKey: .risk)
+            confirmation = try container.decodeIfPresent(String.self, forKey: .confirmation)
         }
     }
 
@@ -99,6 +114,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(deepLink, forKey: .deepLink)
         try container.encodeIfPresent(webLink, forKey: .webLink)
         try container.encodeIfPresent(cardText, forKey: .cardText)
+        try container.encodeIfPresent(actionSummary, forKey: .actionSummary)
+        try container.encodeIfPresent(risk, forKey: .risk)
+        try container.encodeIfPresent(confirmation, forKey: .confirmation)
     }
 }
 

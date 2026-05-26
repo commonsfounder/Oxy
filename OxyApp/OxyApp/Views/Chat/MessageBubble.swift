@@ -188,6 +188,7 @@ struct ActionCard: View {
     }
 
     private var actionSummary: String {
+        if let summary = action.actionSummary, !summary.isEmpty { return summary }
         switch action.action {
         case "send_email": return action.success ? "Email sent" : "Email failed"
         case "send_message": return action.success ? "Message ready" : "Message failed"

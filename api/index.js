@@ -11,6 +11,13 @@ const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const {
+  ACTION_CONTRACTS,
+  actionPromptBlock,
+  applyActionContractResultMetadata,
+  buildActionRecovery,
+  validateActionWithContract
+} = require('./action-contracts');
+const {
   createGeminiServiceClient,
   createSupabaseServiceClient,
   getMissingRuntimeEnv,
@@ -373,34 +380,7 @@ ACTIONS YOU CAN TAKE:
 Return an action block only when the user clearly asks for one of these actions and the required details are present.
 If key details are missing, ask for the smallest missing detail instead of inventing it.
 
-<action>
-{
-  "actions": [
-    {"type": "send_message", "input": {"contact": "name", "message": "text"}},
-    {"type": "make_call", "input": {"contact": "name"}},
-    {"type": "create_reminder", "input": {"title": "reminder", "due_date": "ISO date"}},
-    {"type": "play_music", "input": {"query": "search term"}},
-    {"type": "create_calendar_event", "input": {"title": "event", "start_date": "ISO date", "end_date": "ISO date"}},
-    {"type": "get_calendar_events", "input": {"max_results": 5}},
-    {"type": "send_email", "input": {"to": "email", "subject": "optional subject inferred from the user's message if omitted", "body": "specific complete email body based on the user's provided content"}},
-    {"type": "get_emails", "input": {"max_results": 5}},
-    {"type": "search_emails", "input": {"query": "search term", "max_results": 5}},
-    {"type": "book_uber", "input": {"destination": "natural place or address phrase"}},
-    {"type": "find_place", "input": {"query": "natural place or address phrase"}},
-    {"type": "send_telegram", "input": {"contact": "contact name", "message": "message text"}},
-    {"type": "get_telegram_contacts", "input": {}},
-    {"type": "search_trains", "input": {"origin": "station name or CRS code", "destination": "station name or CRS code"}},
-    {"type": "order_uber_eats", "input": {"query": "food or restaurant", "restaurant": "optional restaurant name", "item": "optional dish"}},
-    {"type": "order_deliveroo", "input": {"query": "food or restaurant", "restaurant": "optional restaurant name", "item": "optional dish"}},
-    {"type": "search_netflix_title", "input": {"title": "show or film title"}},
-    {"type": "add_to_netflix_list", "input": {"title": "show or film title"}},
-    {"type": "forget_memory", "input": {"scope": "recent|all", "query": "optional memory topic to forget"}},
-    {"type": "generate_visual", "input": {"brief": "what to create", "style": "optional style", "usage": "where this visual will be used"}},
-    {"type": "create_diagram", "input": {"topic": "what to explain", "goal": "what the diagram should help with"}},
-    {"type": "create_presentation", "input": {"topic": "subject", "audience": "who it's for", "objective": "what the deck should achieve", "slide_count": 6}}
-  ]
-}
-</action>
+${actionPromptBlock()}
 
 ABSOLUTE RULES:
 1. Never claim to have done something without returning the action block
@@ -483,52 +463,7 @@ function isLinkSendRequest(message) {
 }
 
 function validateActionAgainstUserRequest(action, originalMessage = '') {
-  const type = action?.type || '';
-  const input = action?.input || {};
-  if (['send_message', 'send_telegram'].includes(type) && isLinkSendRequest(originalMessage) && !containsUrl(input.message)) {
-    return {
-      success: false,
-      error: 'The user asked to send a link, but no actual URL was provided or found. Ask for the exact link before sending.'
-    };
-  }
-  if (type === 'send_email' && isLinkSendRequest(originalMessage) && !containsUrl(`${input.subject || ''} ${input.body || ''}`)) {
-    return {
-      success: false,
-      error: 'The user asked to send a link, but the email does not contain an actual URL. Ask for the exact link before sending.'
-    };
-  }
-  return null;
-}
-
-function buildActionRecovery(action, result) {
-  const type = action?.type || action?.action || '';
-  const error = String(result?.error || '').trim();
-  if (result?.success !== false) return {};
-
-  if ((type === 'find_place' || type === 'book_uber') && /need your current location|enable location/i.test(error)) {
-    return {
-      cardText: 'Enable location and try again.',
-      retryable: true,
-      retryAction: { type, input: action?.input || {} }
-    };
-  }
-
-  if ((type === 'find_place' || type === 'book_uber') && /Places API|Google Places|PERMISSION_DENIED|REQUEST_DENIED/i.test(error)) {
-    return {
-      cardText: 'Places search needs server setup.',
-      retryable: false
-    };
-  }
-
-  if (/No results found|couldn't find a nearby|Geocoding error/i.test(error)) {
-    return {
-      cardText: 'Try a different place name.',
-      retryable: true,
-      retryAction: { type, input: action?.input || {} }
-    };
-  }
-
-  return {};
+  return validateActionWithContract(action, originalMessage);
 }
 
 function pcmToWav(pcmBuffer, sampleRate = 24000) {
@@ -1401,10 +1336,11 @@ async function executeActions(userId, actions, context = {}, trace = null, callb
   const results = await Promise.all(actions.map(async action => {
     if (callbacks.onActionStart) callbacks.onActionStart(action);
     const validationError = validateActionAgainstUserRequest(action, context.userMessage || '');
-    const result = validationError || (trace
+    let result = validationError || (trace
       ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
       : await executeAction(userId, action.type, action.input || {}, context));
     Object.assign(result, buildActionRecovery(action, result));
+    result = applyActionContractResultMetadata(action, result);
     const insertActionLog = () => supabase.from('action_log').insert({
       user_id: userId,
       action: serializeLoggedAction(action, result),
@@ -2181,6 +2117,10 @@ app.get('/action-log/:userId', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/action-contracts', requireSessionAuth, (req, res) => {
+  res.json({ actions: ACTION_CONTRACTS });
 });
 
 const CONNECTORS = [
