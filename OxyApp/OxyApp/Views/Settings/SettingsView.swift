@@ -1,17 +1,11 @@
 import AVFoundation
-import Contacts
-import CoreLocation
-import EventKit
 import SwiftUI
-import UserNotifications
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
     @State private var voicePreview = VoicePreviewPlayer()
-    @State private var showAdvanced = false
-    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         NavigationStack {
@@ -105,55 +99,11 @@ struct SettingsView: View {
                                     previewVoice(newVoice)
                                 }
                             }
-
-                            Divider().overlay(Color.oxyLine)
-
-                            Button {
-                                previewVoice(settings.voice)
-                            } label: {
-                                HStack {
-                                    Image(systemName: voicePreview.isPlaying ? "waveform" : "play.fill")
-                                    Text(voicePreview.isPlaying ? "Playing Preview" : "Play Preview")
-                                    Spacer()
-                                    if voicePreview.isLoading {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                    }
-                                }
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyText)
-                                .padding(.vertical, 4)
-                            }
                         }
 
                         // Autonomy
                         settingsSection(title: "Behaviour") {
-                            settingRow(label: "Initiative Level", description: "How often Oxy proactively reaches out") {
-                                HStack(spacing: 6) {
-                                    ForEach(["Low", "Medium", "High"], id: \.self) { level in
-                                        Button(action: {
-                                            settings.autonomy = level
-                                            saveSettings()
-                                        }) {
-                                            Text(level)
-                                                .font(.system(size: 12, weight: .medium))
-                                                .foregroundStyle(
-                                                    settings.autonomy == level
-                                                        ? Color.oxyBg
-                                                        : Color.oxySub
-                                                )
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 7)
-                                                .background(
-                                                    settings.autonomy == level
-                                                        ? Color.oxyStone
-                                                        : Color.oxySurface3
-                                                )
-                                                .clipShape(Capsule())
-                                        }
-                                    }
-                                }
-                            }
+                            InitiativeScroller(selection: $settings.autonomy, onChange: saveSettings)
 
                             Divider().overlay(Color.oxyLine)
 
@@ -199,142 +149,6 @@ struct SettingsView: View {
                                     .tint(Color.oxyGreen)
                                     .onChange(of: settings.reviewBeforeOpeningApps) { _, _ in saveSettings() }
                             }
-                        }
-
-                        settingsSection(title: "Apple") {
-                            VStack(spacing: 0) {
-                                PermissionStatusRow(label: "Location", systemImage: "location.fill", state: locationPermissionLabel)
-                                Divider().overlay(Color.oxyLine)
-                                PermissionStatusRow(label: "Contacts", systemImage: "person.crop.circle.fill", state: contactsPermissionLabel)
-                                Divider().overlay(Color.oxyLine)
-                                PermissionStatusRow(label: "Calendar", systemImage: "calendar", state: calendarPermissionLabel)
-                                Divider().overlay(Color.oxyLine)
-                                PermissionStatusRow(label: "Reminders", systemImage: "bell.fill", state: remindersPermissionLabel)
-                                Divider().overlay(Color.oxyLine)
-                                PermissionStatusRow(label: "Notifications", systemImage: "app.badge.fill", state: notificationPermissionLabel)
-                            }
-
-                            Divider().overlay(Color.oxyLine)
-
-                            Button {
-                                Task {
-                                    await NativeIntegrationManager.shared.requestNativePermissions(userId: appState.userId)
-                                    await refreshPermissionStatus()
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "iphone.gen3.radiowaves.left.and.right")
-                                    Text("Enable Native Context")
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color.oxyDim)
-                                }
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyText)
-                                .padding(.vertical, 4)
-                            }
-
-                            Divider().overlay(Color.oxyLine)
-
-                            Button {
-                                Task {
-                                    await NativeIntegrationManager.shared.markCurrentLocationAsHome(userId: appState.userId)
-                                    await MainActor.run { loadSettings() }
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: "house.and.flag.fill")
-                                    Text("Set Current Location as Home")
-                                    Spacer()
-                                    Image(systemName: settings.homeLatitude == nil ? "location" : "checkmark.circle.fill")
-                                        .foregroundStyle(settings.homeLatitude == nil ? Color.oxyDim : Color.oxyGreen)
-                                }
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyText)
-                                .padding(.vertical, 4)
-                            }
-                        }
-
-                        settingsSection(title: "Advanced") {
-                            DisclosureGroup(isExpanded: $showAdvanced) {
-                                VStack(spacing: 0) {
-                                    Divider().overlay(Color.oxyLine)
-
-                                    settingRow(label: "Voice Engine", description: nil) {
-                                        Picker("", selection: $settings.voiceEngine) {
-                                            Text("Current").tag("current")
-                                            Text("Gemini Live").tag("gemini-live-prototype")
-                                        }
-                                        .pickerStyle(.menu)
-                                        .tint(Color.oxyStone)
-                                        .onChange(of: settings.voiceEngine) { _, _ in saveSettings() }
-                                    }
-
-                                    Divider().overlay(Color.oxyLine)
-
-                                    settingRow(label: "Health Alerts", description: "Use HealthKit summaries for checks") {
-                                        Toggle("", isOn: $settings.healthAlerts)
-                                            .labelsHidden()
-                                            .tint(Color.oxyGreen)
-                                            .onChange(of: settings.healthAlerts) { _, _ in saveSettings() }
-                                    }
-
-                                    Divider().overlay(Color.oxyLine)
-
-                                    settingRow(label: "Location Reminders", description: "Context nudges near important places") {
-                                        Toggle("", isOn: $settings.locationReminders)
-                                            .labelsHidden()
-                                            .tint(Color.oxyGreen)
-                                            .onChange(of: settings.locationReminders) { _, _ in saveSettings() }
-                                    }
-
-                                    Divider().overlay(Color.oxyLine)
-
-                                    DesignPreview(
-                                        template: settings.designTemplate,
-                                        palette: settings.designPalette,
-                                        motion: settings.designMotion
-                                    )
-                                    .padding(.top, 14)
-
-                                    DesignChoiceGroup(
-                                        title: "Template",
-                                        selection: $settings.designTemplate,
-                                        options: OxySettings.designTemplates,
-                                        onChange: saveSettings
-                                    )
-                                    .padding(.top, 16)
-
-                                    Divider().overlay(Color.oxyLine).padding(.vertical, 10)
-
-                                    DesignChoiceGroup(
-                                        title: "Palette",
-                                        selection: $settings.designPalette,
-                                        options: OxySettings.designPalettes,
-                                        onChange: saveSettings
-                                    )
-
-                                    Divider().overlay(Color.oxyLine).padding(.vertical, 10)
-
-                                    DesignChoiceGroup(
-                                        title: "Motion",
-                                        selection: $settings.designMotion,
-                                        options: OxySettings.designMotions,
-                                        onChange: saveSettings
-                                    )
-                                }
-                                .padding(.top, 10)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "slider.horizontal.3")
-                                    Text("Developer and visual tuning")
-                                    Spacer()
-                                }
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyText)
-                            }
-                            .tint(Color.oxySub)
                         }
 
                         // Account
@@ -383,10 +197,7 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .onAppear {
-                loadSettings()
-                Task { await refreshPermissionStatus() }
-            }
+            .onAppear { loadSettings() }
         }
     }
 
@@ -400,60 +211,10 @@ struct SettingsView: View {
         OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.label ?? "Stone"
     }
 
-    private var locationPermissionLabel: PermissionState {
-        switch LocationManager.shared.authorizationStatus {
-        case .authorizedAlways: return .good("Always")
-        case .authorizedWhenInUse: return .good("While Using")
-        case .denied, .restricted: return .blocked("Off")
-        default: return .needsSetup("Ask")
-        }
-    }
-
-    private var contactsPermissionLabel: PermissionState {
-        switch CNContactStore.authorizationStatus(for: .contacts) {
-        case .authorized: return .good("On")
-        case .denied, .restricted: return .blocked("Off")
-        default: return .needsSetup("Ask")
-        }
-    }
-
-    private var calendarPermissionLabel: PermissionState {
-        let status = EKEventStore.authorizationStatus(for: .event)
-        if #available(iOS 17.0, *) {
-            if status == .fullAccess || status == .writeOnly { return .good("On") }
-        } else if status == .authorized {
-            return .good("On")
-        }
-        return status == .denied || status == .restricted ? .blocked("Off") : .needsSetup("Ask")
-    }
-
-    private var remindersPermissionLabel: PermissionState {
-        let status = EKEventStore.authorizationStatus(for: .reminder)
-        if #available(iOS 17.0, *) {
-            if status == .fullAccess || status == .writeOnly { return .good("On") }
-        } else if status == .authorized {
-            return .good("On")
-        }
-        return status == .denied || status == .restricted ? .blocked("Off") : .needsSetup("Ask")
-    }
-
-    private var notificationPermissionLabel: PermissionState {
-        switch notificationStatus {
-        case .authorized, .provisional, .ephemeral: return .good("On")
-        case .denied: return .blocked("Off")
-        default: return .needsSetup("Ask")
-        }
-    }
-
     private func previewVoice(_ voice: String) {
         Task {
             await voicePreview.preview(voice: voice)
         }
-    }
-
-    private func refreshPermissionStatus() async {
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
-        notificationStatus = settings.authorizationStatus
     }
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -570,56 +331,70 @@ private struct TTSPreviewResponse: Codable {
     let audio: String
 }
 
-// MARK: - Permissions
+// MARK: - Initiative
 
-private enum PermissionState: Equatable {
-    case good(String)
-    case needsSetup(String)
-    case blocked(String)
+private struct InitiativeScroller: View {
+    @Binding var selection: String
+    let onChange: () -> Void
 
-    var text: String {
-        switch self {
-        case .good(let text), .needsSetup(let text), .blocked(let text): return text
-        }
+    private var value: Binding<Double> {
+        Binding(
+            get: {
+                switch selection {
+                case "Low": return 0
+                case "High": return 2
+                default: return 1
+                }
+            },
+            set: { newValue in
+                let rounded = Int(newValue.rounded())
+                let next = rounded <= 0 ? "Low" : rounded >= 2 ? "High" : "Medium"
+                if next != selection {
+                    selection = next
+                    onChange()
+                }
+            }
+        )
     }
-
-    var color: Color {
-        switch self {
-        case .good: return Color.oxyGreen
-        case .needsSetup: return Color.oxyStone
-        case .blocked: return Color.oxyRed
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .good: return "checkmark.circle.fill"
-        case .needsSetup: return "circle.dashed"
-        case .blocked: return "xmark.circle.fill"
-        }
-    }
-}
-
-private struct PermissionStatusRow: View {
-    let label: String
-    let systemImage: String
-    let state: PermissionState
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .frame(width: 20)
-            Text(label)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-            Spacer()
-            Label(state.text, systemImage: state.icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(state.color)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Initiative")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.oxyText)
+                    Text(description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                }
+                Spacer()
+                Text(selection)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyStone)
+            }
+
+            Slider(value: value, in: 0...2, step: 1)
+                .tint(Color.oxyStone)
+
+            HStack {
+                Text("Quiet")
+                Spacer()
+                Text("Balanced")
+                Spacer()
+                Text("Active")
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Color.oxySub)
         }
-        .padding(.vertical, 8)
+    }
+
+    private var description: String {
+        switch selection {
+        case "Low": return "Mostly waits for you."
+        case "High": return "More proactive with useful nudges."
+        default: return "Helpful without being noisy."
+        }
     }
 }
 
