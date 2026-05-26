@@ -20,8 +20,14 @@ function isExplicitNearbyQuery(query) {
 
 function cleanPlaceSearchQuery(query) {
   let cleaned = String(query || '')
+    .replace(/^(can you|could you|please|pls)\s+/i, ' ')
+    .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, ' ')
+    .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, ' ')
+    .replace(/^where\s+(is|are)\s+/i, ' ')
+    .replace(/^(what|which)\s+(is\s+)?/i, ' ')
     .replace(/\b(get|take|send|book|open)\s+(me\s+)?(an?\s+)?(uber|ride|car|taxi)\s+(to|for)\b/gi, ' ')
     .replace(/\b(get|take|send)\s+me\s+to\b/gi, ' ')
+    .replace(/\bnext\s+(nearest|closest)\b/gi, '$1')
     .replace(/\b(the\s+)?nearest\b/gi, ' ')
     .replace(/\b(the\s+)?closest\b/gi, ' ')
     .replace(/\bnear\s+me\b/gi, ' ')
@@ -30,6 +36,7 @@ function cleanPlaceSearchQuery(query) {
     .replace(/\b(to|from)\s+me\b/gi, ' ')
     .replace(/\bmy\s+location\b/gi, ' ')
     .replace(/\bcurrent\s+location\b/gi, ' ')
+    .replace(/\b(is|are)\??$/i, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned || String(query || '').trim();

@@ -39,14 +39,15 @@ function mapsLink(place, query) {
 }
 
 function mapsSearchFallback(query, err = null) {
-  const link = `https://maps.apple.com/?q=${encodeURIComponent(query)}`;
+  const cleanedQuery = cleanPlaceSearchQuery(query);
+  const link = `https://maps.apple.com/?q=${encodeURIComponent(cleanedQuery)}`;
   const reason = String(err?.message || err || '');
   const setupText = /not configured|GOOGLE_PLACES_API_KEY|GOOGLE_MAPS_API_KEY/i.test(reason)
     ? 'Exact nearest-place ranking needs a Google Places API key on the server.'
     : 'Exact nearest-place ranking needs the server Places key to be accepted.';
   return {
     success: true,
-    text: `I can open Maps for ${query}. ${setupText}`,
+    text: `I can open Maps for ${cleanedQuery}. ${setupText}`,
     actionSummary: 'Maps search ready',
     cardText: 'Open search in Maps',
     deepLink: link,

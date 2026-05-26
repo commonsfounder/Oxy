@@ -34,3 +34,10 @@ test('casual nearest-place question strips filler wording', () => {
   assert.equal(routed.actions[0].type, 'find_place');
   assert.equal(routed.actions[0].input.query, "the nearest mcdonald's");
 });
+
+test('speechy nearest-place question strips trailing filler', () => {
+  const routed = inferDeterministicAction("what is the next nearest mcdonald's to me is?");
+  assert.equal(routed.reason, 'find_local_place');
+  assert.equal(routed.actions[0].type, 'find_place');
+  assert.equal(routed.actions[0].input.query, "the nearest mcdonald's");
+});
