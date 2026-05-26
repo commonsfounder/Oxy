@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { getGooglePlacesKey } = require('./services/maps-config');
 
 function normalizeLocation(location) {
   const latitude = Number(location?.latitude ?? location?.lat);
@@ -49,10 +50,11 @@ function distanceMeters(a, b) {
 }
 
 async function geocodeWithGoogle(locationString) {
+  const key = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY;
   const response = await axios.get(
     'https://maps.googleapis.com/maps/api/geocode/json',
     {
-      params: { address: locationString, region: 'uk', key: process.env.GOOGLE_MAPS_API_KEY },
+      params: { address: locationString, region: 'uk', key },
       timeout: 10000
     }
   );
@@ -85,8 +87,9 @@ async function geocodeWithNominatim(locationString) {
 }
 
 async function searchPlaceWithGoogle(query, location = null) {
-  if (!process.env.GOOGLE_MAPS_API_KEY) {
-    const err = new Error('Google Places is not configured. Set GOOGLE_MAPS_API_KEY and enable Places API.');
+  const key = getGooglePlacesKey();
+  if (!key) {
+    const err = new Error('Google Places is not configured. Set GOOGLE_PLACES_API_KEY or GOOGLE_MAPS_API_KEY and enable Places API (New).');
     err.code = 'PLACES_NOT_CONFIGURED';
     throw err;
   }
@@ -117,7 +120,7 @@ async function searchPlaceWithGoogle(query, location = null) {
     {
       headers: {
         'Content-Type': 'application/json',
-        'X-Goog-Api-Key': process.env.GOOGLE_MAPS_API_KEY,
+        'X-Goog-Api-Key': key,
         'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow'
       },
       timeout: 10000
@@ -156,7 +159,7 @@ async function searchPlaceWithGoogle(query, location = null) {
 
 const geocodeLocation = async (locationString) => {
   try {
-    if (process.env.GOOGLE_MAPS_API_KEY) {
+    if (process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY) {
       return await geocodeWithGoogle(locationString);
     }
   } catch (err) {
@@ -186,8 +189,11 @@ async function resolvePlaceDestination(destination, options = {}) {
     try {
       return await searchPlaceWithGoogle(query, location);
     } catch (err) {
-      if (err.code === 'PLACES_NOT_CONFIGURED' || /Places API has not been used|API has not been enabled|REQUEST_DENIED|PERMISSION_DENIED/i.test(err.response?.data?.error?.message || err.message)) {
-        throw new Error('Google Places is not ready on the server. Enable Places API for the Google Maps key.');
+      if (err.code === 'PLACES_NOT_CONFIGURED') {
+        throw err;
+      }
+      if (/Places API has not been used|API has not been enabled|API_KEY_INVALID|REQUEST_DENIED|PERMISSION_DENIED|billing/i.test(err.response?.data?.error?.message || err.message)) {
+        throw new Error('Google Places key is being rejected by the server. Check the Cloud Run API key, billing, and Places API (New) access.');
       }
       if (isExplicitNearbyQuery(query)) {
         throw new Error(`I couldn't find a nearby ${cleanPlaceSearchQuery(query)} from your current location. Try a different place name or enable location.`);

@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   ACTION_CONTRACTS,
+  actionPromptBlock,
   buildActionRecovery,
   applyActionContractResultMetadata,
   validateActionWithContract
@@ -69,6 +70,13 @@ test('email saying Y can omit subject but not body', () => {
     input: { to: 'josh@example.com' }
   }, 'email Josh');
   assert.match(missing.error, /body/);
+});
+
+test('send_email prompt contract tells the model to draft a complete email', () => {
+  const prompt = actionPromptBlock();
+  assert.match(prompt, /polished complete email draft/);
+  assert.match(prompt, /Do not ask for a subject/);
+  assert.match(prompt, /Do not use stiff cliches/);
 });
 
 test('nearby place failures return one-tap recovery metadata', () => {

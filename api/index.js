@@ -404,13 +404,14 @@ ABSOLUTE RULES:
 12. If a recent action failed and the user asks to retry, fix, redo, or "do the failed one", retry only the failed action unless they explicitly ask to rerun other actions too.
 13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.
 14. When executing communication actions, use the right register for the medium and relationship automatically.
-15. Emails to unknown or professional contacts should have a proper salutation, structured body, and sign-off.
-16. Emails to known contacts should match the established tone of that relationship.
-17. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
-18. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email.
-19. Never send an email body that is just a generic template like "I hope this email finds you well" plus "I look forward to connecting." The body must contain specific content from the user or conversation.
-19a. If the user says "email X saying Y" or otherwise gives the message content, use that content. Do not ask for a subject; infer a short subject if the user did not provide one.
-20. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
+15. Email quality matters. If the user says "email X saying Y", turn Y into a complete, useful email draft instead of copying a terse fragment. Include a natural greeting, 1-3 short paragraphs, and a sign-off when appropriate.
+16. Default email tone is warm, clear, and human. Avoid corporate cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the user explicitly wants very formal language.
+17. Match requested tone. If the user says casual, friendly, firm, apologetic, confident, less desperate, short, or professional, make the draft visibly follow that. Do not ignore tone instructions.
+18. Emails to unknown or professional contacts should be polished and structured, but not ridiculously formal. Emails to known contacts should match the established tone of that relationship.
+19. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
+20. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email. If they provide actual substance, do not ask for a subject; infer a short subject.
+20a. Never send an email body that is just a generic template. The body must contain specific content from the user, current conversation, memory, or tool results.
+20b. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
 21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
 22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
 22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
@@ -2185,7 +2186,7 @@ app.get('/connectors/:userId', async (req, res) => {
       const enabled = row?.enabled === true;
       const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session);
       const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
-      const needsSetup = c.id === 'maps' && !process.env.GOOGLE_MAPS_API_KEY;
+      const needsSetup = c.id === 'maps' && !(process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY);
       const degraded = c.id === 'trainline' && (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY);
       const connectionState = needsReconnect
         ? 'needs_reconnect'
