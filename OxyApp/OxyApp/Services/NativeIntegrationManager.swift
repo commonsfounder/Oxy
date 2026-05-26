@@ -5,6 +5,7 @@ import Foundation
 import HealthKit
 import MapKit
 import MediaPlayer
+import MessageUI
 import MusicKit
 import UIKit
 import UserNotifications
@@ -193,6 +194,14 @@ final class NativeIntegrationManager {
             return nil
         }
 
+        if let result = await prepareNativeMessage(from: normalized) {
+            return result
+        }
+
+        if let result = nativeDiagnostics(for: normalized) {
+            return result
+        }
+
         if let result = await handleNativeMusicRequest(normalized) {
             return result
         }
@@ -213,6 +222,113 @@ final class NativeIntegrationManager {
             return result
         }
 
+        return nil
+    }
+
+    private func nativeDiagnostics(for message: String) -> NativeLocalActionResult? {
+        let lower = message.lowercased()
+        guard lower.contains("diagnose oxy")
+            || lower.contains("native diagnostics")
+            || lower.contains("oxy diagnostics")
+            || lower.contains("why is oxy not working") else { return nil }
+
+        let contactsStatus = CNContactStore.authorizationStatus(for: .contacts)
+        let musicStatus = MusicAuthorization.currentStatus
+        let canSendText = MFMessageComposeViewController.canSendText()
+        let lines = [
+            "Contacts: \(authorizationLabel(contactsStatus))",
+            "Can send iMessage/SMS: \(canSendText ? "yes" : "no")",
+            "MusicKit: \(musicAuthorizationLabel(musicStatus))",
+            "Apple Music app installed: \(UIApplication.shared.canOpenURL(URL(string: "music://")!) ? "yes" : "no")"
+        ]
+        return NativeLocalActionResult(
+            action: "native_diagnostics",
+            text: lines.joined(separator: "\n"),
+            cardText: lines.joined(separator: "\n"),
+            actionSummary: "Native diagnostics",
+            deepLink: nil
+        )
+    }
+
+    private func authorizationLabel(_ status: CNAuthorizationStatus) -> String {
+        switch status {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "not requested"
+        case .limited: return "limited"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func musicAuthorizationLabel(_ status: MusicAuthorization.Status) -> String {
+        switch status {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "not requested"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func prepareNativeMessage(from message: String) async -> NativeLocalActionResult? {
+        guard let parsed = parseMessageRequest(message) else { return nil }
+        let contacts = await contactHints(in: parsed.contact)
+        let matched = contacts.first
+        let recipient = matched?.phone ?? matched?.email ?? normalizedMessageAddress(parsed.contact)
+        guard let recipient, !recipient.isEmpty else {
+            return NativeLocalActionResult(
+                action: "send_message",
+                text: "I need a phone number for \(parsed.contact). Turn on Contacts access for Oxy or include the number.",
+                cardText: "No phone number found for \(parsed.contact)",
+                actionSummary: "Message needs contact",
+                deepLink: nil,
+                success: false,
+                error: "No message address found."
+            )
+        }
+
+        let label = matched?.displayName ?? parsed.contact
+        let encodedRecipient = recipient.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? recipient
+        let encodedBody = parsed.body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? parsed.body
+        return NativeLocalActionResult(
+            action: "send_message",
+            text: "Message ready for \(label). Review and tap Send.",
+            cardText: "To \(label) · \(parsed.body)",
+            actionSummary: "Message ready",
+            deepLink: "sms:\(encodedRecipient)?&body=\(encodedBody)"
+        )
+    }
+
+    private func parseMessageRequest(_ message: String) -> (contact: String, body: String)? {
+        let patterns = [
+            #"(?i)^(?:please\s+)?(?:send\s+)?(?:a\s+)?message\s+to\s+(.+?)\s+(?:saying|that says|and say|say)\s+(.+)$"#,
+            #"(?i)^(?:please\s+)?(?:text|message)\s+(.+?)\s+(?:saying|that says|and say|say)\s+(.+)$"#,
+            #"(?i)^(?:please\s+)?send\s+(.+?)\s+(?:a\s+)?message\s+(?:saying|that says|and say|say)\s+(.+)$"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(message.startIndex..<message.endIndex, in: message)
+            guard let match = regex.firstMatch(in: message, range: range), match.numberOfRanges >= 3,
+                  let contactRange = Range(match.range(at: 1), in: message),
+                  let bodyRange = Range(match.range(at: 2), in: message) else { continue }
+            let contact = String(message[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            let body = String(message[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !contact.isEmpty, !body.isEmpty {
+                return (contact, body)
+            }
+        }
+        return nil
+    }
+
+    private func normalizedMessageAddress(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.range(of: #"^\+?[0-9][0-9\s().-]{5,}$"#, options: .regularExpression) != nil {
+            return trimmed
+        }
+        if trimmed.range(of: #"^[^@\s]+@[^@\s]+\.[^@\s]+$"#, options: .regularExpression) != nil {
+            return trimmed
+        }
         return nil
     }
 
