@@ -42,7 +42,7 @@ struct ChatView: View {
                                 }
 
                                 ForEach(viewModel.messages) { message in
-                                    MessageBubble(message: message)
+                                    MessageBubble(message: message, showsTypingIndicator: viewModel.statusLabel == nil)
                                         .id(message.id)
                                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                                 }
@@ -192,7 +192,13 @@ struct ChatView: View {
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .sheet(isPresented: $showSearch) {
-                ChatSearchView(userId: appState.userId)
+                ChatSearchView(userId: appState.userId) { result in
+                    guard let createdAt = result.createdAt else { return }
+                    showSearch = false
+                    Task {
+                        await viewModel.loadHistoryAround(userId: appState.userId, createdAt: createdAt)
+                    }
+                }
             }
         }
         .task {
@@ -266,6 +272,7 @@ private struct VoiceRecordingBar: View {
 
 struct ChatSearchView: View {
     let userId: String
+    let onSelect: (SearchResult) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var results: [SearchResult] = []
@@ -301,7 +308,13 @@ struct ChatSearchView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(results) { result in
-                                SearchResultRow(result: result)
+                                Button {
+                                    onSelect(result)
+                                    dismiss()
+                                } label: {
+                                    SearchResultRow(result: result)
+                                }
+                                .buttonStyle(.plain)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 10)
 

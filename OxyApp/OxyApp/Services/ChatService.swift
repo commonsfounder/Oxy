@@ -47,6 +47,18 @@ struct ChatService {
             path: "/history/\(userId)",
             queryItems: [URLQueryItem(name: "limit", value: String(limit))]
         )
-        return try JSONDecoder().decode([HistoryEntry].self, from: data)
+        return try JSONDecoder().decode(HistoryResponse.self, from: data).history
+    }
+
+    func loadHistoryAround(userId: String, createdAt: String) async throws -> [HistoryEntry] {
+        let data = try await api.request(
+            path: "/history/\(userId)/around",
+            queryItems: [
+                URLQueryItem(name: "createdAt", value: createdAt),
+                URLQueryItem(name: "before", value: "24"),
+                URLQueryItem(name: "after", value: "24")
+            ]
+        )
+        return try JSONDecoder().decode(HistoryResponse.self, from: data).history
     }
 }

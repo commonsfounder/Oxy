@@ -114,7 +114,7 @@ private struct ActionRow: View {
 
     private var statusColor: Color {
         switch action.status {
-        case "success": return Color.oxyGreen
+        case "success", "executed": return Color.oxyGreen
         case "error", "failed": return Color.oxyRed
         default: return Color.oxySub
         }
@@ -122,7 +122,7 @@ private struct ActionRow: View {
 
     private var iconForStatus: String {
         switch action.status {
-        case "success": return "checkmark"
+        case "success", "executed": return "checkmark"
         case "error", "failed": return "xmark"
         default: return "ellipsis"
         }

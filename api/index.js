@@ -1576,14 +1576,14 @@ function isMemoryDeletionRequest(text) {
     || /\bforget that\b/i.test(String(text || ''));
 }
 
-async function getHistory(userId, trace = null) {
+async function getHistory(userId, trace = null, limit = 12) {
   const fetchHistory = () => supabase
     .from('conversations')
     .select('role, content, created_at')
     .eq('user_id', userId)
     .neq('role', 'system')
     .order('created_at', { ascending: false })
-    .limit(12);
+    .limit(Math.min(Math.max(Number(limit) || 12, 1), 200));
   const { data, error } = trace
     ? await trace.run('supabase.conversations.fetch_history', fetchHistory)
     : await fetchHistory();
@@ -2426,7 +2426,7 @@ app.get('/briefing/:userId', async (req, res) => {
 app.get('/history/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const history = await getHistory(req.params.userId);
+    const history = await getHistory(req.params.userId, null, req.query.limit || 50);
     res.json({ history });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2453,6 +2453,41 @@ app.get('/history/:userId/search', async (req, res) => {
       .map(normalizeConversationRow)
       .map(entry => ({ ...entry, content: conversationFallbackText(entry) }));
     res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/history/:userId/around', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  const anchor = new Date(String(req.query.createdAt || ''));
+  if (Number.isNaN(anchor.getTime())) return res.status(400).json({ error: 'Invalid createdAt' });
+  const beforeLimit = Math.min(Math.max(Number(req.query.before) || 20, 1), 100);
+  const afterLimit = Math.min(Math.max(Number(req.query.after) || 20, 1), 100);
+  try {
+    const base = supabase
+      .from('conversations')
+      .select('role, content, created_at')
+      .eq('user_id', req.params.userId)
+      .neq('role', 'system');
+    const [before, after] = await Promise.all([
+      base.lte('created_at', anchor.toISOString()).order('created_at', { ascending: false }).limit(beforeLimit),
+      supabase
+        .from('conversations')
+        .select('role, content, created_at')
+        .eq('user_id', req.params.userId)
+        .neq('role', 'system')
+        .gt('created_at', anchor.toISOString())
+        .order('created_at', { ascending: true })
+        .limit(afterLimit)
+    ]);
+    if (before.error) throw before.error;
+    if (after.error) throw after.error;
+    const rowsByKey = new Map();
+    [...(before.data || []).reverse(), ...(after.data || [])].forEach(row => {
+      rowsByKey.set(`${row.created_at}:${row.role}:${row.content}`, row);
+    });
+    res.json({ history: [...rowsByKey.values()].map(normalizeConversationRow) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

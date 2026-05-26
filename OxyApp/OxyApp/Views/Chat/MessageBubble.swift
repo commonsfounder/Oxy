@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MessageBubble: View {
     let message: Message
+    var showsTypingIndicator: Bool = true
 
     private var isUser: Bool { message.role == .user }
 
@@ -45,7 +46,7 @@ struct MessageBubble: View {
             }
 
             // Streaming indicator
-            if message.isStreaming && message.content.isEmpty {
+            if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
                     TypingIndicator()
                         .padding(.horizontal, 16)
@@ -129,27 +130,21 @@ struct ActionCard: View {
 
     var body: some View {
         Button(action: openLink) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(action.success ? Color.oxyGreen.opacity(0.15) : Color.oxyRed.opacity(0.15))
-                        .frame(width: 32, height: 32)
-
-                    Image(systemName: action.success ? "checkmark" : "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
-                }
+            HStack(spacing: 10) {
+                Image(systemName: action.success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(humanize(action.action))
-                        .font(.system(size: 13, weight: .semibold))
+                    Text(actionSummary)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.oxyText)
 
                     if let text = detailText {
                         Text(text)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11))
                             .foregroundStyle(Color.oxySub)
-                            .lineLimit(3)
+                            .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -157,22 +152,24 @@ struct ActionCard: View {
                 Spacer()
 
                 if hasLink {
-                    Image(systemName: "arrow.up.right.square.fill")
-                        .font(.system(size: 16))
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(Color.oxyStone)
                 } else {
                     Image(systemName: iconForAction(action.action))
-                        .font(.system(size: 14))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Color.oxyDim)
                 }
             }
-            .padding(12)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(hasLink ? Color.oxyStone.opacity(0.3) : Color.oxyLine2, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(action.success ? Color.white.opacity(0.08) : Color.oxyRed.opacity(0.22), lineWidth: 1)
             )
+            .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain)
         .disabled(!hasLink)
@@ -188,6 +185,23 @@ struct ActionCard: View {
 
     private func humanize(_ type: String) -> String {
         type.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private var actionSummary: String {
+        switch action.action {
+        case "send_email": return action.success ? "Email sent" : "Email failed"
+        case "send_message": return action.success ? "Message ready" : "Message failed"
+        case "send_telegram": return action.success ? "Telegram sent" : "Telegram failed"
+        case "book_uber": return action.success ? "Uber opened" : "Uber needs attention"
+        case "find_place": return action.success ? "Place found" : "Place search failed"
+        case "search_trains": return action.success ? "Trainline ready" : "Train search failed"
+        case "order_uber_eats": return action.success ? "Uber Eats opened" : "Uber Eats failed"
+        case "order_deliveroo": return action.success ? "Deliveroo opened" : "Deliveroo failed"
+        case "play_music": return action.success ? "Music opened" : "Music failed"
+        case "create_reminder": return action.success ? "Reminder created" : "Reminder failed"
+        case "create_calendar_event": return action.success ? "Calendar updated" : "Calendar failed"
+        default: return action.success ? "\(humanize(action.action)) done" : "\(humanize(action.action)) failed"
+        }
     }
 
     private func iconForAction(_ type: String) -> String {

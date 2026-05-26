@@ -39,16 +39,20 @@ final class ChatViewModel {
     func loadHistory(userId: String) async {
         do {
             let entries = try await chatService.loadHistory(userId: userId)
-            let loaded = entries.compactMap { entry -> Message? in
-                guard let role = Message.Role(rawValue: entry.role) else { return nil }
-                return Message(
-                    role: role,
-                    content: entry.content,
-                    timestamp: ISO8601DateFormatter().date(from: entry.createdAt ?? "") ?? Date()
-                )
-            }
+            let loaded = messages(from: entries)
             await MainActor.run {
                 messages = loaded
+            }
+        } catch {}
+    }
+
+    func loadHistoryAround(userId: String, createdAt: String) async {
+        do {
+            let entries = try await chatService.loadHistoryAround(userId: userId, createdAt: createdAt)
+            let loaded = messages(from: entries)
+            await MainActor.run {
+                messages = loaded
+                statusLabel = nil
             }
         } catch {}
     }
@@ -153,6 +157,18 @@ final class ChatViewModel {
 
     func requestLocationAccess() {
         locationManager.requestPermission()
+    }
+
+    private func messages(from entries: [HistoryEntry]) -> [Message] {
+        entries.compactMap { entry -> Message? in
+            guard let role = Message.Role(rawValue: entry.role) else { return nil }
+            return Message(
+                role: role,
+                content: entry.content,
+                timestamp: ISO8601DateFormatter().date(from: entry.createdAt ?? "") ?? Date(),
+                actions: entry.actions ?? []
+            )
+        }
     }
 
     // MARK: - Deep Links

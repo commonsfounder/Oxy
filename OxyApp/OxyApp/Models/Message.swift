@@ -114,15 +114,21 @@ struct HistoryEntry: Codable, Identifiable {
     let role: String
     let content: String
     let createdAt: String?
+    let actions: [ActionResult]?
 
     enum CodingKeys: String, CodingKey {
         case id
         case role
         case content
+        case actions
         case createdAt = "created_at"
     }
 
     var stableId: String {
         id ?? UUID().uuidString
     }
+}
+
+struct HistoryResponse: Codable {
+    let history: [HistoryEntry]
 }
