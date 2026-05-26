@@ -199,7 +199,7 @@ final class NativeIntegrationManager {
             return result
         }
 
-        if let result = nativeDiagnostics(for: normalized) {
+        if let result = await nativeDiagnostics(for: normalized) {
             return result
         }
 
@@ -226,7 +226,7 @@ final class NativeIntegrationManager {
         return nil
     }
 
-    private func nativeDiagnostics(for message: String) -> NativeLocalActionResult? {
+    private func nativeDiagnostics(for message: String) async -> NativeLocalActionResult? {
         let lower = message.lowercased()
         guard lower.contains("diagnose oxy")
             || lower.contains("native diagnostics")
@@ -242,6 +242,15 @@ final class NativeIntegrationManager {
             "MusicKit: \(musicAuthorizationLabel(musicStatus))",
             "Apple Music app installed: \(UIApplication.shared.canOpenURL(URL(string: "music://")!) ? "yes" : "no")"
         ]
+        if musicStatus == .authorized {
+            do {
+                let subscription = try await MusicSubscription.current
+                lines.append("Can play Apple Music catalog: \(subscription.canPlayCatalogContent ? "yes" : "no")")
+                lines.append("Cloud library enabled: \(subscription.hasCloudLibraryEnabled ? "yes" : "no")")
+            } catch {
+                lines.append("Music subscription check failed: \(String(describing: error))")
+            }
+        }
         if let lastMusicError, !lastMusicError.isEmpty {
             lines.append("Last music error: \(lastMusicError)")
         }
@@ -840,77 +849,89 @@ final class NativeIntegrationManager {
             return []
         }
 
-        return await Task.detached(priority: .userInitiated) {
-            let keys: [CNKeyDescriptor] = [
-                CNContactGivenNameKey as CNKeyDescriptor,
-                CNContactFamilyNameKey as CNKeyDescriptor,
-                CNContactNicknameKey as CNKeyDescriptor,
-                CNContactPhoneNumbersKey as CNKeyDescriptor,
-                CNContactEmailAddressesKey as CNKeyDescriptor
-            ]
-            let query = message.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-            let lower = query.lowercased()
-            let store = CNContactStore()
+        let query = message.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !query.isEmpty else { return [] }
+        return await withTaskGroup(of: [NativeContactHint].self) { group in
+            group.addTask {
+                Self.lookupContacts(matching: query)
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                return []
+            }
+            let result = await group.next() ?? []
+            group.cancelAll()
+            return result
+        }
+    }
 
-            func hint(from contact: CNContact) -> NativeContactHint {
+    private nonisolated static func lookupContacts(matching query: String) -> [NativeContactHint] {
+        let keys: [CNKeyDescriptor] = [
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactNicknameKey as CNKeyDescriptor,
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactEmailAddressesKey as CNKeyDescriptor
+        ]
+        let lower = query.lowercased()
+        let store = CNContactStore()
+
+        func hint(from contact: CNContact) -> NativeContactHint {
+            let names = [
+                contact.givenName,
+                contact.familyName,
+                "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
+                contact.nickname
+            ].filter { !$0.isEmpty }
+            return NativeContactHint(
+                displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
+                phone: contact.phoneNumbers.first?.value.stringValue,
+                email: contact.emailAddresses.first.map { String($0.value) }
+            )
+        }
+
+        func ranked(_ hints: [NativeContactHint]) -> [NativeContactHint] {
+            hints.sorted { lhs, rhs in
+                let lhsHasPhone = lhs.phone?.isEmpty == false
+                let rhsHasPhone = rhs.phone?.isEmpty == false
+                if lhsHasPhone != rhsHasPhone { return lhsHasPhone }
+                let lhsExact = lhs.displayName.lowercased() == lower
+                let rhsExact = rhs.displayName.lowercased() == lower
+                if lhsExact != rhsExact { return lhsExact }
+                return lhs.displayName.count < rhs.displayName.count
+            }
+        }
+
+        do {
+            let predicate = CNContact.predicateForContacts(matchingName: query)
+            let contacts = try store.unifiedContacts(matching: predicate, keysToFetch: keys)
+            let hints = ranked(contacts.map(hint))
+            if !hints.isEmpty {
+                return Array(hints.prefix(5))
+            }
+        } catch {}
+
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        var matches: [NativeContactHint] = []
+        do {
+            try store.enumerateContacts(with: request) { contact, stop in
                 let names = [
                     contact.givenName,
                     contact.familyName,
                     "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
                     contact.nickname
                 ].filter { !$0.isEmpty }
-                return NativeContactHint(
-                    displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
-                    phone: contact.phoneNumbers.first?.value.stringValue,
-                    email: contact.emailAddresses.first.map { String($0.value) }
-                )
+                guard names.contains(where: { name in
+                    let normalized = name.lowercased()
+                    return normalized == lower || normalized.contains(lower) || lower.contains(normalized)
+                }) else { return }
+                matches.append(hint(from: contact))
+                if matches.count >= 5 { stop.pointee = true }
             }
-
-            func ranked(_ hints: [NativeContactHint]) -> [NativeContactHint] {
-                hints.sorted { lhs, rhs in
-                    let lhsHasPhone = lhs.phone?.isEmpty == false
-                    let rhsHasPhone = rhs.phone?.isEmpty == false
-                    if lhsHasPhone != rhsHasPhone { return lhsHasPhone }
-                    let lhsExact = lhs.displayName.lowercased() == lower
-                    let rhsExact = rhs.displayName.lowercased() == lower
-                    if lhsExact != rhsExact { return lhsExact }
-                    return lhs.displayName.count < rhs.displayName.count
-                }
-            }
-
-            if !query.isEmpty {
-                do {
-                    let predicate = CNContact.predicateForContacts(matchingName: query)
-                    let contacts = try store.unifiedContacts(matching: predicate, keysToFetch: keys)
-                    let hints = ranked(contacts.map(hint))
-                    if !hints.isEmpty {
-                        return Array(hints.prefix(5))
-                    }
-                } catch {}
-            }
-
-            let request = CNContactFetchRequest(keysToFetch: keys)
-            var matches: [NativeContactHint] = []
-            do {
-                try store.enumerateContacts(with: request) { contact, stop in
-                    let names = [
-                        contact.givenName,
-                        contact.familyName,
-                        "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
-                        contact.nickname
-                    ].filter { !$0.isEmpty }
-                    guard names.contains(where: { name in
-                        let normalized = name.lowercased()
-                        return normalized == lower || normalized.contains(lower) || lower.contains(normalized)
-                    }) else { return }
-                    matches.append(hint(from: contact))
-                    if matches.count >= 5 { stop.pointee = true }
-                }
-            } catch {
-                return []
-            }
-            return ranked(matches)
-        }.value
+        } catch {
+            return []
+        }
+        return ranked(matches)
     }
 
     private func isLocalPlaceRequest(_ text: String) -> Bool {
