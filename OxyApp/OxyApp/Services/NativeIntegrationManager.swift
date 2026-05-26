@@ -3,8 +3,30 @@ import CoreLocation
 import EventKit
 import Foundation
 import HealthKit
+import MapKit
 import UIKit
 import UserNotifications
+
+struct NativeContactHint: Codable, Equatable {
+    let displayName: String
+    let phone: String?
+    let email: String?
+}
+
+struct NativePlaceResult: Equatable {
+    let name: String
+    let address: String
+    let distanceMeters: CLLocationDistance?
+    let mapURL: URL
+}
+
+struct NativeLocalActionResult: Equatable {
+    let action: String
+    let text: String
+    let cardText: String
+    let actionSummary: String
+    let deepLink: String?
+}
 
 struct NativeHealthSnapshot: Codable {
     var latestHeartRate: Double?
@@ -28,6 +50,7 @@ final class NativeIntegrationManager {
     private let healthStore = HKHealthStore()
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
+    private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
 
     private init() {}
 
@@ -70,6 +93,7 @@ final class NativeIntegrationManager {
         await requestHealthPermission()
         await requestContactsPermission()
         await requestReminderPermission()
+        await requestCalendarPermission()
         await syncNativeContext(userId: userId)
     }
 
@@ -117,6 +141,53 @@ final class NativeIntegrationManager {
         }
     }
 
+    func localContextHints(for message: String) async -> [String: Any] {
+        var hints: [String: Any] = [:]
+        let contacts = await contactHints(in: message)
+        if !contacts.isEmpty {
+            hints["contacts"] = contacts.map(\.dictionary)
+        }
+        if let place = await searchPlace(for: message), isLocalPlaceRequest(message) {
+            var placeHint: [String: Any] = [
+                "name": place.name,
+                "address": place.address,
+                "mapURL": place.mapURL.absoluteString
+            ]
+            if let distanceMeters = place.distanceMeters {
+                placeHint["distanceMeters"] = distanceMeters
+            }
+            hints["place"] = placeHint
+        }
+        return hints
+    }
+
+    func executeLocalRequest(_ message: String) async -> NativeLocalActionResult? {
+        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        let lower = normalized.lowercased()
+        if lower.contains("uber") || lower.contains("taxi") || lower.contains("ride") {
+            return nil
+        }
+
+        if let result = await createNativeReminder(from: normalized) {
+            return result
+        }
+
+        if let result = await createNativeCalendarEvent(from: normalized) {
+            return result
+        }
+
+        if isDirectionsRequest(normalized), let result = await openNativeDirections(for: normalized) {
+            return result
+        }
+
+        if isLocalPlaceRequest(normalized), let result = await findNativePlace(for: normalized) {
+            return result
+        }
+
+        return nil
+    }
+
     private func requestHealthPermission() async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let identifiers: [HKQuantityTypeIdentifier] = [.heartRate, .restingHeartRate, .stepCount]
@@ -138,6 +209,14 @@ final class NativeIntegrationManager {
             _ = try? await eventStore.requestFullAccessToReminders()
         } else {
             _ = try? await eventStore.requestAccess(to: .reminder)
+        }
+    }
+
+    private func requestCalendarPermission() async {
+        if #available(iOS 17.0, *) {
+            _ = try? await eventStore.requestFullAccessToEvents()
+        } else {
+            _ = try? await eventStore.requestAccess(to: .event)
         }
     }
 
@@ -208,6 +287,315 @@ final class NativeIntegrationManager {
             }
             healthStore.execute(query)
         }
+    }
+
+    private func contactHints(in message: String) async -> [NativeContactHint] {
+        guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return [] }
+        let keys: [CNKeyDescriptor] = [
+            CNContactGivenNameKey as CNKeyDescriptor,
+            CNContactFamilyNameKey as CNKeyDescriptor,
+            CNContactNicknameKey as CNKeyDescriptor,
+            CNContactPhoneNumbersKey as CNKeyDescriptor,
+            CNContactEmailAddressesKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        var matches: [NativeContactHint] = []
+        let lower = message.lowercased()
+
+        do {
+            try contactStore.enumerateContacts(with: request) { contact, stop in
+                let names = [
+                    contact.givenName,
+                    contact.familyName,
+                    "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
+                    contact.nickname
+                ].filter { !$0.isEmpty }
+                guard names.contains(where: { lower.contains($0.lowercased()) }) else { return }
+                matches.append(NativeContactHint(
+                    displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
+                    phone: contact.phoneNumbers.first?.value.stringValue,
+                    email: contact.emailAddresses.first.map { String($0.value) }
+                ))
+                if matches.count >= 5 { stop.pointee = true }
+            }
+        } catch {
+            return []
+        }
+        return matches
+    }
+
+    private func isLocalPlaceRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("nearest")
+            || lower.contains("closest")
+            || lower.contains("near me")
+            || lower.contains("nearby")
+            || lower.hasPrefix("where is")
+            || lower.hasPrefix("where's")
+    }
+
+    private func isDirectionsRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("directions")
+            || lower.contains("navigate")
+            || lower.contains("route")
+            || lower.contains("bus")
+            || lower.contains("buses")
+            || lower.contains("transit")
+            || lower.contains("public transport")
+            || lower.contains("walk to")
+            || lower.contains("drive to")
+            || lower.contains("get me to")
+            || lower.contains("need to be at")
+    }
+
+    private func findNativePlace(for message: String) async -> NativeLocalActionResult? {
+        guard let place = await searchPlace(for: message) else { return nil }
+        let distance = place.distanceMeters.map(formatDistance) ?? ""
+        let text = "I found \(place.name)\(place.address.isEmpty ? "" : ", \(place.address)")\(distance.isEmpty ? "." : ", \(distance) away.")"
+        let detail = [place.address, distance.isEmpty ? nil : "\(distance) away"].compactMap { $0 }.joined(separator: " · ")
+        return NativeLocalActionResult(
+            action: "find_place",
+            text: text,
+            cardText: detail.isEmpty ? "Open in Maps" : detail,
+            actionSummary: "Place found",
+            deepLink: place.mapURL.absoluteString
+        )
+    }
+
+    private func openNativeDirections(for message: String) async -> NativeLocalActionResult? {
+        let destination = cleanPlaceQuery(message)
+        guard !destination.isEmpty else { return nil }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = destination
+        if let location = LocationManager.shared.lastLocation {
+            request.region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        }
+        let mode = transportMode(for: message)
+        let launchOptions: [String: Any] = [MKLaunchOptionsDirectionsModeKey: mode]
+        let response = try? await MKLocalSearch(request: request).start()
+        let item = response?.mapItems.first
+        if let item {
+            item.openInMaps(launchOptions: launchOptions)
+        } else if let url = appleDirectionsURL(destination: destination, mode: mode) {
+            await UIApplication.shared.open(url)
+        }
+        return NativeLocalActionResult(
+            action: "get_directions",
+            text: "Opening \(directionsModeLabel(mode)) directions to \(item?.name ?? destination).",
+            cardText: "Open \(directionsModeLabel(mode)) directions in Maps",
+            actionSummary: "Directions ready",
+            deepLink: appleDirectionsURL(destination: item?.placemark.title ?? destination, mode: mode)?.absoluteString
+        )
+    }
+
+    private func searchPlace(for message: String) async -> NativePlaceResult? {
+        let query = cleanPlaceQuery(message)
+        guard !query.isEmpty else { return nil }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        let origin = LocationManager.shared.lastLocation
+        if let origin {
+            request.region = MKCoordinateRegion(center: origin.coordinate, latitudinalMeters: 25_000, longitudinalMeters: 25_000)
+        }
+        guard let response = try? await MKLocalSearch(request: request).start(),
+              let item = response.mapItems.first else { return nil }
+
+        let placemark = item.placemark
+        let address = [placemark.thoroughfare, placemark.locality, placemark.postalCode]
+            .compactMap { $0 }
+            .joined(separator: ", ")
+        let distance = origin.map { CLLocation(latitude: placemark.coordinate.latitude, longitude: placemark.coordinate.longitude).distance(from: $0) }
+        let label = (item.name ?? query).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        let url = URL(string: "https://maps.apple.com/?ll=\(placemark.coordinate.latitude),\(placemark.coordinate.longitude)&q=\(label)")!
+        return NativePlaceResult(
+            name: item.name ?? query,
+            address: address,
+            distanceMeters: distance,
+            mapURL: url
+        )
+    }
+
+    private func cleanPlaceQuery(_ message: String) -> String {
+        var text = message.lowercased()
+        let replacements = [
+            "can you tell me where the",
+            "where's the",
+            "where is the",
+            "nearest",
+            "closest",
+            "near me",
+            "nearby",
+            "directions to",
+            "navigate to",
+            "route to",
+            "bus to",
+            "buses to",
+            "get me to",
+            "i need to be at",
+            "what bus can i take"
+        ]
+        for replacement in replacements {
+            text = text.replacingOccurrences(of: replacement, with: " ")
+        }
+        text = text.replacingOccurrences(of: "\\bby\\b", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\bis\\b", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\b\\d{1,2}:\\d{2}\\b", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func transportMode(for message: String) -> String {
+        let lower = message.lowercased()
+        if lower.contains("bus") || lower.contains("transit") || lower.contains("public transport") {
+            return MKLaunchOptionsDirectionsModeTransit
+        }
+        if lower.contains("walk") {
+            return MKLaunchOptionsDirectionsModeWalking
+        }
+        return MKLaunchOptionsDirectionsModeDriving
+    }
+
+    private func directionsModeLabel(_ mode: String) -> String {
+        switch mode {
+        case MKLaunchOptionsDirectionsModeTransit: return "transit"
+        case MKLaunchOptionsDirectionsModeWalking: return "walking"
+        default: return "driving"
+        }
+    }
+
+    private func appleDirectionsURL(destination: String, mode: String) -> URL? {
+        let encoded = destination.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? destination
+        let flag: String
+        switch mode {
+        case MKLaunchOptionsDirectionsModeTransit: flag = "r"
+        case MKLaunchOptionsDirectionsModeWalking: flag = "w"
+        default: flag = "d"
+        }
+        return URL(string: "https://maps.apple.com/?daddr=\(encoded)&dirflg=\(flag)")
+    }
+
+    private func createNativeReminder(from message: String) async -> NativeLocalActionResult? {
+        let lower = message.lowercased()
+        guard lower.hasPrefix("remind me") || lower.hasPrefix("reminder") || lower.hasPrefix("create a reminder") else { return nil }
+        await requestReminderPermission()
+        guard remindersAuthorized else {
+            return NativeLocalActionResult(action: "create_reminder", text: "Turn on Reminders access and I can create that natively.", cardText: "Enable Reminders access", actionSummary: "Reminder needs access", deepLink: nil)
+        }
+
+        let parsedDate = detectedDate(in: message)
+        let title = cleanReminderTitle(message, date: parsedDate)
+        guard !title.isEmpty else { return nil }
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.title = title
+        reminder.calendar = eventStore.defaultCalendarForNewReminders()
+        if let parsedDate {
+            reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: parsedDate)
+            let alarm = EKAlarm(absoluteDate: parsedDate)
+            reminder.addAlarm(alarm)
+        }
+        do {
+            try eventStore.save(reminder, commit: true)
+            let timeText = parsedDate.map { DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short) }
+            return NativeLocalActionResult(
+                action: "create_reminder",
+                text: timeText.map { "Reminder set for \($0): \(title)." } ?? "Reminder set: \(title).",
+                cardText: timeText.map { "\(title) · \($0)" } ?? title,
+                actionSummary: "Reminder created",
+                deepLink: "x-apple-reminderkit://"
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func createNativeCalendarEvent(from message: String) async -> NativeLocalActionResult? {
+        let lower = message.lowercased()
+        guard lower.contains("calendar") || lower.contains("add event") || lower.contains("schedule") else { return nil }
+        await requestCalendarPermission()
+        guard calendarAuthorized else {
+            return NativeLocalActionResult(action: "create_calendar_event", text: "Turn on Calendar access and I can create that natively.", cardText: "Enable Calendar access", actionSummary: "Calendar needs access", deepLink: nil)
+        }
+        guard let start = detectedDate(in: message) else { return nil }
+        let title = cleanCalendarTitle(message, date: start)
+        guard !title.isEmpty else { return nil }
+        let event = EKEvent(eventStore: eventStore)
+        event.title = title
+        event.startDate = start
+        event.endDate = Calendar.current.date(byAdding: .hour, value: 1, to: start) ?? start.addingTimeInterval(3600)
+        event.calendar = eventStore.defaultCalendarForNewEvents
+        do {
+            try eventStore.save(event, span: .thisEvent, commit: true)
+            let timeText = DateFormatter.localizedString(from: start, dateStyle: .medium, timeStyle: .short)
+            return NativeLocalActionResult(
+                action: "create_calendar_event",
+                text: "Added \(title) to Calendar for \(timeText).",
+                cardText: "\(title) · \(timeText)",
+                actionSummary: "Calendar updated",
+                deepLink: "calshow://"
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private var remindersAuthorized: Bool {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if #available(iOS 17.0, *) {
+            return status == .fullAccess || status == .writeOnly
+        }
+        return status == .authorized
+    }
+
+    private var calendarAuthorized: Bool {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(iOS 17.0, *) {
+            return status == .fullAccess || status == .writeOnly
+        }
+        return status == .authorized
+    }
+
+    private func detectedDate(in message: String) -> Date? {
+        let range = NSRange(message.startIndex..<message.endIndex, in: message)
+        return detector?.firstMatch(in: message, options: [], range: range)?.date
+    }
+
+    private func cleanReminderTitle(_ message: String, date: Date?) -> String {
+        var title = message
+            .replacingOccurrences(of: #"(?i)^remind me to\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)^remind me\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)^create a reminder to\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)^reminder to\s+"#, with: "", options: .regularExpression)
+        if let match = dateMatch(in: message) {
+            title = title.replacingOccurrences(of: match, with: "")
+        }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func cleanCalendarTitle(_ message: String, date: Date?) -> String {
+        var title = message
+            .replacingOccurrences(of: #"(?i)add\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)to (my )?calendar"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)schedule\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)event\s+"#, with: "", options: .regularExpression)
+        if let match = dateMatch(in: message) {
+            title = title.replacingOccurrences(of: match, with: "")
+        }
+        return title.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func dateMatch(in message: String) -> String? {
+        let range = NSRange(message.startIndex..<message.endIndex, in: message)
+        guard let match = detector?.firstMatch(in: message, options: [], range: range),
+              let swiftRange = Range(match.range, in: message) else { return nil }
+        return String(message[swiftRange])
+    }
+
+    private func formatDistance(_ meters: CLLocationDistance) -> String {
+        if meters < 1000 {
+            return "\(Int(meters.rounded())) m"
+        }
+        return String(format: "%.1f km", meters / 1000)
     }
 
     private func loadSettings() -> OxySettings {

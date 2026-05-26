@@ -87,6 +87,18 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.healthStatus = healthStatus
     }
 
+    init(native result: NativeLocalActionResult) {
+        self.init(
+            action: result.action,
+            success: true,
+            text: result.text,
+            deepLink: result.deepLink,
+            webLink: result.deepLink,
+            cardText: result.cardText,
+            actionSummary: result.actionSummary
+        )
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         action = try container.decodeIfPresent(String.self, forKey: .action) ?? "unknown"

@@ -16,6 +16,10 @@
 	<string>Oxy uses contacts to prepare native message and FaceTime handoffs.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Oxy uses reminders to help create native Apple Reminders when you ask.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Oxy uses Calendar to create native events when you ask.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Oxy uses Calendar to create native events when you ask.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>uber</string>

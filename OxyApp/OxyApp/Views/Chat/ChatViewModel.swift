@@ -16,6 +16,7 @@ final class ChatViewModel {
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
+    private let nativeManager = NativeIntegrationManager.shared
 
     private var currentSettings: OxySettings {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
@@ -87,11 +88,30 @@ final class ChatViewModel {
                 location = await locationManager.currentLocationForLocalRequest() ?? location
             }
 
+            if let localResult = await nativeManager.executeLocalRequest(text) {
+                let actionResult = ActionResult(native: localResult)
+                await MainActor.run {
+                    _ = updateAssistantMessage(id: assistantID) {
+                        $0.content = localResult.text
+                        $0.actions = [actionResult]
+                        $0.isStreaming = false
+                    }
+                    statusLabel = nil
+                    isSending = false
+                    currentSendTask = nil
+                }
+                await chatService.logNativeLocalAction(userId: userId, message: text, result: actionResult)
+                return
+            }
+
+            let nativeHints = await nativeManager.localContextHints(for: text)
+
             let stream = chatService.sendMessage(
                 userId: userId,
                 message: text,
                 settings: settings,
-                location: location
+                location: location,
+                nativeHints: nativeHints
             )
             var fullText = ""
 

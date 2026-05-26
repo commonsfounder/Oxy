@@ -8,6 +8,7 @@ struct ChatService {
         message: String,
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
+        nativeHints: [String: Any]? = nil,
         tts: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
@@ -27,6 +28,10 @@ struct ChatService {
 
         if let location {
             body["location"] = location
+        }
+
+        if let nativeHints, !nativeHints.isEmpty {
+            body["nativeHints"] = nativeHints
         }
 
         var queryItems = [URLQueryItem(name: "stream", value: "true")]
@@ -60,5 +65,27 @@ struct ChatService {
             ]
         )
         return try JSONDecoder().decode(HistoryResponse.self, from: data).history
+    }
+
+    func logNativeLocalAction(userId: String, message: String, result: ActionResult) async {
+        _ = try? await api.request(
+            path: "/native/local-action",
+            method: "POST",
+            body: [
+                "userId": userId,
+                "message": message,
+                "result": result.dictionary
+            ]
+        )
+    }
+}
+
+private extension Encodable {
+    var dictionary: [String: Any] {
+        guard let data = try? JSONEncoder().encode(self),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return [:]
+        }
+        return object
     }
 }

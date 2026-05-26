@@ -691,6 +691,29 @@ Longitude: ${lng}
 Use these coordinates for "near me", "nearest", "closest", pickup, traffic, and local place requests. Do not invent a place; use a tool/action that can resolve it.`;
 }
 
+function buildNativeHintsContext(nativeHints) {
+  if (!nativeHints || typeof nativeHints !== 'object') return '';
+  const lines = [];
+  const contacts = Array.isArray(nativeHints.contacts) ? nativeHints.contacts.slice(0, 5) : [];
+  if (contacts.length) {
+    lines.push('NATIVE CONTACT MATCHES:');
+    for (const contact of contacts) {
+      const bits = [
+        contact.displayName || contact.name,
+        contact.phone && `phone ${contact.phone}`,
+        contact.email && `email ${contact.email}`
+      ].filter(Boolean);
+      if (bits.length) lines.push(`- ${bits.join(' · ')}`);
+    }
+  }
+  if (nativeHints.place?.name || nativeHints.place?.address) {
+    lines.push('NATIVE PLACE MATCH:');
+    lines.push(`- ${[nativeHints.place.name, nativeHints.place.address].filter(Boolean).join(' · ')}`);
+  }
+  if (!lines.length) return '';
+  return `${lines.join('\n')}\nUse these native hints to resolve casual references, but still follow action rules and reviews.`;
+}
+
 function buildPendingActionContext(pendingAction) {
   if (!pendingAction?.action) return '';
   return `PENDING ACTION AWAITING REVIEW:
@@ -2303,6 +2326,31 @@ app.post('/native/context', async (req, res) => {
   }
 });
 
+app.post('/native/local-action', async (req, res) => {
+  try {
+    const { userId, message, result } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!message || !result?.action) {
+      return res.status(400).json({ error: 'message and result.action are required.' });
+    }
+
+    await saveMessage(userId, 'user', String(message));
+    await saveMessage(userId, 'assistant', { text: result.text || '', actions: [result] });
+    await supabase.from('action_log').insert({
+      user_id: userId,
+      action: JSON.stringify({ type: result.action, input: { source: 'ios-native' } }),
+      status: result.success === false ? 'failed' : 'executed',
+      error: result.success === false ? (result.error || null) : null,
+      created_at: new Date().toISOString()
+    });
+
+    invalidateUserContextCache(userId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/briefings/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
@@ -2613,7 +2661,12 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
       memory,
       preferences,
       availableActions,
-      [userContext, buildLocationContext(requestContext.location), buildPendingActionContext(requestContext.pendingAction)].filter(Boolean).join('\n\n'),
+      [
+        userContext,
+        buildLocationContext(requestContext.location),
+        buildNativeHintsContext(requestContext.nativeHints),
+        buildPendingActionContext(requestContext.pendingAction)
+      ].filter(Boolean).join('\n\n'),
       statedContext
     );
   const searchReason = getSearchReason(message);
@@ -3113,7 +3166,7 @@ app.post('/chat', async (req, res) => {
   const streaming = req.query.stream === 'true';
 
   try {
-    const { message, userId, settings = {}, location = null } = req.body;
+    const { message, userId, settings = {}, location = null, nativeHints = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
 
@@ -3280,6 +3333,7 @@ app.post('/chat', async (req, res) => {
     const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
     const requestContext = {
       location,
+      nativeHints,
       pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
     };
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
