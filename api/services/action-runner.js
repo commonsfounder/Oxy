@@ -4,6 +4,7 @@ const {
   getActionContract,
   validateActionWithContract
 } = require('../action-contracts');
+const { diagnoseConnectorIssue } = require('./connector-health');
 const { buildPendingReviewResult } = require('./pending-review');
 
 function createActionRunner({
@@ -38,6 +39,7 @@ function createActionRunner({
           ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
           : await executeAction(userId, action.type, action.input || {}, context);
         Object.assign(result, buildActionRecovery(action, result));
+        Object.assign(result, diagnoseConnectorIssue(action, result));
         result = applyActionContractResultMetadata(action, result);
       }
 

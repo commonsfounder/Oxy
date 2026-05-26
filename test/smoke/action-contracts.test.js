@@ -22,8 +22,15 @@ test('Core 20 actions have contracts for reliability work', () => {
     'play_music',
     'order_uber_eats',
     'order_deliveroo',
+    'search_netflix_title',
+    'add_to_netflix_list',
+    'send_telegram',
+    'get_telegram_contacts',
     'forget_memory',
-    'make_call'
+    'make_call',
+    'generate_visual',
+    'create_diagram',
+    'create_presentation'
   ];
 
   for (const action of expected) {
@@ -31,6 +38,15 @@ test('Core 20 actions have contracts for reliability work', () => {
     assert.ok(ACTION_CONTRACTS[action].risk, `${action} missing risk`);
     assert.ok(ACTION_CONTRACTS[action].successSummary, `${action} missing success summary`);
     assert.ok(ACTION_CONTRACTS[action].failureSummary, `${action} missing failure summary`);
+  }
+});
+
+test('Core actions validate required fields consistently', () => {
+  for (const [type, contract] of Object.entries(ACTION_CONTRACTS)) {
+    const input = {};
+    for (const field of contract.required || []) input[field] = `sample ${field}`;
+    const result = validateActionWithContract({ type, input }, `${type} smoke`);
+    assert.equal(result, null, `${type} rejected complete sample input`);
   }
 });
 

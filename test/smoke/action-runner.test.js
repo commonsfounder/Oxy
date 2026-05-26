@@ -87,3 +87,24 @@ test('action runner adds recovery metadata to failed direct actions', async () =
   assert.equal(result[0].result.cardText, 'Enable location and try again.');
   assert.equal(result[0].result.retryable, true);
 });
+
+test('action runner adds connector health metadata to connector failures', async () => {
+  const executeActions = createActionRunner({
+    executeAction: async () => ({
+      success: false,
+      error: 'Google not connected: token expired. Reconnect Google from Settings.'
+    }),
+    setPendingAction: async () => {},
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'get_emails', input: { max_results: 5 } }
+  ]);
+
+  assert.equal(result[0].result.connectorId, 'google');
+  assert.equal(result[0].result.healthStatus, 'needs_reconnect');
+  assert.equal(result[0].result.recoveryAction.connectorId, 'google');
+  assert.match(result[0].result.cardText, /Reconnect Google/);
+});

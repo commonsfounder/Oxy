@@ -50,9 +50,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let risk: String?
     let confirmation: String?
     let pending: Bool
+    let connectorId: String?
+    let healthStatus: String?
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending
+        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
     }
 
     init(
@@ -66,7 +68,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
         actionSummary: String? = nil,
         risk: String? = nil,
         confirmation: String? = nil,
-        pending: Bool = false
+        pending: Bool = false,
+        connectorId: String? = nil,
+        healthStatus: String? = nil
     ) {
         self.action = action
         self.success = success
@@ -79,6 +83,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.risk = risk
         self.confirmation = confirmation
         self.pending = pending
+        self.connectorId = connectorId
+        self.healthStatus = healthStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -96,6 +102,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
             risk = try result.decodeIfPresent(String.self, forKey: .risk)
             confirmation = try result.decodeIfPresent(String.self, forKey: .confirmation)
             pending = try result.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+            connectorId = try result.decodeIfPresent(String.self, forKey: .connectorId)
+            healthStatus = try result.decodeIfPresent(String.self, forKey: .healthStatus)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -107,6 +115,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
             risk = try container.decodeIfPresent(String.self, forKey: .risk)
             confirmation = try container.decodeIfPresent(String.self, forKey: .confirmation)
             pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+            connectorId = try container.decodeIfPresent(String.self, forKey: .connectorId)
+            healthStatus = try container.decodeIfPresent(String.self, forKey: .healthStatus)
         }
     }
 
@@ -123,6 +133,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(risk, forKey: .risk)
         try container.encodeIfPresent(confirmation, forKey: .confirmation)
         try container.encode(pending, forKey: .pending)
+        try container.encodeIfPresent(connectorId, forKey: .connectorId)
+        try container.encodeIfPresent(healthStatus, forKey: .healthStatus)
     }
 }
 

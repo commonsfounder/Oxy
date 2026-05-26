@@ -75,7 +75,12 @@ final class APIClient: @unchecked Sendable {
         body: [String: Any]? = nil,
         queryItems: [URLQueryItem]? = nil
     ) -> AsyncStream<SSEEvent> {
-        AsyncStream { continuation in
+        let baseURL = self.baseURL
+        let token = self.token
+        let bodyDataResult: Result<Data?, Error> = Result {
+            try body.map { try JSONSerialization.data(withJSONObject: $0) }
+        }
+        return AsyncStream<SSEEvent> { continuation in
             Task {
                 do {
                     guard var components = URLComponents(string: "\(baseURL)\(path)") else {
@@ -98,8 +103,13 @@ final class APIClient: @unchecked Sendable {
                     if !token.isEmpty {
                         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                     }
-                    if let body {
-                        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    switch bodyDataResult {
+                    case .success(let bodyData):
+                        req.httpBody = bodyData
+                    case .failure(let error):
+                        continuation.yield(.error(error.localizedDescription))
+                        continuation.finish()
+                        return
                     }
                     req.timeoutInterval = 120
 
