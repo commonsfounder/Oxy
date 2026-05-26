@@ -85,6 +85,7 @@ final class NativeIntegrationManager {
     private let eventStore = EKEventStore()
     private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
     private var lastMusicQuery: String?
+    private var lastMusicError: String?
 
     private init() {}
 
@@ -235,12 +236,15 @@ final class NativeIntegrationManager {
         let contactsStatus = CNContactStore.authorizationStatus(for: .contacts)
         let musicStatus = MusicAuthorization.currentStatus
         let canSendText = MFMessageComposeViewController.canSendText()
-        let lines = [
+        var lines = [
             "Contacts: \(authorizationLabel(contactsStatus))",
             "Can send iMessage/SMS: \(canSendText ? "yes" : "no")",
             "MusicKit: \(musicAuthorizationLabel(musicStatus))",
             "Apple Music app installed: \(UIApplication.shared.canOpenURL(URL(string: "music://")!) ? "yes" : "no")"
         ]
+        if let lastMusicError, !lastMusicError.isEmpty {
+            lines.append("Last music error: \(lastMusicError)")
+        }
         return NativeLocalActionResult(
             action: "native_diagnostics",
             text: lines.joined(separator: "\n"),
@@ -394,6 +398,7 @@ final class NativeIntegrationManager {
                 try await playWithMediaPlayer(song)
             }
             lastMusicQuery = "\(song.title) \(song.artistName)"
+            lastMusicError = nil
             return NativeLocalActionResult(
                 action: "play_music",
                 text: "Playing \(song.title) by \(song.artistName).",
@@ -402,10 +407,11 @@ final class NativeIntegrationManager {
                 deepLink: song.url?.absoluteString ?? "music://"
             )
         } catch {
+            lastMusicError = String(describing: error)
             return NativeLocalActionResult(
                 action: "play_music",
                 text: "Apple Music couldn't play that yet. Check Music access and your Apple Music subscription.",
-                cardText: query,
+                cardText: "\(query) · \(String(describing: error))",
                 actionSummary: "Music failed",
                 deepLink: nil,
                 success: false,
@@ -420,7 +426,9 @@ final class NativeIntegrationManager {
             throw NSError(domain: "OxyMusic", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing Apple Music store ID"])
         }
         let player = MPMusicPlayerController.systemMusicPlayer
-        player.setQueue(with: [storeID])
+        let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: [storeID])
+        player.setQueue(with: descriptor)
+        try await player.prepareToPlay()
         player.play()
     }
 
@@ -840,11 +848,49 @@ final class NativeIntegrationManager {
                 CNContactPhoneNumbersKey as CNKeyDescriptor,
                 CNContactEmailAddressesKey as CNKeyDescriptor
             ]
-            let request = CNContactFetchRequest(keysToFetch: keys)
-            var matches: [NativeContactHint] = []
-            let lower = message.lowercased()
+            let query = message.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            let lower = query.lowercased()
             let store = CNContactStore()
 
+            func hint(from contact: CNContact) -> NativeContactHint {
+                let names = [
+                    contact.givenName,
+                    contact.familyName,
+                    "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
+                    contact.nickname
+                ].filter { !$0.isEmpty }
+                return NativeContactHint(
+                    displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
+                    phone: contact.phoneNumbers.first?.value.stringValue,
+                    email: contact.emailAddresses.first.map { String($0.value) }
+                )
+            }
+
+            func ranked(_ hints: [NativeContactHint]) -> [NativeContactHint] {
+                hints.sorted { lhs, rhs in
+                    let lhsHasPhone = lhs.phone?.isEmpty == false
+                    let rhsHasPhone = rhs.phone?.isEmpty == false
+                    if lhsHasPhone != rhsHasPhone { return lhsHasPhone }
+                    let lhsExact = lhs.displayName.lowercased() == lower
+                    let rhsExact = rhs.displayName.lowercased() == lower
+                    if lhsExact != rhsExact { return lhsExact }
+                    return lhs.displayName.count < rhs.displayName.count
+                }
+            }
+
+            if !query.isEmpty {
+                do {
+                    let predicate = CNContact.predicateForContacts(matchingName: query)
+                    let contacts = try store.unifiedContacts(matching: predicate, keysToFetch: keys)
+                    let hints = ranked(contacts.map(hint))
+                    if !hints.isEmpty {
+                        return Array(hints.prefix(5))
+                    }
+                } catch {}
+            }
+
+            let request = CNContactFetchRequest(keysToFetch: keys)
+            var matches: [NativeContactHint] = []
             do {
                 try store.enumerateContacts(with: request) { contact, stop in
                     let names = [
@@ -853,18 +899,17 @@ final class NativeIntegrationManager {
                         "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
                         contact.nickname
                     ].filter { !$0.isEmpty }
-                    guard names.contains(where: { lower.contains($0.lowercased()) }) else { return }
-                    matches.append(NativeContactHint(
-                        displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
-                        phone: contact.phoneNumbers.first?.value.stringValue,
-                        email: contact.emailAddresses.first.map { String($0.value) }
-                    ))
+                    guard names.contains(where: { name in
+                        let normalized = name.lowercased()
+                        return normalized == lower || normalized.contains(lower) || lower.contains(normalized)
+                    }) else { return }
+                    matches.append(hint(from: contact))
                     if matches.count >= 5 { stop.pointee = true }
                 }
             } catch {
                 return []
             }
-            return matches
+            return ranked(matches)
         }.value
     }
 
