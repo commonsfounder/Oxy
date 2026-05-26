@@ -22,7 +22,10 @@ struct ChatService {
                 "voice": settings.voice,
                 "voiceOn": settings.voiceOn,
                 "voiceEngine": settings.voiceEngine,
-                "autonomy": settings.autonomy
+                "autonomy": settings.autonomy,
+                "preferredMapsApp": settings.preferredMapsApp,
+                "preferredTransportMode": settings.preferredTransportMode,
+                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps
             ]
         }
 

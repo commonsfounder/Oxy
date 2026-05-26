@@ -1,5 +1,9 @@
 import AVFoundation
+import Contacts
+import CoreLocation
+import EventKit
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -7,6 +11,7 @@ struct SettingsView: View {
     @State private var showSignOutConfirm = false
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var showAdvanced = false
+    @State private var notificationStatus: UNAuthorizationStatus = .notDetermined
 
     var body: some View {
         NavigationStack {
@@ -24,6 +29,54 @@ struct SettingsView: View {
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 120)
                                     .onChange(of: settings.name) { _, _ in saveSettings() }
+                            }
+                        }
+
+                        settingsSection(title: "Appearance") {
+                            settingRow(label: "Accent", description: selectedAccentLabel) {
+                                HStack(spacing: 8) {
+                                    ForEach(OxySettings.accentOptions, id: \.value) { option in
+                                        Button {
+                                            settings.accentColor = option.value
+                                            saveSettings()
+                                        } label: {
+                                            Circle()
+                                                .fill(option.color)
+                                                .frame(width: 28, height: 28)
+                                                .overlay(
+                                                    Circle()
+                                                        .stroke(settings.accentColor == option.value ? Color.oxyText : Color.clear, lineWidth: 2)
+                                                )
+                                        }
+                                        .accessibilityLabel(option.label)
+                                    }
+                                }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Theme", description: "Chat surface") {
+                                Picker("Theme", selection: $settings.appTheme) {
+                                    Text("True Black").tag("trueBlack")
+                                    Text("Soft Dark").tag("softDark")
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(Color.oxyStone)
+                                .onChange(of: settings.appTheme) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Bubbles", description: "Message density") {
+                                Picker("Bubbles", selection: $settings.bubbleStyle) {
+                                    Text("Comfort").tag("comfort")
+                                    Text("Compact").tag("compact")
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(Color.oxyStone)
+                                .onChange(of: settings.bubbleStyle) { _, _ in saveSettings() }
                             }
                         }
 
@@ -112,10 +165,61 @@ struct SettingsView: View {
                             }
                         }
 
+                        settingsSection(title: "Action Defaults") {
+                            settingRow(label: "Preferred Maps", description: "Used for directions links") {
+                                Picker("Preferred Maps", selection: $settings.preferredMapsApp) {
+                                    Text("Apple Maps").tag("apple")
+                                    Text("Google Maps").tag("google")
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(Color.oxyStone)
+                                .onChange(of: settings.preferredMapsApp) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Transport", description: "Default route mode") {
+                                Picker("Transport", selection: $settings.preferredTransportMode) {
+                                    Text("Driving").tag("driving")
+                                    Text("Transit").tag("transit")
+                                    Text("Walking").tag("walking")
+                                }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(Color.oxyStone)
+                                .onChange(of: settings.preferredTransportMode) { _, _ in saveSettings() }
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Review App Opens", description: "Ask before opening Maps/Uber-style links") {
+                                Toggle("", isOn: $settings.reviewBeforeOpeningApps)
+                                    .labelsHidden()
+                                    .tint(Color.oxyGreen)
+                                    .onChange(of: settings.reviewBeforeOpeningApps) { _, _ in saveSettings() }
+                            }
+                        }
+
                         settingsSection(title: "Apple") {
+                            VStack(spacing: 0) {
+                                PermissionStatusRow(label: "Location", systemImage: "location.fill", state: locationPermissionLabel)
+                                Divider().overlay(Color.oxyLine)
+                                PermissionStatusRow(label: "Contacts", systemImage: "person.crop.circle.fill", state: contactsPermissionLabel)
+                                Divider().overlay(Color.oxyLine)
+                                PermissionStatusRow(label: "Calendar", systemImage: "calendar", state: calendarPermissionLabel)
+                                Divider().overlay(Color.oxyLine)
+                                PermissionStatusRow(label: "Reminders", systemImage: "bell.fill", state: remindersPermissionLabel)
+                                Divider().overlay(Color.oxyLine)
+                                PermissionStatusRow(label: "Notifications", systemImage: "app.badge.fill", state: notificationPermissionLabel)
+                            }
+
+                            Divider().overlay(Color.oxyLine)
+
                             Button {
                                 Task {
                                     await NativeIntegrationManager.shared.requestNativePermissions(userId: appState.userId)
+                                    await refreshPermissionStatus()
                                 }
                             } label: {
                                 HStack {
@@ -279,7 +383,10 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .onAppear { loadSettings() }
+            .onAppear {
+                loadSettings()
+                Task { await refreshPermissionStatus() }
+            }
         }
     }
 
@@ -289,10 +396,64 @@ struct SettingsView: View {
         OxySettings.voiceOptions.first(where: { $0.value == settings.voice })?.label ?? settings.voice
     }
 
+    private var selectedAccentLabel: String {
+        OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.label ?? "Stone"
+    }
+
+    private var locationPermissionLabel: PermissionState {
+        switch LocationManager.shared.authorizationStatus {
+        case .authorizedAlways: return .good("Always")
+        case .authorizedWhenInUse: return .good("While Using")
+        case .denied, .restricted: return .blocked("Off")
+        default: return .needsSetup("Ask")
+        }
+    }
+
+    private var contactsPermissionLabel: PermissionState {
+        switch CNContactStore.authorizationStatus(for: .contacts) {
+        case .authorized: return .good("On")
+        case .denied, .restricted: return .blocked("Off")
+        default: return .needsSetup("Ask")
+        }
+    }
+
+    private var calendarPermissionLabel: PermissionState {
+        let status = EKEventStore.authorizationStatus(for: .event)
+        if #available(iOS 17.0, *) {
+            if status == .fullAccess || status == .writeOnly { return .good("On") }
+        } else if status == .authorized {
+            return .good("On")
+        }
+        return status == .denied || status == .restricted ? .blocked("Off") : .needsSetup("Ask")
+    }
+
+    private var remindersPermissionLabel: PermissionState {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        if #available(iOS 17.0, *) {
+            if status == .fullAccess || status == .writeOnly { return .good("On") }
+        } else if status == .authorized {
+            return .good("On")
+        }
+        return status == .denied || status == .restricted ? .blocked("Off") : .needsSetup("Ask")
+    }
+
+    private var notificationPermissionLabel: PermissionState {
+        switch notificationStatus {
+        case .authorized, .provisional, .ephemeral: return .good("On")
+        case .denied: return .blocked("Off")
+        default: return .needsSetup("Ask")
+        }
+    }
+
     private func previewVoice(_ voice: String) {
         Task {
             await voicePreview.preview(voice: voice)
         }
+    }
+
+    private func refreshPermissionStatus() async {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        notificationStatus = settings.authorizationStatus
     }
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -409,6 +570,59 @@ private struct TTSPreviewResponse: Codable {
     let audio: String
 }
 
+// MARK: - Permissions
+
+private enum PermissionState: Equatable {
+    case good(String)
+    case needsSetup(String)
+    case blocked(String)
+
+    var text: String {
+        switch self {
+        case .good(let text), .needsSetup(let text), .blocked(let text): return text
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .good: return Color.oxyGreen
+        case .needsSetup: return Color.oxyStone
+        case .blocked: return Color.oxyRed
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .good: return "checkmark.circle.fill"
+        case .needsSetup: return "circle.dashed"
+        case .blocked: return "xmark.circle.fill"
+        }
+    }
+}
+
+private struct PermissionStatusRow: View {
+    let label: String
+    let systemImage: String
+    let state: PermissionState
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.oxySub)
+                .frame(width: 20)
+            Text(label)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+            Spacer()
+            Label(state.text, systemImage: state.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(state.color)
+        }
+        .padding(.vertical, 8)
+    }
+}
+
 // MARK: - Settings Model
 
 struct OxySettings: Codable {
@@ -425,10 +639,54 @@ struct OxySettings: Codable {
     var designTemplate: String = "compact"
     var designPalette: String = "stone"
     var designMotion: String = "calm"
+    var accentColor: String = "stone"
+    var appTheme: String = "trueBlack"
+    var bubbleStyle: String = "comfort"
+    var preferredMapsApp: String = "apple"
+    var preferredTransportMode: String = "driving"
+    var reviewBeforeOpeningApps: Bool = false
+
+    enum CodingKeys: String, CodingKey {
+        case name, voice, voiceOn, voiceEngine, autonomy, proactiveBriefings, healthAlerts, locationReminders
+        case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
+        case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Oxy"
+        voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
+        voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
+        voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"
+        autonomy = try container.decodeIfPresent(String.self, forKey: .autonomy) ?? "Medium"
+        proactiveBriefings = try container.decodeIfPresent(Bool.self, forKey: .proactiveBriefings) ?? true
+        healthAlerts = try container.decodeIfPresent(Bool.self, forKey: .healthAlerts) ?? true
+        locationReminders = try container.decodeIfPresent(Bool.self, forKey: .locationReminders) ?? true
+        homeLatitude = try container.decodeIfPresent(Double.self, forKey: .homeLatitude)
+        homeLongitude = try container.decodeIfPresent(Double.self, forKey: .homeLongitude)
+        designTemplate = try container.decodeIfPresent(String.self, forKey: .designTemplate) ?? "compact"
+        designPalette = try container.decodeIfPresent(String.self, forKey: .designPalette) ?? "stone"
+        designMotion = try container.decodeIfPresent(String.self, forKey: .designMotion) ?? "calm"
+        accentColor = try container.decodeIfPresent(String.self, forKey: .accentColor) ?? designPalette
+        appTheme = try container.decodeIfPresent(String.self, forKey: .appTheme) ?? "trueBlack"
+        bubbleStyle = try container.decodeIfPresent(String.self, forKey: .bubbleStyle) ?? "comfort"
+        preferredMapsApp = try container.decodeIfPresent(String.self, forKey: .preferredMapsApp) ?? "apple"
+        preferredTransportMode = try container.decodeIfPresent(String.self, forKey: .preferredTransportMode) ?? "driving"
+        reviewBeforeOpeningApps = try container.decodeIfPresent(Bool.self, forKey: .reviewBeforeOpeningApps) ?? false
+    }
 
     struct VoiceOption: Identifiable {
         let value: String
         let label: String
+        var id: String { value }
+    }
+
+    struct AccentOption: Identifiable {
+        let value: String
+        let label: String
+        let color: Color
         var id: String { value }
     }
 
@@ -468,6 +726,14 @@ struct OxySettings: Codable {
     static let designTemplates = ["compact", "glass", "dense"]
     static let designPalettes = ["stone", "mint", "ember", "mono"]
     static let designMotions = ["calm", "snappy", "none"]
+    static let accentOptions = [
+        AccentOption(value: "stone", label: "Stone", color: Color.oxyDefaultStone),
+        AccentOption(value: "mint", label: "Mint", color: Color.oxyGreen),
+        AccentOption(value: "blue", label: "Blue", color: Color(red: 92/255, green: 154/255, blue: 245/255)),
+        AccentOption(value: "rose", label: "Rose", color: Color(red: 230/255, green: 124/255, blue: 154/255)),
+        AccentOption(value: "violet", label: "Violet", color: Color(red: 162/255, green: 132/255, blue: 245/255)),
+        AccentOption(value: "mono", label: "Mono", color: Color.oxyText)
+    ]
 }
 
 // MARK: - Appearance Lab

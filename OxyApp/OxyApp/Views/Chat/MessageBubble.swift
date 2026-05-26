@@ -6,9 +6,17 @@ struct MessageBubble: View {
     var onActionCommand: ((String) -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
+    private var bubbleStyle: String {
+        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else {
+            return "comfort"
+        }
+        return settings.bubbleStyle
+    }
+    private var isCompact: Bool { bubbleStyle == "compact" }
 
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
             // Message content
             if !message.content.isEmpty {
                 HStack {
@@ -16,12 +24,12 @@ struct MessageBubble: View {
 
                     VStack(alignment: .leading, spacing: 0) {
                         Text(message.content)
-                            .font(.system(size: 15))
+                            .font(.system(size: isCompact ? 14 : 15))
                             .foregroundStyle(isUser ? .white : Color.oxyText)
-                            .lineSpacing(4)
+                            .lineSpacing(isCompact ? 2 : 4)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, isCompact ? 13 : 16)
+                    .padding(.vertical, isCompact ? 9 : 12)
                     .background(
                         isUser
                             ? AnyShapeStyle(
@@ -36,9 +44,9 @@ struct MessageBubble: View {
                     .clipShape(
                         UnevenRoundedRectangle(
                             topLeadingRadius: isUser ? 20 : 6,
-                            bottomLeadingRadius: 20,
-                            bottomTrailingRadius: isUser ? 6 : 20,
-                            topTrailingRadius: 20
+                            bottomLeadingRadius: isCompact ? 16 : 20,
+                            bottomTrailingRadius: isUser ? 6 : (isCompact ? 16 : 20),
+                            topTrailingRadius: isCompact ? 16 : 20
                         )
                     )
 
@@ -51,7 +59,7 @@ struct MessageBubble: View {
                 HStack {
                     TypingIndicator()
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 14)
+                        .padding(.vertical, isCompact ? 10 : 14)
                         .background(Color.oxySurface2)
                         .clipShape(
                             UnevenRoundedRectangle(
@@ -92,7 +100,7 @@ struct MessageBubble: View {
             .padding(.horizontal, 4)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        .padding(.vertical, isCompact ? 2 : 4)
     }
 }
 

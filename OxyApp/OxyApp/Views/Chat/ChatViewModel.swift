@@ -216,6 +216,7 @@ final class ChatViewModel {
     // MARK: - Deep Links
 
     private func openDeepLinks(_ results: [ActionResult]) {
+        if currentSettings.reviewBeforeOpeningApps { return }
         for result in results {
             guard Self.autoOpenActions.contains(result.action) else { continue }
             if let link = result.deepLink, let url = URL(string: link) {
