@@ -1359,12 +1359,11 @@ async function executeAction(userId, action, params, context = {}) {
       const query = String(params?.query || params?.song || params?.title || '').trim();
       if (!query) return { success: false, error: 'play_music requires a query' };
       return {
-        success: true,
-        text: `Opening Apple Music for ${query}.`,
+        success: false,
+        text: `I can play ${query} through the iOS native music handler, but the backend can only prepare a search link.`,
         cardText: query,
-        actionSummary: 'Music opened',
-        deepLink: `music://music.apple.com/search?term=${encodeURIComponent(query)}`,
-        webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`
+        actionSummary: 'Music needs native playback',
+        error: 'Music playback must run on-device through MusicKit.'
       };
     }
     case 'add_to_music_playlist': {

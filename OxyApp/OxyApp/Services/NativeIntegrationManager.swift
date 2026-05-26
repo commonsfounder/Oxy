@@ -4,6 +4,7 @@ import EventKit
 import Foundation
 import HealthKit
 import MapKit
+import MediaPlayer
 import MusicKit
 import UIKit
 import UserNotifications
@@ -27,6 +28,26 @@ struct NativeLocalActionResult: Equatable {
     let cardText: String
     let actionSummary: String
     let deepLink: String?
+    let success: Bool
+    let error: String?
+
+    init(
+        action: String,
+        text: String,
+        cardText: String,
+        actionSummary: String,
+        deepLink: String?,
+        success: Bool = true,
+        error: String? = nil
+    ) {
+        self.action = action
+        self.text = text
+        self.cardText = cardText
+        self.actionSummary = actionSummary
+        self.deepLink = deepLink
+        self.success = success
+        self.error = error
+    }
 }
 
 struct NativeHealthSnapshot: Codable {
@@ -62,6 +83,7 @@ final class NativeIntegrationManager {
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
     private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+    private var lastMusicQuery: String?
 
     private init() {}
 
@@ -227,11 +249,13 @@ final class NativeIntegrationManager {
                 text: "Turn on Apple Music access and I can play that natively.",
                 cardText: "Enable Apple Music access",
                 actionSummary: "Music needs access",
-                deepLink: "music://"
+                deepLink: "music://",
+                success: false,
+                error: "Apple Music permission is not authorized."
             )
         }
 
-        let query = cleanMusicQuery(message)
+        let query = resolvedMusicQuery(from: message)
         guard !query.isEmpty else { return nil }
 
         do {
@@ -241,12 +265,19 @@ final class NativeIntegrationManager {
                     text: "I couldn't find that song in Apple Music.",
                     cardText: query,
                     actionSummary: "Music not found",
-                    deepLink: "music://"
+                    deepLink: "music://",
+                    success: false,
+                    error: "No Apple Music catalog result for \(query)."
                 )
             }
-            let player = SystemMusicPlayer.shared
-            player.queue = SystemMusicPlayer.Queue(for: [song])
-            try await player.play()
+            do {
+                let player = SystemMusicPlayer.shared
+                player.queue = SystemMusicPlayer.Queue(for: [song])
+                try await player.play()
+            } catch {
+                try await playWithMediaPlayer(song)
+            }
+            lastMusicQuery = "\(song.title) \(song.artistName)"
             return NativeLocalActionResult(
                 action: "play_music",
                 text: "Playing \(song.title) by \(song.artistName).",
@@ -257,12 +288,24 @@ final class NativeIntegrationManager {
         } catch {
             return NativeLocalActionResult(
                 action: "play_music",
-                text: "Apple Music couldn't play that yet. Open Music and try again.",
+                text: "Apple Music couldn't play that yet. Check Music access and your Apple Music subscription.",
                 cardText: query,
                 actionSummary: "Music failed",
-                deepLink: "music://"
+                deepLink: nil,
+                success: false,
+                error: String(describing: error)
             )
         }
+    }
+
+    private func playWithMediaPlayer(_ song: Song) async throws {
+        let storeID = song.id.rawValue
+        guard !storeID.isEmpty else {
+            throw NSError(domain: "OxyMusic", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing Apple Music store ID"])
+        }
+        let player = MPMusicPlayerController.systemMusicPlayer
+        player.setQueue(with: [storeID])
+        player.play()
     }
 
     private func addNativeMusicItem(from message: String) async -> NativeLocalActionResult? {
@@ -272,7 +315,9 @@ final class NativeIntegrationManager {
                 text: "Turn on Apple Music access and I can add music natively.",
                 cardText: "Enable Apple Music access",
                 actionSummary: "Music needs access",
-                deepLink: "music://"
+                deepLink: "music://",
+                success: false,
+                error: "Apple Music permission is not authorized."
             )
         }
 
@@ -286,7 +331,9 @@ final class NativeIntegrationManager {
                     text: "I couldn't find \(parsed.query) in Apple Music.",
                     cardText: parsed.query,
                     actionSummary: "Music not found",
-                    deepLink: "music://"
+                    deepLink: "music://",
+                    success: false,
+                    error: "No Apple Music catalog result for \(parsed.query)."
                 )
             }
 
@@ -297,7 +344,9 @@ final class NativeIntegrationManager {
                         text: "I found \(song.title), but couldn't find a playlist called \(playlistName).",
                         cardText: "\(song.title) · Missing playlist: \(playlistName)",
                         actionSummary: "Playlist not found",
-                        deepLink: "music://"
+                        deepLink: "music://",
+                        success: false,
+                        error: "Playlist not found: \(playlistName)."
                     )
                 }
                 try await MusicLibrary.shared.add(song, to: playlist)
@@ -324,7 +373,9 @@ final class NativeIntegrationManager {
                 text: "Apple Music couldn't add that yet. Check Music access and try again.",
                 cardText: parsed.query,
                 actionSummary: "Music add failed",
-                deepLink: "music://"
+                deepLink: nil,
+                success: false,
+                error: String(describing: error)
             )
         }
     }
@@ -363,6 +414,17 @@ final class NativeIntegrationManager {
         }
         return text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func resolvedMusicQuery(from message: String) -> String {
+        let query = cleanMusicQuery(message)
+        let normalized = normalizeMusicText(query)
+        if ["it", "that", "this", "that one", "this one"].contains(normalized),
+           let lastMusicQuery,
+           !lastMusicQuery.isEmpty {
+            return lastMusicQuery
+        }
+        return query
     }
 
     private func parseMusicAddRequest(_ message: String) -> (query: String, playlistName: String?) {

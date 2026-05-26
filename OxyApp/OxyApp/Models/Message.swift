@@ -90,8 +90,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
     init(native result: NativeLocalActionResult) {
         self.init(
             action: result.action,
-            success: true,
+            success: result.success,
             text: result.text,
+            error: result.error,
             deepLink: result.deepLink,
             webLink: result.deepLink,
             cardText: result.cardText,
