@@ -15,6 +15,7 @@ const {
   actionPromptBlock,
   applyActionContractResultMetadata,
   buildActionRecovery,
+  getActionContract,
   validateActionWithContract
 } = require('./action-contracts');
 const {
@@ -1336,15 +1337,25 @@ async function executeActions(userId, actions, context = {}, trace = null, callb
   const results = await Promise.all(actions.map(async action => {
     if (callbacks.onActionStart) callbacks.onActionStart(action);
     const validationError = validateActionAgainstUserRequest(action, context.userMessage || '');
-    let result = validationError || (trace
-      ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
-      : await executeAction(userId, action.type, action.input || {}, context));
-    Object.assign(result, buildActionRecovery(action, result));
-    result = applyActionContractResultMetadata(action, result);
+    const contract = getActionContract(action.type);
+    let result;
+    if (validationError) {
+      result = validationError;
+    } else if (contract?.executionMode === 'review' && !context.bypassReview) {
+      await setPendingAction(userId, action, context);
+      result = buildPendingReviewResult(action);
+    } else {
+      result = trace
+        ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
+        : await executeAction(userId, action.type, action.input || {}, context);
+      Object.assign(result, buildActionRecovery(action, result));
+      result = applyActionContractResultMetadata(action, result);
+    }
+    if (validationError) result = applyActionContractResultMetadata(action, result);
     const insertActionLog = () => supabase.from('action_log').insert({
       user_id: userId,
       action: serializeLoggedAction(action, result),
-      status: result.success ? 'executed' : 'failed',
+      status: result.pending ? 'pending' : result.success ? 'executed' : 'failed',
       error: result.success ? null : (result.error || null),
       created_at: new Date().toISOString()
     });
@@ -1629,6 +1640,98 @@ async function setPreferenceValue(userId, key, value) {
       value,
       updated_at: new Date().toISOString()
     }, { onConflict: 'user_id,key' });
+}
+
+async function getPendingAction(userId) {
+  const { data, error } = await supabase
+    .from('preferences')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', PENDING_ACTION_PREF)
+    .maybeSingle();
+  if (error || !data?.value) return null;
+  try {
+    const parsed = JSON.parse(data.value);
+    if (!parsed?.action?.type) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function setPendingAction(userId, action, context = {}) {
+  const payload = {
+    action,
+    createdAt: new Date().toISOString(),
+    userMessage: context.userMessage || ''
+  };
+  await setPreferenceValue(userId, PENDING_ACTION_PREF, JSON.stringify(payload));
+  return payload;
+}
+
+async function clearPendingAction(userId) {
+  await supabase
+    .from('preferences')
+    .delete()
+    .eq('user_id', userId)
+    .eq('key', PENDING_ACTION_PREF);
+}
+
+function isPendingConfirmMessage(message) {
+  return /^(yes|yeah|yep|ok|okay|sure|confirm|send it|send|go ahead|do it|book it|order it|call|call them|open it|proceed)$/i
+    .test(String(message || '').trim());
+}
+
+function isPendingCancelMessage(message) {
+  return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it)$/i
+    .test(String(message || '').trim());
+}
+
+function reviewTitleForAction(action) {
+  switch (action?.type) {
+    case 'send_email': return 'Review email';
+    case 'send_message': return 'Review message';
+    case 'send_telegram': return 'Review Telegram';
+    case 'book_uber': return 'Review Uber';
+    case 'order_uber_eats': return 'Review Uber Eats';
+    case 'order_deliveroo': return 'Review Deliveroo';
+    case 'make_call': return 'Review call';
+    default: return `Review ${humanizeActionType(action?.type || 'action')}`;
+  }
+}
+
+function reviewDetailForAction(action) {
+  const input = action?.input || {};
+  switch (action?.type) {
+    case 'send_email':
+      return [input.to, input.subject, input.body].filter(Boolean).join(' · ');
+    case 'send_message':
+    case 'send_telegram':
+      return [input.contact, input.message].filter(Boolean).join(' · ');
+    case 'book_uber':
+      return input.destination ? `Destination: ${input.destination}` : '';
+    case 'order_uber_eats':
+    case 'order_deliveroo':
+      return [input.restaurant, input.item, input.query].filter(Boolean).join(' · ');
+    case 'make_call':
+      return input.contact ? `Contact: ${input.contact}` : '';
+    default:
+      return summarizeActionInput(input).replace(/^\s*\(|\)\s*$/g, '');
+  }
+}
+
+function buildPendingReviewResult(action) {
+  const contract = getActionContract(action?.type) || {};
+  return applyActionContractResultMetadata(action, {
+    success: true,
+    pending: true,
+    text: `${reviewTitleForAction(action)}. Say "confirm" to continue or "cancel" to stop.`,
+    cardText: reviewDetailForAction(action) || 'Ready for review.',
+    actionSummary: reviewTitleForAction(action),
+    risk: contract.risk || 'high',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  });
 }
 
 async function getEnabledConnectors(userId, trace = null) {
@@ -2135,6 +2238,7 @@ const CONNECTORS = [
 ];
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
+const PENDING_ACTION_PREF = 'pending.action';
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
@@ -2963,6 +3067,12 @@ function summarizeFinishedActionsForUser(actionResults) {
       })
       .join('\n');
   }
+  const pending = normalizedResults.filter(entry => entry?.result?.pending);
+  if (pending.length) {
+    return pending
+      .map(entry => entry.result?.text || `${reviewTitleForAction({ type: entry.action })}. Say "confirm" to continue or "cancel" to stop.`)
+      .join('\n');
+  }
   return summarizeCompletedActionsConcise(normalizedResults);
 }
 
@@ -3016,6 +3126,50 @@ function postResponseTasks(userId, message) {
   }
 }
 
+async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
+  saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+    .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
+  postResponseTasks(userId, message);
+
+  if (streaming) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    if (actionResults.length) sse({ type: 'actions', results: actionResults });
+    sse({ type: 'replace', text: spoken });
+    if (wantsTTS) {
+      try {
+        const audio = await trace.run('gemini.tts.generateSpeech.short_response', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+        if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
+      } catch (ttsErr) {
+        console.error('[tts error]', ttsErr.message);
+        sse({ type: 'tts-error', error: ttsErr.message });
+      }
+    }
+    sse({ type: 'done' });
+    res.end();
+    return;
+  }
+
+  const result = { text: spoken, actions: actionResults };
+  if (wantsTTS) {
+    try {
+      const audio = await trace.run('gemini.tts.generateSpeech.short_response_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+      if (audio) {
+        result.audio = audio;
+        result.audioFormat = 'wav';
+        result.audioMimeType = 'audio/wav';
+      }
+    } catch (ttsErr) {
+      console.error('[tts error]', ttsErr.message);
+      result.ttsError = ttsErr.message;
+    }
+  }
+  res.json(result);
+}
+
 app.post('/chat', async (req, res) => {
   const streaming = req.query.stream === 'true';
 
@@ -3033,6 +3187,48 @@ app.post('/chat', async (req, res) => {
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+
+    const pendingAction = await getPendingAction(userId);
+    if (pendingAction && isPendingCancelMessage(message)) {
+      await clearPendingAction(userId);
+      await respondWithResult({
+        res,
+        streaming,
+        wantsTTS,
+        settings,
+        trace,
+        userId,
+        message,
+        spoken: 'Cancelled.'
+      });
+      return;
+    }
+
+    if (pendingAction && isPendingConfirmMessage(message)) {
+      trace.log(`pending_action.confirm ${pendingAction.action.type}`);
+      let actionResults = await executeActions(userId, [pendingAction.action], {
+        userMessage: pendingAction.userMessage || message,
+        location,
+        bypassReview: true
+      }, trace);
+      actionResults = normalizeActionResultsForClient(actionResults);
+      await clearPendingAction(userId);
+      const spoken = summarizeFinishedActionsForUser(actionResults) ||
+        actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
+        'Done.';
+      await respondWithResult({
+        res,
+        streaming,
+        wantsTTS,
+        settings,
+        trace,
+        userId,
+        message,
+        spoken,
+        actionResults
+      });
+      return;
+    }
 
     const deterministicQuickReply = getDeterministicQuickReply(message);
     if (deterministicQuickReply) {

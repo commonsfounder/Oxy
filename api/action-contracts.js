@@ -6,7 +6,8 @@ const ACTION_CONTRACTS = {
     inputExample: { contact: 'name', message: 'text' },
     successSummary: 'Message ready',
     failureSummary: 'Message failed',
-    confirmation: 'review_in_app'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   make_call: {
     risk: 'high',
@@ -14,7 +15,8 @@ const ACTION_CONTRACTS = {
     inputExample: { contact: 'name' },
     successSummary: 'Call opened',
     failureSummary: 'Call failed',
-    confirmation: 'external_app'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   create_reminder: {
     risk: 'medium',
@@ -60,7 +62,8 @@ const ACTION_CONTRACTS = {
     },
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
-    confirmation: 'clear_request_required'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   get_emails: {
     risk: 'low',
@@ -85,7 +88,8 @@ const ACTION_CONTRACTS = {
     inputExample: { destination: 'natural place or address phrase' },
     successSummary: 'Uber opened',
     failureSummary: 'Uber needs attention',
-    confirmation: 'external_app'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   find_place: {
     risk: 'low',
@@ -103,7 +107,8 @@ const ACTION_CONTRACTS = {
     inputExample: { contact: 'contact name', message: 'message text' },
     successSummary: 'Telegram sent',
     failureSummary: 'Telegram failed',
-    confirmation: 'clear_request_required'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   get_telegram_contacts: {
     risk: 'low',
@@ -128,7 +133,8 @@ const ACTION_CONTRACTS = {
     inputExample: { query: 'food or restaurant', restaurant: 'optional restaurant name', item: 'optional dish' },
     successSummary: 'Uber Eats opened',
     failureSummary: 'Uber Eats failed',
-    confirmation: 'external_app'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   order_deliveroo: {
     risk: 'high',
@@ -136,7 +142,8 @@ const ACTION_CONTRACTS = {
     inputExample: { query: 'food or restaurant', restaurant: 'optional restaurant name', item: 'optional dish' },
     successSummary: 'Deliveroo opened',
     failureSummary: 'Deliveroo failed',
-    confirmation: 'external_app'
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   search_netflix_title: {
     risk: 'low',
@@ -305,6 +312,7 @@ function applyActionContractResultMetadata(action, result = {}) {
     ...result,
     risk: result.risk || contract.risk,
     confirmation: result.confirmation || contract.confirmation,
+    executionMode: result.executionMode || contract.executionMode || 'direct',
     actionSummary: result.actionSummary || (result.success === false ? contract.failureSummary : contract.successSummary)
   };
 }
@@ -315,7 +323,8 @@ function actionPromptList() {
     input: contract.inputExample,
     required: contract.required || [],
     risk: contract.risk,
-    confirmation: contract.confirmation
+    confirmation: contract.confirmation,
+    executionMode: contract.executionMode || 'direct'
   }));
 }
 
