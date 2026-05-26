@@ -1,9 +1,12 @@
+import AVFoundation
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
+    @State private var voicePreview = VoicePreviewPlayer()
+    @State private var showAdvanced = false
 
     var body: some View {
         NavigationStack {
@@ -11,9 +14,9 @@ struct SettingsView: View {
                 Color.oxyBg.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 24) {
+                    VStack(spacing: 18) {
                         // Identity
-                        settingsSection(title: "Identity") {
+                        settingsSection(title: "Profile") {
                             settingRow(label: "Assistant Name", description: nil) {
                                 TextField("Oxy", text: $settings.name)
                                     .font(.system(size: 15))
@@ -21,41 +24,6 @@ struct SettingsView: View {
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 120)
                                     .onChange(of: settings.name) { _, _ in saveSettings() }
-                            }
-                        }
-
-                        settingsSection(title: "Appearance Lab") {
-                            VStack(alignment: .leading, spacing: 16) {
-                                DesignPreview(
-                                    template: settings.designTemplate,
-                                    palette: settings.designPalette,
-                                    motion: settings.designMotion
-                                )
-
-                                DesignChoiceGroup(
-                                    title: "Template",
-                                    selection: $settings.designTemplate,
-                                    options: OxySettings.designTemplates,
-                                    onChange: saveSettings
-                                )
-
-                                Divider().overlay(Color.oxyLine)
-
-                                DesignChoiceGroup(
-                                    title: "Palette",
-                                    selection: $settings.designPalette,
-                                    options: OxySettings.designPalettes,
-                                    onChange: saveSettings
-                                )
-
-                                Divider().overlay(Color.oxyLine)
-
-                                DesignChoiceGroup(
-                                    title: "Motion",
-                                    selection: $settings.designMotion,
-                                    options: OxySettings.designMotions,
-                                    onChange: saveSettings
-                                )
                             }
                         }
 
@@ -70,49 +38,43 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Voice Engine", description: nil) {
-                                Picker("", selection: $settings.voiceEngine) {
-                                    Text("Current").tag("current")
-                                    Text("Gemini Live").tag("gemini-live-prototype")
+                            settingRow(label: "Voice", description: selectedVoiceLabel) {
+                                Picker("Voice", selection: $settings.voice) {
+                                    ForEach(OxySettings.voiceOptions, id: \.value) { voice in
+                                        Text(voice.label).tag(voice.value)
+                                    }
                                 }
-                                .pickerStyle(.segmented)
-                                .frame(width: 200)
-                                .onChange(of: settings.voiceEngine) { _, _ in saveSettings() }
+                                .labelsHidden()
+                                .pickerStyle(.menu)
+                                .tint(Color.oxyStone)
+                                .onChange(of: settings.voice) { _, newVoice in
+                                    saveSettings()
+                                    previewVoice(newVoice)
+                                }
                             }
 
                             Divider().overlay(Color.oxyLine)
 
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text("Gemini Voice")
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundStyle(Color.oxyText)
-
-                                Text("Choose the voice used for spoken replies")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.oxySub)
-
-                                LazyVGrid(columns: [
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible()),
-                                    GridItem(.flexible())
-                                ], spacing: 8) {
-                                    ForEach(OxySettings.voiceOptions, id: \.value) { voice in
-                                        VoiceChip(
-                                            label: voice.label,
-                                            isSelected: settings.voice == voice.value,
-                                            onTap: {
-                                                settings.voice = voice.value
-                                                saveSettings()
-                                            }
-                                        )
+                            Button {
+                                previewVoice(settings.voice)
+                            } label: {
+                                HStack {
+                                    Image(systemName: voicePreview.isPlaying ? "waveform" : "play.fill")
+                                    Text(voicePreview.isPlaying ? "Playing Preview" : "Play Preview")
+                                    Spacer()
+                                    if voicePreview.isLoading {
+                                        ProgressView()
+                                            .controlSize(.small)
                                     }
                                 }
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Color.oxyText)
+                                .padding(.vertical, 4)
                             }
-                            .padding(.vertical, 4)
                         }
 
                         // Autonomy
-                        settingsSection(title: "Autonomy") {
+                        settingsSection(title: "Behaviour") {
                             settingRow(label: "Initiative Level", description: "How often Oxy proactively reaches out") {
                                 HStack(spacing: 6) {
                                     ForEach(["Low", "Medium", "High"], id: \.self) { level in
@@ -142,33 +104,15 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Briefings", description: "Wake, midday, and evening proactive updates") {
+                            settingRow(label: "Proactive Briefings", description: "Wake, midday, and evening updates") {
                                 Toggle("", isOn: $settings.proactiveBriefings)
                                     .labelsHidden()
                                     .tint(Color.oxyGreen)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
+                        }
 
-                            Divider().overlay(Color.oxyLine)
-
-                            settingRow(label: "Health Alerts", description: "Use HealthKit summaries for useful checks") {
-                                Toggle("", isOn: $settings.healthAlerts)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
-                                    .onChange(of: settings.healthAlerts) { _, _ in saveSettings() }
-                            }
-
-                            Divider().overlay(Color.oxyLine)
-
-                            settingRow(label: "Location Reminders", description: "Food and context nudges near important places") {
-                                Toggle("", isOn: $settings.locationReminders)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
-                                    .onChange(of: settings.locationReminders) { _, _ in saveSettings() }
-                            }
-
-                            Divider().overlay(Color.oxyLine)
-
+                        settingsSection(title: "Apple") {
                             Button {
                                 Task {
                                     await NativeIntegrationManager.shared.requestNativePermissions(userId: appState.userId)
@@ -206,6 +150,87 @@ struct SettingsView: View {
                                 .foregroundStyle(Color.oxyText)
                                 .padding(.vertical, 4)
                             }
+                        }
+
+                        settingsSection(title: "Advanced") {
+                            DisclosureGroup(isExpanded: $showAdvanced) {
+                                VStack(spacing: 0) {
+                                    Divider().overlay(Color.oxyLine)
+
+                                    settingRow(label: "Voice Engine", description: nil) {
+                                        Picker("", selection: $settings.voiceEngine) {
+                                            Text("Current").tag("current")
+                                            Text("Gemini Live").tag("gemini-live-prototype")
+                                        }
+                                        .pickerStyle(.menu)
+                                        .tint(Color.oxyStone)
+                                        .onChange(of: settings.voiceEngine) { _, _ in saveSettings() }
+                                    }
+
+                                    Divider().overlay(Color.oxyLine)
+
+                                    settingRow(label: "Health Alerts", description: "Use HealthKit summaries for checks") {
+                                        Toggle("", isOn: $settings.healthAlerts)
+                                            .labelsHidden()
+                                            .tint(Color.oxyGreen)
+                                            .onChange(of: settings.healthAlerts) { _, _ in saveSettings() }
+                                    }
+
+                                    Divider().overlay(Color.oxyLine)
+
+                                    settingRow(label: "Location Reminders", description: "Context nudges near important places") {
+                                        Toggle("", isOn: $settings.locationReminders)
+                                            .labelsHidden()
+                                            .tint(Color.oxyGreen)
+                                            .onChange(of: settings.locationReminders) { _, _ in saveSettings() }
+                                    }
+
+                                    Divider().overlay(Color.oxyLine)
+
+                                    DesignPreview(
+                                        template: settings.designTemplate,
+                                        palette: settings.designPalette,
+                                        motion: settings.designMotion
+                                    )
+                                    .padding(.top, 14)
+
+                                    DesignChoiceGroup(
+                                        title: "Template",
+                                        selection: $settings.designTemplate,
+                                        options: OxySettings.designTemplates,
+                                        onChange: saveSettings
+                                    )
+                                    .padding(.top, 16)
+
+                                    Divider().overlay(Color.oxyLine).padding(.vertical, 10)
+
+                                    DesignChoiceGroup(
+                                        title: "Palette",
+                                        selection: $settings.designPalette,
+                                        options: OxySettings.designPalettes,
+                                        onChange: saveSettings
+                                    )
+
+                                    Divider().overlay(Color.oxyLine).padding(.vertical, 10)
+
+                                    DesignChoiceGroup(
+                                        title: "Motion",
+                                        selection: $settings.designMotion,
+                                        options: OxySettings.designMotions,
+                                        onChange: saveSettings
+                                    )
+                                }
+                                .padding(.top, 10)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "slider.horizontal.3")
+                                    Text("Developer and visual tuning")
+                                    Spacer()
+                                }
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(Color.oxyText)
+                            }
+                            .tint(Color.oxySub)
                         }
 
                         // Account
@@ -259,6 +284,16 @@ struct SettingsView: View {
     }
 
     // MARK: - Helpers
+
+    private var selectedVoiceLabel: String {
+        OxySettings.voiceOptions.first(where: { $0.value == settings.voice })?.label ?? settings.voice
+    }
+
+    private func previewVoice(_ voice: String) {
+        Task {
+            await voicePreview.preview(voice: voice)
+        }
+    }
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -320,28 +355,58 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Voice Chip
+// MARK: - Voice Preview
 
-private struct VoiceChip: View {
-    let label: String
-    let isSelected: Bool
-    let onTap: () -> Void
+@Observable
+@MainActor
+private final class VoicePreviewPlayer: NSObject, AVAudioPlayerDelegate {
+    var isLoading = false
+    var isPlaying = false
+    private var player: AVAudioPlayer?
 
-    var body: some View {
-        Button(action: onTap) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isSelected ? Color.oxyBg : Color.oxySub)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(isSelected ? Color.oxyStone : Color.oxySurface3)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(isSelected ? Color.clear : Color.oxyLine2, lineWidth: 1)
-                )
+    func preview(voice: String) async {
+        isLoading = true
+        isPlaying = false
+        player?.stop()
+
+        do {
+            let data = try await APIClient.shared.request(
+                path: "/tts-preview",
+                method: "POST",
+                body: [
+                    "voice": voice,
+                    "text": "Hey, I am Oxy. This is how I sound."
+                ]
+            )
+            let response = try JSONDecoder().decode(TTSPreviewResponse.self, from: data)
+            guard let audioData = Data(base64Encoded: response.audio) else {
+                isLoading = false
+                return
+            }
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try audioSession.setActive(true)
+            let nextPlayer = try AVAudioPlayer(data: audioData)
+            nextPlayer.delegate = self
+            nextPlayer.prepareToPlay()
+            player = nextPlayer
+            isLoading = false
+            isPlaying = nextPlayer.play()
+        } catch {
+            isLoading = false
+            isPlaying = false
         }
     }
+
+    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        Task { @MainActor in
+            self.isPlaying = false
+        }
+    }
+}
+
+private struct TTSPreviewResponse: Codable {
+    let audio: String
 }
 
 // MARK: - Settings Model
