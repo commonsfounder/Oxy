@@ -255,6 +255,7 @@ struct ActionCard: View {
         case "play_music": return action.success ? "Music opened" : "Music failed"
         case "create_reminder": return action.success ? "Reminder created" : "Reminder failed"
         case "create_calendar_event": return action.success ? "Calendar updated" : "Calendar failed"
+        case "check_health": return action.success ? "Health checked" : "Health unavailable"
         default: return action.success ? "\(humanize(action.action)) done" : "\(humanize(action.action)) failed"
         }
     }
@@ -272,6 +273,7 @@ struct ActionCard: View {
         case "create_reminder": return "bell.fill"
         case "send_message": return "message.fill"
         case "play_music": return "music.note"
+        case "check_health": return "heart.fill"
         default: return "bolt.fill"
         }
     }

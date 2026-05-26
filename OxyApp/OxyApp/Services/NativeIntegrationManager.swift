@@ -33,6 +33,15 @@ struct NativeHealthSnapshot: Codable {
     var restingHeartRate: Double?
     var stepCountToday: Double?
     var sleepMinutesLastNight: Double?
+    var recentWorkouts: [NativeWorkoutSummary]?
+}
+
+struct NativeWorkoutSummary: Codable, Equatable {
+    let activity: String
+    let durationMinutes: Double
+    let energyKilocalories: Double?
+    let distanceMeters: Double?
+    let endedAt: Date
 }
 
 struct NativeCapabilities: Codable {
@@ -160,6 +169,10 @@ final class NativeIntegrationManager {
             return nil
         }
 
+        if let result = await answerNativeHealthRequest(normalized) {
+            return result
+        }
+
         if let result = await createNativeReminder(from: normalized) {
             return result
         }
@@ -179,13 +192,132 @@ final class NativeIntegrationManager {
         return nil
     }
 
+    private func answerNativeHealthRequest(_ message: String) async -> NativeLocalActionResult? {
+        let lower = message.lowercased()
+        let isHealthRequest = lower.contains("health")
+            || lower.contains("steps")
+            || lower.contains("step count")
+            || lower.contains("heart rate")
+            || lower.contains("bpm")
+            || lower.contains("resting heart")
+            || lower.contains("sleep")
+            || lower.contains("slept")
+            || lower.contains("workout")
+            || lower.contains("workouts")
+            || lower.contains("exercise")
+        guard isHealthRequest else { return nil }
+
+        guard HKHealthStore.isHealthDataAvailable() else {
+            return NativeLocalActionResult(
+                action: "check_health",
+                text: "Health data is not available on this device.",
+                cardText: "HealthKit unavailable",
+                actionSummary: "Health unavailable",
+                deepLink: nil
+            )
+        }
+
+        await requestHealthPermission()
+        let snapshot = await healthSnapshot()
+
+        if lower.contains("steps") || lower.contains("step count") {
+            guard let steps = snapshot.stepCountToday else {
+                return noHealthDataResult("steps today")
+            }
+            let count = Int(steps.rounded())
+            return NativeLocalActionResult(
+                action: "check_health",
+                text: "You have \(count.formatted()) steps today.",
+                cardText: "\(count.formatted()) steps today",
+                actionSummary: "Steps checked",
+                deepLink: "x-apple-health://"
+            )
+        }
+
+        if lower.contains("sleep") || lower.contains("slept") {
+            guard let minutes = snapshot.sleepMinutesLastNight else {
+                return noHealthDataResult("sleep last night")
+            }
+            let formatted = formatDurationMinutes(minutes)
+            return NativeLocalActionResult(
+                action: "check_health",
+                text: "Health shows \(formatted) of sleep from the latest overnight window.",
+                cardText: "\(formatted) sleep",
+                actionSummary: "Sleep checked",
+                deepLink: "x-apple-health://"
+            )
+        }
+
+        if lower.contains("heart rate") || lower.contains("bpm") || lower.contains("resting heart") {
+            let latest = snapshot.latestHeartRate.map { "\(Int($0.rounded())) bpm" }
+            let resting = snapshot.restingHeartRate.map { "resting \(Int($0.rounded())) bpm" }
+            let parts = [latest, resting].compactMap { $0 }
+            guard !parts.isEmpty else {
+                return noHealthDataResult("heart rate")
+            }
+            return NativeLocalActionResult(
+                action: "check_health",
+                text: "Your latest Health heart data is \(parts.joined(separator: ", ")).",
+                cardText: parts.joined(separator: " · "),
+                actionSummary: "Heart checked",
+                deepLink: "x-apple-health://"
+            )
+        }
+
+        if lower.contains("workout") || lower.contains("workouts") || lower.contains("exercise") {
+            let workouts = snapshot.recentWorkouts ?? []
+            guard !workouts.isEmpty else {
+                return noHealthDataResult("recent workouts")
+            }
+            let first = workouts[0]
+            let text = "Your latest workout was \(first.activity.lowercased()) for \(formatDurationMinutes(first.durationMinutes))."
+            let detail = workouts.prefix(3).map(formatWorkoutSummary).joined(separator: "\n")
+            return NativeLocalActionResult(
+                action: "check_health",
+                text: text,
+                cardText: detail,
+                actionSummary: "Workouts checked",
+                deepLink: "x-apple-health://"
+            )
+        }
+
+        let parts = [
+            snapshot.stepCountToday.map { "\(Int($0.rounded()).formatted()) steps today" },
+            snapshot.sleepMinutesLastNight.map { "\(formatDurationMinutes($0)) sleep" },
+            snapshot.latestHeartRate.map { "\(Int($0.rounded())) bpm latest heart rate" },
+            snapshot.recentWorkouts?.first.map { "latest workout: \($0.activity.lowercased()), \(formatDurationMinutes($0.durationMinutes))" }
+        ].compactMap { $0 }
+        guard !parts.isEmpty else {
+            return noHealthDataResult("Health")
+        }
+        return NativeLocalActionResult(
+            action: "check_health",
+            text: "Here is your latest Health snapshot: \(parts.joined(separator: "; ")).",
+            cardText: parts.joined(separator: "\n"),
+            actionSummary: "Health checked",
+            deepLink: "x-apple-health://"
+        )
+    }
+
+    private func noHealthDataResult(_ label: String) -> NativeLocalActionResult {
+        NativeLocalActionResult(
+            action: "check_health",
+            text: "I could not read \(label) from Health yet. Open Health permissions for Oxy, then try again.",
+            cardText: "Enable Health access for Oxy",
+            actionSummary: "Health needs access",
+            deepLink: "x-apple-health://"
+        )
+    }
+
     private func requestHealthPermission() async {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let identifiers: [HKQuantityTypeIdentifier] = [.heartRate, .restingHeartRate, .stepCount]
         let quantityTypes = identifiers.compactMap { HKObjectType.quantityType(forIdentifier: $0) }
         let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis)
+        let workoutType = HKObjectType.workoutType()
         var readTypes = Set<HKObjectType>(quantityTypes)
         if let sleepType { readTypes.insert(sleepType) }
+        readTypes.insert(workoutType)
         do {
             try await healthStore.requestAuthorization(toShare: [], read: readTypes)
         } catch {}
@@ -237,7 +369,8 @@ final class NativeIntegrationManager {
             latestHeartRate: await latestQuantity(.heartRate, unit: HKUnit.count().unitDivided(by: .minute())),
             restingHeartRate: await latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute())),
             stepCountToday: await sumQuantityToday(.stepCount, unit: .count()),
-            sleepMinutesLastNight: await sleepMinutesLastNight()
+            sleepMinutesLastNight: await sleepMinutesLastNight(),
+            recentWorkouts: await recentWorkouts(limit: 3)
         )
     }
 
@@ -275,6 +408,28 @@ final class NativeIntegrationManager {
                     .filter { $0.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
                     .reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) / 60.0 }
                 continuation.resume(returning: minutes > 0 ? minutes : nil)
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    private func recentWorkouts(limit: Int) async -> [NativeWorkoutSummary] {
+        let type = HKObjectType.workoutType()
+        let start = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date()
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: limit, sortDescriptors: [sort]) { _, samples, _ in
+                let workouts = (samples as? [HKWorkout] ?? []).map { workout in
+                    NativeWorkoutSummary(
+                        activity: workout.workoutActivityType.displayName,
+                        durationMinutes: workout.duration / 60.0,
+                        energyKilocalories: workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()),
+                        distanceMeters: workout.totalDistance?.doubleValue(for: .meter()),
+                        endedAt: workout.endDate
+                    )
+                }
+                continuation.resume(returning: workouts)
             }
             healthStore.execute(query)
         }
@@ -607,6 +762,31 @@ final class NativeIntegrationManager {
         return String(format: "%.1f km", meters / 1000)
     }
 
+    private func formatDurationMinutes(_ minutes: Double) -> String {
+        let total = max(0, Int(minutes.rounded()))
+        let hours = total / 60
+        let remainder = total % 60
+        if hours > 0 && remainder > 0 {
+            return "\(hours)h \(remainder)m"
+        }
+        if hours > 0 {
+            return "\(hours)h"
+        }
+        return "\(remainder)m"
+    }
+
+    private func formatWorkoutSummary(_ workout: NativeWorkoutSummary) -> String {
+        let date = DateFormatter.localizedString(from: workout.endedAt, dateStyle: .short, timeStyle: .none)
+        var parts = ["\(workout.activity)", formatDurationMinutes(workout.durationMinutes)]
+        if let energy = workout.energyKilocalories {
+            parts.append("\(Int(energy.rounded())) kcal")
+        }
+        if let distance = workout.distanceMeters, distance > 0 {
+            parts.append(formatDistance(distance))
+        }
+        return "\(date): \(parts.joined(separator: " · "))"
+    }
+
     private func loadSettings() -> OxySettings {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
@@ -639,5 +819,32 @@ extension OxySettings {
             dict["homeLocation"] = ["latitude": homeLatitude, "longitude": homeLongitude]
         }
         return dict
+    }
+}
+
+private extension HKWorkoutActivityType {
+    var displayName: String {
+        switch self {
+        case .running: return "Run"
+        case .walking: return "Walk"
+        case .cycling: return "Cycle"
+        case .traditionalStrengthTraining: return "Strength training"
+        case .functionalStrengthTraining: return "Functional strength"
+        case .highIntensityIntervalTraining: return "HIIT"
+        case .yoga: return "Yoga"
+        case .swimming: return "Swim"
+        case .dance: return "Dance"
+        case .mindAndBody: return "Mind and body"
+        case .coreTraining: return "Core training"
+        case .pilates: return "Pilates"
+        case .rowing: return "Rowing"
+        case .elliptical: return "Elliptical"
+        case .stairClimbing: return "Stair climbing"
+        case .soccer: return "Football"
+        case .basketball: return "Basketball"
+        case .tennis: return "Tennis"
+        case .other: return "Workout"
+        default: return "Workout"
+        }
     }
 }
