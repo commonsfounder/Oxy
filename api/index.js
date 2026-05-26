@@ -10,12 +10,16 @@ const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
+const { createActionRunner } = require('./services/action-runner');
+const {
+  isPendingCancelMessage,
+  isPendingConfirmMessage,
+  isPendingRevisionMessage,
+  reviewTitleForAction
+} = require('./services/pending-review');
 const {
   ACTION_CONTRACTS,
   actionPromptBlock,
-  applyActionContractResultMetadata,
-  buildActionRecovery,
-  getActionContract,
   validateActionWithContract
 } = require('./action-contracts');
 const {
@@ -461,10 +465,6 @@ function containsUrl(text) {
 function isLinkSendRequest(message) {
   return /\b(send|text|message|telegram|whatsapp|imessage|email)\b/i.test(String(message || '')) &&
     /\blink\b/i.test(String(message || ''));
-}
-
-function validateActionAgainstUserRequest(action, originalMessage = '') {
-  return validateActionWithContract(action, originalMessage);
 }
 
 function pcmToWav(pcmBuffer, sampleRate = 24000) {
@@ -1340,44 +1340,19 @@ async function executeAction(userId, action, params, context = {}) {
   }
 }
 
-async function executeActions(userId, actions, context = {}, trace = null, callbacks = {}) {
-  if (!actions?.length) return [];
-  const results = await Promise.all(actions.map(async action => {
-    if (callbacks.onActionStart) callbacks.onActionStart(action);
-    const validationError = validateActionAgainstUserRequest(action, context.userMessage || '');
-    const contract = getActionContract(action.type);
-    let result;
-    if (validationError) {
-      result = validationError;
-    } else if (contract?.executionMode === 'review' && !context.bypassReview) {
-      await setPendingAction(userId, action, context);
-      result = buildPendingReviewResult(action);
-    } else {
-      result = trace
-        ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
-        : await executeAction(userId, action.type, action.input || {}, context);
-      Object.assign(result, buildActionRecovery(action, result));
-      result = applyActionContractResultMetadata(action, result);
-    }
-    if (validationError) result = applyActionContractResultMetadata(action, result);
-    const insertActionLog = () => supabase.from('action_log').insert({
-      user_id: userId,
-      action: serializeLoggedAction(action, result),
-      status: result.pending ? 'pending' : result.success ? 'executed' : 'failed',
-      error: result.success ? null : (result.error || null),
-      created_at: new Date().toISOString()
-    });
-    if (trace) {
-      await trace.run(`supabase.action_log.insert.${action.type}`, insertActionLog);
-    } else {
-      await insertActionLog();
-    }
-    if (callbacks.onActionComplete) callbacks.onActionComplete(action, result);
-    return { action: action.type, result };
-  }));
-  invalidateUserContextCache(userId);
-  return results;
-}
+const executeActions = createActionRunner({
+  executeAction,
+  invalidateUserContextCache,
+  setPendingAction,
+  validateAction: validateActionWithContract,
+  logAction: (userId, action, result) => supabase.from('action_log').insert({
+    user_id: userId,
+    action: serializeLoggedAction(action, result),
+    status: result.pending ? 'pending' : result.success ? 'executed' : 'failed',
+    error: result.success ? null : (result.error || null),
+    created_at: new Date().toISOString()
+  })
+});
 
 async function getMemory(userId, trace = null) {
   const fetchMemory = () => supabase
@@ -1683,75 +1658,6 @@ async function clearPendingAction(userId) {
     .delete()
     .eq('user_id', userId)
     .eq('key', PENDING_ACTION_PREF);
-}
-
-function isPendingConfirmMessage(message) {
-  const text = String(message || '').trim().toLowerCase();
-  if (!text) return false;
-  if (/\b(wait|hold on|actually|change|edit|instead|but|before|not yet|don't|do not|stop|cancel)\b/i.test(text)) {
-    return false;
-  }
-  return /^(yes|yeah|yep|yup|ok|okay|sure|confirm|confirmed|approve|approved|proceed)$/i.test(text) ||
-    /\b(yes please|looks good|go ahead|do it|send it|send now|book it|order it|call them|open it|that's fine|that is fine|all good)\b/i.test(text);
-}
-
-function isPendingCancelMessage(message) {
-  const text = String(message || '').trim();
-  return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it|not now|not yet)$/i
-    .test(text) ||
-    /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text);
-}
-
-function isPendingRevisionMessage(message) {
-  return /\b(change|edit|rewrite|make it|instead|actually|wait|hold on|tone|shorter|longer|more|less|add|remove|don't|do not)\b/i
-    .test(String(message || '').trim());
-}
-
-function reviewTitleForAction(action) {
-  switch (action?.type) {
-    case 'send_email': return 'Review email';
-    case 'send_message': return 'Review message';
-    case 'send_telegram': return 'Review Telegram';
-    case 'book_uber': return 'Review Uber';
-    case 'order_uber_eats': return 'Review Uber Eats';
-    case 'order_deliveroo': return 'Review Deliveroo';
-    case 'make_call': return 'Review call';
-    default: return `Review ${humanizeActionType(action?.type || 'action')}`;
-  }
-}
-
-function reviewDetailForAction(action) {
-  const input = action?.input || {};
-  switch (action?.type) {
-    case 'send_email':
-      return [input.to, input.subject, input.body].filter(Boolean).join(' · ');
-    case 'send_message':
-    case 'send_telegram':
-      return [input.contact, input.message].filter(Boolean).join(' · ');
-    case 'book_uber':
-      return input.destination ? `Destination: ${input.destination}` : '';
-    case 'order_uber_eats':
-    case 'order_deliveroo':
-      return [input.restaurant, input.item, input.query].filter(Boolean).join(' · ');
-    case 'make_call':
-      return input.contact ? `Contact: ${input.contact}` : '';
-    default:
-      return summarizeActionInput(input).replace(/^\s*\(|\)\s*$/g, '');
-  }
-}
-
-function buildPendingReviewResult(action) {
-  const contract = getActionContract(action?.type) || {};
-  return applyActionContractResultMetadata(action, {
-    success: true,
-    pending: true,
-    text: `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`,
-    cardText: reviewDetailForAction(action) || 'Ready for review.',
-    actionSummary: reviewTitleForAction(action),
-    risk: contract.risk || 'high',
-    confirmation: 'review_required',
-    executionMode: 'review'
-  });
 }
 
 async function getEnabledConnectors(userId, trace = null) {
