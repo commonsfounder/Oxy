@@ -13,6 +13,7 @@ test('Core 20 actions have contracts for reliability work', () => {
   const expected = [
     'find_place',
     'book_uber',
+    'get_directions',
     'send_message',
     'send_email',
     'get_emails',

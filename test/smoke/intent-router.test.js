@@ -24,6 +24,24 @@ test('Uber to nearest McDonald’s routes to book_uber', () => {
   assert.match(routed.actions[0].input.destination, /nearest McDonald's/i);
 });
 
+test('Uber to that John Lewis cleans conversational reference words', () => {
+  const routed = inferDeterministicAction('okay get me an uber to that john lewis please');
+  assert.equal(routed.reason, 'ride_to_local_place');
+  assert.equal(routed.actions[0].type, 'book_uber');
+  assert.equal(routed.actions[0].input.destination, 'john lewis');
+});
+
+test('bus requests route to transit directions instead of place lookup', () => {
+  const routed = inferDeterministicAction('i need to be at john lewis solihull by 7:30 what bus can i take?');
+  assert.equal(routed.reason, 'transit_directions_to_place');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.deepEqual(routed.actions[0].input, {
+    destination: 'john lewis solihull',
+    mode: 'transit',
+    arrival_time: '7:30'
+  });
+});
+
 test('plain factual question does not become local place action', () => {
   assert.equal(inferDeterministicAction('what is McDonald’s revenue?'), null);
 });

@@ -102,6 +102,16 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Place search failed',
     confirmation: 'none'
   },
+  get_directions: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['mode', 'arrival_time'],
+    aliases: { destination: ['query', 'place', 'address'] },
+    inputExample: { destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional natural time' },
+    successSummary: 'Directions ready',
+    failureSummary: 'Directions failed',
+    confirmation: 'none'
+  },
   send_telegram: {
     risk: 'high',
     required: ['contact', 'message'],

@@ -6,6 +6,7 @@ const ACTION_CONNECTOR = {
   get_calendar_events: 'google',
   book_uber: 'uber',
   find_place: 'maps',
+  get_directions: 'maps',
   send_telegram: 'telegram',
   get_telegram_contacts: 'telegram',
   search_trains: 'trainline',

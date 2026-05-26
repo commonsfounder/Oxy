@@ -1,6 +1,6 @@
 const { resolvePlaceDestination, cleanPlaceSearchQuery } = require('../api/geocoding');
 
-const SUPPORTED_ACTIONS = ['find_place'];
+const SUPPORTED_ACTIONS = ['find_place', 'get_directions'];
 
 function shortAddress(address) {
   return String(address || '')
@@ -55,12 +55,59 @@ function mapsSearchFallback(query, err = null) {
   };
 }
 
+function directionModeFlag(mode) {
+  const normalized = String(mode || '').toLowerCase();
+  if (/walk|walking/.test(normalized)) return 'w';
+  if (/bus|transit|public|train|tube|tram/.test(normalized)) return 'r';
+  return 'd';
+}
+
+function mapsDirectionsFallback(destination, params = {}) {
+  const cleanedDestination = cleanPlaceSearchQuery(destination);
+  const flag = directionModeFlag(params.mode);
+  const link = `https://maps.apple.com/?daddr=${encodeURIComponent(cleanedDestination)}&dirflg=${flag}`;
+  const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
+  return {
+    success: true,
+    text: `Opening ${modeLabel} directions to ${cleanedDestination}.`,
+    actionSummary: 'Directions ready',
+    cardText: `Open ${modeLabel} directions in Maps`,
+    deepLink: link,
+    webLink: link
+  };
+}
+
 function isPlacesSetupError(err) {
   return /Google Places|Places API|GOOGLE_MAPS_API_KEY|PERMISSION_DENIED|REQUEST_DENIED/i.test(String(err?.message || err || ''));
 }
 
 async function execute(userId, action, params) {
   try {
+    if (action === 'get_directions') {
+      const destination = String(params?.destination || params?.query || '').trim();
+      if (!destination) return { success: false, error: 'get_directions requires a destination' };
+      let place = null;
+      try {
+        place = await resolvePlaceDestination(destination, { location: params.location });
+      } catch (err) {
+        if (isPlacesSetupError(err)) return mapsDirectionsFallback(destination, params);
+        return mapsDirectionsFallback(destination, params);
+      }
+      const flag = directionModeFlag(params.mode);
+      const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
+      const link = place?.googleMapsUri
+        ? `https://maps.apple.com/?daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
+        : `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
+      return {
+        success: true,
+        text: `Opening ${modeLabel} directions to ${placeLabel(place, destination)}.`,
+        deepLink: link,
+        webLink: link,
+        actionSummary: 'Directions ready',
+        cardText: `Open ${modeLabel} directions in Maps`
+      };
+    }
+
     if (action !== 'find_place') return { success: false, error: `Unknown action: ${action}` };
 
     const query = String(params?.query || params?.destination || '').trim();

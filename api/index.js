@@ -1694,7 +1694,7 @@ function buildAvailableActions(enabled) {
     reminders: ['create_reminder'],
     spotify: ['play_music'],
     homekit: ['homekit_control'],
-    maps: ['find_place'],
+    maps: ['find_place', 'get_directions'],
     uber: ['book_uber'],
     ubereats: ['order_uber_eats'],
     netflix: ['search_netflix_title', 'add_to_netflix_list'],
