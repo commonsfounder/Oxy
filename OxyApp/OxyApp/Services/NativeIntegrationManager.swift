@@ -4,6 +4,7 @@ import EventKit
 import Foundation
 import HealthKit
 import MapKit
+import MusicKit
 import UIKit
 import UserNotifications
 
@@ -47,6 +48,7 @@ struct NativeWorkoutSummary: Codable, Equatable {
 struct NativeCapabilities: Codable {
     var notifications: Bool
     var healthKit: Bool
+    var musicKit: Bool
     var contacts: Bool
     var reminders: Bool
     var locationAlways: Bool
@@ -169,6 +171,10 @@ final class NativeIntegrationManager {
             return nil
         }
 
+        if let result = await handleNativeMusicRequest(normalized) {
+            return result
+        }
+
         if let result = await answerNativeHealthRequest(normalized) {
             return result
         }
@@ -186,6 +192,212 @@ final class NativeIntegrationManager {
         }
 
         return nil
+    }
+
+    private func handleNativeMusicRequest(_ message: String) async -> NativeLocalActionResult? {
+        let lower = message.lowercased()
+        guard lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("playlist")
+            || lower.hasPrefix("play ")
+            || lower.hasPrefix("listen to ")
+            || lower.hasPrefix("add ") else { return nil }
+
+        if lower.contains("playlist") || lower.hasPrefix("add ") {
+            return await addNativeMusicItem(from: message)
+        }
+        return await playNativeMusic(from: message)
+    }
+
+    private func requestMusicPermission() async -> Bool {
+        switch MusicAuthorization.currentStatus {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await MusicAuthorization.request() == .authorized
+        default:
+            return false
+        }
+    }
+
+    private func playNativeMusic(from message: String) async -> NativeLocalActionResult? {
+        guard await requestMusicPermission() else {
+            return NativeLocalActionResult(
+                action: "play_music",
+                text: "Turn on Apple Music access and I can play that natively.",
+                cardText: "Enable Apple Music access",
+                actionSummary: "Music needs access",
+                deepLink: "music://"
+            )
+        }
+
+        let query = cleanMusicQuery(message)
+        guard !query.isEmpty else { return nil }
+
+        do {
+            guard let song = try await searchCatalogSong(query) else {
+                return NativeLocalActionResult(
+                    action: "play_music",
+                    text: "I couldn't find that song in Apple Music.",
+                    cardText: query,
+                    actionSummary: "Music not found",
+                    deepLink: "music://"
+                )
+            }
+            let player = ApplicationMusicPlayer.shared
+            player.queue = ApplicationMusicPlayer.Queue(for: [song])
+            try await player.play()
+            return NativeLocalActionResult(
+                action: "play_music",
+                text: "Playing \(song.title) by \(song.artistName).",
+                cardText: "\(song.title) · \(song.artistName)",
+                actionSummary: "Music playing",
+                deepLink: song.url?.absoluteString ?? "music://"
+            )
+        } catch {
+            return NativeLocalActionResult(
+                action: "play_music",
+                text: "Apple Music couldn't play that yet. Open Music and try again.",
+                cardText: query,
+                actionSummary: "Music failed",
+                deepLink: "music://"
+            )
+        }
+    }
+
+    private func addNativeMusicItem(from message: String) async -> NativeLocalActionResult? {
+        guard await requestMusicPermission() else {
+            return NativeLocalActionResult(
+                action: "add_to_music_playlist",
+                text: "Turn on Apple Music access and I can add music natively.",
+                cardText: "Enable Apple Music access",
+                actionSummary: "Music needs access",
+                deepLink: "music://"
+            )
+        }
+
+        let parsed = parseMusicAddRequest(message)
+        guard !parsed.query.isEmpty else { return nil }
+
+        do {
+            guard let song = try await searchCatalogSong(parsed.query) else {
+                return NativeLocalActionResult(
+                    action: "add_to_music_playlist",
+                    text: "I couldn't find \(parsed.query) in Apple Music.",
+                    cardText: parsed.query,
+                    actionSummary: "Music not found",
+                    deepLink: "music://"
+                )
+            }
+
+            if let playlistName = parsed.playlistName, !playlistName.isEmpty {
+                guard let playlist = try await findLibraryPlaylist(named: playlistName) else {
+                    return NativeLocalActionResult(
+                        action: "add_to_music_playlist",
+                        text: "I found \(song.title), but couldn't find a playlist called \(playlistName).",
+                        cardText: "\(song.title) · Missing playlist: \(playlistName)",
+                        actionSummary: "Playlist not found",
+                        deepLink: "music://"
+                    )
+                }
+                try await MusicLibrary.shared.add(song, to: playlist)
+                return NativeLocalActionResult(
+                    action: "add_to_music_playlist",
+                    text: "Added \(song.title) by \(song.artistName) to \(playlist.name).",
+                    cardText: "\(song.title) · \(playlist.name)",
+                    actionSummary: "Added to playlist",
+                    deepLink: playlist.url?.absoluteString ?? song.url?.absoluteString ?? "music://"
+                )
+            }
+
+            try await MusicLibrary.shared.add(song)
+            return NativeLocalActionResult(
+                action: "add_to_music_playlist",
+                text: "Added \(song.title) by \(song.artistName) to your Apple Music library.",
+                cardText: "\(song.title) · Library",
+                actionSummary: "Added to library",
+                deepLink: song.url?.absoluteString ?? "music://"
+            )
+        } catch {
+            return NativeLocalActionResult(
+                action: "add_to_music_playlist",
+                text: "Apple Music couldn't add that yet. Check Music access and try again.",
+                cardText: parsed.query,
+                actionSummary: "Music add failed",
+                deepLink: "music://"
+            )
+        }
+    }
+
+    private func searchCatalogSong(_ query: String) async throws -> Song? {
+        var request = MusicCatalogSearchRequest(term: query, types: [Song.self])
+        request.limit = 1
+        let response = try await request.response()
+        return response.songs.first
+    }
+
+    private func findLibraryPlaylist(named name: String) async throws -> Playlist? {
+        var request = MusicLibraryRequest<Playlist>()
+        request.limit = 100
+        let response = try await request.response()
+        let normalized = normalizeMusicText(name)
+        return response.items.first { playlist in
+            let playlistName = normalizeMusicText(playlist.name)
+            return playlistName == normalized || playlistName.contains(normalized) || normalized.contains(playlistName)
+        }
+    }
+
+    private func cleanMusicQuery(_ message: String) -> String {
+        var text = message
+        let patterns = [
+            #"(?i)^play\s+"#,
+            #"(?i)^listen to\s+"#,
+            #"(?i)\bon apple music\b"#,
+            #"(?i)\bin apple music\b"#,
+            #"(?i)\bthe song\b"#,
+            #"(?i)\bsong\b"#,
+            #"(?i)\bmusic\b"#
+        ]
+        for pattern in patterns {
+            text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+        }
+        return text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func parseMusicAddRequest(_ message: String) -> (query: String, playlistName: String?) {
+        var text = message
+            .replacingOccurrences(of: #"(?i)^add\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\bthe song\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\bon apple music\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\bin apple music\b"#, with: " ", options: .regularExpression)
+
+        if let range = text.range(of: #"(?i)\s+to\s+(my\s+)?playlist\s+"#, options: .regularExpression) {
+            let query = String(text[..<range.lowerBound])
+            let playlist = String(text[range.upperBound...])
+            return (cleanMusicQuery(query), cleanPlaylistName(playlist))
+        }
+
+        if let range = text.range(of: #"(?i)\s+to\s+(my\s+)?library\b"#, options: .regularExpression) {
+            let query = String(text[..<range.lowerBound])
+            return (cleanMusicQuery(query), nil)
+        }
+
+        text = text.replacingOccurrences(of: #"(?i)\bto my music\b"#, with: " ", options: .regularExpression)
+        return (cleanMusicQuery(text), nil)
+    }
+
+    private func cleanPlaylistName(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(?i)\bplaylist\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func normalizeMusicText(_ text: String) -> String {
+        text.lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func answerNativeHealthRequest(_ message: String) async -> NativeLocalActionResult? {
@@ -353,6 +565,7 @@ final class NativeIntegrationManager {
         return NativeCapabilities(
             notifications: notificationSettings.authorizationStatus == .authorized || notificationSettings.authorizationStatus == .provisional,
             healthKit: HKHealthStore.isHealthDataAvailable(),
+            musicKit: MusicAuthorization.currentStatus == .authorized,
             contacts: contactStatus == .authorized,
             reminders: remindersAuthorized,
             locationAlways: locationStatus == .authorizedAlways

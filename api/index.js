@@ -425,6 +425,7 @@ ABSOLUTE RULES:
 22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
 22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
 22c. Action risk policy: searches, place lookup, train lookup, directions, and opening Uber/Maps to a destination are low risk. Drafting is medium risk. Sending messages/emails, spending money, confirming an actual booking/payment, placing orders, or making calls require a clear user request and review.
+22d. For Apple Music requests: use play_music for "play/listen to X"; use add_to_music_playlist when the user asks to add a song/album to their music library or playlist.
 23. Infer the appropriate format from context. The user should not need to specify formatting.
 24. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
 25. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
@@ -1352,6 +1353,33 @@ async function executeAction(userId, action, params, context = {}) {
         success: true,
         text: `Opening FaceTime for ${contact}.`,
         deepLink: `facetime://${encodeURIComponent(contact)}`
+      };
+    }
+    case 'play_music': {
+      const query = String(params?.query || params?.song || params?.title || '').trim();
+      if (!query) return { success: false, error: 'play_music requires a query' };
+      return {
+        success: true,
+        text: `Opening Apple Music for ${query}.`,
+        cardText: query,
+        actionSummary: 'Music opened',
+        deepLink: `music://music.apple.com/search?term=${encodeURIComponent(query)}`,
+        webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`
+      };
+    }
+    case 'add_to_music_playlist': {
+      const query = String(params?.query || params?.song || params?.title || '').trim();
+      const playlist = String(params?.playlist || params?.playlistName || '').trim();
+      if (!query) return { success: false, error: 'add_to_music_playlist requires a query' };
+      return {
+        success: true,
+        text: playlist
+          ? `Opening Apple Music for ${query}. Add it to ${playlist} there.`
+          : `Opening Apple Music for ${query}.`,
+        cardText: playlist ? `${query} · ${playlist}` : query,
+        actionSummary: playlist ? 'Music ready' : 'Music opened',
+        deepLink: `music://music.apple.com/search?term=${encodeURIComponent(query)}`,
+        webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`
       };
     }
     case 'forget_memory':

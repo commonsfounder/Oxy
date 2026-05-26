@@ -259,6 +259,7 @@ struct ActionCard: View {
         case "order_uber_eats": return action.success ? "Uber Eats opened" : "Uber Eats failed"
         case "order_deliveroo": return action.success ? "Deliveroo opened" : "Deliveroo failed"
         case "play_music": return action.success ? "Music opened" : "Music failed"
+        case "add_to_music_playlist": return action.success ? "Music added" : "Music add failed"
         case "create_reminder": return action.success ? "Reminder created" : "Reminder failed"
         case "create_calendar_event": return action.success ? "Calendar updated" : "Calendar failed"
         case "check_health": return action.success ? "Health checked" : "Health unavailable"
@@ -278,7 +279,7 @@ struct ActionCard: View {
         case "search_netflix_title", "add_to_netflix_list": return "play.tv.fill"
         case "create_reminder": return "bell.fill"
         case "send_message": return "message.fill"
-        case "play_music": return "music.note"
+        case "play_music", "add_to_music_playlist": return "music.note"
         case "check_health": return "heart.fill"
         default: return "bolt.fill"
         }

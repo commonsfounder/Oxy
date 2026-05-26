@@ -34,6 +34,16 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Music failed',
     confirmation: 'none'
   },
+  add_to_music_playlist: {
+    risk: 'medium',
+    required: ['query'],
+    optional: ['playlist'],
+    aliases: { playlist: ['playlistName', 'list'] },
+    inputExample: { query: 'song or album', playlist: 'optional playlist name' },
+    successSummary: 'Music added',
+    failureSummary: 'Music add failed',
+    confirmation: 'none'
+  },
   create_calendar_event: {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],

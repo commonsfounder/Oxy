@@ -6,6 +6,8 @@
 	<string>Oxy uses your location to help with ride booking, directions, and local recommendations.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Oxy uses background location for useful reminders such as arriving near home.</string>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Oxy uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Oxy uses the microphone for voice input so you can talk instead of typing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
@@ -29,6 +31,7 @@
 		<string>tg</string>
 		<string>comgooglemaps</string>
 		<string>maps</string>
+		<string>music</string>
 	</array>
 </dict>
 </plist>

@@ -1,8 +1,11 @@
-const axios = require('axios');
-
 const SUPPORTED_ACTIONS = ['search_trains'];
 
+function getAxios() {
+  return require('axios');
+}
+
 const CRS_MAP = {
+  'apsley': 'APS', 'apsley station': 'APS',
   'birmingham': 'BHM', 'birmingham new street': 'BHM',
   'london euston': 'EUS', 'euston': 'EUS',
   'london paddington': 'PAD', 'paddington': 'PAD',
@@ -23,12 +26,27 @@ const CRS_MAP = {
   'oxford': 'OXF', 'reading': 'RDG', 'brighton': 'BTN',
   'southampton': 'SOT', 'norwich': 'NRW', 'exeter': 'EXD',
   'plymouth': 'PLY', 'aberdeen': 'ABD',
+  'hemel hempstead': 'HML',
+  'watford junction': 'WFJ', 'watford': 'WFJ',
+  'berkhamsted': 'BKM',
+  'tring': 'TRI',
 };
 
+function normalizeStationName(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/\bstation\b/g, ' ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function toCRS(input) {
-  const s = input.trim();
+  const s = String(input || '').trim();
   if (/^[A-Za-z]{3}$/.test(s)) return s.toUpperCase();
-  return CRS_MAP[s.toLowerCase()] || null;
+  return CRS_MAP[normalizeStationName(s)] || null;
 }
 
 async function lookupCRS(name) {
@@ -39,6 +57,7 @@ async function lookupCRS(name) {
   // Fallback — TransportAPI station search
   if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) return null;
   try {
+    const axios = getAxios();
     const resp = await axios.get('https://transportapi.com/v3/uk/places.json', {
       params: {
         query: name,
@@ -67,6 +86,7 @@ async function getNextTrains(originCRS, destCRS) {
   };
 
   let resp;
+  const axios = getAxios();
   try {
     resp = await axios.get(endpoint, {
       params: { ...baseParams, darwin: true },
@@ -142,6 +162,24 @@ function buildTrainlineURL(originCRS, destCRS) {
   return `https://www.thetrainline.com/trains/${from}/${to}`;
 }
 
+function slugifyStation(input) {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+function buildTrainlineFallbackURL(origin, destination) {
+  const from = slugifyStation(origin);
+  const to = slugifyStation(destination);
+  if (from && to) return `https://www.thetrainline.com/trains/${from}/${to}`;
+  return 'https://www.thetrainline.com/';
+}
+
 function compareClockTimes(a, b) {
   if (!a || !b || !/^\d{2}:\d{2}$/.test(a) || !/^\d{2}:\d{2}$/.test(b)) return null;
   return a.localeCompare(b);
@@ -156,8 +194,19 @@ async function execute(userId, action, params) {
 
     const [originCRS, destCRS] = await Promise.all([lookupCRS(origin), lookupCRS(destination)]);
 
-    if (!originCRS) return { success: false, error: `Unknown station: "${origin}". Try a different spelling or 3-letter CRS code.` };
-    if (!destCRS)   return { success: false, error: `Unknown station: "${destination}". Try a different spelling or 3-letter CRS code.` };
+    if (!originCRS || !destCRS) {
+      const missing = !originCRS ? origin : destination;
+      const bookingUrl = buildTrainlineFallbackURL(origin, destination);
+      return {
+        success: true,
+        text: `I couldn't verify "${missing}" as a rail station for live departures, but I can open the route in Trainline so you can confirm it there.`,
+        cardText: 'Open route in Trainline',
+        actionSummary: 'Trainline ready',
+        webLink: bookingUrl,
+        bookingUrl,
+        trains: []
+      };
+    }
 
     const bookingUrl = buildTrainlineURL(originCRS, destCRS);
 
