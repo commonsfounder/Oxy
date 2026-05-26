@@ -707,38 +707,49 @@ final class NativeIntegrationManager {
     }
 
     private func contactHints(in message: String) async -> [NativeContactHint] {
-        guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return [] }
-        let keys: [CNKeyDescriptor] = [
-            CNContactGivenNameKey as CNKeyDescriptor,
-            CNContactFamilyNameKey as CNKeyDescriptor,
-            CNContactNicknameKey as CNKeyDescriptor,
-            CNContactPhoneNumbersKey as CNKeyDescriptor,
-            CNContactEmailAddressesKey as CNKeyDescriptor
-        ]
-        let request = CNContactFetchRequest(keysToFetch: keys)
-        var matches: [NativeContactHint] = []
-        let lower = message.lowercased()
-
-        do {
-            try contactStore.enumerateContacts(with: request) { contact, stop in
-                let names = [
-                    contact.givenName,
-                    contact.familyName,
-                    "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
-                    contact.nickname
-                ].filter { !$0.isEmpty }
-                guard names.contains(where: { lower.contains($0.lowercased()) }) else { return }
-                matches.append(NativeContactHint(
-                    displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
-                    phone: contact.phoneNumbers.first?.value.stringValue,
-                    email: contact.emailAddresses.first.map { String($0.value) }
-                ))
-                if matches.count >= 5 { stop.pointee = true }
-            }
-        } catch {
+        switch CNContactStore.authorizationStatus(for: .contacts) {
+        case .authorized:
+            break
+        case .notDetermined:
+            guard (try? await contactStore.requestAccess(for: .contacts)) == true else { return [] }
+        default:
             return []
         }
-        return matches
+
+        return await Task.detached(priority: .userInitiated) {
+            let keys: [CNKeyDescriptor] = [
+                CNContactGivenNameKey as CNKeyDescriptor,
+                CNContactFamilyNameKey as CNKeyDescriptor,
+                CNContactNicknameKey as CNKeyDescriptor,
+                CNContactPhoneNumbersKey as CNKeyDescriptor,
+                CNContactEmailAddressesKey as CNKeyDescriptor
+            ]
+            let request = CNContactFetchRequest(keysToFetch: keys)
+            var matches: [NativeContactHint] = []
+            let lower = message.lowercased()
+            let store = CNContactStore()
+
+            do {
+                try store.enumerateContacts(with: request) { contact, stop in
+                    let names = [
+                        contact.givenName,
+                        contact.familyName,
+                        "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces),
+                        contact.nickname
+                    ].filter { !$0.isEmpty }
+                    guard names.contains(where: { lower.contains($0.lowercased()) }) else { return }
+                    matches.append(NativeContactHint(
+                        displayName: CNContactFormatter.string(from: contact, style: .fullName) ?? names.first ?? "Contact",
+                        phone: contact.phoneNumbers.first?.value.stringValue,
+                        email: contact.emailAddresses.first.map { String($0.value) }
+                    ))
+                    if matches.count >= 5 { stop.pointee = true }
+                }
+            } catch {
+                return []
+            }
+            return matches
+        }.value
     }
 
     private func isLocalPlaceRequest(_ text: String) -> Bool {
