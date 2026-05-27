@@ -86,7 +86,8 @@ test('explicit nearby place lookup uses distance-ranked Nearby Search before tex
               formattedAddress: '2 Close Street',
               location: { latitude: 52.0001, longitude: -1.9999 },
               businessStatus: 'OPERATIONAL',
-              types: ['restaurant']
+              types: ['restaurant'],
+              currentOpeningHours: { openNow: false }
             },
             {
               displayName: { text: "McDonald's" },

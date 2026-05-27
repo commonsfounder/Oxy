@@ -119,11 +119,8 @@ function placeMatchesQuery(place, query) {
 
 function rankedGooglePlaceCandidates(places, location, query = '') {
   const normalizedLocation = normalizeLocation(location);
-  const openPlaces = places.filter(place =>
-    place.businessStatus !== 'CLOSED_PERMANENTLY' &&
-    place.currentOpeningHours?.openNow !== false
-  );
-  const candidates = (openPlaces.length ? openPlaces : places)
+  const availablePlaces = places.filter(place => place.businessStatus !== 'CLOSED_PERMANENTLY');
+  const candidates = (availablePlaces.length ? availablePlaces : places)
     .filter(place => place?.location)
     .map(place => ({
       ...place,

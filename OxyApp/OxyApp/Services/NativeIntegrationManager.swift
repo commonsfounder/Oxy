@@ -381,7 +381,7 @@ final class NativeIntegrationManager {
             || lower.hasPrefix("listen to ")
             || lower.hasPrefix("add ") else { return nil }
 
-        if let result = handleMusicTransportCommand(lower) {
+        if let result = await handleMusicTransportCommand(lower) {
             return result
         }
 
@@ -402,11 +402,13 @@ final class NativeIntegrationManager {
         }
     }
 
-    private func handleMusicTransportCommand(_ lower: String) -> NativeLocalActionResult? {
+    private func handleMusicTransportCommand(_ lower: String) async -> NativeLocalActionResult? {
         let systemPlayer = MPMusicPlayerController.systemMusicPlayer
         let appPlayer = MPMusicPlayerController.applicationMusicPlayer
 
         if lower == "previous" || lower == "back" || lower.contains("previous song") || lower.contains("last track") {
+            try? await ApplicationMusicPlayer.shared.skipToPreviousEntry()
+            try? await SystemMusicPlayer.shared.skipToPreviousEntry()
             systemPlayer.skipToPreviousItem()
             appPlayer.skipToPreviousItem()
             return NativeLocalActionResult(
@@ -421,6 +423,8 @@ final class NativeIntegrationManager {
         guard !lower.hasPrefix("play ") && !lower.hasPrefix("listen to ") else { return nil }
 
         if lower == "pause" || lower.hasPrefix("pause ") || lower.contains("pause music") || lower.contains("pause playback") {
+            ApplicationMusicPlayer.shared.pause()
+            SystemMusicPlayer.shared.pause()
             systemPlayer.pause()
             appPlayer.pause()
             return NativeLocalActionResult(
@@ -442,6 +446,8 @@ final class NativeIntegrationManager {
             || lower.contains("resume playback")
             || lower.contains("unpause music")
             || lower.contains("unpause playback") {
+            try? await ApplicationMusicPlayer.shared.play()
+            try? await SystemMusicPlayer.shared.play()
             systemPlayer.play()
             appPlayer.play()
             return NativeLocalActionResult(
@@ -454,6 +460,8 @@ final class NativeIntegrationManager {
         }
 
         if lower == "next" || lower.contains("next song") || lower.contains("skip this") || lower.contains("skip song") {
+            try? await ApplicationMusicPlayer.shared.skipToNextEntry()
+            try? await SystemMusicPlayer.shared.skipToNextEntry()
             systemPlayer.skipToNextItem()
             appPlayer.skipToNextItem()
             return NativeLocalActionResult(
