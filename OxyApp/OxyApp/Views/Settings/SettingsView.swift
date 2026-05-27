@@ -285,7 +285,9 @@ struct SettingsView: View {
         Task {
             do {
                 let version = try await ChatService().backendVersion()
-                let commit = version.gitCommit?.isEmpty == false ? version.gitCommit! : "unknown"
+                let commit = version.gitCommit?.isEmpty == false && version.gitCommit != "unknown"
+                    ? version.gitCommit!
+                    : (version.deployId?.isEmpty == false ? version.deployId! : "unknown")
                 let branch = version.gitBranch?.isEmpty == false ? version.gitBranch! : "unknown"
                 let environment = version.environment?.isEmpty == false ? version.environment! : "env unknown"
                 await MainActor.run {

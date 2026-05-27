@@ -21,7 +21,7 @@ Acceptance:
 
 Backend proof:
 
-- `GET /version` returns `gitCommit`, `gitBranch`, `packageVersion`, `buildTime`, `nodeVersion`, and `environment`.
+- `GET /version` returns `gitCommit`, `gitBranch`, `cloudRunRevision`, `deployId`, `packageVersion`, `buildTime`, `nodeVersion`, and `environment`.
 - `GET /health` returns `status`, `missingEnv`, and the same version payload.
 - Every backend response includes `X-Oxy-Commit`.
 - iOS Settings shows the backend commit under Diagnostics.
@@ -34,7 +34,7 @@ curl -s https://oxy-151340634966.europe-west2.run.app/version
 
 Acceptance:
 
-- The commit shown in Settings matches the commit pushed to `main`.
+- The deploy proof shown in Settings matches `gitCommit` when the deploy provides one; otherwise it matches the Cloud Run revision in `cloudRunRevision`.
 
 ## 3. Observability
 

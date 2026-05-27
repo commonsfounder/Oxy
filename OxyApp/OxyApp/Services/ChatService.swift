@@ -163,6 +163,8 @@ struct BackendVersion: Decodable {
     let packageVersion: String?
     let gitCommit: String?
     let gitBranch: String?
+    let cloudRunRevision: String?
+    let deployId: String?
     let buildTime: String?
     let environment: String?
 }

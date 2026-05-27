@@ -9,6 +9,8 @@ test('runtime version exposes deploy proof fields', () => {
   assert.ok(version.packageVersion);
   assert.ok(version.gitCommit);
   assert.ok(version.gitBranch);
+  assert.ok(Object.hasOwn(version, 'cloudRunRevision'));
+  assert.ok(version.deployId);
   assert.ok(version.buildTime);
   assert.ok(version.nodeVersion);
   assert.ok(Object.hasOwn(version, 'environment'));

@@ -13,8 +13,9 @@ function safeExec(command) {
   }
 }
 
+const cloudRunRevision = process.env.K_REVISION || '';
+
 const gitCommit =
-  process.env.K_REVISION ||
   process.env.OXY_COMMIT_SHA ||
   process.env.GITHUB_SHA ||
   safeExec('git rev-parse --short=12 HEAD') ||
@@ -34,6 +35,8 @@ function getRuntimeVersion() {
     packageVersion: pkg.version || '0.0.0',
     gitCommit,
     gitBranch,
+    cloudRunRevision,
+    deployId: gitCommit !== 'unknown' ? gitCommit : (cloudRunRevision || 'unknown'),
     buildTime,
     nodeVersion: process.version,
     environment: process.env.NODE_ENV || 'development',
