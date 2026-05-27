@@ -122,6 +122,16 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Directions failed',
     confirmation: 'none'
   },
+  plan_trip: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['origin', 'departure_time', 'arrival_time', 'preference'],
+    aliases: { destination: ['query', 'place', 'address', 'to'], origin: ['from'] },
+    inputExample: { destination: 'London Euston', origin: 'optional start place or station', departure_time: 'optional leave-at/around time', arrival_time: 'optional arrive-by time', preference: 'balanced|fastest|fewest_changes' },
+    successSummary: 'Trip planned',
+    failureSummary: 'Trip failed',
+    confirmation: 'none'
+  },
   send_telegram: {
     risk: 'high',
     required: ['contact', 'message'],

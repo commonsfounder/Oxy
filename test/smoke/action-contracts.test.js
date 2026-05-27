@@ -14,6 +14,7 @@ test('Core 20 actions have contracts for reliability work', () => {
     'find_place',
     'book_uber',
     'get_directions',
+    'plan_trip',
     'send_message',
     'send_email',
     'get_emails',

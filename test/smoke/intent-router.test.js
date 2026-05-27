@@ -52,38 +52,46 @@ test('bus requests to arbitrary destinations route to transit directions', () =>
   });
 });
 
-test('future train journey requests route to transit directions, not live rail', () => {
+test('future train journey requests route to rail-first trip planning, not live rail', () => {
   const routed = inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley');
-  assert.equal(routed.reason, 'transit_directions_to_place');
-  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.reason, 'rail_first_trip_plan');
+  assert.equal(routed.actions[0].type, 'plan_trip');
   assert.deepEqual(routed.actions[0].input, {
     destination: 'apsley',
-    mode: 'transit',
-    departure_time: 'tomorrow 9am'
+    departure_time: 'tomorrow 9am',
+    preference: 'balanced'
   });
 });
 
-test('train journey with explicit origin keeps from and to for maps transit', () => {
+test('train journey with explicit origin keeps from and to for trip planning', () => {
   const routed = inferDeterministicAction('what train can i take from birmingham new street to apsley tomorrow around 9am');
-  assert.equal(routed.reason, 'transit_directions_to_place');
-  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.reason, 'rail_first_trip_plan');
+  assert.equal(routed.actions[0].type, 'plan_trip');
   assert.deepEqual(routed.actions[0].input, {
     origin: 'birmingham new street',
     destination: 'apsley',
-    mode: 'transit',
-    departure_time: 'tomorrow 9am'
+    departure_time: 'tomorrow 9am',
+    preference: 'balanced'
   });
 });
 
-test('future first train request routes to maps transit', () => {
+test('future first train request routes to rail-first trip planning', () => {
   const routed = inferDeterministicAction("when's the first train to london euston tomorrow");
-  assert.equal(routed.reason, 'transit_directions_to_place');
-  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.reason, 'rail_first_trip_plan');
+  assert.equal(routed.actions[0].type, 'plan_trip');
   assert.deepEqual(routed.actions[0].input, {
     destination: 'london euston',
-    mode: 'transit',
-    departure_time: 'tomorrow 00:01'
+    departure_time: 'tomorrow 00:01',
+    preference: 'fastest'
   });
+});
+
+test('direct train preference is preserved for trip planning', () => {
+  const routed = inferDeterministicAction('can i take a direct train to london with no changes tomorrow');
+  assert.equal(routed.reason, 'rail_first_trip_plan');
+  assert.equal(routed.actions[0].type, 'plan_trip');
+  assert.equal(routed.actions[0].input.destination, 'london');
+  assert.equal(routed.actions[0].input.preference, 'fewest_changes');
 });
 
 test('vague train follow-up does not become a fake destination', () => {

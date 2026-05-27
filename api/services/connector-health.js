@@ -7,6 +7,7 @@ const ACTION_CONNECTOR = {
   book_uber: 'uber',
   find_place: 'maps',
   get_directions: 'maps',
+  plan_trip: 'maps',
   send_telegram: 'telegram',
   get_telegram_contacts: 'telegram',
   search_trains: 'trainline',

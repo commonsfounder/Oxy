@@ -2,7 +2,7 @@ const axios = require('axios');
 const { resolvePlaceDestination, cleanPlaceSearchQuery } = require('../api/geocoding');
 const { getGoogleDirectionsKey } = require('../api/services/maps-config');
 
-const SUPPORTED_ACTIONS = ['find_place', 'get_directions'];
+const SUPPORTED_ACTIONS = ['find_place', 'get_directions', 'plan_trip'];
 
 function shortAddress(address) {
   return String(address || '')
@@ -81,6 +81,13 @@ function mapsDirectionsFallback(destination, params = {}) {
   };
 }
 
+function trainlineLink(origin, destination, params = {}) {
+  const from = cleanPlaceSearchQuery(origin || '');
+  const to = cleanPlaceSearchQuery(destination || '');
+  const query = [from, to].filter(Boolean).join(' to ');
+  return `https://www.thetrainline.com/search?origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to || query)}${params.departure_time ? `&when=${encodeURIComponent(params.departure_time)}` : ''}${params.arrival_time ? `&arriveBy=${encodeURIComponent(params.arrival_time)}` : ''}`;
+}
+
 function parseDirectionTime(value, now = new Date()) {
   const text = String(value || '').trim();
   if (!text) return null;
@@ -108,6 +115,29 @@ function minutesBetween(a, b) {
   return mins > 7 ? mins : null;
 }
 
+function findPlatformValue(value, seen = new Set()) {
+  if (!value || typeof value !== 'object') return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+  for (const [key, child] of Object.entries(value)) {
+    if (/platform/i.test(key) && (typeof child === 'string' || typeof child === 'number')) {
+      const text = String(child).trim();
+      if (text) return text;
+    }
+    const nested = findPlatformValue(child, seen);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function isRailStep(step) {
+  return /RAIL|TRAIN|HEAVY_RAIL|COMMUTER_TRAIN|INTERCITY|NATIONAL_RAIL/i.test([
+    step?.vehicle,
+    step?.service,
+    step?.line
+  ].filter(Boolean).join(' '));
+}
+
 function formatTransitStep(step) {
   const transit = step.transit_details;
   if (!transit) return null;
@@ -120,6 +150,8 @@ function formatTransitStep(step) {
   const arrival = transit.arrival_time?.text;
   const stops = transit.num_stops;
   const service = [agency, line].filter(Boolean).join(' ');
+  const platform = findPlatformValue(transit);
+  const platformText = platform ? `platform ${platform}` : '';
   return {
     line,
     service: service || line,
@@ -131,7 +163,202 @@ function formatTransitStep(step) {
     departureValue: transit.departure_time?.value,
     arrivalValue: transit.arrival_time?.value,
     stops,
-    text: [line, from && `from ${from}`, to && `to ${to}`].filter(Boolean).join(' ')
+    platform,
+    text: [line, from && `from ${from}`, platformText, to && `to ${to}`].filter(Boolean).join(' ')
+  };
+}
+
+function routeTransitSteps(route) {
+  const leg = route?.legs?.[0];
+  return (leg?.steps || []).map(formatTransitStep).filter(Boolean);
+}
+
+function scoreTripRoute(route, preference = '') {
+  const leg = route?.legs?.[0];
+  const steps = routeTransitSteps(route);
+  const railCount = steps.filter(isRailStep).length;
+  const transitCount = steps.length;
+  const duration = Number(leg?.duration?.value || Number.MAX_SAFE_INTEGER);
+  const waits = [];
+  for (let i = 1; i < steps.length; i += 1) {
+    const wait = minutesBetween(steps[i - 1].arrivalValue, steps[i].departureValue);
+    if (wait) waits.push(wait);
+  }
+  const changePenalty = /direct|few|no changes?/i.test(preference)
+    ? transitCount * 1400
+    : transitCount * 700;
+  const waitPenalty = waits.reduce((sum, wait) => sum + (wait > 45 ? wait * 80 : wait * 20), 0);
+  return (railCount ? -200000 : 0) + changePenalty + waitPenalty + duration;
+}
+
+function chooseBestTripRoute(routes = [], preference = '') {
+  return [...routes]
+    .filter(route => route?.legs?.[0])
+    .sort((a, b) => scoreTripRoute(a, preference) - scoreTripRoute(b, preference))[0] || null;
+}
+
+function buildTransitRequestParams(destination, params = {}, railFirst = false) {
+  const key = getGoogleDirectionsKey();
+  const location = params.location;
+  const lat = Number(location?.latitude ?? location?.lat);
+  const lng = Number(location?.longitude ?? location?.lng);
+  const explicitOrigin = cleanPlaceSearchQuery(params.origin || '');
+  if (!key || (!explicitOrigin && (!Number.isFinite(lat) || !Number.isFinite(lng)))) return null;
+  const requestParams = {
+    origin: explicitOrigin || `${lat},${lng}`,
+    destination: cleanPlaceSearchQuery(destination),
+    mode: 'transit',
+    alternatives: true,
+    key
+  };
+  if (railFirst) requestParams.transit_mode = 'train|rail';
+  const arrival = parseDirectionTime(params.arrival_time);
+  const departure = parseDirectionTime(params.departure_time);
+  if (arrival) requestParams.arrival_time = arrival;
+  if (!arrival && departure) requestParams.departure_time = departure;
+  return requestParams;
+}
+
+async function fetchTransitRoutes(destination, params = {}, railFirst = false) {
+  const requestParams = buildTransitRequestParams(destination, params, railFirst);
+  if (!requestParams) return null;
+  const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
+    params: requestParams,
+    timeout: 10000
+  });
+  if (response.data?.status !== 'OK' || !response.data.routes?.length) return null;
+  return response.data.routes;
+}
+
+function summarizeTripRoute(route, destination, params = {}, usedRailFirst = false) {
+  const leg = route?.legs?.[0];
+  if (!leg) return null;
+  const steps = routeTransitSteps(route);
+  const railSteps = steps.filter(isRailStep);
+  const mainRail = railSteps.sort((a, b) => Number(b.arrivalValue || 0) - Number(a.arrivalValue || 0))[0] || steps[0];
+  const duration = leg.duration?.text;
+  const departure = leg.departure_time?.text;
+  const arrival = leg.arrival_time?.text;
+  const originLabel = params.origin || leg.start_address || 'your current location';
+  const cleanDestination = cleanPlaceSearchQuery(destination);
+  const hasRail = railSteps.length > 0;
+  const directRail = railSteps.length === 1;
+  const accessSteps = [];
+  for (const step of steps) {
+    if (step === mainRail) break;
+    accessSteps.push(step);
+  }
+  const changes = [];
+  for (let i = 1; i < steps.length; i += 1) {
+    const wait = minutesBetween(steps[i - 1].arrivalValue, steps[i].departureValue);
+    if (wait) changes.push({ minutes: wait, at: steps[i - 1].to, next: steps[i].service });
+  }
+  const mainPlatform = mainRail?.platform ? ` from platform ${mainRail.platform}` : '';
+  const mainTrainText = mainRail
+    ? `${mainRail.service}${mainRail.departure ? ` at ${mainRail.departure}` : ''}${mainPlatform}${mainRail.from ? ` from ${mainRail.from}` : ''}${mainRail.to ? ` to ${mainRail.to}` : ''}${mainRail.arrival ? `, arriving ${mainRail.arrival}` : ''}`
+    : '';
+  const accessText = accessSteps.length
+    ? `First get to ${mainRail?.from || 'the station'}${mainRail?.departure ? ` before ${mainRail.departure}` : ''}.`
+    : '';
+  const directText = directRail ? 'direct train' : `${railSteps.length || steps.length} transit legs`;
+  const opener = hasRail
+    ? `Best move: ${accessSteps.length ? `get to ${mainRail?.from || 'the station'}, then ` : ''}take the ${directText} to ${cleanDestination}.`
+    : `Best move: take the transit route to ${cleanDestination}.`;
+  const timing = departure && arrival
+    ? `Leave around ${departure}; you should arrive around ${arrival}${duration ? ` (${duration})` : ''}.`
+    : duration ? `It takes about ${duration}.` : '';
+  const changeText = changes[0]
+    ? `You have about ${changes[0].minutes} minutes to change${changes[0].at ? ` at ${changes[0].at}` : ''}.`
+    : '';
+  const platformCaveat = hasRail && !railSteps.some(step => step.platform)
+    ? 'No reliable platform is in the route data yet, so check the board closer to departure.'
+    : '';
+  const text = [opener, timing, mainTrainText ? `Main train: ${mainTrainText}.` : '', changeText, platformCaveat]
+    .filter(Boolean)
+    .join(' ');
+  const itinerary = steps.map(step => ({
+    type: isRailStep(step) ? 'rail' : 'transit',
+    service: step.service,
+    line: step.line,
+    from: step.from,
+    to: step.to,
+    departure: step.departure,
+    arrival: step.arrival,
+    platform: step.platform || null,
+    stops: Number.isFinite(Number(step.stops)) ? Number(step.stops) : null
+  }));
+  const cardBits = [
+    accessText,
+    mainTrainText ? `Train: ${mainTrainText}.` : null,
+    changeText,
+    arrival ? `Arrive around ${arrival}.` : null
+  ].filter(Boolean);
+  return {
+    text,
+    headline: [duration, departure && arrival ? `${departure}-${arrival}` : null].filter(Boolean).join(' · '),
+    detail: mainRail?.text || `Open trip in Maps`,
+    cardText: cardBits.join(' '),
+    itinerary,
+    routeContext: {
+      origin: originLabel,
+      destination: cleanDestination,
+      departure,
+      arrival,
+      duration,
+      railFirst: usedRailFirst,
+      directRail,
+      mainRailLeg: mainRail || null,
+      changes,
+      platformReliable: railSteps.some(step => step.platform)
+    }
+  };
+}
+
+async function planTrip(destination, params = {}) {
+  const cleanedDestination = cleanPlaceSearchQuery(destination);
+  const fallbackLink = `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(cleanedDestination)}&dirflg=r`;
+  const bookingUrl = trainlineLink(params.origin || '', cleanedDestination, params);
+  if (!getGoogleDirectionsKey()) {
+    return {
+      success: true,
+      text: `I can open a rail check for ${cleanedDestination}. Live route planning needs the Google Directions key on the server.`,
+      actionSummary: 'Trip ready',
+      cardText: 'Check tickets in Trainline',
+      deepLink: bookingUrl,
+      webLink: bookingUrl
+    };
+  }
+  const railRoutes = await fetchTransitRoutes(cleanedDestination, params, true).catch(err => {
+    console.warn('[maps] Rail-first Directions failed:', err.message);
+    return null;
+  });
+  const allRoutes = railRoutes || await fetchTransitRoutes(cleanedDestination, params, false).catch(err => {
+    console.warn('[maps] Transit Directions failed:', err.message);
+    return null;
+  });
+  const best = chooseBestTripRoute(allRoutes || [], params.preference);
+  if (!best) {
+    return {
+      success: true,
+      text: `I can open transit options for ${cleanedDestination}, but I couldn't get a reliable route summary right now.`,
+      actionSummary: 'Trip ready',
+      cardText: 'Open transit directions in Maps',
+      deepLink: fallbackLink,
+      webLink: fallbackLink
+    };
+  }
+  const summary = summarizeTripRoute(best, cleanedDestination, params, Boolean(railRoutes));
+  return {
+    success: true,
+    text: summary.text,
+    actionSummary: 'Trip planned',
+    cardText: summary.cardText || summary.detail,
+    headline: summary.headline,
+    itinerary: summary.itinerary,
+    routeContext: summary.routeContext,
+    bookingUrl,
+    deepLink: fallbackLink,
+    webLink: bookingUrl
   };
 }
 
@@ -215,6 +442,12 @@ function isPlacesSetupError(err) {
 
 async function execute(userId, action, params) {
   try {
+    if (action === 'plan_trip') {
+      const destination = String(params?.destination || params?.query || '').trim();
+      if (!destination) return { success: false, error: 'plan_trip requires a destination' };
+      return await planTrip(destination, params || {});
+    }
+
     if (action === 'get_directions') {
       const destination = String(params?.destination || params?.query || '').trim();
       if (!destination) return { success: false, error: 'get_directions requires a destination' };

@@ -403,8 +403,8 @@ ABSOLUTE RULES:
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
 7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
-7a. For journey-planning train questions like "what train can I take tomorrow around 9", "how do I get to Apsley", or "train to London tomorrow", use get_directions with mode "transit"; include origin, departure_time for "around/at/after", and arrival_time for "by".
-7b. Use search_trains only for live train departures between two named stations now. Use station_board for live departures/platform/station-board questions at one station.
+7a. For journey-planning train questions like "what train can I take tomorrow around 9", "how do I get to Apsley", or "train to London tomorrow", use plan_trip; include origin when known, departure_time for "around/at/after", arrival_time for "by", and preference when the user asks for direct/fewer changes/fastest.
+7b. Use get_directions for generic local directions, walking, driving, and bus-only questions. Use search_trains only for live train departures between two named stations now. Use station_board for live departures/platform/station-board questions at one station.
 7c. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
 7d. For follow-ups like "yeah but what train is it" or "what about tomorrow", use the recent route/action context instead of treating the whole sentence as a new destination.
 8. If you are unsure, ask a brief clarifying question instead of guessing
@@ -963,6 +963,8 @@ const ACTION_STATUS_LABELS = {
   get_calendar_events: 'Checking calendar',
   book_uber: 'Booking Uber',
   find_place: 'Finding place',
+  get_directions: 'Checking directions',
+  plan_trip: 'Planning trip',
   send_telegram: 'Sending Telegram message',
   get_telegram_contacts: 'Checking Telegram contacts',
   search_trains: 'Checking train times',
@@ -1807,7 +1809,7 @@ function buildAvailableActions(enabled) {
     reminders: ['create_reminder'],
     spotify: ['play_music'],
     homekit: ['homekit_control'],
-    maps: ['find_place', 'get_directions'],
+    maps: ['find_place', 'get_directions', 'plan_trip'],
     uber: ['book_uber'],
     ubereats: ['order_uber_eats'],
     netflix: ['search_netflix_title', 'add_to_netflix_list'],

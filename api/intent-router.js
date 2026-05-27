@@ -2,6 +2,7 @@ const LOCAL_PLACE_TERMS = /\b(nearest|closest|near me|nearby|around me|coffee|ca
 const RIDE_TERMS = /\b(uber|ride|taxi|cab|car|take me|pick me up|drive me)\b/i;
 const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
 const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|train|trains|rail|tube|tram)\b/i;
+const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
 const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
 const FUTURE_TIME_TERMS = /\b(tomorrow|later|around|about|by|at|after|before|\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i;
 
@@ -35,6 +36,8 @@ function cleanDestinationPhrase(message) {
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, '')
     .replace(/^(what|which)\s+(bus|buses|public transport|transit)\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
     .replace(/^(what|which)\s+train\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
+    .replace(/^(when'?s\s+)?(the\s+)?(first|earliest|next)\s+train\s+(to|for)\s+/i, '')
+    .replace(/^(train|trains)\s+(to|for)\s+/i, '')
     .replace(/^what\s+about\s+(to)?\s*/i, '')
     .replace(/^heading\s+to\s+/i, '')
     .replace(/^how\s+do\s+i\s+get\s+to\s+/i, '')
@@ -54,6 +57,7 @@ function cleanDestinationPhrase(message) {
     .replace(/\s+by\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\s+.*$/i, ' ')
     .replace(/\s+(tomorrow|today)\s+(around|about|at|by)?\s*\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
     .replace(/\s+(around|about|at|by)\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
+    .replace(/\s+(with\s+)?(no changes?|without changing|direct|fewest changes?)\b.*$/i, ' ')
     .replace(/\s+what\s+(bus|buses|public transport|transit)\s+.*$/i, ' ')
     .replace(/\s+(to|near|from)\s+me\s+(is|are)\??$/i, ' ')
     .replace(/\s+(is|are)\??$/i, '')
@@ -80,6 +84,13 @@ function extractDepartureTime(message) {
   const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
     text.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
+}
+
+function extractTripPreference(message) {
+  const text = String(message || '');
+  if (/\b(direct|no changes?|without changing|fewest changes?)\b/i.test(text)) return 'fewest_changes';
+  if (/\b(fastest|quickest|soonest|earliest|first train)\b/i.test(text)) return 'fastest';
+  return 'balanced';
 }
 
 function extractFromTo(message) {
@@ -168,6 +179,15 @@ function inferDeterministicAction(message) {
     if (arrivalTime) input.arrival_time = arrivalTime;
     const departureTime = !arrivalTime ? extractDepartureTime(text) : undefined;
     if (departureTime) input.departure_time = departureTime;
+    if (RAIL_TRIP_TERMS.test(text) && !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text)) {
+      delete input.mode;
+      input.preference = extractTripPreference(text);
+      return {
+        reason: 'rail_first_trip_plan',
+        spoken: "I'll plan the train route.",
+        actions: [{ type: 'plan_trip', input }]
+      };
+    }
     return {
       reason: TRANSIT_TERMS.test(text) ? 'transit_directions_to_place' : 'directions_to_local_place',
       spoken: "I'll open directions.",
