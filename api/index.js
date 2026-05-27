@@ -45,6 +45,7 @@ const {
 } = require('../auth');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
+const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -1001,10 +1002,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
     }
   }
 
-  const asksAboutPreviousPlace = /\b(is|was)\s+(that|this|it)\b/i.test(normalized) ||
-    /\b(that|this|it)\s+(definitely|sure|nearest|closest|right|correct)\b/i.test(normalized) ||
-    (/\b(definitely|sure|right|correct)\b/i.test(normalized) && /\b(that|this|it)\b/i.test(normalized));
-  if (asksAboutPreviousPlace && /\b(nearest|closest|definitely|sure|right|correct)\b/i.test(normalized)) {
+  if (shouldClarifyPreviousPlace(normalized)) {
     const actions = await getRecentLoggedActions(userId, trace, 8);
     const lastPlace = lastActionOfType(actions, 'find_place');
     if (lastPlace?.input?.query) {
