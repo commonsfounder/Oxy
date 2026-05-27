@@ -368,6 +368,9 @@ final class NativeIntegrationManager {
             || lower.hasPrefix("pause ")
             || lower == "resume"
             || lower.hasPrefix("resume ")
+            || lower == "resume it"
+            || lower == "unpause"
+            || lower.hasPrefix("unpause ")
             || lower == "next"
             || lower == "previous"
             || lower == "back"
@@ -429,7 +432,16 @@ final class NativeIntegrationManager {
             )
         }
 
-        if lower == "resume" || lower == "play" || lower.hasPrefix("resume ") || lower.contains("resume music") || lower.contains("resume playback") {
+        if lower == "resume"
+            || lower == "resume it"
+            || lower == "play"
+            || lower == "unpause"
+            || lower.hasPrefix("resume ")
+            || lower.hasPrefix("unpause ")
+            || lower.contains("resume music")
+            || lower.contains("resume playback")
+            || lower.contains("unpause music")
+            || lower.contains("unpause playback") {
             systemPlayer.play()
             appPlayer.play()
             return NativeLocalActionResult(
@@ -1442,8 +1454,14 @@ final class NativeIntegrationManager {
         if let origin {
             request.region = MKCoordinateRegion(center: origin.coordinate, latitudinalMeters: 25_000, longitudinalMeters: 25_000)
         }
-        guard let response = try? await MKLocalSearch(request: request).start(),
-              let item = response.mapItems.first else { return nil }
+        guard let response = try? await MKLocalSearch(request: request).start() else { return nil }
+        let sortedItems = response.mapItems.sorted { lhs, rhs in
+            guard let origin else { return false }
+            let left = CLLocation(latitude: lhs.placemark.coordinate.latitude, longitude: lhs.placemark.coordinate.longitude).distance(from: origin)
+            let right = CLLocation(latitude: rhs.placemark.coordinate.latitude, longitude: rhs.placemark.coordinate.longitude).distance(from: origin)
+            return left < right
+        }
+        guard let item = sortedItems.first else { return nil }
 
         let placemark = item.placemark
         let address = [placemark.thoroughfare, placemark.locality, placemark.postalCode]

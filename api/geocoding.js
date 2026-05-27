@@ -23,6 +23,7 @@ function cleanPlaceSearchQuery(query) {
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, ' ')
     .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, ' ')
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, ' ')
+    .replace(/^where['’]?s\s+(the\s+)?/i, ' ')
     .replace(/^where\s+(is|are)\s+/i, ' ')
     .replace(/^(what|which)\s+(is\s+)?/i, ' ')
     .replace(/^i\s+need\s+to\s+be\s+at\s+/i, ' ')
@@ -60,6 +61,132 @@ function distanceMeters(a, b) {
   const lat2 = toRad(locB.latitude);
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * r * Math.asin(Math.sqrt(h));
+}
+
+function googlePlaceFieldMask() {
+  return 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow';
+}
+
+function googlePlaceHeaders(key) {
+  return {
+    'Content-Type': 'application/json',
+    'X-Goog-Api-Key': key,
+    'X-Goog-FieldMask': googlePlaceFieldMask()
+  };
+}
+
+function nearbyTypesForQuery(query) {
+  const text = cleanPlaceSearchQuery(query).toLowerCase();
+  if (/\b(mcdonald|kfc|burger king|restaurant|food|eat|dinner|lunch)\b/.test(text)) return ['restaurant'];
+  if (/\b(coffee|cafe|starbucks|costa|nero)\b/.test(text)) return ['cafe'];
+  if (/\b(gym|fitness|the gym group)\b/.test(text)) return ['gym'];
+  if (/\b(pharmacy|chemist|boots)\b/.test(text)) return ['pharmacy'];
+  if (/\b(supermarket|grocery|tesco|sainsbury|aldi|lidl|asda)\b/.test(text)) return ['supermarket'];
+  if (/\b(john lewis|selfridges|department store)\b/.test(text)) return ['department_store'];
+  if (/\b(shop|store)\b/.test(text)) return ['store'];
+  if (/\b(bank)\b/.test(text)) return ['bank'];
+  if (/\b(atm|cash machine)\b/.test(text)) return ['atm'];
+  if (/\b(hospital|a&e|clinic)\b/.test(text)) return ['hospital'];
+  if (/\b(hotel)\b/.test(text)) return ['hotel'];
+  if (/\b(cinema|movie)\b/.test(text)) return ['movie_theater'];
+  if (/\b(train station|station)\b/.test(text)) return ['train_station'];
+  return [];
+}
+
+function meaningfulPlaceTokens(query) {
+  return cleanPlaceSearchQuery(query)
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .filter(token => ![
+      'the', 'a', 'an', 'place', 'shop', 'store', 'restaurant', 'cafe', 'coffee',
+      'gym', 'station', 'near', 'nearest', 'closest', 'to', 'me', 'from', 'is',
+      'that', 'this', 'where', 's'
+    ].includes(token));
+}
+
+function placeMatchesQuery(place, query) {
+  const tokens = meaningfulPlaceTokens(query);
+  if (!tokens.length) return true;
+  const haystack = [
+    place.displayName?.text,
+    place.formattedAddress,
+    ...(place.types || [])
+  ].filter(Boolean).join(' ').toLowerCase().replace(/['’]/g, '');
+  return tokens.every(token => haystack.includes(token));
+}
+
+function rankedGooglePlaceCandidates(places, location, query = '') {
+  const normalizedLocation = normalizeLocation(location);
+  const openPlaces = places.filter(place =>
+    place.businessStatus !== 'CLOSED_PERMANENTLY' &&
+    place.currentOpeningHours?.openNow !== false
+  );
+  const candidates = (openPlaces.length ? openPlaces : places)
+    .filter(place => place?.location)
+    .map(place => ({
+      ...place,
+      queryMatch: placeMatchesQuery(place, query),
+      distanceMeters: normalizedLocation
+        ? distanceMeters(normalizedLocation, { latitude: place.location.latitude, longitude: place.location.longitude })
+        : Number.POSITIVE_INFINITY
+    }))
+    .sort((a, b) => {
+      if (a.queryMatch !== b.queryMatch) return a.queryMatch ? -1 : 1;
+      return a.distanceMeters - b.distanceMeters;
+    });
+  const matched = candidates.filter(place => place.queryMatch);
+  return matched.length ? matched : candidates;
+}
+
+function googlePlaceResult(place, query) {
+  if (!place?.location) {
+    throw new Error(`No place results found for "${query}"`);
+  }
+  return {
+    lat: place.location.latitude,
+    lng: place.location.longitude,
+    formattedAddress: place.formattedAddress || place.displayName?.text || query,
+    name: place.displayName?.text || '',
+    googleMapsUri: place.googleMapsUri || null,
+    distanceMeters: Number.isFinite(place.distanceMeters) ? Math.round(place.distanceMeters) : null,
+    source: 'google_places'
+  };
+}
+
+async function searchNearbyPlacesWithGoogle(query, location, key) {
+  const normalizedLocation = normalizeLocation(location);
+  if (!normalizedLocation) return null;
+  const includedTypes = nearbyTypesForQuery(query);
+  if (!includedTypes.length) return null;
+
+  const response = await axios.post(
+    'https://places.googleapis.com/v1/places:searchNearby',
+    {
+      includedTypes,
+      maxResultCount: 20,
+      rankPreference: 'DISTANCE',
+      regionCode: 'GB',
+      languageCode: 'en-GB',
+      locationRestriction: {
+        circle: {
+          center: {
+            latitude: normalizedLocation.latitude,
+            longitude: normalizedLocation.longitude
+          },
+          radius: 15000
+        }
+      }
+    },
+    {
+      headers: googlePlaceHeaders(key),
+      timeout: 10000
+    }
+  );
+
+  const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query);
+  return candidates[0] ? googlePlaceResult(candidates[0], query) : null;
 }
 
 async function geocodeWithGoogle(locationString) {
@@ -113,6 +240,11 @@ async function searchPlaceWithGoogle(query, location = null) {
   }
 
   const normalizedLocation = normalizeLocation(location);
+  if (normalizedLocation && isExplicitNearbyQuery(query)) {
+    const nearby = await searchNearbyPlacesWithGoogle(query, normalizedLocation, key);
+    if (nearby) return nearby;
+  }
+
   const body = {
     textQuery: cleanPlaceSearchQuery(query),
     pageSize: 8,
@@ -136,43 +268,14 @@ async function searchPlaceWithGoogle(query, location = null) {
     'https://places.googleapis.com/v1/places:searchText',
     body,
     {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': key,
-        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location,places.businessStatus,places.googleMapsUri,places.types,places.currentOpeningHours.openNow'
-      },
+      headers: googlePlaceHeaders(key),
       timeout: 10000
     }
   );
 
-  const places = response.data?.places || [];
-  const openPlaces = places.filter(place =>
-    place.businessStatus !== 'CLOSED_PERMANENTLY' &&
-    place.currentOpeningHours?.openNow !== false
-  );
-  const candidates = (openPlaces.length ? openPlaces : places)
-    .filter(place => place?.location)
-    .map(place => ({
-      ...place,
-      distanceMeters: normalizedLocation
-        ? distanceMeters(normalizedLocation, { latitude: place.location.latitude, longitude: place.location.longitude })
-        : Number.POSITIVE_INFINITY
-    }))
-    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query);
   const place = candidates[0];
-  if (!place?.location) {
-    throw new Error(`No place results found for "${query}"`);
-  }
-
-  return {
-    lat: place.location.latitude,
-    lng: place.location.longitude,
-    formattedAddress: place.formattedAddress || place.displayName?.text || query,
-    name: place.displayName?.text || '',
-    googleMapsUri: place.googleMapsUri || null,
-    distanceMeters: Number.isFinite(place.distanceMeters) ? Math.round(place.distanceMeters) : null,
-    source: 'google_places'
-  };
+  return googlePlaceResult(place, query);
 }
 
 const geocodeLocation = async (locationString) => {
