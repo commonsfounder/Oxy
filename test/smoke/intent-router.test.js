@@ -52,6 +52,20 @@ test('bus requests to arbitrary destinations route to transit directions', () =>
   });
 });
 
+test('leave-time directions use preferred transport when no mode is explicit', () => {
+  const routed = inferDeterministicAction(
+    'when should i leave the house if i want to get to selfridges by 9:30 pm',
+    { settings: { preferredTransportMode: 'transit' } }
+  );
+  assert.equal(routed.reason, 'transit_directions_to_place');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.deepEqual(routed.actions[0].input, {
+    destination: 'selfridges',
+    mode: 'transit',
+    arrival_time: '9:30 pm'
+  });
+});
+
 test('future train journey requests route to rail-first trip planning, not live rail', () => {
   const routed = inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley');
   assert.equal(routed.reason, 'rail_first_trip_plan');

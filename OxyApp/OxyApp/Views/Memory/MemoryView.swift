@@ -28,21 +28,6 @@ struct MemoryView: View {
                             MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
                         }
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("What belongs here")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.oxySub)
-                                .textCase(.uppercase)
-                                .tracking(0.5)
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                MemoryHint(text: "usual station is Birmingham International")
-                                MemoryHint(text: "my gym is PureGym Solihull")
-                                MemoryHint(text: "I prefer short, casual emails")
-                            }
-                        }
-                        .padding(.top, 4)
-
                         if let lastUpdated = summary.lastUpdated {
                             Text("Updated \(formattedDate(lastUpdated))")
                                 .font(.system(size: 12, weight: .medium))
@@ -223,25 +208,6 @@ private struct MemoryStat: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.oxyLine2, lineWidth: 1)
         )
-    }
-}
-
-private struct MemoryHint: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus.circle.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxyStone.opacity(0.9))
-            Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyText)
-            Spacer()
-        }
-        .padding(12)
-        .background(Color.oxySurface2.opacity(0.75))
-        .clipShape(RoundedRectangle(cornerRadius: 13))
     }
 }
 

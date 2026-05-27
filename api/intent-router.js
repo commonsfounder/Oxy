@@ -1,6 +1,6 @@
 const LOCAL_PLACE_TERMS = /\b(nearest|closest|near me|nearby|around me|coffee|cafe|restaurant|gym|mcdonald'?s|john lewis|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i;
 const RIDE_TERMS = /\b(uber|ride|taxi|cab|car|take me|pick me up|drive me)\b/i;
-const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
+const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|when should i leave|latest.*leave|get there by|be there by|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
 const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|train|trains|rail|tube|tram)\b/i;
 const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
 const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
@@ -126,6 +126,7 @@ function extractHeadingDestination(message) {
   const text = normalizeText(message);
   const match = text.match(/\bneed\s+to\s+be\s+at\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
     text.match(/\bneed\s+to\s+get\s+to\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
+    text.match(/\b(?:get|go)\s+to\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
     text.match(/\b(?:heading|going|travelling|traveling)\s+to\s+(.+?)(?:[?.!]|$)/i) ||
     text.match(/\bto\s+(.+?)(?:\s+(?:tomorrow|today|around|about|at|by|after|before)\b|[?.!]|$)/i);
   if (!match) return null;
@@ -169,8 +170,10 @@ function inferLiveRailAction(message) {
   };
 }
 
-function inferDeterministicAction(message) {
+function inferDeterministicAction(message, options = {}) {
   const text = normalizeText(message);
+  const preferredMode = options?.settings?.preferredTransportMode;
+  const defaultMode = ['driving', 'transit', 'walking'].includes(preferredMode) ? preferredMode : 'driving';
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
@@ -193,7 +196,7 @@ function inferDeterministicAction(message) {
     }
     const input = {
       destination: fromTo?.destination || headingDestination || cleanDestinationPhrase(text),
-      mode: TRANSIT_TERMS.test(text) ? 'transit' : 'driving'
+      mode: TRANSIT_TERMS.test(text) ? 'transit' : defaultMode
     };
     if (fromTo?.origin) input.origin = fromTo.origin;
     const arrivalTime = extractArrivalTime(text);
@@ -210,7 +213,7 @@ function inferDeterministicAction(message) {
       };
     }
     return {
-      reason: TRANSIT_TERMS.test(text) ? 'transit_directions_to_place' : 'directions_to_local_place',
+      reason: input.mode === 'transit' ? 'transit_directions_to_place' : 'directions_to_local_place',
       spoken: "I'll open directions.",
       actions: [{ type: 'get_directions', input }]
     };

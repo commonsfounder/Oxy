@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @State private var selectedTab = Tab.chat
 
     enum Tab: String {
@@ -53,6 +54,7 @@ struct MainTabView: View {
                 .tag(Tab.settings)
         }
         .tint(Color.oxyStone)
+        .id(accentColor)
     }
 }
 

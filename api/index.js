@@ -423,6 +423,8 @@ ABSOLUTE RULES:
 20a. Never send an email body that is just a generic template. The body must contain specific content from the user, current conversation, memory, or tool results.
 20b. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
 21. If the user asks you to send "a link", the outgoing message must contain an actual URL from the user's message, tool results, or explicit conversation context. Never invent product links, prices, retailers, model names, or recommendations.
+21a. Calendar beats music. If the user says "calendar", "schedule", or "event", do not use Apple Music just because the phrase contains "add". Use create_calendar_event or ask for the missing date/time.
+21b. If the user corrects you with "I mean..." or "not that", preserve the original task details and only change the misunderstood part.
 22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
 22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
 22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
@@ -771,6 +773,186 @@ function getDeterministicQuickReply(message) {
   if (/^(ok|okay|kk|cool|nice|great|sure|yep|yes)$/.test(normalized)) return 'Got it.';
   if (/^(nah|no)$/.test(normalized)) return 'Got you.';
   return '';
+}
+
+function formatLondonYMD(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function addDaysToYMD(ymd, days) {
+  const [year, month, day] = String(ymd).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+}
+
+function extractRelativeDateYMD(text) {
+  const lower = String(text || '').toLowerCase();
+  const today = formatLondonYMD();
+  if (/\btomorrow\b/.test(lower)) return addDaysToYMD(today, 1);
+  if (/\btoday\b/.test(lower)) return today;
+  return null;
+}
+
+function cleanCalendarTitle(text) {
+  return String(text || '')
+    .replace(/^(okay|ok|please|pls|can you|could you)\s+/i, '')
+    .replace(/\b(i\s+mean\s+)?add\s+(it|that)?\s*to\s+my\s+calendar\b/i, '')
+    .replace(/\b(add|create|put|schedule)\b/i, '')
+    .replace(/\b(to|in|on)\s+my\s+calendar\b/i, '')
+    .replace(/\bfor\s+(today|tomorrow)\b/i, '')
+    .replace(/\b(today|tomorrow)\b/i, '')
+    .replace(/\ball\s+day\b/i, '')
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["']|["']$/g, '');
+}
+
+function extractCalendarEventInput(message, fallbackMessage = '') {
+  const source = String(message || '');
+  const fallback = String(fallbackMessage || '');
+  const combined = `${source} ${fallback}`.trim();
+  const hasCalendarIntent = /\b(calendar|schedule|event)\b/i.test(combined) ||
+    /\b(add|put|create)\b.+\b(tomorrow|today|all day)\b/i.test(combined);
+  if (!hasCalendarIntent) return null;
+
+  const dateYMD = extractRelativeDateYMD(combined);
+  if (!dateYMD) return null;
+
+  const allDay = /\ball\s+day\b/i.test(combined);
+  let title = cleanCalendarTitle(source);
+  if (!title || /^(it|that)$/i.test(title)) title = cleanCalendarTitle(fallback);
+  if (!title) return null;
+
+  if (allDay) {
+    return {
+      title,
+      start_date: `${dateYMD}T00:00:00`,
+      end_date: `${addDaysToYMD(dateYMD, 1)}T00:00:00`,
+      timezone: TIMEZONE
+    };
+  }
+
+  const timeMatch = combined.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+  let hour = 9;
+  let minute = 0;
+  if (timeMatch) {
+    hour = Number(timeMatch[1]);
+    minute = Number(timeMatch[2] || 0);
+    const suffix = (timeMatch[3] || '').toLowerCase();
+    if (suffix === 'pm' && hour < 12) hour += 12;
+    if (suffix === 'am' && hour === 12) hour = 0;
+  }
+  const start = `${dateYMD}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  const endHour = Math.min(hour + 1, 23);
+  const end = `${dateYMD}T${String(endHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+  return { title, start_date: start, end_date: end, timezone: TIMEZONE };
+}
+
+async function getRecentLoggedActions(userId, trace = null, limit = 8) {
+  const fetchActions = () => supabase
+    .from('action_log')
+    .select('action, status, error, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(Math.min(Math.max(Number(limit) || 8, 1), 20));
+  const { data, error } = trace
+    ? await trace.run('supabase.action_log.contextual_fetch', fetchActions)
+    : await fetchActions();
+  if (error || !data) return [];
+  return data.map(row => {
+    const parsed = safeParseJSON(row.action) || row.action || {};
+    return {
+      type: parsed.type || parsed.action || '',
+      input: parsed.input || {},
+      status: parsed.status || row.status || '',
+      resultText: parsed.resultText || '',
+      error: parsed.error || row.error || '',
+      created_at: row.created_at
+    };
+  });
+}
+
+function lastActionOfType(actions, types) {
+  const wanted = Array.isArray(types) ? types : [types];
+  return actions.find(action => wanted.includes(action.type));
+}
+
+function isClarificationRequest(message) {
+  return /^(huh|what|what\?|wdym|what do you mean|what does that mean|i don'?t get it)$/i.test(String(message || '').trim());
+}
+
+async function inferContextualDeterministicTurn(userId, message, settings, trace = null) {
+  const text = String(message || '').trim();
+  const normalized = text.toLowerCase();
+
+  if (isClarificationRequest(text)) {
+    const history = await getHistory(userId, trace, 10);
+    const lastAssistant = [...history].reverse().find(row => row.role === 'assistant' && String(row.content || '').trim());
+    if (lastAssistant?.content) {
+      return {
+        reason: 'clarify_previous_turn',
+        spokenOnly: true,
+        spoken: `I meant: ${String(lastAssistant.content).trim()}`
+      };
+    }
+  }
+
+  const isCalendarCorrection = /\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text);
+  if (/\b(calendar|schedule|event)\b/i.test(text) || isCalendarCorrection) {
+    const history = await getHistory(userId, trace, 8);
+    const previousUser = [...history].reverse()
+      .find(row => row.role === 'user' && row.content !== message && /\b(calendar|schedule|event|tomorrow|today|all day)\b/i.test(row.content || ''));
+    const input = extractCalendarEventInput(text, previousUser?.content || '');
+    if (input) {
+      return {
+        reason: isCalendarCorrection ? 'calendar_correction' : 'calendar_direct',
+        spoken: "I'll add that to your calendar.",
+        actions: [{ type: 'create_calendar_event', input }]
+      };
+    }
+  }
+
+  if (/\b(i'?m|im|i am)\s+taking\s+the\s+(bus|train|tube|tram|transit)\b/i.test(normalized) || /^by\s+(bus|train|tube|tram|transit)$/i.test(normalized)) {
+    const actions = await getRecentLoggedActions(userId, trace, 8);
+    const lastTravel = lastActionOfType(actions, ['get_directions', 'plan_trip']);
+    const destination = lastTravel?.input?.destination;
+    if (destination) {
+      const mode = /\b(bus|train|tube|tram|transit)\b/i.test(normalized) ? 'transit' : (settings?.preferredTransportMode || 'transit');
+      const input = { destination, mode };
+      if (lastTravel.input?.origin) input.origin = lastTravel.input.origin;
+      if (lastTravel.input?.arrival_time) input.arrival_time = lastTravel.input.arrival_time;
+      if (lastTravel.input?.departure_time) input.departure_time = lastTravel.input.departure_time;
+      return {
+        reason: 'travel_mode_correction',
+        spoken: "I'll redo that for transit.",
+        actions: [{ type: 'get_directions', input }]
+      };
+    }
+  }
+
+  if (/\b(is that|was that|definitely|nearest|closest)\b/i.test(normalized) && /\b(nearest|closest|definitely|sure)\b/i.test(normalized)) {
+    const actions = await getRecentLoggedActions(userId, trace, 8);
+    const lastPlace = lastActionOfType(actions, 'find_place');
+    if (lastPlace?.input?.query) {
+      return {
+        reason: 'place_result_clarification',
+        spokenOnly: true,
+        spoken: `That was the nearest result Places returned for “${lastPlace.input.query}”. If it looks wrong, ask me to re-check nearby and I’ll run a fresh search with your current location.`
+      };
+    }
+  }
+
+  return null;
 }
 
 function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
@@ -3415,7 +3597,24 @@ app.post('/chat', async (req, res) => {
       return res.json(result);
     }
 
-    const deterministicAction = inferDeterministicAction(message);
+    const contextualTurn = await inferContextualDeterministicTurn(userId, message, settings, trace);
+    if (contextualTurn?.spokenOnly) {
+      trace.log(`context_router.match ${contextualTurn.reason}`);
+      await respondWithResult({
+        res,
+        streaming,
+        wantsTTS,
+        settings,
+        trace,
+        userId,
+        message,
+        spoken: contextualTurn.spoken,
+        actionResults: []
+      });
+      return;
+    }
+
+    const deterministicAction = contextualTurn || inferDeterministicAction(message, { settings });
     if (deterministicAction) {
       trace.log(`intent_router.match ${deterministicAction.reason}`);
 

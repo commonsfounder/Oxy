@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
+    @State private var showAccentPicker = false
     @State private var voicePreview = VoicePreviewPlayer()
 
     var body: some View {
@@ -29,15 +30,8 @@ struct SettingsView: View {
 
                         settingsSection(title: "Appearance") {
                             settingRow(label: "Accent", description: selectedAccentLabel) {
-                                Menu {
-                                    ForEach(OxySettings.accentOptions, id: \.value) { option in
-                                        Button {
-                                            settings.accentColor = option.value
-                                            saveSettings()
-                                        } label: {
-                                            Label(option.label, systemImage: settings.accentColor == option.value ? "checkmark.circle.fill" : "circle.fill")
-                                        }
-                                    }
+                                Button {
+                                    showAccentPicker = true
                                 } label: {
                                     HStack(spacing: 8) {
                                         Circle()
@@ -54,7 +48,7 @@ struct SettingsView: View {
                                     .background(Color.oxySurface1)
                                     .clipShape(Capsule())
                                 }
-                                .tint(Color.oxyStone)
+                                .buttonStyle(.plain)
                             }
 
                             Divider().overlay(Color.oxyLine)
@@ -218,6 +212,14 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .sheet(isPresented: $showAccentPicker) {
+                AccentPickerSheet(selection: $settings.accentColor) {
+                    saveSettings()
+                    showAccentPicker = false
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
             .onAppear { loadSettings() }
         }
     }
@@ -292,11 +294,13 @@ struct SettingsView: View {
         }
         normalizeSettings()
         appTheme = settings.appTheme
+        UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
     }
 
     private func saveSettings() {
         normalizeSettings()
         appTheme = settings.appTheme
+        UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "oxy_settings")
         }
@@ -315,6 +319,71 @@ struct SettingsView: View {
             settings.accentColor = "stone"
         }
         settings.designPalette = settings.accentColor
+    }
+}
+
+private struct AccentPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selection: String
+    let onSelect: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.oxyBg.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 8) {
+                        ForEach(OxySettings.accentOptions) { option in
+                            Button {
+                                selection = option.value
+                                onSelect()
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Circle()
+                                        .fill(option.color)
+                                        .frame(width: 22, height: 22)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(Color.oxyLine2, lineWidth: 1)
+                                        )
+
+                                    Text(option.label)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Color.oxyText)
+
+                                    Spacer()
+
+                                    if selection == option.value {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 15, weight: .bold))
+                                            .foregroundStyle(option.color)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(selection == option.value ? option.color.opacity(0.12) : Color.oxySurface2)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(selection == option.value ? option.color.opacity(0.45) : Color.oxyLine2, lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Accent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(Color.oxyStone)
+                }
+            }
+        }
     }
 }
 
