@@ -28,6 +28,7 @@ const {
   getMissingRuntimeEnv,
   logMissingRuntimeEnvOnce
 } = require('../runtime');
+const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
   createSessionToken,
   getAuthenticatedUserId,
@@ -370,6 +371,8 @@ CORE ETHOS:
 - You are trusted because you are careful with real-world actions, not because you rush them.
 - Execute clear requests. Ask for the missing detail when the request is underspecified.
 - Never treat casual chat as task completion.
+- Understand the user's meaning, not just keywords. If a phrase could be conversation, correction, factual question, or action, use the surrounding conversation to choose the human interpretation.
+- Back-and-forth matters. Treat short follow-ups like "that one", "is this right", "look it up", "bruh", "not that", and "I mean..." as referring to the recent conversation unless the user clearly starts a new topic.
 - You're a person they trust, not a corporate chatbot.
 - Talk like a real friend — casual, natural, direct. No corporate-speak.
 - For simple conversational questions, keep replies to a maximum of 2 sentences. Voice replies must be concise.
@@ -411,6 +414,7 @@ ABSOLUTE RULES:
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
 11. Recent action results are real state. Don't repeat successful actions unless the user clearly asks you to repeat them.
+11a. If the user asks a question about a previous action result ("is this right?", "is this the most popular?", "why did you choose this?", "bruh"), answer or re-check the claim. Do not perform a new action unless they explicitly ask you to do it again.
 12. If a recent action failed and the user asks to retry, fix, redo, or "do the failed one", retry only the failed action unless they explicitly ask to rerun other actions too.
 13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.
 14. When executing communication actions, use the right register for the medium and relationship automatically.
@@ -430,6 +434,7 @@ ABSOLUTE RULES:
 22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
 22c. Action risk policy: searches, place lookup, train lookup, directions, and opening Uber/Maps to a destination are low risk. Drafting is medium risk. Sending messages/emails, spending money, confirming an actual booking/payment, placing orders, or making calls require a clear user request and review.
 22d. For Apple Music requests: use play_music for "play/listen to X"; use add_to_music_playlist when the user asks to add a song/album to their music library or playlist.
+22e. For music requests that depend on current facts, charts, rankings, popularity, trends, or words like "right now", first use search grounding to resolve the exact song title and artist. Never pass vague queries like "most popular song", "top song", or "Billboard Hot 100 right now" to play_music. If you cannot verify the current result, say you need to check instead of guessing.
 23. Infer the appropriate format from context. The user should not need to specify formatting.
 24. If the user asks you to forget, delete, wipe, or remove something from memory, use forget_memory instead of just saying you will do it.
 25. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.`;
@@ -1054,6 +1059,50 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   };
 }
 
+async function recoverEmptyModelResponse({ model, initialRequest, message, trace = null }) {
+  const recoveryRequest = {
+    config: {
+      ...initialRequest.config,
+      temperature: 0.2,
+      maxOutputTokens: Math.max(initialRequest.config.maxOutputTokens || 0, 512)
+    },
+    contents: [
+      ...initialRequest.contents,
+      { role: 'model', parts: [{ text: '[empty response]' }] },
+      {
+        role: 'user',
+        parts: [{
+          text: [
+            'Your previous response was empty. Recover the turn now.',
+            'Answer the user directly, or return a valid action block if an action is clearly needed.',
+            'Do not apologize for the empty response unless the user asked about it.',
+            'Use search grounding if it is available in this request.',
+            '',
+            `User message: ${message}`
+          ].join('\n')
+        }]
+      }
+    ]
+  };
+  try {
+    const response = trace
+      ? await trace.run('gemini.generateContent.empty_recovery', () => modernGenAI.models.generateContent({
+        model,
+        contents: recoveryRequest.contents,
+        config: recoveryRequest.config
+      }))
+      : await modernGenAI.models.generateContent({
+        model,
+        contents: recoveryRequest.contents,
+        config: recoveryRequest.config
+      });
+    return (response.text || '').trim();
+  } catch (error) {
+    if (trace) trace.log('gemini.empty_recovery_fail', error.message);
+    return '';
+  }
+}
+
 async function runActions(userId, actions) {
   const results = [];
   for (const action of actions) {
@@ -1596,11 +1645,13 @@ async function executeAction(userId, action, params, context = {}) {
       const query = String(params?.query || params?.song || params?.title || '').trim();
       if (!query) return { success: false, error: 'play_music requires a query' };
       return {
-        success: false,
-        text: `I can play ${query} through the iOS native music handler, but the backend can only prepare a search link.`,
+        success: true,
+        text: `Playing ${query}.`,
         cardText: query,
-        actionSummary: 'Music needs native playback',
-        error: 'Music playback must run on-device through MusicKit.'
+        actionSummary: 'Music playing',
+        deepLink: `music://music.apple.com/search?term=${encodeURIComponent(query)}`,
+        webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`,
+        nativeExecution: 'music'
       };
     }
     case 'add_to_music_playlist': {
@@ -2003,9 +2054,9 @@ function buildAvailableActions(enabled) {
     trainline: ['search_trains', 'station_board']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
-  if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, generate_visual, create_diagram, create_presentation.';
+  if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation.';
   const active = live.flatMap(id => actionMap[id] || []);
-  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, find_place, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
+  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
 }
 
 async function savePreference(userId, key, value) {
@@ -2845,101 +2896,6 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
-// Detect whether a message likely needs current/real-time information or other changeable facts.
-const SEARCH_KEYWORD_PATTERNS = [
-  { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
-  { reason: 'public-safety-events', pattern: /\b(assassination|assassinate|attempt(?:ed)?|shooting|shooter|gunman|armed|rally|campaign rally|security incident|suspect|arrested|charged|identified|names?|who did it|who was it)\b/i },
-  { reason: 'time-sensitive', pattern: /\b(weather|forecast|temperature|rain|snow|traffic|delay|delays|schedule|schedules|arrival|departure|when does|when is|opening hours|closing time|wait time|wait times|availability)\b/i },
-  { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|exchange rates|interest rate|interest rates|how much is)\b/i },
-  { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
-  { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach|trump|biden|harris|vance)\b/i },
-  { reason: 'explicit-search', pattern: /\b(search|look up|find out|google|check online|online)\b/i }
-];
-
-const CHANGEABLE_QUESTION_PATTERNS = [
-  /\bwho is\b/i,
-  /\bwhat is\b/i,
-  /\bwhat's\b/i,
-  /\bwho are\b/i,
-  /\bwho was\b/i,
-  /\bwho were\b/i,
-  /\bwhat happened\b/i,
-  /\bwhat are\b/i,
-  /\bwhen is\b/i,
-  /\bwhen does\b/i,
-  /\bwhere is\b/i,
-  /\bwhere are\b/i,
-  /\bhow much is\b/i,
-  /\bhow much are\b/i,
-  /\bhow many\b/i,
-  /\bdoes .* (still|currently|now)\b/i,
-  /\bdid .* (recently|today|this week|this month|this year)\b/i,
-  /\bis .* (open|closed|available|released|launching)\b/i,
-  /\bare .* (open|closed|available)\b/i
-];
-
-const NON_SEARCH_PATTERNS = [
-  /\b(send|text|message|email|call|ring|telegram|whatsapp|imessage)\b/i,
-  /\b(remind|reminder|calendar|event|schedule me|add to calendar)\b/i,
-  /\b(book|order|get me|take me|uber|ubereats|deliveroo|train|trainline)\b/i,
-  /\b(play|pause|skip|spotify|music)\b/i,
-  /\b(forget|delete from memory|wipe memory|remember)\b/i,
-  /\bmy\b.+\b(email|calendar|memory|reminder|messages?|settings|preferences)\b/i
-];
-
-const PERSONAL_CONTEXT_PATTERNS = [
-  /\bmy\b/i,
-  /\bi\b/i,
-  /\bme\b/i,
-  /\bmine\b/i,
-  /\bwe\b/i,
-  /\byou\b/i,
-  /\bdo you remember\b/i,
-  /\bwhat did i\b/i,
-  /\bwhen did i\b/i,
-  /\bwho am i\b/i
-];
-
-const FACTUAL_QUESTION_START = /^(who|what|when|where|why|how|is|are|did|does|do|can|could|will|would)\b/i;
-
-function getSearchReason(message) {
-  const text = String(message || '').trim();
-  if (!text) return '';
-
-  const hasQuestion = /[?]/.test(text) || FACTUAL_QUESTION_START.test(text);
-  const looksLikeToolRequest = NON_SEARCH_PATTERNS.some(pattern => pattern.test(text));
-
-  for (const entry of SEARCH_KEYWORD_PATTERNS) {
-    if (entry.pattern.test(text)) return entry.reason;
-  }
-
-  const mentionsEntityLikeToken = /\b(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}|[A-Z]{2,}|[A-Z][a-z]+AI|[A-Z][a-z]+Tech)\b/.test(text);
-  const asksChangeableQuestion = CHANGEABLE_QUESTION_PATTERNS.some(pattern => pattern.test(text));
-
-  if (hasQuestion && mentionsEntityLikeToken && asksChangeableQuestion) {
-    return 'entity-question';
-  }
-
-  if (hasQuestion && asksChangeableQuestion && !looksLikeToolRequest) {
-    return 'factual-question-default';
-  }
-
-  if (hasQuestion && /\b(news|company|ceo|founder|price|stock|weather|forecast|launch|release|latest|current|today|tonight|yesterday|week|month|year)\b/i.test(text)) {
-    return 'factual-question-keyword';
-  }
-
-  const looksPersonal = PERSONAL_CONTEXT_PATTERNS.some(pattern => pattern.test(text));
-  if (hasQuestion && !looksLikeToolRequest && !looksPersonal && text.length >= 18) {
-    return 'question-default-search';
-  }
-
-  return '';
-}
-
-function needsSearch(message) {
-  return Boolean(getSearchReason(message));
-}
-
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
@@ -3766,9 +3722,22 @@ app.post('/chat', async (req, res) => {
         }
         flushSafeDisplayText();
         trace.log('gemini.initial_complete');
+        if (!fullText.trim()) {
+          fullText = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+          if (fullText) trace.log('gemini.empty_recovery_success');
+        }
 
         let { spoken, actions } = parseActions(fullText);
         spoken = stripActionMarkupForDisplay(spoken).trim();
+        if (!spoken && !actions.length) {
+          const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+          if (recovered) {
+            fullText = recovered;
+            ({ spoken, actions } = parseActions(fullText));
+            spoken = stripActionMarkupForDisplay(spoken).trim();
+            trace.log('gemini.blank_spoken_recovery_success');
+          }
+        }
 
         // Execute actions in parallel
         let actionResults = [];
@@ -3836,7 +3805,7 @@ app.post('/chat', async (req, res) => {
         if (!spoken) {
           spoken = actionResults.length
             ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
-            : 'I hit an empty response. Try that again.';
+            : "I couldn't get a clean answer for that. Ask me again and I'll re-check it.";
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (!actionResults.length && !dataResults.length && !hasStreamedText) {
@@ -3885,6 +3854,12 @@ app.post('/chat', async (req, res) => {
 
     const rawText = geminiRes.text || '';
     let { spoken, actions } = parseActions(rawText);
+    if (!rawText.trim() || (!spoken && !actions.length)) {
+      const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+      if (recovered) {
+        ({ spoken, actions } = parseActions(recovered));
+      }
+    }
 
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
@@ -3923,7 +3898,7 @@ app.post('/chat', async (req, res) => {
     if (!spoken) {
       spoken = actionResults.length
         ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
-        : 'I hit an empty response. Try that again.';
+        : "I couldn't get a clean answer for that. Ask me again and I'll re-check it.";
     }
 
     // Don't block on saving assistant message

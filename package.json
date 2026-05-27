@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "test": "node --test",
     "smoke": "node --test test/smoke/*.test.js",
+    "brain:evals": "node --test test/smoke/brain-evals.test.js",
     "proactive:job": "node proactive-job.js",
     "benchmark:voice": "node scripts/benchmark-voice-pipelines.js"
   },

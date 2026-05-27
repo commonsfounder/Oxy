@@ -205,6 +205,9 @@ final class NativeIntegrationManager {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
         let lower = normalized.lowercased()
+        if shouldLetBrainHandleFirst(normalized) {
+            return nil
+        }
         if lower.contains("uber") || lower.contains("taxi") || lower.contains("ride") {
             return nil
         }
@@ -217,7 +220,8 @@ final class NativeIntegrationManager {
             return result
         }
 
-        if let result = await handleNativeMusicRequest(normalized) {
+        if !requiresOnlineMusicResolution(normalized),
+           let result = await handleNativeMusicRequest(normalized) {
             return result
         }
 
@@ -238,6 +242,74 @@ final class NativeIntegrationManager {
         }
 
         return nil
+    }
+
+    private func shouldLetBrainHandleFirst(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        let trimmed = lower.trimmingCharacters(in: .whitespacesAndNewlines)
+        if requiresOnlineMusicResolution(message) {
+            return true
+        }
+        if lower.contains("last song i asked")
+            || lower.contains("last track i asked")
+            || lower.contains("song i asked you")
+            || lower.contains("track i asked you")
+            || lower.contains("thing i asked you to play") {
+            return true
+        }
+        if trimmed == "look it up"
+            || trimmed == "search it"
+            || trimmed == "google it"
+            || trimmed == "check online" {
+            return true
+        }
+        if lower.contains("bruh")
+            || lower.contains("huh")
+            || lower.contains("what do you mean")
+            || lower.contains("that is wrong")
+            || lower.contains("that's wrong")
+            || lower.contains("not what i")
+            || lower.contains("i mean")
+            || lower.contains("try again") {
+            return true
+        }
+        if lower.contains("remind me")
+            || lower.contains("create a reminder")
+            || lower.contains("set a reminder")
+            || lower.contains("text ")
+            || lower.contains("message ")
+            || lower.contains("call ")
+            || lower.contains("facetime")
+            || lower.contains("add to calendar")
+            || lower.contains("schedule ")
+            || lower.contains("calendar event") {
+            return false
+        }
+        if lower.contains("latest")
+            || lower.contains("current")
+            || lower.contains("right now")
+            || lower.contains("today")
+            || lower.contains("news")
+            || lower.contains("price")
+            || lower.contains("popular")
+            || lower.contains("best")
+            || lower.contains("top")
+            || lower.contains("chart")
+            || lower.contains("ranking")
+            || lower.contains("weather")
+            || lower.contains("forecast") {
+            return true
+        }
+        if trimmed.range(of: #"^(who|what|when|where|why|how|is|are|do|does|did|can|could|should|would|will)\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
+    }
+
+    func playResolvedMusicQuery(_ query: String) async -> NativeLocalActionResult? {
+        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !cleaned.isEmpty else { return nil }
+        return await playNativeMusicQuery(cleaned)
     }
 
     private func nativeDiagnostics(for message: String) async -> NativeLocalActionResult? {
@@ -391,6 +463,28 @@ final class NativeIntegrationManager {
         return await playNativeMusic(from: message)
     }
 
+    private func requiresOnlineMusicResolution(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        guard lower.contains("play") || lower.contains("song") || lower.contains("music") || lower.contains("track") else {
+            return false
+        }
+        return lower.contains("billboard")
+            || lower.contains("hot 100")
+            || lower.contains("chart")
+            || lower.contains("number one")
+            || lower.contains("no. 1")
+            || lower.contains("top song")
+            || lower.contains("top track")
+            || lower.contains("most popular")
+            || lower.contains("most streamed")
+            || lower.contains("viral")
+            || lower.contains("right now")
+            || lower.contains("currently")
+            || lower.contains("today")
+            || lower.contains("latest")
+            || lower.contains("trending")
+    }
+
     private func requestMusicPermission() async -> Bool {
         switch MusicAuthorization.currentStatus {
         case .authorized:
@@ -477,6 +571,12 @@ final class NativeIntegrationManager {
     }
 
     private func playNativeMusic(from message: String) async -> NativeLocalActionResult? {
+        let query = resolvedMusicQuery(from: message)
+        guard !query.isEmpty else { return nil }
+        return await playNativeMusicQuery(query)
+    }
+
+    private func playNativeMusicQuery(_ query: String) async -> NativeLocalActionResult? {
         guard await requestMusicPermission() else {
             return NativeLocalActionResult(
                 action: "play_music",
@@ -488,9 +588,6 @@ final class NativeIntegrationManager {
                 error: "Apple Music permission is not authorized."
             )
         }
-
-        let query = resolvedMusicQuery(from: message)
-        guard !query.isEmpty else { return nil }
 
         do {
             if let song = try? await withMusicTimeout(seconds: 4) { try await self.searchCatalogSong(query) } {

@@ -139,6 +139,9 @@ final class ChatViewModel {
                     case .actions(let results):
                         guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
+                        Task {
+                            await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
+                        }
 
                     case .status(let status, let label):
                         setStatus(status, label)
@@ -367,6 +370,43 @@ final class ChatViewModel {
             group.cancelAll()
             return result
         }
+    }
+
+    private func playBackendMusicActions(
+        _ results: [ActionResult],
+        assistantID: UUID,
+        userId: String,
+        originalMessage: String
+    ) async {
+        guard let action = results.first(where: { $0.action == "play_music" && $0.success }) else { return }
+        let query = (action.cardText ?? action.text ?? "")
+            .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !query.isEmpty, !musicQueryStillNeedsResolution(query) else { return }
+        guard let nativeResult = await nativeManager.playResolvedMusicQuery(query) else { return }
+        let nativeAction = ActionResult(native: nativeResult)
+        _ = updateAssistantMessage(id: assistantID) {
+            $0.content = nativeResult.text
+            $0.actions = [nativeAction]
+            $0.isStreaming = false
+        }
+        await chatService.logNativeLocalAction(userId: userId, message: originalMessage, result: nativeAction)
+    }
+
+    private func musicQueryStillNeedsResolution(_ query: String) -> Bool {
+        let lower = query.lowercased()
+        return lower.contains("billboard")
+            || lower.contains("hot 100")
+            || lower.contains("chart")
+            || lower.contains("most popular")
+            || lower.contains("top song")
+            || lower.contains("top track")
+            || lower.contains("number one")
+            || lower.contains("right now")
+            || lower.contains("currently")
+            || lower.contains("today")
+            || lower.contains("latest")
+            || lower.contains("trending")
     }
 
     // MARK: - Deep Links
