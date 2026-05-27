@@ -1,13 +1,13 @@
 const ACTION_CONTRACTS = {
   send_message: {
-    risk: 'high',
+    risk: 'medium',
     required: ['contact', 'message'],
     aliases: { message: ['body', 'text', 'content'] },
     inputExample: { contact: 'name', message: 'text' },
     successSummary: 'Message ready',
     failureSummary: 'Message failed',
-    confirmation: 'review_required',
-    executionMode: 'review'
+    confirmation: 'none',
+    executionMode: 'direct'
   },
   make_call: {
     risk: 'high',

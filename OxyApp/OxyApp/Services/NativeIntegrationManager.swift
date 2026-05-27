@@ -7,6 +7,7 @@ import MapKit
 import MediaPlayer
 import MessageUI
 import MusicKit
+import AVFoundation
 import UIKit
 import UserNotifications
 
@@ -400,11 +401,19 @@ final class NativeIntegrationManager {
                 )
             }
             do {
-                let player = SystemMusicPlayer.shared
-                player.queue = SystemMusicPlayer.Queue(for: [song])
+                try prepareAudioSessionForMusic()
+                let player = ApplicationMusicPlayer.shared
+                player.queue = ApplicationMusicPlayer.Queue(for: [song])
                 try await player.play()
             } catch {
-                try await playWithMediaPlayer(song)
+                do {
+                    try prepareAudioSessionForMusic()
+                    let player = SystemMusicPlayer.shared
+                    player.queue = SystemMusicPlayer.Queue(for: [song])
+                    try await player.play()
+                } catch {
+                    try await playWithMediaPlayer(song)
+                }
             }
             lastMusicQuery = "\(song.title) \(song.artistName)"
             lastMusicError = nil
@@ -434,11 +443,18 @@ final class NativeIntegrationManager {
         guard !storeID.isEmpty else {
             throw NSError(domain: "OxyMusic", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing Apple Music store ID"])
         }
+        try prepareAudioSessionForMusic()
         let player = MPMusicPlayerController.systemMusicPlayer
         let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: [storeID])
         player.setQueue(with: descriptor)
         try await player.prepareToPlay()
         player.play()
+    }
+
+    private func prepareAudioSessionForMusic() throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default)
+        try session.setActive(true)
     }
 
     private func addNativeMusicItem(from message: String) async -> NativeLocalActionResult? {

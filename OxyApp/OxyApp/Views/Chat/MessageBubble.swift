@@ -15,6 +15,11 @@ struct MessageBubble: View {
         return settings.bubbleStyle
     }
     private var isCompact: Bool { bubbleStyle == "compact" }
+    private var visibleActions: [ActionResult] {
+        message.actions.filter { action in
+            !(action.action == "send_message" && action.success && !action.pending)
+        }
+    }
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
@@ -75,9 +80,9 @@ struct MessageBubble: View {
             }
 
             // Action cards
-            if !message.actions.isEmpty {
+            if !visibleActions.isEmpty {
                 VStack(spacing: 6) {
-                    ForEach(message.actions) { action in
+                    ForEach(visibleActions) { action in
                         ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                     }
                 }
