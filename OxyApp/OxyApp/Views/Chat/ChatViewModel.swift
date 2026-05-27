@@ -37,8 +37,7 @@ final class ChatViewModel {
         "place", "maps", "mcdonald", "john lewis", "gym", "restaurant", "cafe", "coffee",
         "shop", "supermarket", "store", "pharmacy", "station", "cinema",
         "bank", "atm", "directions", "navigate", "route", "bus", "buses", "transit",
-        "public transport", "walk", "walking", "drive", "driving",
-        "play", "song", "music", "playlist", "listen to"
+        "public transport", "walk", "walking", "drive", "driving"
     ]
 
     func loadHistory(userId: String) async {

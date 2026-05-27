@@ -48,5 +48,5 @@ test('pending review result owns concise final wording for high-risk actions', (
   assert.equal(result.pending, true);
   assert.equal(result.confirmation, 'review_required');
   assert.equal(result.cardText, 'Josh · Can we meet Friday?');
-  assert.match(result.text, /^Review message\./);
+  assert.equal(result.text, 'Check this, then send when ready.');
 });

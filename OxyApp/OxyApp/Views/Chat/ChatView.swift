@@ -174,7 +174,7 @@ struct ChatView: View {
                                 )
                                 .frame(width: 34, height: 34)
 
-                            Image(systemName: "waveform")
+                            Image(systemName: "sparkles")
                                 .font(.system(size: 14, weight: .medium))
                                 .foregroundStyle(Color.oxyStone)
                         }
@@ -705,7 +705,7 @@ private struct SearchResultRow: View {
                 Circle()
                     .fill(result.role == "user" ? Color.oxyStone.opacity(0.15) : Color.oxySurface3)
                     .frame(width: 36, height: 36)
-                Image(systemName: result.role == "user" ? "person.fill" : "waveform")
+                Image(systemName: result.role == "user" ? "person.fill" : "sparkles")
                     .font(.system(size: 13))
                     .foregroundStyle(result.role == "user" ? Color.oxyStone : Color.oxySub)
             }
@@ -779,7 +779,7 @@ private struct WelcomeCard: View {
                     )
                     .frame(width: 72, height: 72)
 
-                Image(systemName: "waveform.circle.fill")
+                Image(systemName: "sparkles")
                     .font(.system(size: 36))
                     .foregroundStyle(Color.oxyStone)
             }

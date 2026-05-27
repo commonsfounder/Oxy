@@ -74,10 +74,15 @@ function reviewDetailForAction(action) {
 
 function buildPendingReviewResult(action) {
   const contract = getActionContract(action?.type) || {};
+  const prompt = action?.type === 'send_message'
+    ? 'Check this, then send when ready.'
+    : action?.type === 'send_email'
+      ? 'Check this draft, then send when ready.'
+      : `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`;
   return applyActionContractResultMetadata(action, {
     success: true,
     pending: true,
-    text: `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`,
+    text: prompt,
     cardText: reviewDetailForAction(action) || 'Ready for review.',
     actionSummary: reviewTitleForAction(action),
     risk: contract.risk || 'high',

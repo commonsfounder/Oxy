@@ -132,3 +132,11 @@ test('speechy nearest-place question strips trailing filler', () => {
   assert.equal(routed.actions[0].type, 'find_place');
   assert.equal(routed.actions[0].input.query, "the nearest mcdonald's");
 });
+
+test('memory writes do not become place lookups', () => {
+  assert.equal(inferDeterministicAction('remember my usual station is either Birmingham International or Birmingham New Street'), null);
+});
+
+test('contextual closest-place follow-up does not search a fake new place', () => {
+  assert.equal(inferDeterministicAction('is that definitely the closest one'), null);
+});

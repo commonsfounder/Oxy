@@ -36,7 +36,7 @@ struct LoginView: View {
                                 )
                                 .frame(width: 88, height: 88)
 
-                            Image(systemName: "waveform.circle.fill")
+                            Image(systemName: "sparkles")
                                 .font(.system(size: 44))
                                 .foregroundStyle(Color.oxyStone)
                         }

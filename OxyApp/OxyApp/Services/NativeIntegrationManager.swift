@@ -926,7 +926,7 @@ final class NativeIntegrationManager {
     }
 
     private func isLastMusicReference(_ normalized: String) -> Bool {
-        ["last", "last song", "last again", "last song again", "the last", "the last again", "the last song", "the last song again", "same", "same song", "same again"].contains(normalized)
+        ["last", "last song", "last again", "last song again", "the last", "the last again", "the last song", "the last song again", "same", "same song", "same again", "it again", "that again", "this again", "play it again", "play that again", "play this again"].contains(normalized)
     }
 
     private func isPreviousMusicReference(_ normalized: String) -> Bool {

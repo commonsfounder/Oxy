@@ -29,6 +29,17 @@ function looksLikeDirectionsRequest(message) {
   return DIRECTIONS_TERMS.test(normalizeText(message));
 }
 
+function looksLikeMemoryWrite(message) {
+  return /^(remember|save|note down)\b/i.test(normalizeText(message));
+}
+
+function looksLikeContextualPlaceFollowup(message) {
+  const text = normalizeText(message);
+  return /\b(that|it|this|one|there)\b/i.test(text) &&
+    /\b(closest|nearest|definitely|sure|same|open|maps|uber|there)\b/i.test(text) &&
+    !/\b(mcdonald'?s|john lewis|coffee|cafe|restaurant|gym|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i.test(text);
+}
+
 function cleanDestinationPhrase(message) {
   const text = normalizeText(message)
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, '')
@@ -152,6 +163,8 @@ function inferLiveRailAction(message) {
 
 function inferDeterministicAction(message) {
   const text = normalizeText(message);
+
+  if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text)) return null;
 
   const liveRail = inferLiveRailAction(text);
   if (liveRail) return liveRail;

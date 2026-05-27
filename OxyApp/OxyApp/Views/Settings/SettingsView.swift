@@ -601,7 +601,7 @@ private struct DesignPreview: View {
                     .fill(accent.opacity(0.18))
                     .frame(width: 34, height: 34)
                     .overlay(
-                        Image(systemName: "waveform")
+                        Image(systemName: "sparkles")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(accent)
                     )

@@ -2454,7 +2454,8 @@ app.get('/briefings/:userId', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    res.json({ briefings: data || [] });
+    const visible = (data || []).filter(briefing => briefing.kind !== 'failed_action_followup');
+    res.json({ briefings: visible });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3029,9 +3030,23 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   }
 
   const actionType = failedAction.action?.type || failedAction.action?.action?.type || failedAction.action?.action || failedAction.action?.type || 'that';
+  if (['find_place', 'get_directions', 'plan_trip', 'play_music', 'music_control', 'add_to_music_playlist'].includes(actionType)) {
+    return null;
+  }
   const actionLabel = humanizeActionType(actionType);
   const detail = String(failedAction.error || '').trim();
-  const followUpText = `${actionLabel} hit a snag earlier${detail ? ` (${detail.slice(0, 80)})` : ''}. Want me to try again a different way?`;
+  if (!/(not connected|reconnect|permission|authorized|authenticate|expired|revoked)/i.test(detail)) {
+    return null;
+  }
+  const cleanDetail = detail
+    .replace(/^\.unknown$/i, '')
+    .replace(/^Maps error:\s*/i, '')
+    .replace(/^Google error:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const followUpText = cleanDetail
+    ? `${actionLabel} needs attention: ${cleanDetail.slice(0, 100)}.`
+    : `${actionLabel} needs attention before I can finish it.`;
 
   await createBriefing(userId, {
     kind: 'failed_action_followup',

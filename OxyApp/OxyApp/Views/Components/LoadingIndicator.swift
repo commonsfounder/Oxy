@@ -25,33 +25,13 @@ struct OxyThinkingIndicator: View {
 
     var body: some View {
         HStack(spacing: compact ? 7 : 9) {
-            HStack(spacing: compact ? 4 : 5) {
-                ForEach(0..<3, id: \.self) { index in
-                    Capsule()
-                        .fill(Color.oxyStone)
-                        .frame(width: active ? (compact ? 13 : 15) : (compact ? 7 : 8), height: compact ? 7 : 8)
-                        .opacity(active ? 0.95 : 0.42)
-                        .scaleEffect(active ? 1 : 0.82)
-                        .shadow(color: Color.oxyStone.opacity(active ? 0.22 : 0.04), radius: active ? 7 : 1)
-                        .animation(
-                            .easeInOut(duration: 0.62)
-                                .repeatForever(autoreverses: true)
-                                .delay(Double(index) * 0.13),
-                            value: active
-                        )
-                }
-            }
-            .frame(width: compact ? 42 : 50, height: compact ? 18 : 22)
-            .padding(.horizontal, compact ? 3 : 4)
-            .padding(.vertical, compact ? 4 : 5)
-            .background(
-                Capsule()
-                    .fill(Color.oxyStone.opacity(0.12))
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.oxyStone.opacity(0.22), lineWidth: 1)
-                    )
-            )
+            Image(systemName: "sparkles")
+                .font(.system(size: compact ? 13 : 15, weight: .semibold))
+                .foregroundStyle(Color.oxyStone)
+                .opacity(active ? 1 : 0.45)
+                .scaleEffect(active ? 1.08 : 0.92)
+                .shadow(color: Color.oxyStone.opacity(active ? 0.22 : 0.04), radius: active ? 8 : 1)
+                .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: active)
 
             if let label, !label.isEmpty {
                 Text(label)
