@@ -24,7 +24,7 @@ struct NativePlaceResult: Equatable {
     let mapURL: URL
 }
 
-struct NativeLocalActionResult: Equatable {
+struct NativeLocalActionResult: Equatable, Sendable {
     let action: String
     let text: String
     let cardText: String
@@ -493,7 +493,7 @@ final class NativeIntegrationManager {
         guard !query.isEmpty else { return nil }
 
         do {
-            if let song = try? await searchCatalogSong(query) {
+            if let song = try? await withMusicTimeout(seconds: 4) { try await self.searchCatalogSong(query) } {
                 try await playResolvedSong(song, query: query)
                 recordPlayedMusic("\(song.title) \(song.artistName)")
                 lastMusicError = nil
@@ -506,7 +506,7 @@ final class NativeIntegrationManager {
                 )
             }
 
-            if let iTunesSong = try await searchITunesSong(query) {
+            if let iTunesSong = try await withMusicTimeout(seconds: 4) { try await self.searchITunesSong(query) } {
                 guard let trackId = iTunesSong.trackId else {
                     throw NSError(domain: "OxyMusic", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing iTunes track ID"])
                 }
@@ -567,8 +567,10 @@ final class NativeIntegrationManager {
             try prepareAudioSessionForMusic()
             let player = ApplicationMusicPlayer.shared
             player.queue = ApplicationMusicPlayer.Queue(for: [song])
-            try await player.prepareToPlay()
-            try await player.play()
+            try await withMusicTimeout(seconds: 5) {
+                try await player.prepareToPlay()
+                try await player.play()
+            }
             return
         } catch {
             failures.append("ApplicationMusicPlayer: \(String(describing: error))")
@@ -578,8 +580,10 @@ final class NativeIntegrationManager {
             try prepareAudioSessionForMusic()
             let player = SystemMusicPlayer.shared
             player.queue = SystemMusicPlayer.Queue(for: [song])
-            try await player.prepareToPlay()
-            try await player.play()
+            try await withMusicTimeout(seconds: 5) {
+                try await player.prepareToPlay()
+                try await player.play()
+            }
             return
         } catch {
             failures.append("SystemMusicPlayer: \(String(describing: error))")
@@ -629,7 +633,9 @@ final class NativeIntegrationManager {
         let player = MPMusicPlayerController.systemMusicPlayer
         let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: [storeID])
         player.setQueue(with: descriptor)
-        try await player.prepareToPlay()
+        try await withMusicTimeout(seconds: 5) {
+            try await player.prepareToPlay()
+        }
         player.play()
     }
 
@@ -721,7 +727,9 @@ final class NativeIntegrationManager {
         guard let url = components?.url else {
             throw NSError(domain: "OxyMusic", code: 7, userInfo: [NSLocalizedDescriptionKey: "Invalid iTunes search URL"])
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await withMusicTimeout(seconds: 4) {
+            try await URLSession.shared.data(from: url)
+        }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw NSError(domain: "OxyMusic", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "iTunes search failed with HTTP \(http.statusCode)"])
         }
@@ -856,6 +864,31 @@ final class NativeIntegrationManager {
         request.limit = 1
         let response = try await request.response()
         return response.songs.first
+    }
+
+    private func withMusicTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw NSError(
+                    domain: "OxyMusic",
+                    code: 408,
+                    userInfo: [NSLocalizedDescriptionKey: "Apple Music timed out."]
+                )
+            }
+            guard let value = try await group.next() else {
+                throw NSError(
+                    domain: "OxyMusic",
+                    code: 408,
+                    userInfo: [NSLocalizedDescriptionKey: "Apple Music timed out."]
+                )
+            }
+            group.cancelAll()
+            return value
+        }
     }
 
     private func findLibraryPlaylist(named name: String) async throws -> Playlist? {

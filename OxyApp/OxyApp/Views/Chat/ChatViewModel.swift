@@ -96,7 +96,7 @@ final class ChatViewModel {
                 location = await locationManager.currentLocationForLocalRequest() ?? location
             }
 
-            if let localResult = await nativeManager.executeLocalRequest(text) {
+            if let localResult = await executeLocalRequestWithTimeout(text) {
                 let actionResult = ActionResult(native: localResult)
                 await MainActor.run {
                     _ = updateAssistantMessage(id: assistantID) {
@@ -337,6 +337,35 @@ final class ChatViewModel {
             }
             statusLabel = nil
             isSending = false
+        }
+    }
+
+    private func executeLocalRequestWithTimeout(_ text: String) async -> NativeLocalActionResult? {
+        await withTaskGroup(of: NativeLocalActionResult?.self) { group in
+            group.addTask {
+                await NativeIntegrationManager.shared.executeLocalRequest(text)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(7))
+                if text.lowercased().contains("play")
+                    || text.lowercased().contains("music")
+                    || text.lowercased().contains("song")
+                    || text.lowercased().contains("playlist") {
+                    return NativeLocalActionResult(
+                        action: "play_music",
+                        text: "Apple Music is taking too long to respond. Try again in a moment.",
+                        cardText: "Native music timed out",
+                        actionSummary: "Music timed out",
+                        deepLink: "music://",
+                        success: false,
+                        error: "Native music request timed out."
+                    )
+                }
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
         }
     }
 
