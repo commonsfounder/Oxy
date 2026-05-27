@@ -67,6 +67,10 @@ struct ConnectorsView: View {
 
     // MARK: - Google Section
 
+    private var googleConnector: Connector? {
+        connectors.first(where: { $0.id == "google" })
+    }
+
     private var googleSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Google")
@@ -76,7 +80,7 @@ struct ConnectorsView: View {
                 .tracking(0.5)
 
             HStack(spacing: 14) {
-                AppIconView(candidates: [connectors.first(where: { $0.id == "google" })?.icon ?? "", "google"], fallbackSystemName: "envelope.fill")
+                AppIconView(candidates: [googleConnector?.icon ?? "", "google"], fallbackSystemName: "envelope.fill")
                     .frame(width: 44, height: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -91,14 +95,14 @@ struct ConnectorsView: View {
 
                 Spacer()
 
-                Button(action: connectGoogle) {
+                Button(action: handleGoogleAction) {
                     ConnectorPill(
                         label: googleButtonLabel,
-                        tint: googleStatus == .connected ? Color.oxyGreen : Color.oxyStone,
+                        tint: googleStatus == .connected ? Color.oxySub : Color.oxyStone,
                         isBusy: googleStatus == .connecting
                     )
                 }
-                .disabled(googleStatus == .connecting || googleStatus == .connected)
+                .disabled(googleStatus == .connecting)
             }
             .padding(14)
             .background(Color.oxySurface2)
@@ -114,7 +118,7 @@ struct ConnectorsView: View {
         switch googleStatus {
         case .idle: return "Connect"
         case .connecting: return "Connecting…"
-        case .connected: return "Connected"
+        case .connected: return "Disable"
         case .needsReconnect: return "Reconnect"
         case .error: return "Retry"
         }
@@ -211,6 +215,18 @@ struct ConnectorsView: View {
                     errorMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private func handleGoogleAction() {
+        guard let connector = googleConnector else {
+            connectGoogle()
+            return
+        }
+        if connector.enabled && connector.connectionState == "connected" {
+            updateConnector(connector, enabled: false)
+        } else {
+            connectGoogle()
         }
     }
 
@@ -349,31 +365,27 @@ private struct AppIconView: View {
     let fallbackSystemName: String
 
     var body: some View {
-        ZStack {
-            if let url = firstURL(from: candidates) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        fallback
-                    }
-                }
-            } else if let img = firstAssetImage(from: candidates) {
+        Group {
+            if let img = firstAssetImage(from: candidates) {
                 Image(uiImage: img)
                     .resizable()
                     .scaledToFill()
+            } else if let url = firstURL(from: candidates) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        brandFallback
+                    }
+                }
             } else if let emoji = firstEmoji(from: candidates) {
                 Text(emoji)
                     .font(.system(size: 20))
             } else {
-                fallback
+                brandFallback
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.oxySurface3)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
@@ -381,10 +393,37 @@ private struct AppIconView: View {
         )
     }
 
-    private var fallback: some View {
-        Image(systemName: fallbackSystemName)
-            .font(.system(size: 17))
-            .foregroundStyle(Color.oxySub)
+    private var brandFallback: some View {
+        let brand = brandStyle
+        return ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(brand.background)
+            if let text = brand.text {
+                Text(text)
+                    .font(.system(size: brand.fontSize, weight: .bold))
+                    .foregroundStyle(brand.foreground)
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(1)
+                    .padding(.horizontal, 4)
+            } else {
+                Image(systemName: fallbackSystemName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(brand.foreground)
+            }
+        }
+    }
+
+    private var brandStyle: (text: String?, background: Color, foreground: Color, fontSize: CGFloat) {
+        let names = candidates.map { $0.lowercased() }
+        if names.contains("uber") { return ("Uber", .black, .white, 12) }
+        if names.contains("ubereats") { return ("Eats", .black, Color(red: 6/255, green: 193/255, blue: 103/255), 11) }
+        if names.contains("google") { return ("G", .white, Color(red: 66/255, green: 133/255, blue: 244/255), 21) }
+        if names.contains("maps") { return (nil, Color(red: 66/255, green: 133/255, blue: 244/255), .white, 17) }
+        if names.contains("telegram") { return (nil, Color(red: 42/255, green: 171/255, blue: 238/255), .white, 17) }
+        if names.contains("trainline") { return ("TL", Color(red: 0/255, green: 169/255, blue: 126/255), .white, 15) }
+        if names.contains("deliveroo") { return ("D", Color(red: 0/255, green: 204/255, blue: 188/255), .white, 19) }
+        if names.contains("netflix") { return ("N", .black, Color(red: 229/255, green: 9/255, blue: 20/255), 21) }
+        return (nil, Color.oxySurface3, Color.oxySub, 17)
     }
 
     private func firstURL(from candidates: [String]) -> URL? {

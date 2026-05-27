@@ -29,23 +29,32 @@ struct SettingsView: View {
 
                         settingsSection(title: "Appearance") {
                             settingRow(label: "Accent", description: selectedAccentLabel) {
-                                HStack(spacing: 8) {
+                                Menu {
                                     ForEach(OxySettings.accentOptions, id: \.value) { option in
                                         Button {
                                             settings.accentColor = option.value
                                             saveSettings()
                                         } label: {
-                                            Circle()
-                                                .fill(option.color)
-                                                .frame(width: 28, height: 28)
-                                                .overlay(
-                                                    Circle()
-                                                        .stroke(settings.accentColor == option.value ? Color.oxyText : Color.clear, lineWidth: 2)
-                                                )
+                                            Label(option.label, systemImage: settings.accentColor == option.value ? "checkmark.circle.fill" : "circle.fill")
                                         }
-                                        .accessibilityLabel(option.label)
                                     }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Circle()
+                                            .fill(selectedAccentColor)
+                                            .frame(width: 14, height: 14)
+                                        Text(selectedAccentLabel)
+                                            .font(.system(size: 13, weight: .semibold))
+                                        Image(systemName: "chevron.down")
+                                            .font(.system(size: 10, weight: .bold))
+                                    }
+                                    .foregroundStyle(Color.oxyText)
+                                    .padding(.horizontal, 11)
+                                    .padding(.vertical, 7)
+                                    .background(Color.oxySurface1)
+                                    .clipShape(Capsule())
                                 }
+                                .tint(Color.oxyStone)
                             }
 
                             Divider().overlay(Color.oxyLine)
@@ -221,6 +230,10 @@ struct SettingsView: View {
 
     private var selectedAccentLabel: String {
         OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.label ?? "Stone"
+    }
+
+    private var selectedAccentColor: Color {
+        OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.color ?? Color.oxyDefaultStone
     }
 
     private func previewVoice(_ voice: String) {

@@ -253,9 +253,20 @@ private struct EmptyProactiveState: View {
 private extension Briefing {
     var isWorthShowing: Bool {
         if source == "action_log" { return false }
-        if kind.contains("failed") { return false }
+        let lowerKind = kind.lowercased()
+        if lowerKind.contains("failed") || lowerKind.contains("cancel") { return false }
         let lower = body.lowercased()
-        if lower.contains(".unknown") || lower.contains("maps error") || lower.contains("try a diff") {
+        let noisyFragments = [
+            ".unknown",
+            "maps error",
+            "try a diff",
+            "that hit a snag",
+            "cancelled",
+            "canceled",
+            "was cancelled",
+            "was canceled"
+        ]
+        if noisyFragments.contains(where: { lower.contains($0) }) {
             return false
         }
         return true
