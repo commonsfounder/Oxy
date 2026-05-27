@@ -371,6 +371,49 @@ final class ChatViewModel {
         )
     }
 
+    nonisolated private static func nativeHealthTimeoutResult() -> NativeLocalActionResult {
+        NativeLocalActionResult(
+            action: "check_health",
+            text: "Apple Health took too long to respond, so I stopped waiting.",
+            cardText: "Health timed out",
+            actionSummary: "Health timed out",
+            deepLink: "x-apple-health://",
+            success: false,
+            error: "Native health request timed out."
+        )
+    }
+
+    nonisolated private static func isLikelyNativeHealthRequest(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let hasHealthTerm = lower.contains("health")
+            || lower.contains("steps")
+            || lower.contains("step count")
+            || lower.contains("heart rate")
+            || lower.contains("bpm")
+            || lower.contains("resting heart")
+            || lower.contains("sleep")
+            || lower.contains("slept")
+            || lower.contains("workout")
+            || lower.contains("workouts")
+            || lower.contains("exercise")
+        guard hasHealthTerm else { return false }
+
+        return lower.contains("my ")
+            || lower.contains("i ")
+            || lower.contains("i've")
+            || lower.contains("ive ")
+            || lower.contains("me ")
+            || lower.contains("today")
+            || lower.contains("yesterday")
+            || lower.contains("last night")
+            || lower.contains("this week")
+            || lower.contains("latest")
+            || lower.contains("current")
+            || lower.contains("check health")
+            || lower.contains("health snapshot")
+            || lower.contains("health data")
+    }
+
     private func runNativeActionWithHardTimeout(
         seconds: Double,
         timeoutResult: NativeLocalActionResult?,
@@ -418,17 +461,9 @@ final class ChatViewModel {
             }
         }
 
-        return await withTaskGroup(of: NativeLocalActionResult?.self) { group in
-            group.addTask {
-                await NativeIntegrationManager.shared.executeLocalRequest(text)
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(7))
-                return nil
-            }
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
+        let timeoutResult = Self.isLikelyNativeHealthRequest(text) ? Self.nativeHealthTimeoutResult() : nil
+        return await runNativeActionWithHardTimeout(seconds: 7, timeoutResult: timeoutResult) {
+            await NativeIntegrationManager.shared.executeLocalRequest(text)
         }
     }
 

@@ -205,6 +205,13 @@ final class NativeIntegrationManager {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
         let lower = normalized.lowercased()
+        if let result = await nativeDiagnostics(for: normalized) {
+            return result
+        }
+        if isPersonalHealthDataRequest(normalized),
+           let result = await answerNativeHealthRequest(normalized) {
+            return result
+        }
         if shouldLetBrainHandleFirst(normalized) {
             return nil
         }
@@ -213,10 +220,6 @@ final class NativeIntegrationManager {
         }
 
         if let result = await prepareNativeMessage(from: normalized) {
-            return result
-        }
-
-        if let result = await nativeDiagnostics(for: normalized) {
             return result
         }
 
@@ -324,6 +327,41 @@ final class NativeIntegrationManager {
         if trimmed.range(of: #"^(my|our)\s+[^?.!]{2,80}\s+(is|are)\s+[^?.!]{2,120}$"#, options: .regularExpression) != nil {
             return true
         }
+        return false
+    }
+
+    private func isPersonalHealthDataRequest(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        let hasHealthTerm = lower.contains("health")
+            || lower.contains("steps")
+            || lower.contains("step count")
+            || lower.contains("heart rate")
+            || lower.contains("bpm")
+            || lower.contains("resting heart")
+            || lower.contains("sleep")
+            || lower.contains("slept")
+            || lower.contains("workout")
+            || lower.contains("workouts")
+            || lower.contains("exercise")
+        guard hasHealthTerm else { return false }
+
+        if lower.contains("my ")
+            || lower.contains("i ")
+            || lower.contains("i've")
+            || lower.contains("ive ")
+            || lower.contains("me ")
+            || lower.contains("today")
+            || lower.contains("yesterday")
+            || lower.contains("last night")
+            || lower.contains("this week")
+            || lower.contains("latest")
+            || lower.contains("current")
+            || lower.contains("check health")
+            || lower.contains("health snapshot")
+            || lower.contains("health data") {
+            return true
+        }
+
         return false
     }
 
@@ -1173,18 +1211,7 @@ final class NativeIntegrationManager {
 
     private func answerNativeHealthRequest(_ message: String) async -> NativeLocalActionResult? {
         let lower = message.lowercased()
-        let isHealthRequest = lower.contains("health")
-            || lower.contains("steps")
-            || lower.contains("step count")
-            || lower.contains("heart rate")
-            || lower.contains("bpm")
-            || lower.contains("resting heart")
-            || lower.contains("sleep")
-            || lower.contains("slept")
-            || lower.contains("workout")
-            || lower.contains("workouts")
-            || lower.contains("exercise")
-        guard isHealthRequest else { return nil }
+        guard isPersonalHealthDataRequest(message) else { return nil }
 
         guard HKHealthStore.isHealthDataAvailable() else {
             return NativeLocalActionResult(
