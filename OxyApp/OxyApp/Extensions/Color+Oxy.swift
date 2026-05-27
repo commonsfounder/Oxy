@@ -63,7 +63,10 @@ extension Color {
         case "blue": return Color(red: 92/255, green: 154/255, blue: 245/255)
         case "rose": return Color(red: 230/255, green: 124/255, blue: 154/255)
         case "violet": return Color(red: 162/255, green: 132/255, blue: 245/255)
-        case "mono": return Color(red: 242/255, green: 242/255, blue: 242/255)
+        case "cyan": return Color(red: 48/255, green: 184/255, blue: 210/255)
+        case "amber": return Color(red: 236/255, green: 168/255, blue: 65/255)
+        case "coral": return Color(red: 238/255, green: 112/255, blue: 92/255)
+        case "indigo": return Color(red: 105/255, green: 126/255, blue: 235/255)
         default: return oxyDefaultStone
         }
     }

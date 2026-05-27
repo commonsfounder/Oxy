@@ -2919,7 +2919,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const nativeContext = await getLatestNativeContext(userId);
   const settings = parseJsonObject(nativeContext?.settings);
   if (settings.proactiveBriefings === false) return null;
-  if (settings.autonomy === 'Low') return null;
+  if (['Quiet', 'Low'].includes(settings.autonomy)) return null;
 
   const todayKey = getLocalDateKey(now);
   const key = `proactive.briefing.${window.id}.${todayKey}`;
@@ -2968,7 +2968,7 @@ async function maybeCreateHealthAlert(userId, nativeContext, now = new Date()) {
 async function maybeCreateHomeFoodReminder(userId, nativeContext, now = new Date()) {
   const settings = parseJsonObject(nativeContext?.settings);
   if (!settings.locationReminders) return null;
-  if (settings.autonomy !== 'High') return null;
+  if (!['Active', 'Bold', 'High'].includes(settings.autonomy)) return null;
   const hour = getLocalHour(now);
   if (hour < 17 || hour > 21) return null;
 

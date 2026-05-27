@@ -11,93 +11,68 @@ struct MemoryView: View {
                 Color.oxyBg.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 20) {
-                        // Header icon
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.oxyStone.opacity(0.2), Color.oxyStone.opacity(0.05)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 72, height: 72)
+                    VStack(alignment: .leading, spacing: 18) {
+                        MemoryHero(summary: summary, isLoading: isLoading)
 
-                            Image(systemName: "brain.head.profile")
-                                .font(.system(size: 32))
-                                .foregroundStyle(Color.oxyStone)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 12)
-
-                        // Info card
-                        VStack(alignment: .leading, spacing: 14) {
-                            HStack(spacing: 10) {
-                                Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(Color.oxyStone)
-                                Text("Background Memory")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Color.oxyText)
-                            }
-
-                            Text("Oxy keeps memory quietly in the background. You do not need to manage a big profile here.")
-                                .font(.system(size: 14))
-                                .foregroundStyle(Color.oxyText)
-                                .lineSpacing(4)
-
-                            Text("If you want something removed, just say things like **\"forget that\"**, **\"delete that from memory\"**, or **\"wipe what you know about X\"** in chat.")
-                                .font(.system(size: 13))
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Memory Areas")
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.oxySub)
-                                .lineSpacing(4)
+                                .textCase(.uppercase)
+                                .tracking(0.5)
+
+                            VStack(spacing: 10) {
+                                MemoryAreaRow(
+                                    icon: "person.crop.circle.fill",
+                                    title: "You",
+                                    detail: summary.profile ? "Personal profile is active" : "No profile memory yet",
+                                    isActive: summary.profile
+                                )
+                                MemoryAreaRow(
+                                    icon: "lightbulb.fill",
+                                    title: "Learned facts",
+                                    detail: "\(summary.learned) saved from chat",
+                                    isActive: summary.learned > 0
+                                )
+                                MemoryAreaRow(
+                                    icon: "location.fill",
+                                    title: "Places and routines",
+                                    detail: "Tell Oxy your home, work, gym, stations, and usual preferences",
+                                    isActive: summary.total > 0
+                                )
+                            }
                         }
-                        .padding(16)
-                        .background(Color.oxySurface2)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(Color.oxyLine2, lineWidth: 1)
-                        )
 
-                        // Stats
-                        if isLoading {
-                            HStack {
-                                Spacer()
-                                ProgressView()
-                                    .tint(Color.oxyStone)
-                                Spacer()
-                            }
-                            .padding(.vertical, 20)
-                        } else {
-                            LazyVGrid(columns: [
-                                GridItem(.flexible()),
-                                GridItem(.flexible()),
-                                GridItem(.flexible())
-                            ], spacing: 12) {
-                                StatCard(title: "Stored", value: "\(summary.total)", icon: "tray.full.fill")
-                                StatCard(title: "Learned", value: "\(summary.learned)", icon: "lightbulb.fill")
-                                StatCard(title: "Profile", value: summary.profile ? "Stored" : "None", icon: "person.fill")
-                            }
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Controls")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Color.oxySub)
+                                .textCase(.uppercase)
+                                .tracking(0.5)
 
-                            // Last updated
-                            if let lastUpdated = summary.lastUpdated {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "clock")
-                                        .font(.system(size: 11))
-                                    Text("Last updated \(formattedDate(lastUpdated))")
-                                        .font(.system(size: 12))
-                                }
+                            MemoryCommandCard(
+                                icon: "plus.circle.fill",
+                                title: "Teach naturally",
+                                detail: "Say \"remember my usual station is Birmingham International\"."
+                            )
+                            MemoryCommandCard(
+                                icon: "pencil.circle.fill",
+                                title: "Correct it fast",
+                                detail: "Say \"not that one, remember the McDonald's by me is the nearby one\"."
+                            )
+                            MemoryCommandCard(
+                                icon: "trash.circle.fill",
+                                title: "Forget anything",
+                                detail: "Say \"forget that\", \"delete my gym\", or \"wipe what you know about X\"."
+                            )
+                        }
+
+                        if let lastUpdated = summary.lastUpdated {
+                            Text("Last updated \(formattedDate(lastUpdated))")
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Color.oxyDim)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 4)
-                            } else {
-                                Text("No memory stored yet.")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.oxyDim)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 4)
-                            }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.top, 4)
                         }
                     }
                     .padding(16)
@@ -118,61 +93,157 @@ struct MemoryView: View {
 
     private func loadMemory() async {
         do {
-            let data = try await APIClient.shared.request(
-                path: "/memory/\(appState.userId)"
-            )
+            let data = try await APIClient.shared.request(path: "/memory/\(appState.userId)")
             let response = try JSONDecoder().decode(MemoryResponse.self, from: data)
             if let s = response.summary {
                 summary = s
             }
-            isLoading = false
         } catch {
-            isLoading = false
+            summary = MemorySummary()
         }
+        isLoading = false
     }
 
     private func formattedDate(_ dateStr: String) -> String {
         let iso = ISO8601DateFormatter()
         guard let date = iso.date(from: dateStr) else { return dateStr }
         let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm · d MMM"
+        fmt.dateFormat = "HH:mm - d MMM"
         return fmt.string(from: date)
     }
 }
 
-// MARK: - Stat Card
-
-private struct StatCard: View {
-    let title: String
-    let value: String
-    let icon: String
+private struct MemoryHero: View {
+    let summary: MemorySummary
+    let isLoading: Bool
 
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 18))
-                .foregroundStyle(Color.oxyStone)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(Color.oxyStone.opacity(0.14))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.oxyStone)
+                }
 
-            Text(value)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.oxyText)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Oxy remembers quietly")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.oxyText)
+                    Text("Useful facts live in the background, and chat is the control surface.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.oxySub)
+                        .lineSpacing(3)
+                }
+            }
 
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.oxySub)
+            HStack(spacing: 10) {
+                MemoryPill(title: "Saved", value: isLoading ? "..." : "\(summary.total)")
+                MemoryPill(title: "Learned", value: isLoading ? "..." : "\(summary.learned)")
+                MemoryPill(title: "Profile", value: summary.profile ? "On" : "Off")
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
+        .padding(18)
         .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 22))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 22)
                 .stroke(Color.oxyLine2, lineWidth: 1)
         )
     }
 }
 
-// MARK: - Models
+private struct MemoryPill: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.oxyText)
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.oxySub)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.oxySurface1)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private struct MemoryAreaRow: View {
+    let icon: String
+    let title: String
+    let detail: String
+    let isActive: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isActive ? Color.oxyStone : Color.oxyDim)
+                .frame(width: 30, height: 30)
+                .background((isActive ? Color.oxyStone : Color.oxySurface3).opacity(isActive ? 0.14 : 1))
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                Text(detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxySub)
+                    .lineSpacing(2)
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(Color.oxySurface2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.oxyLine2, lineWidth: 1)
+        )
+    }
+}
+
+private struct MemoryCommandCard: View {
+    let icon: String
+    let title: String
+    let detail: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.oxyStone)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                Text(detail)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxySub)
+                    .lineSpacing(3)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(Color.oxySurface2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.oxyLine2, lineWidth: 1)
+        )
+    }
+}
 
 struct MemorySummary: Codable {
     var total: Int = 0

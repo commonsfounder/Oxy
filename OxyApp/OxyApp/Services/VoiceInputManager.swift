@@ -6,12 +6,14 @@ import Observation
 @MainActor
 final class VoiceInputManager {
     var isRecording = false
+    var isPreparing = false
     var transcript = ""
     var errorMessage: String?
 
     private var audioEngine: AVAudioEngine?
     private var recognitionTask: SFSpeechRecognitionTask?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var startTask: Task<Void, Never>?
 
     var speechAuthStatus: SFSpeechRecognizerAuthorizationStatus {
         SFSpeechRecognizer.authorizationStatus()
@@ -31,18 +33,28 @@ final class VoiceInputManager {
     }
 
     func startRecording() {
-        guard !isRecording else { return }
+        guard !isRecording, !isPreparing else { return }
 
-        if !isAuthorized {
-            requestPermissions()
-            return
+        startTask?.cancel()
+        startTask = Task { [weak self] in
+            await self?.beginRecording()
         }
+    }
 
+    private func beginRecording() async {
+        isPreparing = true
         errorMessage = nil
         transcript = ""
 
+        guard await ensurePermissions() else {
+            isPreparing = false
+            errorMessage = "Enable microphone and speech access to use voice."
+            return
+        }
+
         let recognizer = SFSpeechRecognizer(locale: Locale.current)
         guard let recognizer, recognizer.isAvailable else {
+            isPreparing = false
             errorMessage = "Speech recognition not available"
             return
         }
@@ -66,6 +78,8 @@ final class VoiceInputManager {
             engine.prepare()
             try engine.start()
         } catch {
+            inputNode.removeTap(onBus: 0)
+            isPreparing = false
             errorMessage = "Audio setup failed: \(error.localizedDescription)"
             return
         }
@@ -84,10 +98,13 @@ final class VoiceInputManager {
 
         audioEngine = engine
         recognitionRequest = request
+        isPreparing = false
         isRecording = true
     }
 
     func stopRecording() {
+        startTask?.cancel()
+        startTask = nil
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         recognitionRequest?.endAudio()
@@ -96,8 +113,36 @@ final class VoiceInputManager {
         audioEngine = nil
         recognitionRequest = nil
         recognitionTask = nil
+        isPreparing = false
         isRecording = false
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func ensurePermissions() async -> Bool {
+        let speech = await requestSpeechAuthorizationIfNeeded()
+        let mic = await requestMicrophoneAuthorizationIfNeeded()
+        return speech == .authorized && mic == .granted
+    }
+
+    private func requestSpeechAuthorizationIfNeeded() async -> SFSpeechRecognizerAuthorizationStatus {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        guard current == .notDetermined else { return current }
+        return await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
+    private func requestMicrophoneAuthorizationIfNeeded() async -> AVAudioSession.RecordPermission {
+        let session = AVAudioSession.sharedInstance()
+        let current = session.recordPermission
+        guard current == .undetermined else { return current }
+        return await withCheckedContinuation { continuation in
+            session.requestRecordPermission { granted in
+                continuation.resume(returning: granted ? .granted : .denied)
+            }
+        }
     }
 }

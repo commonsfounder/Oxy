@@ -124,6 +124,7 @@ struct ChatView: View {
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending,
                         isRecording: voiceInput.isRecording,
+                        isPreparingVoice: voiceInput.isPreparing,
                         attachmentLabel: pendingImageName,
                         isFocused: $isInputFocused,
                         onSend: {
@@ -861,6 +862,7 @@ private struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
     let isRecording: Bool
+    let isPreparingVoice: Bool
     let attachmentLabel: String?
     var isFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
@@ -926,12 +928,20 @@ private struct ChatInputBar: View {
                 )
 
                 Button(action: canSend ? onSend : onVoice) {
-                    Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
-                        .frame(width: 36, height: 36)
-                        .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
-                        .clipShape(Circle())
+                    ZStack {
+                        if isPreparingVoice && !canSend {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color.oxyOnAccent)
+                        } else {
+                            Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
+                    .frame(width: 36, height: 36)
+                    .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
+                    .clipShape(Circle())
                 }
                 .disabled(!canAct)
                 .animation(.easeInOut(duration: 0.15), value: canAct)
@@ -947,7 +957,7 @@ private struct ChatInputBar: View {
     }
 
     private var canAct: Bool {
-        !isSending
+        !isSending && !isPreparingVoice
     }
 }
 

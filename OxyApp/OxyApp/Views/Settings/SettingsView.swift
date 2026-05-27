@@ -88,17 +88,28 @@ struct SettingsView: View {
                             Divider().overlay(Color.oxyLine)
 
                             settingRow(label: "Voice", description: selectedVoiceLabel) {
-                                Picker("Voice", selection: $settings.voice) {
-                                    ForEach(OxySettings.voiceOptions, id: \.value) { voice in
-                                        Text(voice.label).tag(voice.value)
+                                HStack(spacing: 8) {
+                                    Picker("Voice", selection: $settings.voice) {
+                                        ForEach(OxySettings.voiceOptions, id: \.value) { voice in
+                                            Text(voice.label).tag(voice.value)
+                                        }
                                     }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(Color.oxyStone)
-                                .onChange(of: settings.voice) { _, newVoice in
-                                    saveSettings()
-                                    previewVoice(newVoice)
+                                    .labelsHidden()
+                                    .pickerStyle(.menu)
+                                    .tint(Color.oxyStone)
+                                    .onChange(of: settings.voice) { _, _ in saveSettings() }
+
+                                    Button {
+                                        previewVoice(settings.voice)
+                                    } label: {
+                                        Image(systemName: voicePreview.isLoading ? "hourglass" : (voicePreview.isPlaying ? "speaker.wave.2.fill" : "play.fill"))
+                                            .font(.system(size: 12, weight: .bold))
+                                            .foregroundStyle(Color.oxyOnAccent)
+                                            .frame(width: 30, height: 30)
+                                            .background(Color.oxyStone)
+                                            .clipShape(Circle())
+                                    }
+                                    .disabled(voicePreview.isLoading)
                                 }
                             }
                         }
@@ -265,13 +276,13 @@ struct SettingsView: View {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
             settings = saved
-            settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
-            appTheme = settings.appTheme
         }
+        normalizeSettings()
+        appTheme = settings.appTheme
     }
 
     private func saveSettings() {
-        settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
+        normalizeSettings()
         appTheme = settings.appTheme
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "oxy_settings")
@@ -279,6 +290,18 @@ struct SettingsView: View {
         Task {
             await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
         }
+    }
+
+    private func normalizeSettings() {
+        settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
+        settings.autonomy = OxySettings.normalizedAutonomy(settings.autonomy)
+        if !OxySettings.voiceOptions.contains(where: { $0.value == settings.voice }) {
+            settings.voice = "Aoede"
+        }
+        if !OxySettings.accentOptions.contains(where: { $0.value == settings.accentColor }) {
+            settings.accentColor = "stone"
+        }
+        settings.designPalette = settings.accentColor
     }
 }
 
@@ -290,39 +313,48 @@ private final class VoicePreviewPlayer: NSObject, AVAudioPlayerDelegate {
     var isLoading = false
     var isPlaying = false
     private var player: AVAudioPlayer?
+    private var previewTask: Task<Void, Never>?
 
     func preview(voice: String) async {
+        previewTask?.cancel()
+        player?.stop()
         isLoading = true
         isPlaying = false
-        player?.stop()
 
-        do {
-            let data = try await APIClient.shared.request(
-                path: "/tts-preview",
-                method: "POST",
-                body: [
-                    "voice": voice,
-                    "text": "Hey, I am Oxy. This is how I sound."
-                ]
-            )
-            let response = try JSONDecoder().decode(TTSPreviewResponse.self, from: data)
-            guard let audioData = Data(base64Encoded: response.audio) else {
+        let task = Task {
+            do {
+                let data = try await APIClient.shared.request(
+                    path: "/tts-preview",
+                    method: "POST",
+                    body: [
+                        "voice": voice,
+                        "text": "Hey, I am Oxy. This is how I sound."
+                    ]
+                )
+                guard !Task.isCancelled else { return }
+                let response = try JSONDecoder().decode(TTSPreviewResponse.self, from: data)
+                guard let audioData = Data(base64Encoded: response.audio) else {
+                    isLoading = false
+                    return
+                }
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+                try audioSession.setActive(true)
+                let nextPlayer = try AVAudioPlayer(data: audioData)
+                guard !Task.isCancelled else { return }
+                nextPlayer.delegate = self
+                nextPlayer.prepareToPlay()
+                player = nextPlayer
                 isLoading = false
-                return
+                isPlaying = nextPlayer.play()
+            } catch {
+                isLoading = false
+                isPlaying = false
             }
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try audioSession.setActive(true)
-            let nextPlayer = try AVAudioPlayer(data: audioData)
-            nextPlayer.delegate = self
-            nextPlayer.prepareToPlay()
-            player = nextPlayer
-            isLoading = false
-            isPlaying = nextPlayer.play()
-        } catch {
-            isLoading = false
-            isPlaying = false
         }
+
+        previewTask = task
+        await task.value
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -345,15 +377,11 @@ private struct InitiativeScroller: View {
     private var value: Binding<Double> {
         Binding(
             get: {
-                switch selection {
-                case "Low": return 0
-                case "High": return 2
-                default: return 1
-                }
+                Double(OxySettings.autonomyLevels.firstIndex(of: OxySettings.normalizedAutonomy(selection)) ?? 2)
             },
             set: { newValue in
-                let rounded = Int(newValue.rounded())
-                let next = rounded <= 0 ? "Low" : rounded >= 2 ? "High" : "Medium"
+                let rounded = min(max(Int(newValue.rounded()), 0), OxySettings.autonomyLevels.count - 1)
+                let next = OxySettings.autonomyLevels[rounded]
                 if next != selection {
                     selection = next
                     onChange()
@@ -379,13 +407,13 @@ private struct InitiativeScroller: View {
                     .foregroundStyle(Color.oxyStone)
             }
 
-            Slider(value: value, in: 0...2, step: 1)
+            Slider(value: value, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
                 .tint(Color.oxyStone)
 
             HStack {
                 Text("Quiet")
                 Spacer()
-                Text("Balanced")
+                Text("Steady")
                 Spacer()
                 Text("Active")
             }
@@ -396,8 +424,10 @@ private struct InitiativeScroller: View {
 
     private var description: String {
         switch selection {
-        case "Low": return "Mostly waits for you."
-        case "High": return "More proactive with useful nudges."
+        case "Quiet": return "Only speaks when asked."
+        case "Low": return "Light nudges, mostly reactive."
+        case "Active": return "Looks for useful openings."
+        case "Bold": return "More opinionated and proactive."
         default: return "Helpful without being noisy."
         }
     }
@@ -410,7 +440,7 @@ struct OxySettings: Codable {
     var voice: String = "Aoede"
     var voiceOn: Bool = true
     var voiceEngine: String = "current"
-    var autonomy: String = "Medium"
+    var autonomy: String = "Balanced"
     var proactiveBriefings: Bool = true
     var healthAlerts: Bool = true
     var locationReminders: Bool = true
@@ -440,7 +470,7 @@ struct OxySettings: Codable {
         voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
         voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
         voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"
-        autonomy = try container.decodeIfPresent(String.self, forKey: .autonomy) ?? "Medium"
+        autonomy = Self.normalizedAutonomy(try container.decodeIfPresent(String.self, forKey: .autonomy) ?? "Balanced")
         proactiveBriefings = try container.decodeIfPresent(Bool.self, forKey: .proactiveBriefings) ?? true
         healthAlerts = try container.decodeIfPresent(Bool.self, forKey: .healthAlerts) ?? true
         locationReminders = try container.decodeIfPresent(Bool.self, forKey: .locationReminders) ?? true
@@ -472,40 +502,21 @@ struct OxySettings: Codable {
 
     static let voiceOptions: [VoiceOption] = [
         VoiceOption(value: "Aoede", label: "Breezy"),
-        VoiceOption(value: "Achernar", label: "Soft"),
-        VoiceOption(value: "Achird", label: "Friendly"),
-        VoiceOption(value: "Algenib", label: "Gravelly"),
-        VoiceOption(value: "Algieba", label: "Smooth"),
-        VoiceOption(value: "Alnilam", label: "Firm"),
+        VoiceOption(value: "Algenib", label: "Gravel"),
         VoiceOption(value: "Autonoe", label: "Bright"),
-        VoiceOption(value: "Callirrhoe", label: "Easy-going"),
-        VoiceOption(value: "Charon", label: "Informative"),
-        VoiceOption(value: "Despina", label: "Polished"),
-        VoiceOption(value: "Enceladus", label: "Breathy"),
-        VoiceOption(value: "Erinome", label: "Clear"),
-        VoiceOption(value: "Fenrir", label: "Excitable"),
+        VoiceOption(value: "Fenrir", label: "Electric"),
         VoiceOption(value: "Gacrux", label: "Mature"),
         VoiceOption(value: "Iapetus", label: "Measured"),
-        VoiceOption(value: "Kore", label: "Stoic"),
-        VoiceOption(value: "Laomedeia", label: "Upbeat"),
-        VoiceOption(value: "Leda", label: "Youthful"),
-        VoiceOption(value: "Orus", label: "Grounded"),
         VoiceOption(value: "Puck", label: "Playful"),
-        VoiceOption(value: "Pulcherrima", label: "Forward"),
-        VoiceOption(value: "Rasalgethi", label: "Guide"),
-        VoiceOption(value: "Sadachbia", label: "Lively"),
-        VoiceOption(value: "Sadaltager", label: "Wise"),
-        VoiceOption(value: "Schedar", label: "Even"),
         VoiceOption(value: "Sulafat", label: "Warm"),
-        VoiceOption(value: "Umbriel", label: "Relaxed"),
         VoiceOption(value: "Vindemiatrix", label: "Gentle"),
-        VoiceOption(value: "Zephyr", label: "Spark"),
         VoiceOption(value: "Zubenelgenubi", label: "Casual"),
     ]
 
     static let designTemplates = ["compact", "glass", "dense"]
-    static let designPalettes = ["stone", "mint", "ember", "mono"]
+    static let designPalettes = ["stone", "mint", "blue", "violet"]
     static let designMotions = ["calm", "snappy", "none"]
+    static let autonomyLevels = ["Quiet", "Low", "Balanced", "Active", "Bold"]
     static func normalizedTheme(_ theme: String) -> String {
         switch theme {
         case "light", "system":
@@ -514,13 +525,30 @@ struct OxySettings: Codable {
             return "dark"
         }
     }
+    static func normalizedAutonomy(_ autonomy: String) -> String {
+        switch autonomy {
+        case "Quiet", "Low":
+            return autonomy
+        case "Medium", "Balanced":
+            return "Balanced"
+        case "Medium-High", "Active", "High":
+            return "Active"
+        case "Assertive", "Bold":
+            return "Bold"
+        default:
+            return "Balanced"
+        }
+    }
     static let accentOptions = [
         AccentOption(value: "stone", label: "Stone", color: Color.oxyDefaultStone),
         AccentOption(value: "mint", label: "Mint", color: Color.oxyGreen),
         AccentOption(value: "blue", label: "Blue", color: Color(red: 92/255, green: 154/255, blue: 245/255)),
+        AccentOption(value: "cyan", label: "Cyan", color: Color(red: 48/255, green: 184/255, blue: 210/255)),
+        AccentOption(value: "amber", label: "Amber", color: Color(red: 236/255, green: 168/255, blue: 65/255)),
+        AccentOption(value: "coral", label: "Coral", color: Color(red: 238/255, green: 112/255, blue: 92/255)),
         AccentOption(value: "rose", label: "Rose", color: Color(red: 230/255, green: 124/255, blue: 154/255)),
         AccentOption(value: "violet", label: "Violet", color: Color(red: 162/255, green: 132/255, blue: 245/255)),
-        AccentOption(value: "mono", label: "Mono", color: Color.oxyText)
+        AccentOption(value: "indigo", label: "Indigo", color: Color(red: 105/255, green: 126/255, blue: 235/255))
     ]
 }
 
@@ -576,8 +604,8 @@ private struct DesignPreview: View {
     private var accent: Color {
         switch palette {
         case "mint": return Color.oxyGreen
-        case "ember": return Color.oxyRed
-        case "mono": return Color.oxyText
+        case "blue": return Color(red: 92/255, green: 154/255, blue: 245/255)
+        case "violet": return Color(red: 162/255, green: 132/255, blue: 245/255)
         default: return Color.oxyStone
         }
     }
