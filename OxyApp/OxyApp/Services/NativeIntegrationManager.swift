@@ -979,7 +979,7 @@ final class NativeIntegrationManager {
 
         if lower.contains("steps") || lower.contains("step count") {
             let range = healthDateRange(from: lower)
-            guard let steps = await sumQuantity(.stepCount, unit: .count(), start: range.start, end: range.end) else {
+            guard let steps = await stepCount(start: range.start, end: range.end) else {
                 return noHealthDataResult("steps \(range.label)")
             }
             let count = Int(steps.rounded())
@@ -1146,7 +1146,10 @@ final class NativeIntegrationManager {
     }
 
     private func sumQuantityToday(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double? {
-        await sumQuantity(identifier, unit: unit, start: Calendar.current.startOfDay(for: Date()), end: Date())
+        if identifier == .stepCount {
+            return await stepCount(start: Calendar.current.startOfDay(for: Date()), end: Date())
+        }
+        return await sumQuantity(identifier, unit: unit, start: Calendar.current.startOfDay(for: Date()), end: Date())
     }
 
     private func sumQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date) async -> Double? {
@@ -1155,6 +1158,36 @@ final class NativeIntegrationManager {
         return await withCheckedContinuation { continuation in
             let query = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, stats, _ in
                 continuation.resume(returning: stats?.sumQuantity()?.doubleValue(for: unit))
+            }
+            healthStore.execute(query)
+        }
+    }
+
+    private func stepCount(start: Date, end: Date) async -> Double? {
+        guard let type = HKObjectType.quantityType(forIdentifier: .stepCount), end > start else { return nil }
+        let calendar = Calendar.current
+        let anchorDate = calendar.startOfDay(for: start)
+        var interval = DateComponents()
+        interval.day = 1
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsCollectionQuery(
+                quantityType: type,
+                quantitySamplePredicate: nil,
+                options: .cumulativeSum,
+                anchorDate: anchorDate,
+                intervalComponents: interval
+            )
+            query.initialResultsHandler = { _, collection, _ in
+                guard let collection else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                var total = 0.0
+                collection.enumerateStatistics(from: start, to: end) { statistics, _ in
+                    total += statistics.sumQuantity()?.doubleValue(for: .count()) ?? 0
+                }
+                continuation.resume(returning: total)
             }
             healthStore.execute(query)
         }
