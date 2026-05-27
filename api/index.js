@@ -1703,9 +1703,9 @@ async function executeAction(userId, action, params, context = {}) {
       if (!query) return { success: false, error: 'play_music requires a query' };
       return {
         success: true,
-        text: `Opening Apple Music for ${query}.`,
+        text: `Starting playback for ${query}.`,
         cardText: query,
-        actionSummary: 'Music ready',
+        actionSummary: 'Music requested',
         deepLink: `music://music.apple.com/search?term=${encodeURIComponent(query)}`,
         webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`,
         nativeExecution: 'music'
