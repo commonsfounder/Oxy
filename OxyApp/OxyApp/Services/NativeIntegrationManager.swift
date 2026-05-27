@@ -68,6 +68,18 @@ struct NativeWorkoutSummary: Codable, Equatable {
     let endedAt: Date
 }
 
+private struct ITunesSongResult: Decodable {
+    let resultCount: Int
+    let results: [ITunesSong]
+}
+
+private struct ITunesSong: Decodable {
+    let trackId: Int?
+    let trackName: String?
+    let artistName: String?
+    let trackViewUrl: String?
+}
+
 struct NativeCapabilities: Codable {
     var notifications: Bool
     var healthKit: Bool
@@ -389,26 +401,58 @@ final class NativeIntegrationManager {
         guard !query.isEmpty else { return nil }
 
         do {
-            guard let song = try await searchCatalogSong(query) else {
+            if let song = try? await searchCatalogSong(query) {
+                try await playResolvedSong(song, query: query)
+                lastMusicQuery = "\(song.title) \(song.artistName)"
+                lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
-                    text: "I couldn't find that song in Apple Music.",
-                    cardText: query,
-                    actionSummary: "Music not found",
-                    deepLink: "music://",
-                    success: false,
-                    error: "No Apple Music catalog result for \(query)."
+                    text: "Playing \(song.title) by \(song.artistName).",
+                    cardText: "\(song.title) · \(song.artistName)",
+                    actionSummary: "Music playing",
+                    deepLink: song.url?.absoluteString ?? "music://"
                 )
             }
-            try await playResolvedSong(song, query: query)
-            lastMusicQuery = "\(song.title) \(song.artistName)"
-            lastMusicError = nil
+
+            if let iTunesSong = try await searchITunesSong(query) {
+                guard let trackId = iTunesSong.trackId else {
+                    throw NSError(domain: "OxyMusic", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing iTunes track ID"])
+                }
+                try await playWithStoreID(String(trackId))
+                let title = iTunesSong.trackName ?? query
+                let artist = iTunesSong.artistName ?? "Apple Music"
+                lastMusicQuery = "\(title) \(artist)"
+                lastMusicError = nil
+                return NativeLocalActionResult(
+                    action: "play_music",
+                    text: "Playing \(title) by \(artist).",
+                    cardText: "\(title) · \(artist)",
+                    actionSummary: "Music playing",
+                    deepLink: iTunesSong.trackViewUrl ?? "music://"
+                )
+            }
+
+            do {
+                try playLocalLibraryItem(matching: query)
+                lastMusicQuery = query
+                lastMusicError = nil
+                return NativeLocalActionResult(
+                    action: "play_music",
+                    text: "Playing \(query).",
+                    cardText: query,
+                    actionSummary: "Music playing",
+                    deepLink: "music://"
+                )
+            } catch {}
+
             return NativeLocalActionResult(
                 action: "play_music",
-                text: "Playing \(song.title) by \(song.artistName).",
-                cardText: "\(song.title) · \(song.artistName)",
-                actionSummary: "Music playing",
-                deepLink: song.url?.absoluteString ?? "music://"
+                text: "I couldn't find that song in Apple Music.",
+                cardText: query,
+                actionSummary: "Music not found",
+                deepLink: "music://",
+                success: false,
+                error: "No Apple Music or iTunes result for \(query)."
             )
         } catch {
             lastMusicError = String(describing: error)
@@ -482,6 +526,13 @@ final class NativeIntegrationManager {
         guard !storeID.isEmpty else {
             throw NSError(domain: "OxyMusic", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing Apple Music store ID"])
         }
+        try await playWithStoreID(storeID)
+    }
+
+    private func playWithStoreID(_ storeID: String) async throws {
+        guard !storeID.isEmpty, storeID != "0" else {
+            throw NSError(domain: "OxyMusic", code: 6, userInfo: [NSLocalizedDescriptionKey: "Missing playable store ID"])
+        }
         try prepareAudioSessionForMusic()
         let player = MPMusicPlayerController.systemMusicPlayer
         let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: [storeID])
@@ -520,6 +571,27 @@ final class NativeIntegrationManager {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default)
         try session.setActive(true)
+    }
+
+    private func searchITunesSong(_ query: String) async throws -> ITunesSong? {
+        var components = URLComponents(string: "https://itunes.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: query),
+            URLQueryItem(name: "media", value: "music"),
+            URLQueryItem(name: "entity", value: "song"),
+            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "GB")
+        ]
+        guard let url = components?.url else {
+            throw NSError(domain: "OxyMusic", code: 7, userInfo: [NSLocalizedDescriptionKey: "Invalid iTunes search URL"])
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError(domain: "OxyMusic", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "iTunes search failed with HTTP \(http.statusCode)"])
+        }
+        let decoded = try JSONDecoder().decode(ITunesSongResult.self, from: data)
+        guard decoded.resultCount > 0 else { return nil }
+        return decoded.results.first { $0.trackId != nil }
     }
 
     private func musicPlaybackErrorMessage(_ error: Error) -> String {
