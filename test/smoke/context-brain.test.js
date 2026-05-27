@@ -122,6 +122,7 @@ test('contextual reference detector catches corrections and tomorrow follow-ups'
   assert.equal(isContextualReference('no I mean calendar tomorrow'), true);
   assert.equal(isContextualReference('what about tomorrow'), true);
   assert.equal(isContextualReference('the other one'), true);
+  assert.equal(isContextualReference('nearest Aldi'), false);
 });
 
 test('fact check follow-ups trigger search grounding', () => {
@@ -133,6 +134,10 @@ test('fact check follow-ups trigger search grounding', () => {
 test('song extraction handles quoted chart answers', () => {
   assert.equal(
     extractSongFromText('The number one is "Janice STFU" by Drake.'),
+    'Janice STFU by Drake'
+  );
+  assert.equal(
+    extractSongFromText('Drake’s "Janice STFU" is sitting at #1 right now.'),
     'Janice STFU by Drake'
   );
 });

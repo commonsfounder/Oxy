@@ -699,6 +699,7 @@ RESPONSE RULES:
 - The user leads the conversation. Follow their topic instead of steering into unrelated stored memory.
 - Treat stored memory as background context for understanding, not as content to surface by default.
 - Only mention stored memory when it is directly relevant to what the user just said, asked, or asked you to do.
+- Treat personal fact statements like "my usual station is Birmingham New Street" as memory to acknowledge, not as a place, web, or app search.
 - For greetings or simple check-ins like "hi", "hey", or "ok", just respond naturally to that message. Do not surface legal cases, health goals, TV shows, or personal situations unless the user brings them up.
 - Do not repeat context you already stated earlier in this conversation.
 - Especially avoid repeating time/date, current plans, study topics, or personal brief details unless the user directly asks again.
@@ -1000,7 +1001,10 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
     }
   }
 
-  if (/\b(is that|was that|definitely|nearest|closest)\b/i.test(normalized) && /\b(nearest|closest|definitely|sure)\b/i.test(normalized)) {
+  const asksAboutPreviousPlace = /\b(is|was)\s+(that|this|it)\b/i.test(normalized) ||
+    /\b(that|this|it)\s+(definitely|sure|nearest|closest|right|correct)\b/i.test(normalized) ||
+    (/\b(definitely|sure|right|correct)\b/i.test(normalized) && /\b(that|this|it)\b/i.test(normalized));
+  if (asksAboutPreviousPlace && /\b(nearest|closest|definitely|sure|right|correct)\b/i.test(normalized)) {
     const actions = await getRecentLoggedActions(userId, trace, 8);
     const lastPlace = lastActionOfType(actions, 'find_place');
     if (lastPlace?.input?.query) {

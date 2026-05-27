@@ -276,6 +276,9 @@ final class NativeIntegrationManager {
             || lower.contains("try again") {
             return true
         }
+        if isPersonalMemoryStatement(trimmed) {
+            return true
+        }
         if lower.contains("remind me")
             || lower.contains("create a reminder")
             || lower.contains("set a reminder")
@@ -304,6 +307,21 @@ final class NativeIntegrationManager {
             return true
         }
         if trimmed.range(of: #"^(who|what|when|where|why|how|is|are|do|does|did|can|could|should|would|will)\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
+    }
+
+    private func isPersonalMemoryStatement(_ trimmed: String) -> Bool {
+        if trimmed.hasPrefix("remember my ")
+            || trimmed.hasPrefix("remember that my ")
+            || trimmed.hasPrefix("save my ")
+            || trimmed.contains("my usual ")
+            || trimmed.contains("my preferred ")
+            || trimmed.contains("my default ") {
+            return true
+        }
+        if trimmed.range(of: #"^(my|our)\s+[^?.!]{2,80}\s+(is|are)\s+[^?.!]{2,120}$"#, options: .regularExpression) != nil {
             return true
         }
         return false

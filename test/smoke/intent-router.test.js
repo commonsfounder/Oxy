@@ -17,6 +17,14 @@ test('coffee near me routes to find_place with casual phrase preserved', () => {
   assert.equal(routed.actions[0].input.query, 'coffee near me');
 });
 
+test('nearest Aldi routes to a fresh place lookup', () => {
+  const routed = inferDeterministicAction('nearest Aldi?');
+  assert.equal(routed.reason, 'find_local_place');
+  assert.deepEqual(routed.actions, [
+    { type: 'find_place', input: { query: 'nearest Aldi' } }
+  ]);
+});
+
 test('Uber to nearest McDonald’s routes to book_uber', () => {
   const routed = inferDeterministicAction("get me an Uber to the nearest McDonald's");
   assert.equal(routed.reason, 'ride_to_local_place');
@@ -149,6 +157,7 @@ test('speechy nearest-place question strips trailing filler', () => {
 
 test('memory writes do not become place lookups', () => {
   assert.equal(inferDeterministicAction('remember my usual station is either Birmingham International or Birmingham New Street'), null);
+  assert.equal(inferDeterministicAction('my usual station is Birmingham New Street'), null);
 });
 
 test('contextual closest-place follow-up does not search a fake new place', () => {

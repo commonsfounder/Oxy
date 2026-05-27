@@ -30,7 +30,10 @@ function looksLikeDirectionsRequest(message) {
 }
 
 function looksLikeMemoryWrite(message) {
-  return /^(remember|save|note down)\b/i.test(normalizeText(message));
+  const text = normalizeText(message);
+  return /^(remember|save|note down)\b/i.test(text) ||
+    /\bmy\s+(usual|preferred|default)\s+\w+\s+(is|are)\b/i.test(text) ||
+    /^(my|our)\s+[^?.!]{2,80}\s+(is|are)\s+[^?.!]{2,120}$/i.test(text);
 }
 
 function looksLikeContextualPlaceFollowup(message) {
@@ -83,6 +86,8 @@ function cleanDestinationPhrase(message) {
     .replace(/\bplease\b/gi, ' ')
     .replace(/\s+is$/i, '')
     .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[?.!]+$/g, '')
     .trim();
   return text || normalizeText(message);
 }

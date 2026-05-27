@@ -128,6 +128,8 @@ function extractSongFromText(text) {
   if (!source) return null;
   const quoted = source.match(/["“]([^"”]{2,120})["”]\s+by\s+([A-Z][^.,;\n]{1,100})/);
   if (quoted) return `${quoted[1].trim()} by ${quoted[2].trim()}`;
+  const possessiveQuoted = source.match(/\b([A-Z][A-Za-z0-9 .&'-]{1,80})['’]s\s+["“]([^"”]{2,120})["”]/);
+  if (possessiveQuoted) return `${possessiveQuoted[2].trim()} by ${possessiveQuoted[1].trim()}`;
   const playing = source.match(/\bPlaying\s+(.+?)\s+by\s+([^.,;\n]{2,100})[.!]?$/i);
   if (playing) return `${playing[1].trim()} by ${playing[2].trim()}`;
   const named = source.match(/\b(?:is|was)\s+([^.,;\n"]{2,100})\s+by\s+([^.,;\n]{2,100})/i);
