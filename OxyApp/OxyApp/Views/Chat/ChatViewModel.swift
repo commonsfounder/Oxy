@@ -13,6 +13,7 @@ final class ChatViewModel {
 
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
+    @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -77,9 +78,16 @@ final class ChatViewModel {
         let assistantID = assistantMessage.id
 
         let settings = currentSettings
-        let needsFreshLocation = Self.localRequestTerms.contains { text.localizedCaseInsensitiveContains($0) }
+        let needsFreshLocation = shouldFetchLocation(for: text)
+        startSendWatchdog(assistantID: assistantID)
 
         currentSendTask = Task {
+            defer {
+                Task { @MainActor in
+                    sendWatchdogTask?.cancel()
+                    sendWatchdogTask = nil
+                }
+            }
             var location = locationManager.locationDict
             if needsFreshLocation {
                 await MainActor.run {
@@ -132,8 +140,8 @@ final class ChatViewModel {
                         guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
 
-                    case .status(_, let label):
-                        statusLabel = label
+                    case .status(let status, let label):
+                        setStatus(status, label)
 
                     case .transcription:
                         break
@@ -197,8 +205,15 @@ final class ChatViewModel {
         messages.append(assistantMessage)
         let assistantID = assistantMessage.id
         let settings = currentSettings
+        startSendWatchdog(assistantID: assistantID)
 
         currentSendTask = Task {
+            defer {
+                Task { @MainActor in
+                    sendWatchdogTask?.cancel()
+                    sendWatchdogTask = nil
+                }
+            }
             do {
                 let response = try await chatService.sendImageMessage(
                     userId: userId,
@@ -243,6 +258,8 @@ final class ChatViewModel {
     func clearChat() {
         currentSendTask?.cancel()
         currentSendTask = nil
+        sendWatchdogTask?.cancel()
+        sendWatchdogTask = nil
         messages.removeAll()
         inputText = ""
         isSending = false
@@ -270,6 +287,57 @@ final class ChatViewModel {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
         update(&messages[index])
         return true
+    }
+
+    private func shouldFetchLocation(for text: String) -> Bool {
+        let lower = text.lowercased()
+        if lower.hasPrefix("remember ") || lower.hasPrefix("save ") || lower.hasPrefix("note down ") {
+            return false
+        }
+        if lower.contains("play ") || lower.contains("pause") || lower.contains("playlist") || lower.contains("song") {
+            return false
+        }
+        return Self.localRequestTerms.contains { lower.contains($0) }
+    }
+
+    private func setStatus(_ status: String, _ label: String) {
+        let hiddenStatuses = ["thinking_start", "action_complete", "speaking_start"]
+        guard !hiddenStatuses.contains(status), !label.isEmpty else {
+            if status == "action_complete" || status == "speaking_start" {
+                statusLabel = nil
+            }
+            return
+        }
+        statusLabel = label
+        clearStatusSoon()
+    }
+
+    private func clearStatusSoon() {
+        let current = statusLabel
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            if statusLabel == current {
+                statusLabel = nil
+            }
+        }
+    }
+
+    private func startSendWatchdog(assistantID: UUID) {
+        sendWatchdogTask?.cancel()
+        sendWatchdogTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(45))
+            guard !Task.isCancelled, isSending else { return }
+            currentSendTask?.cancel()
+            currentSendTask = nil
+            _ = updateAssistantMessage(id: assistantID) { message in
+                if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    message.content = "I got stuck there. Try that again and I’ll keep it tighter."
+                }
+                message.isStreaming = false
+            }
+            statusLabel = nil
+            isSending = false
+        }
     }
 
     // MARK: - Deep Links

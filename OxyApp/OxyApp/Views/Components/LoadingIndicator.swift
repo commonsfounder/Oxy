@@ -24,18 +24,22 @@ struct OxyThinkingIndicator: View {
     @State private var active = false
 
     var body: some View {
-        HStack(spacing: compact ? 7 : 9) {
-            Image(systemName: "sparkles")
-                .font(.system(size: compact ? 13 : 15, weight: .semibold))
-                .foregroundStyle(Color.oxyStone)
-                .opacity(active ? 1 : 0.45)
-                .scaleEffect(active ? 1.08 : 0.92)
-                .shadow(color: Color.oxyStone.opacity(active ? 0.22 : 0.04), radius: active ? 8 : 1)
-                .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: active)
+        HStack(spacing: compact ? 8 : 10) {
+            ZStack {
+                Circle()
+                    .fill(Color.oxyStone.opacity(active ? 0.18 : 0.08))
+                    .frame(width: compact ? 20 : 24, height: compact ? 20 : 24)
+                    .scaleEffect(active ? 1.06 : 0.92)
+                Image(systemName: "sparkle")
+                    .font(.system(size: compact ? 9 : 11, weight: .bold))
+                    .foregroundStyle(Color.oxyStone)
+                    .rotationEffect(.degrees(active ? 8 : -8))
+            }
+            .animation(.easeInOut(duration: 0.95).repeatForever(autoreverses: true), value: active)
 
             if let label, !label.isEmpty {
                 Text(label)
-                    .font(.system(size: compact ? 12 : 13, weight: .medium))
+                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
                     .foregroundStyle(Color.oxySub)
                     .lineLimit(1)
             }

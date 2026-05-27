@@ -140,3 +140,9 @@ test('memory writes do not become place lookups', () => {
 test('contextual closest-place follow-up does not search a fake new place', () => {
   assert.equal(inferDeterministicAction('is that definitely the closest one'), null);
 });
+
+test('contextual travel follow-ups defer to conversation context', () => {
+  assert.equal(inferDeterministicAction('can i get there by 7:30'), null);
+  assert.equal(inferDeterministicAction('can i take a direct train with no changes'), null);
+  assert.equal(inferDeterministicAction('what train is it'), null);
+});

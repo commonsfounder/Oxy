@@ -8,6 +8,9 @@ struct ProactiveView: View {
     @State private var errorMessage: String?
 
     private let service = ChatService()
+    private var visibleBriefings: [Briefing] {
+        briefings.filter(\.isWorthShowing)
+    }
 
     var body: some View {
         NavigationStack {
@@ -32,12 +35,12 @@ struct ProactiveView: View {
                             ProgressView()
                                 .tint(Color.oxyStone)
                                 .padding(.top, 28)
-                        } else if briefings.isEmpty {
+                        } else if visibleBriefings.isEmpty {
                             EmptyProactiveState()
                                 .padding(.horizontal, 16)
                                 .padding(.top, 24)
                         } else {
-                            ForEach(briefings) { briefing in
+                            ForEach(visibleBriefings) { briefing in
                                 BriefingCard(briefing: briefing) {
                                     Task { await markRead(briefing) }
                                 }
@@ -111,7 +114,7 @@ private struct ProactiveHeader: View {
                 Text("Oxy's read on today")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
-                Text("Briefings, nudges, and follow-ups show up here.")
+                Text("Only useful nudges. No noise.")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.oxySub)
             }
@@ -134,7 +137,7 @@ private struct ProactiveHeader: View {
             .disabled(isChecking)
         }
         .padding(14)
-        .background(Color.oxySurface2)
+        .background(Color.oxySurface2.opacity(0.7))
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
@@ -162,7 +165,7 @@ private struct BriefingCard: View {
                     .foregroundStyle(Color.oxyDim)
             }
 
-            Text(briefing.body)
+            Text(cleanBody)
                 .font(.system(size: 14))
                 .foregroundStyle(Color.oxyText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -199,6 +202,13 @@ private struct BriefingCard: View {
         return "sparkles"
     }
 
+    private var cleanBody: String {
+        briefing.body
+            .replacingOccurrences(of: #"\([^)]*(unknown|\.unknown|Maps error|couldn't find)[^)]*\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "  ", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var sourceLabel: String {
         switch briefing.source {
         case "healthkit": return "HealthKit"
@@ -227,7 +237,7 @@ private struct EmptyProactiveState: View {
             Text("Nothing needs you right now.")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.oxyText)
-            Text("When Oxy has a useful briefing or follow-up, it lands here.")
+            Text("Oxy will only interrupt when there’s something actually useful.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.oxySub)
                 .multilineTextAlignment(.center)
@@ -237,6 +247,18 @@ private struct EmptyProactiveState: View {
         .padding(.horizontal, 18)
         .background(Color.oxySurface2)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private extension Briefing {
+    var isWorthShowing: Bool {
+        if source == "action_log" { return false }
+        if kind.contains("failed") { return false }
+        let lower = body.lowercased()
+        if lower.contains(".unknown") || lower.contains("maps error") || lower.contains("try a diff") {
+            return false
+        }
+        return true
     }
 }
 

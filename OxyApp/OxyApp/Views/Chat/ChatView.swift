@@ -248,7 +248,7 @@ struct ChatView: View {
                         viewModel.sendCommand("cancel", userId: appState.userId)
                     }
                 )
-                .presentationDetents([.medium])
+                .presentationDetents([.height(340), .medium])
                 .presentationDragIndicator(.visible)
             }
             .sheet(item: $messageDraft) { draft in
@@ -469,27 +469,43 @@ private struct ActionReviewSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
+            Capsule()
+                .fill(Color.oxyLine2)
+                .frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity)
+
+            HStack(spacing: 12) {
                 Image(systemName: iconName)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color.oxyStone)
-                Text(title)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
+                    .frame(width: 34, height: 34)
+                    .background(Color.oxyStone.opacity(0.12))
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(Color.oxyText)
+                    Text("One tap when it looks right.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                }
                 Spacer()
             }
 
-            ScrollView {
-                Text(detail)
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.oxyText)
-                    .lineSpacing(5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
-                    .background(Color.oxySurface3)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
+            Text(detail)
+                .font(.system(size: 15))
+                .foregroundStyle(Color.oxyText)
+                .lineSpacing(5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(Color.oxySurface2.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.oxyLine, lineWidth: 1)
+                )
 
             HStack(spacing: 10) {
                 Button(action: onCancel) {
@@ -504,7 +520,7 @@ private struct ActionReviewSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 Button(action: onConfirm) {
-                    Label("Confirm", systemImage: "checkmark")
+                    Label("Send", systemImage: "arrow.up")
                         .font(.system(size: 15, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
@@ -515,7 +531,7 @@ private struct ActionReviewSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
-        .padding(20)
+        .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.oxySurface1)
     }
@@ -884,7 +900,7 @@ private struct ChatInputBar: View {
             HStack(alignment: .bottom, spacing: 10) {
                 Button(action: onAttach) {
                     Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(Color.oxySub)
                         .frame(width: 36, height: 36)
                 }
@@ -943,14 +959,10 @@ private struct StatusIndicator: View {
     var body: some View {
         HStack {
             OxyThinkingIndicator(label: label, compact: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(.ultraThinMaterial)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(Color.oxyStone.opacity(0.08))
                 .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(Color.oxyStone.opacity(0.16), lineWidth: 1)
-                )
             Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -17,7 +17,8 @@ struct MessageBubble: View {
     private var isCompact: Bool { bubbleStyle == "compact" }
     private var visibleActions: [ActionResult] {
         message.actions.filter { action in
-            !(action.action == "send_message" && action.success && !action.pending)
+            !action.pending &&
+            !(action.action == "send_message" && action.success)
         }
     }
 
@@ -35,7 +36,7 @@ struct MessageBubble: View {
                             .lineSpacing(isCompact ? 2 : 4)
                     }
                     .padding(.horizontal, isCompact ? 13 : 16)
-                    .padding(.vertical, isCompact ? 9 : 12)
+                    .padding(.vertical, isCompact ? 8 : 11)
                     .background(
                         isUser
                             ? AnyShapeStyle(
@@ -64,25 +65,16 @@ struct MessageBubble: View {
             if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
                     OxyThinkingIndicator()
-                        .padding(.horizontal, isCompact ? 12 : 14)
-                        .padding(.vertical, isCompact ? 9 : 12)
-                        .background(.ultraThinMaterial)
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 9)
+                        .background(Color.oxySurface2.opacity(0.72))
                         .clipShape(
                             UnevenRoundedRectangle(
                                 topLeadingRadius: 6,
-                                bottomLeadingRadius: 20,
-                                bottomTrailingRadius: 20,
-                                topTrailingRadius: 20
+                                bottomLeadingRadius: 18,
+                                bottomTrailingRadius: 18,
+                                topTrailingRadius: 18
                             )
-                        )
-                        .overlay(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 6,
-                                bottomLeadingRadius: 20,
-                                bottomTrailingRadius: 20,
-                                topTrailingRadius: 20
-                            )
-                            .stroke(Color.oxyStone.opacity(0.16), lineWidth: 1)
                         )
                     Spacer(minLength: 60)
                 }
@@ -170,10 +162,13 @@ struct ActionCard: View {
 
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: action.pending ? 10 : 0) {
-            HStack(spacing: 10) {
-                Image(systemName: action.success ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .font(.system(size: 16, weight: .semibold))
+                HStack(spacing: 9) {
+                Image(systemName: action.success ? "checkmark" : "exclamationmark")
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
+                    .frame(width: 22, height: 22)
+                    .background((action.success ? Color.oxyGreen : Color.oxyRed).opacity(0.12))
+                    .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(actionSummary)
@@ -184,7 +179,7 @@ struct ActionCard: View {
                         Text(text)
                             .font(.system(size: 11))
                             .foregroundStyle(Color.oxySub)
-                            .lineLimit(2)
+                            .lineLimit(action.action == "plan_trip" ? 2 : 1)
                             .multilineTextAlignment(.leading)
                     }
                 }
@@ -232,15 +227,15 @@ struct ActionCard: View {
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(Color.oxySurface2.opacity(0.58))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(action.success ? Color.oxyLine2 : Color.oxyRed.opacity(0.22), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(action.success ? Color.oxyLine.opacity(0.8) : Color.oxyRed.opacity(0.2), lineWidth: 1)
         )
-        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
     }
 
     private func openLink() {

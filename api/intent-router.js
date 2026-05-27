@@ -40,6 +40,14 @@ function looksLikeContextualPlaceFollowup(message) {
     !/\b(mcdonald'?s|john lewis|coffee|cafe|restaurant|gym|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i.test(text);
 }
 
+function looksLikeContextualTravelFollowup(message) {
+  const text = normalizeText(message);
+  return /\b(that|it|this|there|the route|the train)\b/i.test(text) &&
+    /\b(train|direct|changes?|platform|leave|arrive|get there|what time|which one|what is it|what train)\b/i.test(text) &&
+    !extractFromTo(text) &&
+    !extractHeadingDestination(text);
+}
+
 function cleanDestinationPhrase(message) {
   const text = normalizeText(message)
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, '')
@@ -164,7 +172,7 @@ function inferLiveRailAction(message) {
 function inferDeterministicAction(message) {
   const text = normalizeText(message);
 
-  if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text)) return null;
+  if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
   const liveRail = inferLiveRailAction(text);
   if (liveRail) return liveRail;
@@ -180,7 +188,7 @@ function inferDeterministicAction(message) {
   if (looksLikeDirectionsRequest(text)) {
     const fromTo = extractFromTo(text);
     const headingDestination = !fromTo ? extractHeadingDestination(text) : null;
-    if (!fromTo && !headingDestination && /\b(yeah|yes|but|that|it|this|same|tomorrow)\b/i.test(text)) {
+    if (!fromTo && !headingDestination && /\b(yeah|yes|but|that|it|this|same|there|direct|changes?|tomorrow)\b/i.test(text)) {
       return null;
     }
     const input = {
