@@ -3,6 +3,19 @@ import Observation
 import AVFoundation
 import UIKit
 
+private final class NativeActionTimeoutBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(_ continuation: CheckedContinuation<NativeLocalActionResult?, Never>, with result: NativeLocalActionResult?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didResume else { return }
+        didResume = true
+        continuation.resume(returning: result)
+    }
+}
+
 @Observable
 @MainActor
 final class ChatViewModel {
@@ -349,43 +362,68 @@ final class ChatViewModel {
     nonisolated private static func nativeMusicTimeoutResult() -> NativeLocalActionResult {
         NativeLocalActionResult(
             action: "play_music",
-            text: "Apple Music is taking too long to respond. Try again in a moment.",
+            text: "Native music took too long to respond, so I stopped waiting.",
             cardText: "Native music timed out",
             actionSummary: "Music timed out",
-            deepLink: "music://",
+            deepLink: nil,
             success: false,
             error: "Native music request timed out."
         )
     }
 
+    private func runNativeActionWithHardTimeout(
+        seconds: Double,
+        timeoutResult: NativeLocalActionResult?,
+        operation: @escaping () async -> NativeLocalActionResult?
+    ) async -> NativeLocalActionResult? {
+        let operationTask = Task {
+            await operation()
+        }
+
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                let box = NativeActionTimeoutBox()
+
+                Task.detached {
+                    let result = await operationTask.value
+                    box.resume(continuation, with: result)
+                }
+
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                    operationTask.cancel()
+                    box.resume(continuation, with: timeoutResult)
+                }
+            }
+        } onCancel: {
+            operationTask.cancel()
+        }
+    }
+
     private func executeNativeMusicWithTimeout(query: String) async -> NativeLocalActionResult? {
-        await withTaskGroup(of: NativeLocalActionResult?.self) { group in
-            group.addTask {
-                await NativeIntegrationManager.shared.playResolvedMusicQuery(query)
-            }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(7))
-                return Self.nativeMusicTimeoutResult()
-            }
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
+        await runNativeActionWithHardTimeout(seconds: 7, timeoutResult: Self.nativeMusicTimeoutResult()) {
+            await NativeIntegrationManager.shared.playResolvedMusicQuery(query)
         }
     }
 
     private func executeLocalRequestWithTimeout(_ text: String) async -> NativeLocalActionResult? {
-        await withTaskGroup(of: NativeLocalActionResult?.self) { group in
+        let lower = text.lowercased()
+        let isMusicRequest = lower.contains("play")
+            || lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("playlist")
+
+        if isMusicRequest {
+            return await runNativeActionWithHardTimeout(seconds: 7, timeoutResult: Self.nativeMusicTimeoutResult()) {
+                await NativeIntegrationManager.shared.executeLocalRequest(text)
+            }
+        }
+
+        return await withTaskGroup(of: NativeLocalActionResult?.self) { group in
             group.addTask {
                 await NativeIntegrationManager.shared.executeLocalRequest(text)
             }
             group.addTask {
                 try? await Task.sleep(for: .seconds(7))
-                if text.lowercased().contains("play")
-                    || text.lowercased().contains("music")
-                    || text.lowercased().contains("song")
-                    || text.lowercased().contains("playlist") {
-                    return Self.nativeMusicTimeoutResult()
-                }
                 return nil
             }
             let result = await group.next() ?? nil
