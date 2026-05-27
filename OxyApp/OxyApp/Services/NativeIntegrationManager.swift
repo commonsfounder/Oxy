@@ -988,7 +988,7 @@ final class NativeIntegrationManager {
             let formatted = formatDurationMinutes(minutes)
             return NativeLocalActionResult(
                 action: "check_health",
-                text: "Health shows \(formatted) of sleep from the latest overnight window.",
+                text: "Apple Health shows \(formatted) of sleep for your latest overnight sleep window.",
                 cardText: "\(formatted) sleep",
                 actionSummary: "Sleep checked",
                 deepLink: "x-apple-health://"
@@ -1148,16 +1148,64 @@ final class NativeIntegrationManager {
 
     private func sleepMinutesLastNight() async -> Double? {
         guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return nil }
-        let start = Calendar.current.date(byAdding: .hour, value: -18, to: Date()) ?? Date()
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
+        let calendar = Calendar.current
+        let now = Date()
+        let todayStart = calendar.startOfDay(for: now)
+        let broadStart = calendar.date(byAdding: .hour, value: -54, to: todayStart) ?? calendar.date(byAdding: .day, value: -2, to: now) ?? now
+        let predicate = HKQuery.predicateForSamples(withStart: broadStart, end: now, options: .strictEndDate)
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { _, samples, _ in
-                let minutes = (samples as? [HKCategorySample] ?? [])
-                    .filter { $0.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue || $0.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue }
-                    .reduce(0.0) { $0 + $1.endDate.timeIntervalSince($1.startDate) / 60.0 }
+                let sleepSamples = (samples as? [HKCategorySample] ?? [])
+                    .filter { Self.isAsleepSample($0) }
+
+                let candidateMinutes = [0, -1, -2].compactMap { dayOffset -> Double? in
+                    guard let dayStart = calendar.date(byAdding: .day, value: dayOffset, to: todayStart),
+                          let windowStart = calendar.date(byAdding: .hour, value: -6, to: dayStart),
+                          let plannedWindowEnd = calendar.date(byAdding: .hour, value: 18, to: dayStart) else {
+                        return nil
+                    }
+                    let windowEnd = min(plannedWindowEnd, now)
+                    let intervals = sleepSamples.compactMap { sample -> (Date, Date)? in
+                        let start = max(sample.startDate, windowStart)
+                        let end = min(sample.endDate, windowEnd)
+                        guard end > start else { return nil }
+                        return (start, end)
+                    }
+                    return Self.mergedMinutes(intervals)
+                }
+
+                let latestMeaningful = candidateMinutes.first { $0 >= 90 }
+                let fallback = candidateMinutes.max()
+                let minutes = latestMeaningful ?? fallback ?? 0
                 continuation.resume(returning: minutes > 0 ? minutes : nil)
             }
             healthStore.execute(query)
+        }
+    }
+
+    private nonisolated static func isAsleepSample(_ sample: HKCategorySample) -> Bool {
+        sample.value == HKCategoryValueSleepAnalysis.asleepCore.rawValue
+            || sample.value == HKCategoryValueSleepAnalysis.asleepDeep.rawValue
+            || sample.value == HKCategoryValueSleepAnalysis.asleepREM.rawValue
+            || sample.value == HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue
+    }
+
+    private nonisolated static func mergedMinutes(_ intervals: [(Date, Date)]) -> Double {
+        let sorted = intervals.sorted { $0.0 < $1.0 }
+        var merged: [(Date, Date)] = []
+        for interval in sorted {
+            guard let last = merged.last else {
+                merged.append(interval)
+                continue
+            }
+            if interval.0 <= last.1 {
+                merged[merged.count - 1] = (last.0, max(last.1, interval.1))
+            } else {
+                merged.append(interval)
+            }
+        }
+        return merged.reduce(0.0) { total, interval in
+            total + interval.1.timeIntervalSince(interval.0) / 60.0
         }
     }
 
