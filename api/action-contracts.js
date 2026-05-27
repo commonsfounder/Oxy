@@ -115,9 +115,9 @@ const ACTION_CONTRACTS = {
   get_directions: {
     risk: 'low',
     required: ['destination'],
-    optional: ['origin', 'mode', 'arrival_time'],
+    optional: ['origin', 'mode', 'arrival_time', 'departure_time'],
     aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
-    inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional natural time' },
+    inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time', departure_time: 'optional leave-at/around time' },
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none'

@@ -67,7 +67,17 @@ function cleanDestinationPhrase(message) {
 function extractArrivalTime(message) {
   const text = String(message || '');
   const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  const match = text.match(/\b(?:by|at|around|about)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
+  const match = text.match(/\bby\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+  return match ? `${day}${match[1].trim()}`.trim() : undefined;
+}
+
+function extractDepartureTime(message) {
+  const text = String(message || '');
+  const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
+  if (/\b(first|earliest)\s+train\b/i.test(text) && /\btomorrow\b/i.test(text)) {
+    return 'tomorrow 00:01';
+  }
+  const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
     text.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
@@ -146,6 +156,9 @@ function inferDeterministicAction(message) {
   if (looksLikeDirectionsRequest(text)) {
     const fromTo = extractFromTo(text);
     const headingDestination = !fromTo ? extractHeadingDestination(text) : null;
+    if (!fromTo && !headingDestination && /\b(yeah|yes|but|that|it|this|same|tomorrow)\b/i.test(text)) {
+      return null;
+    }
     const input = {
       destination: fromTo?.destination || headingDestination || cleanDestinationPhrase(text),
       mode: TRANSIT_TERMS.test(text) ? 'transit' : 'driving'
@@ -153,6 +166,8 @@ function inferDeterministicAction(message) {
     if (fromTo?.origin) input.origin = fromTo.origin;
     const arrivalTime = extractArrivalTime(text);
     if (arrivalTime) input.arrival_time = arrivalTime;
+    const departureTime = !arrivalTime ? extractDepartureTime(text) : undefined;
+    if (departureTime) input.departure_time = departureTime;
     return {
       reason: TRANSIT_TERMS.test(text) ? 'transit_directions_to_place' : 'directions_to_local_place',
       spoken: "I'll open directions.",

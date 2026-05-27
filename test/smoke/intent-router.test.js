@@ -59,7 +59,7 @@ test('future train journey requests route to transit directions, not live rail',
   assert.deepEqual(routed.actions[0].input, {
     destination: 'apsley',
     mode: 'transit',
-    arrival_time: 'tomorrow 9am'
+    departure_time: 'tomorrow 9am'
   });
 });
 
@@ -71,7 +71,7 @@ test('train journey with explicit origin keeps from and to for maps transit', ()
     origin: 'birmingham new street',
     destination: 'apsley',
     mode: 'transit',
-    arrival_time: 'tomorrow 9am'
+    departure_time: 'tomorrow 9am'
   });
 });
 
@@ -81,8 +81,13 @@ test('future first train request routes to maps transit', () => {
   assert.equal(routed.actions[0].type, 'get_directions');
   assert.deepEqual(routed.actions[0].input, {
     destination: 'london euston',
-    mode: 'transit'
+    mode: 'transit',
+    departure_time: 'tomorrow 00:01'
   });
+});
+
+test('vague train follow-up does not become a fake destination', () => {
+  assert.equal(inferDeterministicAction('yeah but what train is it tomorrow'), null);
 });
 
 test('live station board requests route to station_board', () => {

@@ -81,7 +81,7 @@ function mapsDirectionsFallback(destination, params = {}) {
   };
 }
 
-function parseArrivalTime(value, now = new Date()) {
+function parseDirectionTime(value, now = new Date()) {
   const text = String(value || '').trim();
   if (!text) return null;
   const tomorrow = /\btomorrow\b/i.test(text);
@@ -100,13 +100,39 @@ function parseArrivalTime(value, now = new Date()) {
   return Math.floor(arrival.getTime() / 1000);
 }
 
+function minutesBetween(a, b) {
+  const start = Number(a);
+  const end = Number(b);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const mins = Math.round((end - start) / 60);
+  return mins > 7 ? mins : null;
+}
+
 function formatTransitStep(step) {
   const transit = step.transit_details;
   if (!transit) return null;
   const line = transit.line?.short_name || transit.line?.name || transit.line?.vehicle?.name || 'transit';
   const from = transit.departure_stop?.name;
   const to = transit.arrival_stop?.name;
-  return [line, from && `from ${from}`, to && `to ${to}`].filter(Boolean).join(' ');
+  const vehicle = transit.line?.vehicle?.type || transit.line?.vehicle?.name || '';
+  const agency = transit.line?.agencies?.[0]?.name || '';
+  const departure = transit.departure_time?.text;
+  const arrival = transit.arrival_time?.text;
+  const stops = transit.num_stops;
+  const service = [agency, line].filter(Boolean).join(' ');
+  return {
+    line,
+    service: service || line,
+    vehicle,
+    from,
+    to,
+    departure,
+    arrival,
+    departureValue: transit.departure_time?.value,
+    arrivalValue: transit.arrival_time?.value,
+    stops,
+    text: [line, from && `from ${from}`, to && `to ${to}`].filter(Boolean).join(' ')
+  };
 }
 
 function summarizeDirectionsRoute(route, modeLabel) {
@@ -115,16 +141,39 @@ function summarizeDirectionsRoute(route, modeLabel) {
   const duration = leg.duration?.text;
   const arrival = leg.arrival_time?.text;
   const departure = leg.departure_time?.text;
-  const transitSteps = (leg.steps || []).map(formatTransitStep).filter(Boolean).slice(0, 3);
+  const transitSteps = (leg.steps || []).map(formatTransitStep).filter(Boolean);
   const headline = [
     duration && `${duration}`,
     departure && arrival && `${departure}-${arrival}`,
     !departure && arrival && `arrive ${arrival}`
   ].filter(Boolean).join(' · ');
   const detail = transitSteps.length
-    ? transitSteps.join(' · ')
+    ? transitSteps.map(step => step.text).slice(0, 3).join(' · ')
     : `Open ${modeLabel} directions in Maps`;
-  return { headline, detail };
+  if (!transitSteps.length) return { headline, detail };
+
+  const naturalSteps = transitSteps.slice(0, 4).map((step, index) => {
+    const first = index === 0 ? 'Take' : 'Then take';
+    const time = step.departure ? ` at ${step.departure}` : '';
+    const arrivalText = step.arrival ? `, arriving ${step.arrival}` : '';
+    const stops = Number.isFinite(Number(step.stops)) && Number(step.stops) > 0 ? ` (${step.stops} stops)` : '';
+    return `${first} ${step.service}${time} from ${step.from || 'the stop'} to ${step.to || 'the destination'}${arrivalText}${stops}`;
+  });
+  const waits = [];
+  for (let i = 1; i < transitSteps.length; i += 1) {
+    const wait = minutesBetween(transitSteps[i - 1].arrivalValue, transitSteps[i].departureValue);
+    if (wait) waits.push(`you have about ${wait} minutes to change before ${transitSteps[i].line}`);
+  }
+  const opener = departure && arrival
+    ? `You should leave around ${departure}; this gets you there around ${arrival} (${duration}).`
+    : `This route takes about ${duration}.`;
+  const platformNote = transitSteps.some(step => /RAIL|TRAIN|HEAVY_RAIL|COMMUTER_TRAIN/i.test(step.vehicle))
+    ? 'Planned routes usually do not include platform numbers this far ahead, so check the board when you reach the station.'
+    : '';
+  const text = [opener, naturalSteps.join('. '), waits[0] ? `On the change, ${waits[0]}.` : '', platformNote]
+    .filter(Boolean)
+    .join(' ');
+  return { headline, detail, text };
 }
 
 async function getGoogleDirections(destination, place, params = {}) {
@@ -147,8 +196,10 @@ async function getGoogleDirections(destination, place, params = {}) {
     alternatives: true,
     key
   };
-  const arrival = parseArrivalTime(params.arrival_time);
+  const arrival = parseDirectionTime(params.arrival_time);
+  const departure = parseDirectionTime(params.departure_time);
   if (arrival && mode === 'transit') requestParams.arrival_time = arrival;
+  if (!arrival && departure && mode === 'transit') requestParams.departure_time = departure;
 
   const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
     params: requestParams,
@@ -184,7 +235,7 @@ async function execute(userId, action, params) {
         ? `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
         : `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
       const label = placeLabel(place, destination);
-      const routeText = route?.headline ? `${route.headline}: ${route.detail}` : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`;
+      const routeText = route?.text || (route?.headline ? `${route.headline}: ${route.detail}` : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`);
       return {
         success: true,
         text: routeText,
