@@ -30,7 +30,7 @@ final class ChatViewModel {
     private static let autoOpenActions: Set<String> = [
         "book_uber", "order_deliveroo", "order_uber_eats",
         "search_netflix_title", "add_to_netflix_list",
-        "make_call"
+        "make_call", "play_music", "add_to_music_playlist"
     ]
 
     private static let localRequestTerms = [
@@ -107,6 +107,9 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    if Self.autoOpenActions.contains(actionResult.action) {
+                        openActionLink(actionResult)
+                    }
                 }
                 await chatService.logNativeLocalAction(userId: userId, message: text, result: actionResult)
                 return
@@ -139,9 +142,6 @@ final class ChatViewModel {
                     case .actions(let results):
                         guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
-                        Task {
-                            await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
-                        }
 
                     case .status(let status, let label):
                         setStatus(status, label)
@@ -404,6 +404,9 @@ final class ChatViewModel {
         guard !query.isEmpty, !musicQueryStillNeedsResolution(query) else { return }
         guard let nativeResult = await executeNativeMusicWithTimeout(query: query) else { return }
         let nativeAction = ActionResult(native: nativeResult)
+        if !nativeAction.success {
+            openActionLink(nativeAction)
+        }
         _ = updateAssistantMessage(id: assistantID) {
             $0.content = nativeResult.text
             $0.actions = [nativeAction]

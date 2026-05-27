@@ -621,115 +621,32 @@ final class NativeIntegrationManager {
     }
 
     private func playNativeMusicQuery(_ query: String) async -> NativeLocalActionResult? {
+        let fallbackLink = appleMusicSearchLink(for: query)
         guard await requestMusicPermission() else {
             return NativeLocalActionResult(
                 action: "play_music",
                 text: "Turn on Apple Music access and I can play that natively.",
                 cardText: "Enable Apple Music access",
                 actionSummary: "Music needs access",
-                deepLink: "music://",
+                deepLink: fallbackLink,
                 success: false,
                 error: "Apple Music permission is not authorized."
             )
         }
 
-        do {
-            if let song = try? await withMusicTimeout(seconds: 4) { try await self.searchCatalogSong(query) } {
-                try await playResolvedSong(song, query: query)
-                recordPlayedMusic("\(song.title) \(song.artistName)")
-                lastMusicError = nil
-                return NativeLocalActionResult(
-                    action: "play_music",
-                    text: "Playing \(song.title) by \(song.artistName).",
-                    cardText: "\(song.title) · \(song.artistName)",
-                    actionSummary: "Music playing",
-                    deepLink: song.url?.absoluteString ?? "music://"
-                )
-            }
-
-            if let iTunesSong = try await withMusicTimeout(seconds: 4) { try await self.searchITunesSong(query) } {
-                guard let trackId = iTunesSong.trackId else {
-                    throw NSError(domain: "OxyMusic", code: 5, userInfo: [NSLocalizedDescriptionKey: "Missing iTunes track ID"])
-                }
-                try await playWithStoreID(String(trackId))
-                let title = iTunesSong.trackName ?? query
-                let artist = iTunesSong.artistName ?? "Apple Music"
-                recordPlayedMusic("\(title) \(artist)")
-                lastMusicError = nil
-                return NativeLocalActionResult(
-                    action: "play_music",
-                    text: "Playing \(title) by \(artist).",
-                    cardText: "\(title) · \(artist)",
-                    actionSummary: "Music playing",
-                    deepLink: iTunesSong.trackViewUrl ?? "music://"
-                )
-            }
-
-            do {
-                try playLocalLibraryItem(matching: query)
-                recordPlayedMusic(query)
-                lastMusicError = nil
-                return NativeLocalActionResult(
-                    action: "play_music",
-                    text: "Playing \(query).",
-                    cardText: query,
-                    actionSummary: "Music playing",
-                    deepLink: "music://"
-                )
-            } catch {}
-
-            return NativeLocalActionResult(
-                action: "play_music",
-                text: "I couldn't find that song in Apple Music.",
-                cardText: query,
-                actionSummary: "Music not found",
-                deepLink: "music://",
-                success: false,
-                error: "No Apple Music or iTunes result for \(query)."
-            )
-        } catch {
-            lastMusicError = String(describing: error)
-            let userFacingError = musicPlaybackErrorMessage(error)
-            return NativeLocalActionResult(
-                action: "play_music",
-                text: userFacingError,
-                cardText: query,
-                actionSummary: "Music failed",
-                deepLink: nil,
-                success: false,
-                error: String(describing: error)
-            )
-        }
+        recordPlayedMusic(query)
+        lastMusicError = nil
+        return NativeLocalActionResult(
+            action: "play_music",
+            text: "Opening Apple Music for \(query).",
+            cardText: query,
+            actionSummary: "Music opened",
+            deepLink: fallbackLink
+        )
     }
 
     private func playResolvedSong(_ song: Song, query: String) async throws {
         var failures: [String] = []
-        do {
-            try prepareAudioSessionForMusic()
-            let player = ApplicationMusicPlayer.shared
-            player.queue = ApplicationMusicPlayer.Queue(for: [song])
-            try await withMusicTimeout(seconds: 5) {
-                try await player.prepareToPlay()
-                try await player.play()
-            }
-            return
-        } catch {
-            failures.append("ApplicationMusicPlayer: \(String(describing: error))")
-        }
-
-        do {
-            try prepareAudioSessionForMusic()
-            let player = SystemMusicPlayer.shared
-            player.queue = SystemMusicPlayer.Queue(for: [song])
-            try await withMusicTimeout(seconds: 5) {
-                try await player.prepareToPlay()
-                try await player.play()
-            }
-            return
-        } catch {
-            failures.append("SystemMusicPlayer: \(String(describing: error))")
-        }
-
         do {
             try await playWithMediaPlayer(song)
             return
@@ -738,14 +655,14 @@ final class NativeIntegrationManager {
         }
 
         do {
-            try playLocalLibraryItem(matching: "\(song.title) \(song.artistName)")
+            try await playLocalLibraryItem(matching: "\(song.title) \(song.artistName)")
             return
         } catch {
             failures.append("Local library: \(String(describing: error))")
         }
 
         do {
-            try playLocalLibraryItem(matching: query)
+            try await playLocalLibraryItem(matching: query)
             return
         } catch {
             failures.append("Local query: \(String(describing: error))")
@@ -778,6 +695,40 @@ final class NativeIntegrationManager {
             try await player.prepareToPlay()
         }
         player.play()
+        try await withMusicTimeout(seconds: 4) {
+            try await self.waitForMediaPlayerToStart(player, label: "Apple Music store queue")
+        }
+    }
+
+    private func waitForMediaPlayerToStart(_ player: MPMusicPlayerController, label: String) async throws {
+        for _ in 0..<16 {
+            if player.playbackState == .playing {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        throw NSError(
+            domain: "OxyMusic",
+            code: 12,
+            userInfo: [NSLocalizedDescriptionKey: "\(label) accepted the request but playback state is \(musicPlaybackStateLabel(player.playbackState)), not playing."]
+        )
+    }
+
+    private func musicPlaybackStateLabel(_ state: MPMusicPlaybackState) -> String {
+        switch state {
+        case .stopped: return "stopped"
+        case .playing: return "playing"
+        case .paused: return "paused"
+        case .interrupted: return "interrupted"
+        case .seekingForward: return "seeking forward"
+        case .seekingBackward: return "seeking backward"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private func appleMusicSearchLink(for query: String) -> String {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        return "music://music.apple.com/search?term=\(encoded)"
     }
 
     private func addStoreIDToLibrary(_ storeID: String) async throws {
@@ -824,7 +775,7 @@ final class NativeIntegrationManager {
             }
     }
 
-    private func playLocalLibraryItem(matching query: String) throws {
+    private func playLocalLibraryItem(matching query: String) async throws {
         let normalizedQuery = normalizeMusicText(query)
         guard !normalizedQuery.isEmpty else {
             throw NSError(domain: "OxyMusic", code: 3, userInfo: [NSLocalizedDescriptionKey: "Empty music query"])
@@ -848,6 +799,9 @@ final class NativeIntegrationManager {
         let collection = MPMediaItemCollection(items: [item])
         player.setQueue(with: collection)
         player.play()
+        try await withMusicTimeout(seconds: 4) {
+            try await self.waitForMediaPlayerToStart(player, label: "local library")
+        }
     }
 
     private func prepareAudioSessionForMusic() throws {
@@ -884,7 +838,10 @@ final class NativeIntegrationManager {
         if details.localizedCaseInsensitiveContains("No matching local library item") {
             return "I found the song, but iOS would not start Apple Music playback. Add it to your library or try another song."
         }
-        return "I found the song, but iOS would not start playback. Try again from the Music app once, then ask me again."
+        if details.localizedCaseInsensitiveContains("playback state") {
+            return "I found the song, but iOS did not actually start playback. I opened it in Apple Music so you can start it there."
+        }
+        return "I found the song, but iOS would not start playback. I opened it in Apple Music so you can start it there."
     }
 
     private func musicAddErrorMessage(_ error: Error) -> String {
