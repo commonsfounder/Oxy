@@ -99,6 +99,7 @@ final class NativeIntegrationManager {
     private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
     private var lastMusicQuery: String?
     private var lastMusicError: String?
+    private var musicHistory: [String] = []
 
     private init() {}
 
@@ -363,9 +364,21 @@ final class NativeIntegrationManager {
         guard lower.contains("music")
             || lower.contains("song")
             || lower.contains("playlist")
+            || lower == "pause"
+            || lower == "resume"
+            || lower == "next"
+            || lower == "previous"
+            || lower == "back"
+            || lower.contains("pause playback")
+            || lower.contains("resume playback")
+            || lower.contains("skip")
             || lower.hasPrefix("play ")
             || lower.hasPrefix("listen to ")
             || lower.hasPrefix("add ") else { return nil }
+
+        if let result = handleMusicTransportCommand(lower) {
+            return result
+        }
 
         if lower.contains("playlist") || lower.hasPrefix("add ") {
             return await addNativeMusicItem(from: message)
@@ -382,6 +395,63 @@ final class NativeIntegrationManager {
         default:
             return false
         }
+    }
+
+    private func handleMusicTransportCommand(_ lower: String) -> NativeLocalActionResult? {
+        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
+        let appPlayer = MPMusicPlayerController.applicationMusicPlayer
+
+        if lower == "previous" || lower == "back" || lower.contains("previous song") || lower.contains("last track") {
+            systemPlayer.skipToPreviousItem()
+            appPlayer.skipToPreviousItem()
+            return NativeLocalActionResult(
+                action: "music_control",
+                text: "Going back.",
+                cardText: "Previous track",
+                actionSummary: "Previous track",
+                deepLink: nil
+            )
+        }
+
+        guard !lower.hasPrefix("play ") && !lower.hasPrefix("listen to ") else { return nil }
+
+        if lower == "pause" || lower.contains("pause music") || lower.contains("pause playback") {
+            systemPlayer.pause()
+            appPlayer.pause()
+            return NativeLocalActionResult(
+                action: "music_control",
+                text: "Paused.",
+                cardText: "Playback paused",
+                actionSummary: "Music paused",
+                deepLink: nil
+            )
+        }
+
+        if lower == "resume" || lower == "play" || lower.contains("resume music") || lower.contains("resume playback") {
+            systemPlayer.play()
+            appPlayer.play()
+            return NativeLocalActionResult(
+                action: "music_control",
+                text: "Resumed.",
+                cardText: "Playback resumed",
+                actionSummary: "Music resumed",
+                deepLink: nil
+            )
+        }
+
+        if lower == "next" || lower.contains("next song") || lower.contains("skip this") || lower.contains("skip song") {
+            systemPlayer.skipToNextItem()
+            appPlayer.skipToNextItem()
+            return NativeLocalActionResult(
+                action: "music_control",
+                text: "Skipped.",
+                cardText: "Next track",
+                actionSummary: "Music skipped",
+                deepLink: nil
+            )
+        }
+
+        return nil
     }
 
     private func playNativeMusic(from message: String) async -> NativeLocalActionResult? {
@@ -403,7 +473,7 @@ final class NativeIntegrationManager {
         do {
             if let song = try? await searchCatalogSong(query) {
                 try await playResolvedSong(song, query: query)
-                lastMusicQuery = "\(song.title) \(song.artistName)"
+                recordPlayedMusic("\(song.title) \(song.artistName)")
                 lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
@@ -421,7 +491,7 @@ final class NativeIntegrationManager {
                 try await playWithStoreID(String(trackId))
                 let title = iTunesSong.trackName ?? query
                 let artist = iTunesSong.artistName ?? "Apple Music"
-                lastMusicQuery = "\(title) \(artist)"
+                recordPlayedMusic("\(title) \(artist)")
                 lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
@@ -434,7 +504,7 @@ final class NativeIntegrationManager {
 
             do {
                 try playLocalLibraryItem(matching: query)
-                lastMusicQuery = query
+                recordPlayedMusic(query)
                 lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
@@ -541,6 +611,50 @@ final class NativeIntegrationManager {
         player.play()
     }
 
+    private func addStoreIDToLibrary(_ storeID: String) async throws {
+        guard !storeID.isEmpty, storeID != "0" else {
+            throw NSError(domain: "OxyMusic", code: 8, userInfo: [NSLocalizedDescriptionKey: "Missing store ID for library add"])
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            MPMediaLibrary.default().addItem(withProductID: storeID) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func addStoreID(_ storeID: String, toPlaylistNamed playlistName: String) async throws -> String {
+        guard !storeID.isEmpty, storeID != "0" else {
+            throw NSError(domain: "OxyMusic", code: 9, userInfo: [NSLocalizedDescriptionKey: "Missing store ID for playlist add"])
+        }
+        guard let playlist = findMediaPlaylist(named: playlistName) else {
+            throw NSError(domain: "OxyMusic", code: 10, userInfo: [NSLocalizedDescriptionKey: "Playlist not found: \(playlistName)"])
+        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            playlist.addItem(withProductID: storeID) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+        return playlist.name ?? playlistName
+    }
+
+    private func findMediaPlaylist(named name: String) -> MPMediaPlaylist? {
+        let normalized = normalizeMusicText(name)
+        return MPMediaQuery.playlists().collections?
+            .compactMap { $0 as? MPMediaPlaylist }
+            .first { playlist in
+                let playlistName = normalizeMusicText(playlist.name ?? "")
+                return playlistName == normalized || playlistName.contains(normalized) || normalized.contains(playlistName)
+            }
+    }
+
     private func playLocalLibraryItem(matching query: String) throws {
         let normalizedQuery = normalizeMusicText(query)
         guard !normalizedQuery.isEmpty else {
@@ -602,6 +716,17 @@ final class NativeIntegrationManager {
         return "I found the song, but iOS would not start playback. Try again from the Music app once, then ask me again."
     }
 
+    private func musicAddErrorMessage(_ error: Error) -> String {
+        let details = String(describing: error)
+        if details.localizedCaseInsensitiveContains("Playlist not found") {
+            return "I couldn't find that playlist in your Apple Music library."
+        }
+        if details.localizedCaseInsensitiveContains("developerTokenRequestFailed") {
+            return "Apple Music would not allow playlist editing through MusicKit yet, but playback still works."
+        }
+        return "Apple Music couldn't add that yet."
+    }
+
     private func addNativeMusicItem(from message: String) async -> NativeLocalActionResult? {
         guard await requestMusicPermission() else {
             return NativeLocalActionResult(
@@ -619,7 +744,41 @@ final class NativeIntegrationManager {
         guard !parsed.query.isEmpty else { return nil }
 
         do {
-            guard let song = try await searchCatalogSong(parsed.query) else {
+            if let song = try? await searchCatalogSong(parsed.query) {
+                if let playlistName = parsed.playlistName, !playlistName.isEmpty {
+                    guard let playlist = try await findLibraryPlaylist(named: playlistName) else {
+                        return NativeLocalActionResult(
+                            action: "add_to_music_playlist",
+                            text: "I found \(song.title), but couldn't find a playlist called \(playlistName).",
+                            cardText: "\(song.title) · Missing playlist: \(playlistName)",
+                            actionSummary: "Playlist not found",
+                            deepLink: "music://",
+                            success: false,
+                            error: "Playlist not found: \(playlistName)."
+                        )
+                    }
+                    try await MusicLibrary.shared.add(song, to: playlist)
+                    return NativeLocalActionResult(
+                        action: "add_to_music_playlist",
+                        text: "Added \(song.title) by \(song.artistName) to \(playlist.name).",
+                        cardText: "\(song.title) · \(playlist.name)",
+                        actionSummary: "Added to playlist",
+                        deepLink: playlist.url?.absoluteString ?? song.url?.absoluteString ?? "music://"
+                    )
+                }
+
+                try await MusicLibrary.shared.add(song)
+                return NativeLocalActionResult(
+                    action: "add_to_music_playlist",
+                    text: "Added \(song.title) by \(song.artistName) to your Apple Music library.",
+                    cardText: "\(song.title) · Library",
+                    actionSummary: "Added to library",
+                    deepLink: song.url?.absoluteString ?? "music://"
+                )
+            }
+
+            guard let iTunesSong = try await searchITunesSong(parsed.query),
+                  let trackId = iTunesSong.trackId else {
                 return NativeLocalActionResult(
                     action: "add_to_music_playlist",
                     text: "I couldn't find \(parsed.query) in Apple Music.",
@@ -627,44 +786,36 @@ final class NativeIntegrationManager {
                     actionSummary: "Music not found",
                     deepLink: "music://",
                     success: false,
-                    error: "No Apple Music catalog result for \(parsed.query)."
+                    error: "No Apple Music or iTunes result for \(parsed.query)."
                 )
             }
 
+            let title = iTunesSong.trackName ?? parsed.query
+            let artist = iTunesSong.artistName ?? "Apple Music"
+            let storeID = String(trackId)
             if let playlistName = parsed.playlistName, !playlistName.isEmpty {
-                guard let playlist = try await findLibraryPlaylist(named: playlistName) else {
-                    return NativeLocalActionResult(
-                        action: "add_to_music_playlist",
-                        text: "I found \(song.title), but couldn't find a playlist called \(playlistName).",
-                        cardText: "\(song.title) · Missing playlist: \(playlistName)",
-                        actionSummary: "Playlist not found",
-                        deepLink: "music://",
-                        success: false,
-                        error: "Playlist not found: \(playlistName)."
-                    )
-                }
-                try await MusicLibrary.shared.add(song, to: playlist)
+                let addedPlaylistName = try await addStoreID(storeID, toPlaylistNamed: playlistName)
                 return NativeLocalActionResult(
                     action: "add_to_music_playlist",
-                    text: "Added \(song.title) by \(song.artistName) to \(playlist.name).",
-                    cardText: "\(song.title) · \(playlist.name)",
+                    text: "Added \(title) by \(artist) to \(addedPlaylistName).",
+                    cardText: "\(title) · \(addedPlaylistName)",
                     actionSummary: "Added to playlist",
-                    deepLink: playlist.url?.absoluteString ?? song.url?.absoluteString ?? "music://"
+                    deepLink: iTunesSong.trackViewUrl ?? "music://"
                 )
             }
 
-            try await MusicLibrary.shared.add(song)
+            try await addStoreIDToLibrary(storeID)
             return NativeLocalActionResult(
                 action: "add_to_music_playlist",
-                text: "Added \(song.title) by \(song.artistName) to your Apple Music library.",
-                cardText: "\(song.title) · Library",
+                text: "Added \(title) by \(artist) to your Apple Music library.",
+                cardText: "\(title) · Library",
                 actionSummary: "Added to library",
-                deepLink: song.url?.absoluteString ?? "music://"
+                deepLink: iTunesSong.trackViewUrl ?? "music://"
             )
         } catch {
             return NativeLocalActionResult(
                 action: "add_to_music_playlist",
-                text: "Apple Music couldn't add that yet. Check Music access and try again.",
+                text: musicAddErrorMessage(error),
                 cardText: parsed.query,
                 actionSummary: "Music add failed",
                 deepLink: nil,
@@ -713,12 +864,43 @@ final class NativeIntegrationManager {
     private func resolvedMusicQuery(from message: String) -> String {
         let query = cleanMusicQuery(message)
         let normalized = normalizeMusicText(query)
+        if isPreviousMusicReference(normalized), let previous = previousMusicQuery {
+            return previous
+        }
+        if isLastMusicReference(normalized), let lastMusicQuery, !lastMusicQuery.isEmpty {
+            return lastMusicQuery
+        }
         if ["it", "that", "this", "that one", "this one"].contains(normalized),
            let lastMusicQuery,
            !lastMusicQuery.isEmpty {
             return lastMusicQuery
         }
         return query
+    }
+
+    private var previousMusicQuery: String? {
+        guard musicHistory.count >= 2 else { return nil }
+        return musicHistory[musicHistory.count - 2]
+    }
+
+    private func recordPlayedMusic(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        lastMusicQuery = trimmed
+        if musicHistory.last != trimmed {
+            musicHistory.append(trimmed)
+        }
+        if musicHistory.count > 12 {
+            musicHistory.removeFirst(musicHistory.count - 12)
+        }
+    }
+
+    private func isLastMusicReference(_ normalized: String) -> Bool {
+        ["last", "last song", "last again", "last song again", "the last", "the last again", "the last song", "the last song again", "same", "same song", "same again"].contains(normalized)
+    }
+
+    private func isPreviousMusicReference(_ normalized: String) -> Bool {
+        ["previous", "previous song", "previous again", "previous song again", "the previous", "the previous song", "the previous song again"].contains(normalized)
     }
 
     private func parseMusicAddRequest(_ message: String) -> (query: String, playlistName: String?) {
@@ -745,6 +927,7 @@ final class NativeIntegrationManager {
 
     private func cleanPlaylistName(_ text: String) -> String {
         text.replacingOccurrences(of: #"(?i)\bplaylist\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)^(called|named)\s+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
