@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -8,6 +9,7 @@ struct SettingsView: View {
     @State private var showSignOutConfirm = false
     @State private var showAccentPicker = false
     @State private var voicePreview = VoicePreviewPlayer()
+    @State private var backendVersionText = "Checking backend..."
 
     var body: some View {
         NavigationStack {
@@ -183,6 +185,37 @@ struct SettingsView: View {
                                 .foregroundStyle(Color.oxyRed)
                                 .padding(.vertical, 4)
                             }
+                            Divider().overlay(Color.oxyLine)
+                            legalLink(label: "Privacy Policy", path: "/privacy", icon: "hand.raised.fill")
+                            Divider().overlay(Color.oxyLine)
+                            legalLink(label: "Terms", path: "/terms", icon: "doc.text.fill")
+                            Divider().overlay(Color.oxyLine)
+                            legalLink(label: "Support", path: "/support", icon: "questionmark.circle.fill")
+                        }
+
+                        settingsSection(title: "Diagnostics") {
+                            HStack(spacing: 12) {
+                                Image(systemName: "server.rack")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Color.oxyStone)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Backend")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.oxyText)
+                                    Text(backendVersionText)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(Color.oxySub)
+                                        .lineLimit(2)
+                                }
+                                Spacer()
+                                Button(action: { loadBackendVersion() }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(Color.oxyStone)
+                            }
+                            .padding(.vertical, 4)
                         }
 
                         // App info
@@ -220,7 +253,10 @@ struct SettingsView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
-            .onAppear { loadSettings() }
+            .onAppear {
+                loadSettings()
+                loadBackendVersion()
+            }
         }
     }
 
@@ -241,6 +277,25 @@ struct SettingsView: View {
     private func previewVoice(_ voice: String) {
         Task {
             await voicePreview.preview(voice: voice)
+        }
+    }
+
+    private func loadBackendVersion() {
+        backendVersionText = "Checking backend..."
+        Task {
+            do {
+                let version = try await ChatService().backendVersion()
+                let commit = version.gitCommit?.isEmpty == false ? version.gitCommit! : "unknown"
+                let branch = version.gitBranch?.isEmpty == false ? version.gitBranch! : "unknown"
+                let environment = version.environment?.isEmpty == false ? version.environment! : "env unknown"
+                await MainActor.run {
+                    backendVersionText = "\(commit) · \(branch) · \(environment)"
+                }
+            } catch {
+                await MainActor.run {
+                    backendVersionText = "Backend version unavailable"
+                }
+            }
         }
     }
 
@@ -285,6 +340,27 @@ struct SettingsView: View {
             accessory()
         }
         .padding(.vertical, 4)
+    }
+
+    private func legalLink(label: String, path: String, icon: String) -> some View {
+        Button {
+            guard let url = URL(string: "\(APIClient.shared.baseURL)\(path)") else { return }
+            UIApplication.shared.open(url)
+        } label: {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 15, weight: .medium))
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.oxyDim)
+            }
+            .foregroundStyle(Color.oxyText)
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
     }
 
     private func loadSettings() {

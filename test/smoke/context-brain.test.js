@@ -96,6 +96,34 @@ test('context brain asks a clarification for do it with no target', () => {
   assert.equal(turn.spokenOnly, true);
 });
 
+test('context brain opens directions to the latest place', () => {
+  const turn = resolveContextualTurn({
+    message: 'open the nearest one',
+    recentActions: [
+      { type: 'find_place', input: { query: 'nearest pharmacy' }, status: 'executed', resultText: 'Boots, 12 High Street' }
+    ],
+    settings: { preferredTransportMode: 'walking' }
+  });
+  assert.equal(turn.reason, 'contextual_open_target');
+  assert.equal(turn.actions[0].type, 'get_directions');
+  assert.equal(turn.actions[0].input.mode, 'walking');
+  assert.match(turn.actions[0].input.destination, /nearest pharmacy|Boots/i);
+});
+
+test('context brain does not invent a target for play it without media context', () => {
+  const turn = resolveContextualTurn({
+    message: 'play it',
+    history: [{ role: 'assistant', content: 'I can help with that.' }]
+  });
+  assert.equal(turn?.actions, undefined);
+});
+
+test('contextual reference detector catches corrections and tomorrow follow-ups', () => {
+  assert.equal(isContextualReference('no I mean calendar tomorrow'), true);
+  assert.equal(isContextualReference('what about tomorrow'), true);
+  assert.equal(isContextualReference('the other one'), true);
+});
+
 test('fact check follow-ups trigger search grounding', () => {
   assert.equal(isContextualReference('is that right'), true);
   assert.equal(needsSearch('is that right'), true);

@@ -44,6 +44,7 @@ const {
   verifySignedPayload
 } = require('../auth');
 const { connectorForAction } = require('./services/connector-health');
+const { getRuntimeVersion } = require('./services/runtime-version');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -125,6 +126,7 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use((req, res, next) => {
+  res.setHeader('X-Oxy-Commit', getRuntimeVersion().gitCommit);
   res.setHeader('Vary', 'Origin');
   res.setHeader(
     'Content-Security-Policy',
@@ -149,6 +151,10 @@ app.use((req, res, next) => {
   const publicPaths = new Set([
     '/',
     '/health',
+    '/version',
+    '/privacy',
+    '/terms',
+    '/support',
     '/install-shortcut',
     '/auth/google/callback',
     '/auth/register',
@@ -936,6 +942,15 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
       settings
     });
     if (resolvedTurn?.spokenOnly || resolvedTurn?.actions?.length) {
+      if (trace) {
+        trace.log('context_brain.resolved', JSON.stringify({
+          reason: resolvedTurn.reason,
+          kind: resolvedTurn.resolvedContext?.kind,
+          label: String(resolvedTurn.resolvedContext?.label || '').slice(0, 140),
+          action: resolvedTurn.actions?.[0]?.type || null,
+          confidence: resolvedTurn.resolvedContext?.confidence
+        }));
+      }
       return resolvedTurn;
     }
   }
@@ -2971,6 +2986,15 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const searchReason = getSearchReason(message);
   const useSearch = Boolean(searchReason);
   if (useSearch) console.log(`[search] enabled (${searchReason}) for:`, message.slice(0, 80));
+  if (trace && resolvedContext?.label) {
+    trace.log('context_brain.prompt_context', JSON.stringify({
+      kind: resolvedContext.kind,
+      label: String(resolvedContext.label || '').slice(0, 140),
+      source: resolvedContext.source,
+      confidence: resolvedContext.confidence,
+      suggestedAction: resolvedContext.suggestedAction || null
+    }));
+  }
   return {
     history: quickTurn ? history.slice(-2) : history,
     availableActions,
@@ -4171,7 +4195,93 @@ app.get('/debug/:userId', async (req, res) => {
 
 app.get('/health', (_req, res) => {
   const missingEnv = getMissingRuntimeEnv();
-  res.json({ status: missingEnv.length ? 'degraded' : 'ok' });
+  res.json({
+    status: missingEnv.length ? 'degraded' : 'ok',
+    missingEnv,
+    version: getRuntimeVersion()
+  });
+});
+
+app.get('/version', (_req, res) => {
+  res.json(getRuntimeVersion());
+});
+
+function legalPage(title, body) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} · Oxy</title>
+  <style>
+    body{margin:0;background:#0b0b0c;color:#f4f0ec;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    main{max-width:760px;margin:0 auto;padding:48px 20px 72px}
+    h1{font-size:34px;line-height:1.1;margin:0 0 10px}
+    h2{font-size:20px;margin:30px 0 10px}
+    p,li{color:#cfc8c1}
+    a{color:#e97961}
+    .meta{color:#8f8781;font-size:14px;margin-bottom:30px}
+  </style>
+</head>
+<body><main>${body}</main></body>
+</html>`;
+}
+
+app.get('/privacy', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(legalPage('Privacy Policy', `
+    <h1>Privacy Policy</h1>
+    <p class="meta">Draft operational policy. Last updated ${escapeHtml(getLocalDateKey())}.</p>
+    <p>Oxy is a personal assistant. It uses the information you choose to provide so it can answer, remember, and act for you.</p>
+    <h2>Data Oxy Uses</h2>
+    <ul>
+      <li>Chat messages and conversation history.</li>
+      <li>Memories you ask Oxy to keep, plus stable facts inferred from your messages.</li>
+      <li>Optional location, contacts, calendar, reminders, music, HealthKit, microphone, and notification permissions.</li>
+      <li>Optional connector data such as Google, Telegram, Trainline, Netflix, Maps, and Uber actions.</li>
+    </ul>
+    <h2>AI And Search</h2>
+    <p>Messages may be sent to Gemini and related Google services to generate answers, use search grounding, transcribe audio, or complete requested actions.</p>
+    <h2>Controls</h2>
+    <p>You can sign out, edit memory, disconnect connectors, disable proactive features, and request deletion of your data.</p>
+    <h2>Contact</h2>
+    <p>For privacy or deletion requests, contact support using <a href="/support">Oxy Support</a>.</p>
+  `));
+});
+
+app.get('/terms', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(legalPage('Terms', `
+    <h1>Terms</h1>
+    <p class="meta">Draft operational terms. Last updated ${escapeHtml(getLocalDateKey())}.</p>
+    <p>Oxy is provided as an assistant that can answer questions, summarize information, and prepare or open actions at your request.</p>
+    <h2>Your Responsibility</h2>
+    <p>Review important outputs before relying on them. Confirm any message, booking, payment, order, travel plan, or calendar action before treating it as final.</p>
+    <h2>Limitations</h2>
+    <p>Oxy may be wrong, delayed, or unavailable. Current facts should be checked when accuracy matters.</p>
+    <h2>Subscriptions</h2>
+    <p>Current product planning caps paid subscription pricing at a maximum of £15/month unless changed intentionally before release.</p>
+    <h2>Support</h2>
+    <p>See <a href="/support">Oxy Support</a> for issue reporting and data deletion requests.</p>
+  `));
+});
+
+app.get('/support', (_req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(legalPage('Support', `
+    <h1>Support</h1>
+    <p class="meta">Use this page when Oxy behaves incorrectly or you need account/data help.</p>
+    <h2>What To Include</h2>
+    <ul>
+      <li>Backend commit shown in Settings → Diagnostics.</li>
+      <li>Approximate time of issue.</li>
+      <li>The prompt you sent.</li>
+      <li>Screenshot, if useful.</li>
+      <li>Whether a connector or permission was involved.</li>
+    </ul>
+    <h2>Data Requests</h2>
+    <p>For deletion or privacy requests, include your account identifier and the request type. Do not send passwords, OAuth tokens, or private contact lists.</p>
+  `));
 });
 
 app.get('/install-shortcut', (_req, res) => {

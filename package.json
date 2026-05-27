@@ -9,6 +9,7 @@
     "test": "node --test",
     "smoke": "node --test test/smoke/*.test.js",
     "brain:evals": "node --test test/smoke/brain-evals.test.js",
+    "release:check": "node --check api/index.js && node --check api/services/context-brain.js && node --test test/smoke/*.test.js",
     "proactive:job": "node proactive-job.js",
     "benchmark:voice": "node scripts/benchmark-voice-pipelines.js"
   },

@@ -3,6 +3,11 @@ import Foundation
 struct ChatService {
     private let api = APIClient.shared
 
+    func backendVersion() async throws -> BackendVersion {
+        let data = try await api.request(path: "/version")
+        return try JSONDecoder().decode(BackendVersion.self, from: data)
+    }
+
     func sendMessage(
         userId: String,
         message: String,
@@ -151,6 +156,15 @@ struct ChatService {
             body: ["userId": userId]
         )
     }
+}
+
+struct BackendVersion: Decodable {
+    let app: String?
+    let packageVersion: String?
+    let gitCommit: String?
+    let gitBranch: String?
+    let buildTime: String?
+    let environment: String?
 }
 
 struct ImageChatResponse: Codable {
