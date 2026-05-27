@@ -63,10 +63,10 @@ struct MessageBubble: View {
             // Streaming indicator
             if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
-                    TypingIndicator()
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, isCompact ? 10 : 14)
-                        .background(Color.oxySurface2)
+                    OxyThinkingIndicator()
+                        .padding(.horizontal, isCompact ? 12 : 14)
+                        .padding(.vertical, isCompact ? 9 : 12)
+                        .background(.ultraThinMaterial)
                         .clipShape(
                             UnevenRoundedRectangle(
                                 topLeadingRadius: 6,
@@ -74,6 +74,15 @@ struct MessageBubble: View {
                                 bottomTrailingRadius: 20,
                                 topTrailingRadius: 20
                             )
+                        )
+                        .overlay(
+                            UnevenRoundedRectangle(
+                                topLeadingRadius: 6,
+                                bottomLeadingRadius: 20,
+                                bottomTrailingRadius: 20,
+                                topTrailingRadius: 20
+                            )
+                            .stroke(Color.oxyStone.opacity(0.16), lineWidth: 1)
                         )
                     Spacer(minLength: 60)
                 }
@@ -288,31 +297,6 @@ struct ActionCard: View {
         case "check_health": return "heart.fill"
         default: return "bolt.fill"
         }
-    }
-}
-
-// MARK: - Typing Indicator
-
-private struct TypingIndicator: View {
-    @State private var phase = false
-
-    var body: some View {
-        HStack(spacing: 5) {
-            ForEach(0..<3, id: \.self) { i in
-                Circle()
-                    .fill(Color.oxySub)
-                    .frame(width: 7, height: 7)
-                    .scaleEffect(phase ? 1.0 : 0.5)
-                    .opacity(phase ? 1.0 : 0.4)
-                    .animation(
-                        .easeInOut(duration: 0.5)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(i) * 0.15),
-                        value: phase
-                    )
-            }
-        }
-        .onAppear { phase = true }
     }
 }
 

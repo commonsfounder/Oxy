@@ -866,16 +866,20 @@ private struct StatusIndicator: View {
     let label: String
 
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.7)
-                .tint(Color.oxyStone)
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.oxySub)
+        HStack {
+            OxyThinkingIndicator(label: label, compact: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.oxyStone.opacity(0.16), lineWidth: 1)
+                )
+            Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 20)
+        .padding(.leading, 2)
     }
 }
 
