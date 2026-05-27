@@ -30,6 +30,11 @@ const {
 } = require('../runtime');
 const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
+  buildResolvedContext,
+  isContextualReference,
+  resolveContextualTurn
+} = require('./services/context-brain');
+const {
   createSessionToken,
   getAuthenticatedUserId,
   hashPassword,
@@ -373,6 +378,7 @@ CORE ETHOS:
 - Never treat casual chat as task completion.
 - Understand the user's meaning, not just keywords. If a phrase could be conversation, correction, factual question, or action, use the surrounding conversation to choose the human interpretation.
 - Back-and-forth matters. Treat short follow-ups like "that one", "is this right", "look it up", "bruh", "not that", and "I mean..." as referring to the recent conversation unless the user clearly starts a new topic.
+- Vague references are real intent. "it", "that", "there", "the one", "same", "again", "what about tomorrow", and "no I mean..." should resolve to the latest relevant thing in conversation before you choose a tool.
 - You're a person they trust, not a corporate chatbot.
 - Talk like a real friend — casual, natural, direct. No corporate-speak.
 - For simple conversational questions, keep replies to a maximum of 2 sentences. Voice replies must be concise.
@@ -415,6 +421,7 @@ ABSOLUTE RULES:
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
 11. Recent action results are real state. Don't repeat successful actions unless the user clearly asks you to repeat them.
 11a. If the user asks a question about a previous action result ("is this right?", "is this the most popular?", "why did you choose this?", "bruh"), answer or re-check the claim. Do not perform a new action unless they explicitly ask you to do it again.
+11b. If the user asks to act on a recent answer ("play it", "book that", "send it", "open the nearest one"), act on the most recent conversationally relevant target, not the last unrelated action.
 12. If a recent action failed and the user asks to retry, fix, redo, or "do the failed one", retry only the failed action unless they explicitly ask to rerun other actions too.
 13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.
 14. When executing communication actions, use the right register for the medium and relationship automatically.
@@ -739,6 +746,21 @@ ${JSON.stringify(pendingAction.action, null, 2)}
 If the user is revising it, return the full revised action block and keep it in review. Do not execute, send, book, call, or order until they confirm. If the user is asking a question about it, answer briefly without returning an action.`;
 }
 
+function buildResolvedContextBlock(resolvedContext) {
+  if (!resolvedContext || !resolvedContext.label) return '';
+  const safe = {
+    kind: resolvedContext.kind || 'unknown',
+    label: String(resolvedContext.label || '').slice(0, 1200),
+    source: resolvedContext.source || 'assistant_answer',
+    confidence: resolvedContext.confidence || 'low',
+    suggestedAction: resolvedContext.suggestedAction || undefined
+  };
+  return `RESOLVED SHORT-TERM CONTEXT:
+${JSON.stringify(safe, null, 2)}
+
+Use this to resolve vague follow-ups like "it", "that", "there", "same", "again", "what about tomorrow", and "the other one". If confidence is low, ask one short clarification instead of guessing.`;
+}
+
 function buildQuickTurnContext(preferences, statedContext = []) {
   return `FAST TURN MODE:
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
@@ -899,6 +921,24 @@ function isClarificationRequest(message) {
 async function inferContextualDeterministicTurn(userId, message, settings, trace = null) {
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
+
+  if (isContextualReference(text)) {
+    const [history, recentActions, memory] = await Promise.all([
+      getHistory(userId, trace, 12),
+      getRecentLoggedActions(userId, trace, 10),
+      getMemory(userId, trace)
+    ]);
+    const resolvedTurn = resolveContextualTurn({
+      message: text,
+      history,
+      recentActions,
+      memory,
+      settings
+    });
+    if (resolvedTurn?.spokenOnly || resolvedTurn?.actions?.length) {
+      return resolvedTurn;
+    }
+  }
 
   if (isClarificationRequest(text)) {
     const history = await getHistory(userId, trace, 10);
@@ -2899,16 +2939,20 @@ app.get('/history/:userId/date', async (req, res) => {
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
-  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName] = await Promise.all([
+  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
     getHistory(userId, trace),
     getPreferences(userId, trace),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
-    getPromptCacheName(trace, modelName)
+    getPromptCacheName(trace, modelName),
+    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   const statedContext = extractAlreadyStatedContext(history);
+  const resolvedContext = requestContext.resolvedContext || (!quickTurn && isContextualReference(message)
+    ? buildResolvedContext(history, recentActions)
+    : null);
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
     : buildDynamicSystemPrompt(
@@ -2919,7 +2963,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         userContext,
         buildLocationContext(requestContext.location),
         buildNativeHintsContext(requestContext.nativeHints),
-        buildPendingActionContext(requestContext.pendingAction)
+        buildPendingActionContext(requestContext.pendingAction),
+        buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),
       statedContext
     );
@@ -2934,7 +2979,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     dynamicSystemPrompt,
     cachedContentName,
     quickTurn,
-    statedContext
+    statedContext,
+    resolvedContext
   };
 }
 

@@ -7,7 +7,8 @@ const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|exchange rates|interest rate|interest rates|how much is)\b/i },
   { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
   { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach|trump|biden|harris|vance)\b/i },
-  { reason: 'explicit-search', pattern: /\b(search|look\s*it\s*up|look up|lookup|find out|google|check online|check it|re-?check|verify|online)\b/i }
+  { reason: 'explicit-search', pattern: /\b(search|look\s*it\s*up|look up|lookup|find out|google|check online|check it|re-?check|verify|online)\b/i },
+  { reason: 'contextual-fact-check', pattern: /\b(is|was|are|were)\s+(that|this|it)\s+(right|correct|true|accurate)\b|\b(are you sure|source\??|prove it|check that)\b/i }
 ];
 
 const CHANGEABLE_QUESTION_PATTERNS = [

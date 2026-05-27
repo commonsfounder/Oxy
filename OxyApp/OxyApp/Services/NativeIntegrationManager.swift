@@ -193,7 +193,7 @@ final class NativeIntegrationManager {
     func localContextHints(for message: String) async -> [String: Any] {
         var hints: [String: Any] = [:]
         if isContactResolutionRequest(message) {
-            let contacts = await contactHints(in: message)
+            let contacts = await contactHints(in: contactQuery(from: message))
             if !contacts.isEmpty {
                 hints["contacts"] = contacts.map(\.dictionary)
             }
@@ -250,6 +250,9 @@ final class NativeIntegrationManager {
         if requiresOnlineMusicResolution(message) {
             return true
         }
+        if isAmbiguousContextReference(trimmed) {
+            return true
+        }
         if lower.contains("last song i asked")
             || lower.contains("last track i asked")
             || lower.contains("song i asked you")
@@ -301,6 +304,29 @@ final class NativeIntegrationManager {
             return true
         }
         if trimmed.range(of: #"^(who|what|when|where|why|how|is|are|do|does|did|can|could|should|would|will)\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        return false
+    }
+
+    private func isAmbiguousContextReference(_ trimmed: String) -> Bool {
+        if [
+            "it", "that", "this", "there", "same", "again", "do it", "do that",
+            "book it", "book that", "open it", "open that", "send it",
+            "play it", "play that", "play this", "play that one", "play this one",
+            "that one", "this one", "the other one", "last one"
+        ].contains(trimmed) {
+            return true
+        }
+        if trimmed.contains("what about")
+            || trimmed.contains("no i mean")
+            || trimmed.contains("nah i mean")
+            || trimmed.contains("actually i mean")
+            || trimmed.contains("is that right")
+            || trimmed.contains("are you sure")
+            || trimmed.contains("send it to")
+            || trimmed.contains("open the nearest one")
+            || trimmed.contains("book that") {
             return true
         }
         return false
@@ -1567,6 +1593,16 @@ final class NativeIntegrationManager {
             || lower.contains("facetime")
             || lower.contains("email ")
             || lower.contains("send ")
+    }
+
+    private func contactQuery(from text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let range = trimmed.range(of: #"(?i)\bto\s+([A-Za-z][A-Za-z .'-]{1,60})(?:[?.!]|$)"#, options: .regularExpression) {
+            var contact = String(trimmed[range])
+            contact = contact.replacingOccurrences(of: #"(?i)^\s*to\s+"#, with: "", options: .regularExpression)
+            return contact.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        }
+        return trimmed
     }
 
     private func findNativePlace(for message: String) async -> NativeLocalActionResult? {
