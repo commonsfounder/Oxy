@@ -343,6 +343,33 @@ final class ChatViewModel {
         }
     }
 
+    nonisolated private static func nativeMusicTimeoutResult() -> NativeLocalActionResult {
+        NativeLocalActionResult(
+            action: "play_music",
+            text: "Apple Music is taking too long to respond. Try again in a moment.",
+            cardText: "Native music timed out",
+            actionSummary: "Music timed out",
+            deepLink: "music://",
+            success: false,
+            error: "Native music request timed out."
+        )
+    }
+
+    private func executeNativeMusicWithTimeout(query: String) async -> NativeLocalActionResult? {
+        await withTaskGroup(of: NativeLocalActionResult?.self) { group in
+            group.addTask {
+                await NativeIntegrationManager.shared.playResolvedMusicQuery(query)
+            }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(7))
+                return Self.nativeMusicTimeoutResult()
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
     private func executeLocalRequestWithTimeout(_ text: String) async -> NativeLocalActionResult? {
         await withTaskGroup(of: NativeLocalActionResult?.self) { group in
             group.addTask {
@@ -354,15 +381,7 @@ final class ChatViewModel {
                     || text.lowercased().contains("music")
                     || text.lowercased().contains("song")
                     || text.lowercased().contains("playlist") {
-                    return NativeLocalActionResult(
-                        action: "play_music",
-                        text: "Apple Music is taking too long to respond. Try again in a moment.",
-                        cardText: "Native music timed out",
-                        actionSummary: "Music timed out",
-                        deepLink: "music://",
-                        success: false,
-                        error: "Native music request timed out."
-                    )
+                    return Self.nativeMusicTimeoutResult()
                 }
                 return nil
             }
@@ -383,7 +402,7 @@ final class ChatViewModel {
             .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         guard !query.isEmpty, !musicQueryStillNeedsResolution(query) else { return }
-        guard let nativeResult = await nativeManager.playResolvedMusicQuery(query) else { return }
+        guard let nativeResult = await executeNativeMusicWithTimeout(query: query) else { return }
         let nativeAction = ActionResult(native: nativeResult)
         _ = updateAssistantMessage(id: assistantID) {
             $0.content = nativeResult.text
