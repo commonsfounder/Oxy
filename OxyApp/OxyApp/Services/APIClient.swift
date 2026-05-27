@@ -73,6 +73,64 @@ final class APIClient: @unchecked Sendable {
         return data
     }
 
+    func multipartRequest(
+        path: String,
+        method: String = "POST",
+        fields: [String: String],
+        fileField: String,
+        fileName: String,
+        mimeType: String,
+        fileData: Data,
+        queryItems: [URLQueryItem]? = nil
+    ) async throws -> Data {
+        guard var components = URLComponents(string: "\(baseURL)\(path)") else {
+            throw APIError.invalidURL
+        }
+        if let queryItems {
+            components.queryItems = (components.queryItems ?? []) + queryItems
+        }
+        guard let url = components.url else {
+            throw APIError.invalidURL
+        }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for (key, value) in fields {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"\(key)\"\r\n\r\n")
+            body.append("\(value)\r\n")
+        }
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"\(fileField)\"; filename=\"\(fileName)\"\r\n")
+        body.append("Content-Type: \(mimeType)\r\n\r\n")
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n")
+
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if !token.isEmpty {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        req.httpBody = body
+        req.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.unknown
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorBody = try? JSONDecoder().decode(ErrorBody.self, from: data)
+            let message = errorBody?.error ?? "Upload failed"
+            if http.statusCode == 401 {
+                handleUnauthorized()
+                throw APIError.server(401, message)
+            }
+            throw APIError.server(http.statusCode, message)
+        }
+        return data
+    }
+
     /// Opens an SSE stream and yields parsed events via an AsyncStream.
     func sseStream(
         path: String,
@@ -164,6 +222,14 @@ final class APIClient: @unchecked Sendable {
         KeychainHelper.shared.delete(key: "session_token")
         KeychainHelper.shared.delete(key: "user_id")
         NotificationCenter.default.post(name: .oxySessionExpired, object: nil)
+    }
+}
+
+private extension Data {
+    mutating func append(_ string: String) {
+        if let data = string.data(using: .utf8) {
+            append(data)
+        }
     }
 }
 

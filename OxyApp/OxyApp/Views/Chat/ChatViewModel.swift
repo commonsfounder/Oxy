@@ -182,6 +182,65 @@ final class ChatViewModel {
         sendMessage(userId: userId)
     }
 
+    func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String) {
+        let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = typed.isEmpty ? "Look at this image and tell me what you see." : typed
+        guard !isSending else { return }
+
+        inputText = ""
+        isSending = true
+        statusLabel = "Looking at image"
+
+        let userMessage = Message(role: .user, content: "\(text)\n[Image attached]")
+        messages.append(userMessage)
+
+        let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
+        messages.append(assistantMessage)
+        let assistantID = assistantMessage.id
+        let settings = currentSettings
+
+        currentSendTask = Task {
+            do {
+                let response = try await chatService.sendImageMessage(
+                    userId: userId,
+                    message: text,
+                    imageData: imageData,
+                    fileName: fileName,
+                    mimeType: mimeType,
+                    settings: settings
+                )
+                let actions = response.actions ?? []
+                await MainActor.run {
+                    _ = updateAssistantMessage(id: assistantID) {
+                        $0.content = response.text
+                        $0.actions = actions
+                        $0.isStreaming = false
+                    }
+                    openDeepLinks(actions)
+                    if let audio = response.audio {
+                        playAudio(audio)
+                    } else if let ttsError = response.ttsError {
+                        statusLabel = "Voice unavailable: \(ttsError)"
+                    } else {
+                        statusLabel = nil
+                    }
+                    isSending = false
+                    currentSendTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    _ = updateAssistantMessage(id: assistantID) {
+                        $0.content = "Something went wrong with that image: \(error.localizedDescription)"
+                        $0.isStreaming = false
+                    }
+                    statusLabel = nil
+                    isSending = false
+                    currentSendTask = nil
+                }
+            }
+        }
+    }
+
     func clearChat() {
         currentSendTask?.cancel()
         currentSendTask = nil

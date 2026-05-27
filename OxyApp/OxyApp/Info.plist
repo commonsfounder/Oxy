@@ -12,6 +12,8 @@
 	<string>Oxy uses the microphone for voice input so you can talk instead of typing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Oxy uses speech recognition to convert your voice into text messages.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Oxy lets you attach photos and images for multimodal chat when you choose them.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Oxy reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
 	<key>NSContactsUsageDescription</key>

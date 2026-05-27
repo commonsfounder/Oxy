@@ -1,4 +1,5 @@
 import MessageUI
+import PhotosUI
 import SwiftUI
 
 struct ChatView: View {
@@ -13,6 +14,11 @@ struct ChatView: View {
     @State private var messageComposerAlert: String?
     @State private var handledReviewActionIDs = Set<String>()
     @State private var handledMessageComposeActionIDs = Set<String>()
+    @State private var showPhotoPicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var pendingImageData: Data?
+    @State private var pendingImageName: String?
+    @State private var pendingImageMimeType = "image/jpeg"
 
     var body: some View {
         NavigationStack {
@@ -118,9 +124,10 @@ struct ChatView: View {
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending,
                         isRecording: voiceInput.isRecording,
+                        attachmentLabel: pendingImageName,
                         isFocused: $isInputFocused,
                         onSend: {
-                            viewModel.sendMessage(userId: appState.userId)
+                            sendCurrentDraft()
                         },
                         onVoice: {
                             if voiceInput.isRecording {
@@ -132,6 +139,14 @@ struct ChatView: View {
                             } else {
                                 voiceInput.startRecording()
                             }
+                        },
+                        onAttach: {
+                            showPhotoPicker = true
+                        },
+                        onRemoveAttachment: {
+                            pendingImageData = nil
+                            pendingImageName = nil
+                            selectedPhotoItem = nil
                         }
                     )
                 }
@@ -250,6 +265,19 @@ struct ChatView: View {
             } message: {
                 Text(messageComposerAlert ?? "")
             }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        await MainActor.run {
+                            pendingImageData = data
+                            pendingImageName = "Photo"
+                            pendingImageMimeType = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
+                        }
+                    }
+                }
+            }
             .onChange(of: pendingReviewAction) { oldValue, newValue in
                 if let oldValue, newValue == nil {
                     handledReviewActionIDs.insert(oldValue.id)
@@ -261,6 +289,22 @@ struct ChatView: View {
         }
         .onAppear {
             viewModel.requestLocationAccess()
+        }
+    }
+
+    private func sendCurrentDraft() {
+        if let pendingImageData {
+            viewModel.sendImageMessage(
+                userId: appState.userId,
+                imageData: pendingImageData,
+                fileName: pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg",
+                mimeType: pendingImageMimeType
+            )
+            self.pendingImageData = nil
+            pendingImageName = nil
+            selectedPhotoItem = nil
+        } else {
+            viewModel.sendMessage(userId: appState.userId)
         }
     }
 
@@ -801,23 +845,50 @@ private struct ChatInputBar: View {
     @Binding var text: String
     let isSending: Bool
     let isRecording: Bool
+    let attachmentLabel: String?
     var isFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
     let onVoice: () -> Void
+    let onAttach: () -> Void
+    let onRemoveAttachment: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             Divider()
                 .overlay(Color.oxyLine2)
 
+            if let attachmentLabel {
+                HStack(spacing: 8) {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.oxyStone)
+                    Text(attachmentLabel)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.oxySub)
+                    Spacer()
+                    Button(action: onRemoveAttachment) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color.oxyDim)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Color.oxySurface2)
+                .clipShape(Capsule())
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
-                // Mic button
-                Button(action: onVoice) {
-                    Image(systemName: isRecording ? "mic.fill" : "mic")
-                        .font(.system(size: 17))
-                        .foregroundStyle(isRecording ? Color.oxyRed : Color.oxySub)
+                Button(action: onAttach) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.oxySub)
                         .frame(width: 36, height: 36)
                 }
+                .disabled(isSending)
 
                 HStack(spacing: 8) {
                     TextField("Message Oxy...", text: $text, axis: .vertical)
@@ -838,16 +909,16 @@ private struct ChatInputBar: View {
                         .stroke(Color.oxyLine2, lineWidth: 1)
                 )
 
-                Button(action: onSend) {
-                    Image(systemName: "arrow.up")
+                Button(action: canSend ? onSend : onVoice) {
+                    Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(canSend ? Color.oxyOnAccent : Color.oxyDim)
+                        .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
                         .frame(width: 36, height: 36)
-                        .background(canSend ? Color.oxyStone : Color.oxySurface3)
+                        .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
                         .clipShape(Circle())
                 }
-                .disabled(!canSend)
-                .animation(.easeInOut(duration: 0.15), value: canSend)
+                .disabled(!canAct)
+                .animation(.easeInOut(duration: 0.15), value: canAct)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -856,7 +927,11 @@ private struct ChatInputBar: View {
     }
 
     private var canSend: Bool {
-        !isSending && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isSending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentLabel != nil)
+    }
+
+    private var canAct: Bool {
+        !isSending
     }
 }
 

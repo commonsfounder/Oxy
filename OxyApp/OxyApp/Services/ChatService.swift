@@ -82,6 +82,52 @@ struct ChatService {
         )
     }
 
+    func sendImageMessage(
+        userId: String,
+        message: String,
+        imageData: Data,
+        fileName: String,
+        mimeType: String,
+        settings: OxySettings? = nil
+    ) async throws -> ImageChatResponse {
+        var fields: [String: String] = [
+            "userId": userId,
+            "message": message
+        ]
+        if let settings {
+            let payload: [String: Any] = [
+                "name": settings.name,
+                "voice": settings.voice,
+                "voiceOn": settings.voiceOn,
+                "voiceEngine": settings.voiceEngine,
+                "autonomy": settings.autonomy,
+                "preferredMapsApp": settings.preferredMapsApp,
+                "preferredTransportMode": settings.preferredTransportMode,
+                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload),
+               let json = String(data: data, encoding: .utf8) {
+                fields["settings"] = json
+            }
+        }
+
+        var queryItems: [URLQueryItem] = []
+        if settings?.voiceOn == true {
+            queryItems.append(URLQueryItem(name: "tts", value: "true"))
+        }
+
+        let data = try await api.multipartRequest(
+            path: "/chat-with-image",
+            fields: fields,
+            fileField: "image",
+            fileName: fileName,
+            mimeType: mimeType,
+            fileData: imageData,
+            queryItems: queryItems
+        )
+        return try JSONDecoder().decode(ImageChatResponse.self, from: data)
+    }
+
     func loadBriefings(userId: String, limit: Int = 30) async throws -> [Briefing] {
         let data = try await api.request(
             path: "/briefings/\(userId)",
@@ -105,6 +151,14 @@ struct ChatService {
             body: ["userId": userId]
         )
     }
+}
+
+struct ImageChatResponse: Codable {
+    let text: String
+    let actions: [ActionResult]?
+    let audio: String?
+    let audioMimeType: String?
+    let ttsError: String?
 }
 
 private extension Encodable {

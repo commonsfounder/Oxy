@@ -3,6 +3,7 @@ import Speech
 import Observation
 
 @Observable
+@MainActor
 final class VoiceInputManager {
     var isRecording = false
     var transcript = ""
@@ -40,7 +41,7 @@ final class VoiceInputManager {
         errorMessage = nil
         transcript = ""
 
-        let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+        let recognizer = SFSpeechRecognizer(locale: Locale.current)
         guard let recognizer, recognizer.isAvailable else {
             errorMessage = "Speech recognition not available"
             return
@@ -70,12 +71,14 @@ final class VoiceInputManager {
         }
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                self.transcript = result.bestTranscription.formattedString
-            }
-            if error != nil || (result?.isFinal == true) {
-                self.stopRecording()
+            Task { @MainActor in
+                guard let self else { return }
+                if let result {
+                    self.transcript = result.bestTranscription.formattedString
+                }
+                if error != nil || (result?.isFinal == true) {
+                    self.stopRecording()
+                }
             }
         }
 
