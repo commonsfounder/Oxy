@@ -115,9 +115,9 @@ const ACTION_CONTRACTS = {
   get_directions: {
     risk: 'low',
     required: ['destination'],
-    optional: ['mode', 'arrival_time'],
-    aliases: { destination: ['query', 'place', 'address'] },
-    inputExample: { destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional natural time' },
+    optional: ['origin', 'mode', 'arrival_time'],
+    aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
+    inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional natural time' },
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none'
@@ -147,6 +147,15 @@ const ACTION_CONTRACTS = {
     inputExample: { origin: 'station name or CRS code', destination: 'station name or CRS code' },
     successSummary: 'Trainline ready',
     failureSummary: 'Train search failed',
+    confirmation: 'none'
+  },
+  station_board: {
+    risk: 'low',
+    required: ['station'],
+    aliases: { station: ['origin', 'from'] },
+    inputExample: { station: 'station name or CRS code' },
+    successSummary: 'Station board ready',
+    failureSummary: 'Station board failed',
     confirmation: 'none'
   },
   order_uber_eats: {

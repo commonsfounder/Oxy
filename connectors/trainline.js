@@ -1,4 +1,4 @@
-const SUPPORTED_ACTIONS = ['search_trains'];
+const SUPPORTED_ACTIONS = ['search_trains', 'station_board'];
 
 function getAxios() {
   return require('axios');
@@ -125,6 +125,38 @@ async function getNextTrains(originCRS, destCRS) {
   };
 }
 
+async function getStationBoard(stationCRS) {
+  const appId = process.env.TRANSPORT_API_APP_ID;
+  const appKey = process.env.TRANSPORT_API_APP_KEY;
+  const endpoint = `https://transportapi.com/v3/uk/train/station/${stationCRS}/live.json`;
+  const axios = getAxios();
+  try {
+    const resp = await axios.get(endpoint, {
+      params: {
+        app_id: appId,
+        app_key: appKey,
+        train_status: 'passenger'
+      },
+      timeout: 10000
+    });
+    const departures = resp.data?.departures?.all || [];
+    return {
+      accessDenied: false,
+      trains: departures.slice(0, 5).map(d => ({
+        scheduledDeparture: d.aimed_departure_time,
+        estimatedDeparture: d.expected_departure_time,
+        platform: d.platform,
+        destination: d.destination_name,
+        operator: d.operator_name,
+        cancelled: d.status === 'CANCELLED',
+      }))
+    };
+  } catch (err) {
+    if (err.response?.status === 403) return { trains: [], accessDenied: true };
+    throw err;
+  }
+}
+
 // CRS → Trainline city slug for route URLs (thetrainline.com/trains/{from}/{to})
 const CITY_SLUG = {
   'EUS': 'london', 'PAD': 'london', 'WAT': 'london', 'VIC': 'london',
@@ -187,6 +219,84 @@ function compareClockTimes(a, b) {
 
 async function execute(userId, action, params) {
   try {
+    if (action === 'station_board') {
+      const station = String(params?.station || params?.origin || '').trim();
+      if (!station) return { success: false, error: 'station_board requires a station' };
+
+      const stationCRS = await lookupCRS(station);
+      const bookingUrl = stationCRS
+        ? `https://www.thetrainline.com/stations/${stationCRS.toLowerCase()}`
+        : `https://www.thetrainline.com/search?origin=${encodeURIComponent(station)}`;
+
+      if (!stationCRS) {
+        return {
+          success: true,
+          text: `I couldn't verify "${station}" as a rail station for live departures, but I can open Trainline so you can confirm it there.`,
+          cardText: 'Open station in Trainline',
+          actionSummary: 'Trainline ready',
+          webLink: bookingUrl,
+          bookingUrl,
+          trains: []
+        };
+      }
+
+      if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
+        return {
+          success: true,
+          text: `I couldn't check the live station board for ${station} because live rail data isn't configured right now. I can still open Trainline for the station.`,
+          cardText: 'Open station in Trainline',
+          actionSummary: 'Trainline ready',
+          webLink: bookingUrl,
+          bookingUrl,
+          trains: []
+        };
+      }
+
+      const { trains, accessDenied } = await getStationBoard(stationCRS);
+      if (accessDenied) {
+        return {
+          success: true,
+          text: `I couldn't access the live station board for ${station} with the current rail data permissions, but I can open Trainline for you.`,
+          cardText: 'Open station in Trainline',
+          actionSummary: 'Trainline ready',
+          webLink: bookingUrl,
+          bookingUrl,
+          trains: []
+        };
+      }
+
+      if (!trains.length) {
+        return {
+          success: true,
+          text: `I couldn't find any live departures at ${station} in the current feed. I've included Trainline to double-check.`,
+          cardText: 'Open station in Trainline',
+          actionSummary: 'Trainline ready',
+          webLink: bookingUrl,
+          bookingUrl,
+          trains: []
+        };
+      }
+
+      const lines = trains.map((t, i) => {
+        const dep = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
+          ? `${t.scheduledDeparture} (exp ${t.estimatedDeparture})`
+          : t.scheduledDeparture;
+        const plat = t.platform ? ` · Platform ${t.platform}` : '';
+        const status = t.cancelled ? ' · CANCELLED' : '';
+        return `${i + 1}. ${dep} to ${t.destination || 'destination TBC'}${plat}${status}`;
+      });
+
+      return {
+        success: true,
+        text: `Live departures at ${station}:\n${lines.join('\n')}`,
+        trains,
+        cardText: lines[0].replace(/^1\.\s*/, ''),
+        actionSummary: 'Station board ready',
+        webLink: bookingUrl,
+        bookingUrl
+      };
+    }
+
     if (action !== 'search_trains') return { success: false, error: `Unknown action: ${action}` };
 
     const { origin, destination } = params;

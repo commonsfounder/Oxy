@@ -10,6 +10,7 @@ const ACTION_CONNECTOR = {
   send_telegram: 'telegram',
   get_telegram_contacts: 'telegram',
   search_trains: 'trainline',
+  station_board: 'trainline',
   order_uber_eats: 'ubereats',
   order_deliveroo: 'deliveroo',
   search_netflix_title: 'netflix',

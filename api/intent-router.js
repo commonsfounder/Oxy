@@ -1,7 +1,9 @@
 const LOCAL_PLACE_TERMS = /\b(nearest|closest|near me|nearby|around me|coffee|cafe|restaurant|gym|mcdonald'?s|john lewis|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i;
 const RIDE_TERMS = /\b(uber|ride|taxi|cab|car|take me|pick me up|drive me)\b/i;
-const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|bus|buses|public transport|transit|what bus|which bus|need to be at)\b/i;
-const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus)\b/i;
+const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
+const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|train|trains|rail|tube|tram)\b/i;
+const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
+const FUTURE_TIME_TERMS = /\b(tomorrow|later|around|about|by|at|after|before|\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i;
 
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
@@ -32,6 +34,9 @@ function cleanDestinationPhrase(message) {
     .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, '')
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, '')
     .replace(/^(what|which)\s+(bus|buses|public transport|transit)\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
+    .replace(/^(what|which)\s+train\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')
+    .replace(/^what\s+about\s+(to)?\s*/i, '')
+    .replace(/^heading\s+to\s+/i, '')
     .replace(/^how\s+do\s+i\s+get\s+to\s+/i, '')
     .replace(/^how\s+can\s+i\s+get\s+to\s+/i, '')
     .replace(/^where\s+(is|are)\s+/i, '')
@@ -47,6 +52,8 @@ function cleanDestinationPhrase(message) {
     .replace(/\b(in|on)\s+(apple\s+)?maps\b/i, ' ')
     .replace(/\bis\s+(located|at)\b/i, ' ')
     .replace(/\s+by\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\s+.*$/i, ' ')
+    .replace(/\s+(tomorrow|today)\s+(around|about|at|by)?\s*\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
+    .replace(/\s+(around|about|at|by)\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b.*$/i, ' ')
     .replace(/\s+what\s+(bus|buses|public transport|transit)\s+.*$/i, ' ')
     .replace(/\s+(to|near|from)\s+me\s+(is|are)\??$/i, ' ')
     .replace(/\s+(is|are)\??$/i, '')
@@ -58,12 +65,75 @@ function cleanDestinationPhrase(message) {
 }
 
 function extractArrivalTime(message) {
-  const match = String(message || '').match(/\bby\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
-  return match ? match[1].trim() : undefined;
+  const text = String(message || '');
+  const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
+  const match = text.match(/\b(?:by|at|around|about)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
+    text.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
+  return match ? `${day}${match[1].trim()}`.trim() : undefined;
+}
+
+function extractFromTo(message) {
+  const text = normalizeText(message);
+  const match = text.match(/\bfrom\s+(.+?)\s+to\s+(.+?)(?:\s+(?:tomorrow|today|around|about|at|by|after|before)\b|[?.!]|$)/i);
+  if (!match) return null;
+  return {
+    origin: cleanDestinationPhrase(match[1]),
+    destination: cleanDestinationPhrase(match[2])
+  };
+}
+
+function extractHeadingDestination(message) {
+  const text = normalizeText(message);
+  const match = text.match(/\bneed\s+to\s+be\s+at\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
+    text.match(/\bneed\s+to\s+get\s+to\s+(.+?)(?:\s+by\b|\s+(?:tomorrow|today|around|about|at|after|before)\b|[?.!]|$)/i) ||
+    text.match(/\b(?:heading|going|travelling|traveling)\s+to\s+(.+?)(?:[?.!]|$)/i) ||
+    text.match(/\bto\s+(.+?)(?:\s+(?:tomorrow|today|around|about|at|by|after|before)\b|[?.!]|$)/i);
+  if (!match) return null;
+  return cleanDestinationPhrase(match[1]);
+}
+
+function cleanStationPhrase(value) {
+  return normalizeText(value)
+    .replace(/^(live\s+)?(departures?|arrival board|station board|platforms?|what platform)\s+(at|from|for)?\s*/i, '')
+    .replace(/^next\s+train\s+from\s+/i, '')
+    .replace(/^first\s+train\s+from\s+/i, '')
+    .replace(/\s+(station board|departures?|platforms?)$/i, '')
+    .replace(/\bplease\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferLiveRailAction(message) {
+  const text = normalizeText(message);
+  if (!/\b(train|trains|rail|station|platform|departures?|arrival board|station board)\b/i.test(text)) return null;
+  if (!LIVE_RAIL_TERMS.test(text)) return null;
+
+  const fromTo = extractFromTo(text);
+  if (fromTo?.origin && fromTo?.destination && !FUTURE_TIME_TERMS.test(text.replace(/\bnext train\b/i, ''))) {
+    return {
+      reason: 'live_train_between_stations',
+      spoken: "I'll check live train departures.",
+      actions: [{ type: 'search_trains', input: fromTo }]
+    };
+  }
+
+  if (/\b(tomorrow|later|around|about|at|by|after|before)\b/i.test(text)) return null;
+
+  const stationMatch = text.match(/\b(?:at|from)\s+(.+?)(?:[?.!]|$)/i);
+  const station = cleanStationPhrase(stationMatch?.[1] || text);
+  if (!station || /\b(to|towards)\b/i.test(station)) return null;
+  return {
+    reason: 'live_station_board',
+    spoken: "I'll check the live station board.",
+    actions: [{ type: 'station_board', input: { station } }]
+  };
 }
 
 function inferDeterministicAction(message) {
   const text = normalizeText(message);
+
+  const liveRail = inferLiveRailAction(text);
+  if (liveRail) return liveRail;
 
   if (looksLikeRideRequest(text) && looksLikeLocalPlaceRequest(text)) {
     return {
@@ -74,10 +144,13 @@ function inferDeterministicAction(message) {
   }
 
   if (looksLikeDirectionsRequest(text)) {
+    const fromTo = extractFromTo(text);
+    const headingDestination = !fromTo ? extractHeadingDestination(text) : null;
     const input = {
-      destination: cleanDestinationPhrase(text),
+      destination: fromTo?.destination || headingDestination || cleanDestinationPhrase(text),
       mode: TRANSIT_TERMS.test(text) ? 'transit' : 'driving'
     };
+    if (fromTo?.origin) input.origin = fromTo.origin;
     const arrivalTime = extractArrivalTime(text);
     if (arrivalTime) input.arrival_time = arrivalTime;
     return {

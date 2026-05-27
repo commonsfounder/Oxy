@@ -41,3 +41,22 @@ test('unknown stations degrade to Trainline instead of a failed action', async (
     if (oldKey) process.env.TRANSPORT_API_APP_KEY = oldKey;
   }
 });
+
+test('station board degrades to Trainline when live rail is not configured', async () => {
+  const oldId = process.env.TRANSPORT_API_APP_ID;
+  const oldKey = process.env.TRANSPORT_API_APP_KEY;
+  delete process.env.TRANSPORT_API_APP_ID;
+  delete process.env.TRANSPORT_API_APP_KEY;
+  try {
+    const result = await trainline.execute('test-user', 'station_board', {
+      station: 'Milton Keynes Central'
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.actionSummary, 'Trainline ready');
+    assert.match(result.text, /live station board/i);
+    assert.match(result.webLink, /mkc/);
+  } finally {
+    if (oldId) process.env.TRANSPORT_API_APP_ID = oldId;
+    if (oldKey) process.env.TRANSPORT_API_APP_KEY = oldKey;
+  }
+});

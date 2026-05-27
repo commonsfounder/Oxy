@@ -22,6 +22,7 @@ test('Core 20 actions have contracts for reliability work', () => {
     'create_calendar_event',
     'get_calendar_events',
     'search_trains',
+    'station_board',
     'play_music',
     'order_uber_eats',
     'order_deliveroo',

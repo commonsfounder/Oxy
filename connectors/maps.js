@@ -66,8 +66,10 @@ function directionModeFlag(mode) {
 
 function mapsDirectionsFallback(destination, params = {}) {
   const cleanedDestination = cleanPlaceSearchQuery(destination);
+  const cleanedOrigin = cleanPlaceSearchQuery(params.origin || '');
   const flag = directionModeFlag(params.mode);
-  const link = `https://maps.apple.com/?daddr=${encodeURIComponent(cleanedDestination)}&dirflg=${flag}`;
+  const originPart = cleanedOrigin ? `saddr=${encodeURIComponent(cleanedOrigin)}&` : '';
+  const link = `https://maps.apple.com/?${originPart}daddr=${encodeURIComponent(cleanedDestination)}&dirflg=${flag}`;
   const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
   return {
     success: true,
@@ -82,7 +84,8 @@ function mapsDirectionsFallback(destination, params = {}) {
 function parseArrivalTime(value, now = new Date()) {
   const text = String(value || '').trim();
   if (!text) return null;
-  const match = text.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+  const tomorrow = /\btomorrow\b/i.test(text);
+  const match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2] || 0);
@@ -91,8 +94,9 @@ function parseArrivalTime(value, now = new Date()) {
   if (meridiem === 'pm' && hour < 12) hour += 12;
   if (meridiem === 'am' && hour === 12) hour = 0;
   const arrival = new Date(now);
+  if (tomorrow) arrival.setDate(arrival.getDate() + 1);
   arrival.setHours(hour, minute, 0, 0);
-  if (arrival.getTime() < now.getTime()) arrival.setDate(arrival.getDate() + 1);
+  if (!tomorrow && arrival.getTime() < now.getTime()) arrival.setDate(arrival.getDate() + 1);
   return Math.floor(arrival.getTime() / 1000);
 }
 
@@ -128,7 +132,8 @@ async function getGoogleDirections(destination, place, params = {}) {
   const location = params.location;
   const lat = Number(location?.latitude ?? location?.lat);
   const lng = Number(location?.longitude ?? location?.lng);
-  if (!key || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const explicitOrigin = cleanPlaceSearchQuery(params.origin || '');
+  if (!key || (!explicitOrigin && (!Number.isFinite(lat) || !Number.isFinite(lng)))) return null;
 
   const mode = directionModeFlag(params.mode) === 'r'
     ? 'transit'
@@ -136,7 +141,7 @@ async function getGoogleDirections(destination, place, params = {}) {
       ? 'walking'
       : 'driving';
   const requestParams = {
-    origin: `${lat},${lng}`,
+    origin: explicitOrigin || `${lat},${lng}`,
     destination: place?.formattedAddress || cleanPlaceSearchQuery(destination),
     mode,
     alternatives: true,
@@ -176,8 +181,8 @@ async function execute(userId, action, params) {
         return null;
       });
       const link = place?.googleMapsUri
-        ? `https://maps.apple.com/?daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
-        : `https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
+        ? `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
+        : `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
       const label = placeLabel(place, destination);
       const routeText = route?.headline ? `${route.headline}: ${route.detail}` : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`;
       return {

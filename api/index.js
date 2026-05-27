@@ -403,8 +403,9 @@ ABSOLUTE RULES:
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
 7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
-7a. If the user asks about trains, departures, arrivals, platforms, or the next train to somewhere, use search_trains instead of guessing
-7b. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
+7a. For journey-planning train questions like "what train can I take tomorrow around 9", "how do I get to Apsley", or "train to London tomorrow", use get_directions with mode "transit"; include origin and arrival_time when the user gives them.
+7b. Use search_trains only for live train departures between two named stations now. Use station_board for live departures/platform/station-board questions at one station.
+7c. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
 8. If you are unsure, ask a brief clarifying question instead of guessing
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
@@ -1814,7 +1815,7 @@ function buildAvailableActions(enabled) {
     monzo: ['check_balance'],
     betfair: ['place_bet'],
     notion: ['create_note'],
-    trainline: ['search_trains']
+    trainline: ['search_trains', 'station_board']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
   if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, generate_visual, create_diagram, create_presentation.';
@@ -2795,8 +2796,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   };
 }
 
-const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
-const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains']);
+const DATA_ACTIONS = new Set(['search_trains', 'station_board', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains', 'station_board']);
 
 async function buildMorningBriefing(userId, now = new Date()) {
   const [memory, history] = await Promise.all([
