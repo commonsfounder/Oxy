@@ -365,7 +365,9 @@ final class NativeIntegrationManager {
             || lower.contains("song")
             || lower.contains("playlist")
             || lower == "pause"
+            || lower.hasPrefix("pause ")
             || lower == "resume"
+            || lower.hasPrefix("resume ")
             || lower == "next"
             || lower == "previous"
             || lower == "back"
@@ -415,7 +417,7 @@ final class NativeIntegrationManager {
 
         guard !lower.hasPrefix("play ") && !lower.hasPrefix("listen to ") else { return nil }
 
-        if lower == "pause" || lower.contains("pause music") || lower.contains("pause playback") {
+        if lower == "pause" || lower.hasPrefix("pause ") || lower.contains("pause music") || lower.contains("pause playback") {
             systemPlayer.pause()
             appPlayer.pause()
             return NativeLocalActionResult(
@@ -427,7 +429,7 @@ final class NativeIntegrationManager {
             )
         }
 
-        if lower == "resume" || lower == "play" || lower.contains("resume music") || lower.contains("resume playback") {
+        if lower == "resume" || lower == "play" || lower.hasPrefix("resume ") || lower.contains("resume music") || lower.contains("resume playback") {
             systemPlayer.play()
             appPlayer.play()
             return NativeLocalActionResult(
@@ -740,7 +742,11 @@ final class NativeIntegrationManager {
             )
         }
 
-        let parsed = parseMusicAddRequest(message)
+        let parsedRequest = parseMusicAddRequest(message)
+        let parsed = (
+            query: resolvedMusicReference(parsedRequest.query),
+            playlistName: parsedRequest.playlistName
+        )
         guard !parsed.query.isEmpty else { return nil }
 
         do {
@@ -863,6 +869,10 @@ final class NativeIntegrationManager {
 
     private func resolvedMusicQuery(from message: String) -> String {
         let query = cleanMusicQuery(message)
+        return resolvedMusicReference(query)
+    }
+
+    private func resolvedMusicReference(_ query: String) -> String {
         let normalized = normalizeMusicText(query)
         if isPreviousMusicReference(normalized), let previous = previousMusicQuery {
             return previous
@@ -872,7 +882,7 @@ final class NativeIntegrationManager {
         }
         if ["it", "that", "this", "that one", "this one"].contains(normalized),
            let lastMusicQuery,
-           !lastMusicQuery.isEmpty {
+            !lastMusicQuery.isEmpty {
             return lastMusicQuery
         }
         return query
@@ -927,7 +937,7 @@ final class NativeIntegrationManager {
 
     private func cleanPlaylistName(_ text: String) -> String {
         text.replacingOccurrences(of: #"(?i)\bplaylist\b"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #"(?i)^(called|named)\s+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)^(called|named|titled)\s+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
@@ -968,14 +978,15 @@ final class NativeIntegrationManager {
         let snapshot = await healthSnapshot()
 
         if lower.contains("steps") || lower.contains("step count") {
-            guard let steps = snapshot.stepCountToday else {
-                return noHealthDataResult("steps today")
+            let range = healthDateRange(from: lower)
+            guard let steps = await sumQuantity(.stepCount, unit: .count(), start: range.start, end: range.end) else {
+                return noHealthDataResult("steps \(range.label)")
             }
             let count = Int(steps.rounded())
             return NativeLocalActionResult(
                 action: "check_health",
-                text: "You have \(count.formatted()) steps today.",
-                cardText: "\(count.formatted()) steps today",
+                text: "Apple Health shows \(count.formatted()) steps \(range.label).",
+                cardText: "\(count.formatted()) steps \(range.label)",
                 actionSummary: "Steps checked",
                 deepLink: "x-apple-health://"
             )
@@ -1135,15 +1146,36 @@ final class NativeIntegrationManager {
     }
 
     private func sumQuantityToday(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit) async -> Double? {
+        await sumQuantity(identifier, unit: unit, start: Calendar.current.startOfDay(for: Date()), end: Date())
+    }
+
+    private func sumQuantity(_ identifier: HKQuantityTypeIdentifier, unit: HKUnit, start: Date, end: Date) async -> Double? {
         guard let type = HKObjectType.quantityType(forIdentifier: identifier) else { return nil }
-        let start = Calendar.current.startOfDay(for: Date())
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
         return await withCheckedContinuation { continuation in
             let query = HKStatisticsQuery(quantityType: type, quantitySamplePredicate: predicate, options: .cumulativeSum) { _, stats, _ in
                 continuation.resume(returning: stats?.sumQuantity()?.doubleValue(for: unit))
             }
             healthStore.execute(query)
         }
+    }
+
+    private func healthDateRange(from lower: String) -> (start: Date, end: Date, label: String) {
+        let calendar = Calendar.current
+        let now = Date()
+        let todayStart = calendar.startOfDay(for: now)
+
+        if lower.contains("yesterday") {
+            let start = calendar.date(byAdding: .day, value: -1, to: todayStart) ?? todayStart
+            return (start, todayStart, "yesterday")
+        }
+
+        if lower.contains("this morning") {
+            let noon = calendar.date(byAdding: .hour, value: 12, to: todayStart) ?? now
+            return (todayStart, min(noon, now), "this morning")
+        }
+
+        return (todayStart, now, "today")
     }
 
     private func sleepMinutesLastNight() async -> Double? {
