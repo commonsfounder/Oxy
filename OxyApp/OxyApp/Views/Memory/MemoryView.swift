@@ -7,45 +7,58 @@ struct MemoryView: View {
     @State private var isSaving = false
     @State private var draft = ""
     @State private var saveMessage: String?
+    private let embedded: Bool
+
+    init(embedded: Bool = false) {
+        self.embedded = embedded
+    }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        MemoryDropBox(
-                            draft: $draft,
-                            isSaving: isSaving,
-                            message: saveMessage,
-                            onSave: { Task { await saveMemory() } }
-                        )
-
-                        HStack(spacing: 10) {
-                            MemoryStat(title: "Saved", value: isLoading ? "..." : "\(summary.total)")
-                            MemoryStat(title: "Learned", value: isLoading ? "..." : "\(summary.learned)")
-                            MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
-                        }
-
-                        if let lastUpdated = summary.lastUpdated {
-                            Text("Updated \(formattedDate(lastUpdated))")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Color.oxyDim)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 6)
-                        }
-                    }
-                    .padding(16)
-                }
+        if embedded {
+            memoryContent
+        } else {
+            NavigationStack {
+                memoryContent
             }
-            .navigationTitle("Memory")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .task { await loadMemory() }
-            .refreshable { await loadMemory() }
         }
+    }
+
+    private var memoryContent: some View {
+        ZStack {
+            Color.oxyBg.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    MemoryDropBox(
+                        draft: $draft,
+                        isSaving: isSaving,
+                        message: saveMessage,
+                        onSave: { Task { await saveMemory() } }
+                    )
+
+                    HStack(spacing: 10) {
+                        MemoryStat(title: "Saved", value: isLoading ? "..." : "\(summary.total)")
+                        MemoryStat(title: "Learned", value: isLoading ? "..." : "\(summary.learned)")
+                        MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
+                    }
+
+                    if let lastUpdated = summary.lastUpdated {
+                        Text("Updated \(formattedDate(lastUpdated))")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color.oxyDim)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 6)
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .navigationTitle("Memory")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .task { await loadMemory() }
+        .refreshable { await loadMemory() }
     }
 
     private func loadMemory() async {

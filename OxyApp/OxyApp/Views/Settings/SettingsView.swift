@@ -30,6 +30,19 @@ struct SettingsView: View {
                             }
                         }
 
+                        settingsSection(title: "Personalisation") {
+                            NavigationLink {
+                                MemoryView(embedded: true)
+                            } label: {
+                                settingsNavigationRow(
+                                    label: "Memory",
+                                    description: "Saved facts and preferences",
+                                    icon: "brain.head.profile"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
                         settingsSection(title: "Appearance") {
                             settingRow(label: "Accent", description: selectedAccentLabel) {
                                 Button {
@@ -169,7 +182,6 @@ struct SettingsView: View {
                             }
                         }
 
-                        // Account
                         settingsSection(title: "Account") {
                             Button(action: { showSignOutConfirm = true }) {
                                 HStack {
@@ -185,12 +197,14 @@ struct SettingsView: View {
                                 .foregroundStyle(Color.oxyRed)
                                 .padding(.vertical, 4)
                             }
+                        }
+
+                        settingsSection(title: "Support & Legal") {
+                            legalLink(label: "Support", path: "/support", icon: "questionmark.circle.fill")
                             Divider().overlay(Color.oxyLine)
                             legalLink(label: "Privacy Policy", path: "/privacy", icon: "hand.raised.fill")
                             Divider().overlay(Color.oxyLine)
-                            legalLink(label: "Terms", path: "/terms", icon: "doc.text.fill")
-                            Divider().overlay(Color.oxyLine)
-                            legalLink(label: "Support", path: "/support", icon: "questionmark.circle.fill")
+                            legalLink(label: "Terms of Use", path: "/terms", icon: "doc.text.fill")
                         }
 
                         settingsSection(title: "Diagnostics") {
@@ -340,6 +354,33 @@ struct SettingsView: View {
             }
             Spacer()
             accessory()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func settingsNavigationRow(label: String, description: String?, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.oxyStone)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.oxyText)
+                if let description {
+                    Text(description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.oxyDim)
         }
         .padding(.vertical, 4)
     }
