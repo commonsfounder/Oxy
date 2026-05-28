@@ -67,6 +67,20 @@ struct ChatView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
+                    if let networkError = viewModel.networkError {
+                        ErrorBanner(
+                            message: networkError,
+                            onRetry: {
+                                viewModel.retryLastFailedMessage(userId: appState.userId)
+                            },
+                            onDismiss: {
+                                viewModel.networkError = nil
+                            }
+                        )
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {

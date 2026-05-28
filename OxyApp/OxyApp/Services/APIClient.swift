@@ -73,6 +73,14 @@ final class APIClient: @unchecked Sendable {
         return data
     }
 
+    func exportUserData(userId: String) async throws -> Data {
+        try await request(path: "/user/\(userId)/export")
+    }
+
+    func deleteAccount(userId: String) async throws {
+        _ = try await request(path: "/user/\(userId)", method: "DELETE")
+    }
+
     func multipartRequest(
         path: String,
         method: String = "POST",

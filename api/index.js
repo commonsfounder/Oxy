@@ -167,7 +167,43 @@ app.use((req, res, next) => {
   return requireSessionAuth(req, res, next);
 });
 
+const rateLimitStores = [];
 const audioRateLimit = new Map();
+
+function requestIp(req) {
+  return String(req.headers['x-forwarded-for'] || '')
+    .split(',')[0]
+    .trim()
+    || req.ip
+    || req.socket?.remoteAddress
+    || 'unknown';
+}
+
+function createRateLimiter(maxHits, windowMs, keyFn = requestIp) {
+  const store = new Map();
+  rateLimitStores.push({ store, windowMs });
+  return (req, res, next) => {
+    const key = keyFn(req) || requestIp(req);
+    const now = Date.now();
+    const recentHits = (store.get(key) || []).filter(t => now - t < windowMs);
+    if (recentHits.length >= maxHits) {
+      return res.status(429).json({ error: 'Too many requests. Try again in a moment.' });
+    }
+    store.set(key, [...recentHits, now]);
+    return next();
+  };
+}
+
+function userOrIpRateKey(req) {
+  const bodyUserId = req.body?.userId;
+  const authedUserId = getAuthenticatedUserId(req);
+  return authedUserId || bodyUserId || requestIp(req);
+}
+
+const registerRateLimiter = createRateLimiter(5, 60 * 1000);
+const loginRateLimiter = createRateLimiter(10, 60 * 1000);
+const chatRateLimiter = createRateLimiter(30, 60 * 1000, userOrIpRateKey);
+const imageRateLimiter = createRateLimiter(10, 60 * 1000, userOrIpRateKey);
 const GEMINI_TTS_VOICES = new Set([
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
   'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
@@ -179,6 +215,13 @@ const GEMINI_TTS_VOICES = new Set([
 // Prune stale rate-limit entries (skip in serverless — Maps are ephemeral per invocation)
 setInterval(() => {
   const now = Date.now();
+  for (const { store, windowMs } of rateLimitStores) {
+    for (const [key, timestamps] of store) {
+      const recent = timestamps.filter(t => now - t < windowMs);
+      if (recent.length === 0) store.delete(key);
+      else store.set(key, recent);
+    }
+  }
   for (const [uid, timestamps] of audioRateLimit) {
     const recent = timestamps.filter(t => now - t < 60000);
     if (recent.length === 0) audioRateLimit.delete(uid);
@@ -2329,6 +2372,60 @@ async function getUserAccount(userId) {
   return data;
 }
 
+const USER_DATA_TABLES = [
+  'briefings',
+  'native_context',
+  'devices',
+  'preferences',
+  'connectors',
+  'action_log',
+  'memories',
+  'conversations',
+  'users'
+];
+
+async function fetchUserDataTable(table, userId) {
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('user_id', userId);
+  if (error) throw error;
+  return data || [];
+}
+
+function sanitizeExportRows(table, rows) {
+  if (table === 'connectors') {
+    return rows.map(({ tokens, ...row }) => ({
+      ...row,
+      hasTokens: Boolean(tokens)
+    }));
+  }
+  if (table === 'users') {
+    return rows.map(({ password_hash, ...row }) => row);
+  }
+  return rows;
+}
+
+async function buildUserExport(userId) {
+  const entries = await Promise.all(
+    USER_DATA_TABLES.map(async table => [table, sanitizeExportRows(table, await fetchUserDataTable(table, userId))])
+  );
+  const data = Object.fromEntries(entries);
+  return {
+    exportedAt: new Date().toISOString(),
+    userId,
+    user: data.users?.[0] || null,
+    conversations: data.conversations || [],
+    memories: data.memories || [],
+    actionLog: (data.action_log || []).map(row => ({ ...row, action: safeParseJSON(row.action) })),
+    connectors: data.connectors || [],
+    preferences: data.preferences || [],
+    devices: data.devices || [],
+    nativeContext: data.native_context || [],
+    briefings: data.briefings || []
+  };
+}
+
 async function getUserContext(userId, trace = null) {
   const cached = contextCache.get(userId);
   if (cached && Date.now() - cached.ts < CONTEXT_CACHE_TTL) {
@@ -2396,7 +2493,7 @@ Recent action outcomes: ${recentActions}`.slice(0, 2200);
   return context;
 }
 
-app.post('/auth/register', async (req, res) => {
+app.post('/auth/register', registerRateLimiter, async (req, res) => {
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
@@ -2427,7 +2524,7 @@ app.post('/auth/register', async (req, res) => {
   }
 });
 
-app.post('/auth/login', async (req, res) => {
+app.post('/auth/login', loginRateLimiter, async (req, res) => {
   try {
     const { userId, password } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
@@ -2569,7 +2666,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   }
 });
 
-app.post('/images/generate', upload.single('image'), async (req, res) => {
+app.post('/images/generate', imageRateLimiter, upload.single('image'), async (req, res) => {
   try {
     const { userId, prompt } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
@@ -2587,7 +2684,7 @@ app.post('/images/generate', upload.single('image'), async (req, res) => {
   }
 });
 
-app.post('/chat-with-image', upload.single('image'), async (req, res) => {
+app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (req, res) => {
   try {
     const userId = req.body.userId;
     const message = (req.body.message || '').trim();
@@ -2723,6 +2820,35 @@ app.delete('/memory/:userId', async (req, res) => {
   }
 });
 
+app.get('/user/:userId/export', async (req, res) => {
+  const { userId } = req.params;
+  if (!requireMatchingUser(req, res, userId)) return;
+  try {
+    const data = await buildUserExport(userId);
+    res.setHeader('Content-Disposition', 'attachment; filename="oxy-data-export.json"');
+    res.json(data);
+  } catch (err) {
+    console.error('/user/export error:', err.message);
+    res.status(500).json({ error: 'Could not export your data right now.' });
+  }
+});
+
+app.delete('/user/:userId', async (req, res) => {
+  const { userId } = req.params;
+  if (!requireMatchingUser(req, res, userId)) return;
+  try {
+    for (const table of USER_DATA_TABLES) {
+      const { error } = await supabase.from(table).delete().eq('user_id', userId);
+      if (error) throw error;
+    }
+    contextCache.delete(userId);
+    res.json({ success: true, deleted: true });
+  } catch (err) {
+    console.error('/user/delete error:', err.message);
+    res.status(500).json({ error: 'Could not delete your account right now.' });
+  }
+});
+
 app.post('/action-log', async (req, res) => {
   try {
     const { userId, action, status = 'executed' } = req.body;
@@ -2798,7 +2924,7 @@ app.get('/connectors/:userId', async (req, res) => {
     const result = CONNECTORS.map(c => {
       const row = rowsById.get(c.id);
       const enabled = row?.enabled === true;
-      const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session);
+      const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session || row?.tokens?.encrypted);
       const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
       const needsSetup = c.id === 'maps' && !(process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY);
       const degraded = c.id === 'trainline' && (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY);
@@ -3744,7 +3870,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
   res.json(result);
 }
 
-app.post('/chat', async (req, res) => {
+app.post('/chat', chatRateLimiter, async (req, res) => {
   const streaming = req.query.stream === 'true';
 
   try {
@@ -4460,7 +4586,7 @@ app.get('/privacy', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(legalPage('Privacy Policy', `
     <h1>Privacy Policy</h1>
-    <p class="meta">Draft operational policy. Last updated ${escapeHtml(getLocalDateKey())}.</p>
+    <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <p>Oxy is a personal assistant. It uses the information you choose to provide so it can answer, remember, and act for you.</p>
     <h2>Data Oxy Uses</h2>
     <ul>
@@ -4471,8 +4597,14 @@ app.get('/privacy', (_req, res) => {
     </ul>
     <h2>AI And Search</h2>
     <p>Messages may be sent to Gemini and related Google services to generate answers, use search grounding, transcribe audio, or complete requested actions.</p>
+    <h2>Retention</h2>
+    <p>Conversations, memories, preferences, connector status, device records, and action history are stored until you delete them or delete your account.</p>
     <h2>Controls</h2>
-    <p>You can sign out, edit memory, disconnect connectors, disable proactive features, and request deletion of your data.</p>
+    <p>You can sign out, edit memory, disconnect connectors, disable proactive features, export your data, and delete your account from Settings.</p>
+    <h2>Your Rights</h2>
+    <p>You may request access to your data, export your data, and erase your account data. These controls support GDPR-style access and erasure rights.</p>
+    <h2>Security Incidents</h2>
+    <p>If a data breach affects your account, Oxy will notify you within 72 hours of confirming the incident where legally required.</p>
     <h2>Contact</h2>
     <p>For privacy or deletion requests, contact support using <a href="/support">Oxy Support</a>.</p>
   `));
@@ -4482,7 +4614,7 @@ app.get('/terms', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(legalPage('Terms', `
     <h1>Terms</h1>
-    <p class="meta">Draft operational terms. Last updated ${escapeHtml(getLocalDateKey())}.</p>
+    <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <p>Oxy is provided as an assistant that can answer questions, summarize information, and prepare or open actions at your request.</p>
     <h2>Your Responsibility</h2>
     <p>Review important outputs before relying on them. Confirm any message, booking, payment, order, travel plan, or calendar action before treating it as final.</p>
@@ -4509,7 +4641,7 @@ app.get('/support', (_req, res) => {
       <li>Whether a connector or permission was involved.</li>
     </ul>
     <h2>Data Requests</h2>
-    <p>For deletion or privacy requests, include your account identifier and the request type. Do not send passwords, OAuth tokens, or private contact lists.</p>
+    <p>You can export your account data and delete your account from Oxy Settings. If you need help, include your account identifier and the request type. Do not send passwords, OAuth tokens, or private contact lists.</p>
   `));
 });
 

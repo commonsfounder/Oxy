@@ -7,9 +7,14 @@ struct SettingsView: View {
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
+    @State private var showDeleteAccountConfirm = false
     @State private var showAccentPicker = false
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
+    @State private var accountStatusText: String?
+    @State private var isExportingData = false
+    @State private var isDeletingAccount = false
+    @State private var sharePayload: SharePayload?
 
     var body: some View {
         NavigationStack {
@@ -168,6 +173,46 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "Account") {
+                            Button(action: exportMyData) {
+                                HStack {
+                                    Image(systemName: isExportingData ? "hourglass" : "square.and.arrow.up")
+                                        .font(.system(size: 14))
+                                    Text(isExportingData ? "Preparing Export" : "Export My Data")
+                                        .font(.system(size: 15, weight: .medium))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.oxyDim)
+                                }
+                                .foregroundStyle(Color.oxyText)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isExportingData || isDeletingAccount)
+                            .accessibilityLabel("Export my data")
+
+                            Divider().overlay(Color.oxyLine)
+
+                            Button(action: { showDeleteAccountConfirm = true }) {
+                                HStack {
+                                    Image(systemName: isDeletingAccount ? "hourglass" : "trash.fill")
+                                        .font(.system(size: 14))
+                                    Text(isDeletingAccount ? "Deleting Account" : "Delete Account")
+                                        .font(.system(size: 15, weight: .medium))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.oxyDim)
+                                }
+                                .foregroundStyle(Color.oxyRed)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isExportingData || isDeletingAccount)
+                            .accessibilityLabel("Delete account")
+
+                            Divider().overlay(Color.oxyLine)
+
                             Button(action: { showSignOutConfirm = true }) {
                                 HStack {
                                     Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -181,6 +226,18 @@ struct SettingsView: View {
                                 }
                                 .foregroundStyle(Color.oxyRed)
                                 .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Sign out")
+
+                            if let accountStatusText {
+                                Divider().overlay(Color.oxyLine)
+                                Text(accountStatusText)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.oxySub)
+                                    .lineSpacing(3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 4)
                             }
                         }
 
@@ -244,6 +301,12 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
+                Button("Delete", role: .destructive) { deleteAccount() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your Oxy account data, including conversations, memories, connectors, preferences, and action history.")
+            }
             .sheet(isPresented: $showAccentPicker) {
                 AccentPickerSheet(selection: $settings.accentColor) {
                     saveSettings()
@@ -251,6 +314,9 @@ struct SettingsView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $sharePayload) { payload in
+                ShareSheet(activityItems: [payload.url])
             }
             .onAppear {
                 loadSettings()
@@ -295,6 +361,50 @@ struct SettingsView: View {
             } catch {
                 await MainActor.run {
                     backendVersionText = "Backend version unavailable"
+                }
+            }
+        }
+    }
+
+    private func exportMyData() {
+        guard !isExportingData else { return }
+        accountStatusText = nil
+        isExportingData = true
+        Task {
+            do {
+                let data = try await APIClient.shared.exportUserData(userId: appState.userId)
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("oxy-data-export-\(Int(Date().timeIntervalSince1970)).json")
+                try data.write(to: url, options: .atomic)
+                await MainActor.run {
+                    isExportingData = false
+                    sharePayload = SharePayload(url: url)
+                    accountStatusText = "Export ready."
+                }
+            } catch {
+                await MainActor.run {
+                    isExportingData = false
+                    accountStatusText = "Could not export your data: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        guard !isDeletingAccount else { return }
+        accountStatusText = nil
+        isDeletingAccount = true
+        Task {
+            do {
+                try await APIClient.shared.deleteAccount(userId: appState.userId)
+                await MainActor.run {
+                    isDeletingAccount = false
+                    appState.logout()
+                }
+            } catch {
+                await MainActor.run {
+                    isDeletingAccount = false
+                    accountStatusText = "Could not delete your account: \(error.localizedDescription)"
                 }
             }
         }
@@ -495,6 +605,21 @@ struct SettingsView: View {
         }
         settings.designPalette = settings.accentColor
     }
+}
+
+private struct SharePayload: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct AccentPickerSheet: View {

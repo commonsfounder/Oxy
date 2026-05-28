@@ -3,6 +3,7 @@ const { StringSession } = require('telegram/sessions');
 const { Api } = require('telegram');
 const { computeCheck } = require('telegram/Password');
 const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
+const { decryptTokens, encryptTokens } = require('../api/services/token-crypto');
 
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('telegram connector bootstrap');
@@ -34,7 +35,7 @@ async function getStoredTokens(userId) {
       .eq('user_id', userId)
       .eq('connector_id', 'telegram')
       .limit(1);
-    if (!error && data?.length > 0) return data[0].tokens || {};
+    if (!error && data?.length > 0) return decryptTokens(data[0].tokens || {});
   } catch (err) {
     console.error('[telegram] getStoredTokens error:', err.message);
   }
@@ -45,7 +46,7 @@ async function saveStoredTokens(userId, tokens) {
   await supabase
     .from('connectors')
     .upsert(
-      { user_id: userId, connector_id: 'telegram', enabled: true, tokens, updated_at: new Date().toISOString() },
+      { user_id: userId, connector_id: 'telegram', enabled: true, tokens: encryptTokens(tokens), updated_at: new Date().toISOString() },
       { onConflict: 'user_id,connector_id' }
     );
 }

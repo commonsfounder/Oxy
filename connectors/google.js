@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
+const { decryptTokens, encryptTokens } = require('../api/services/token-crypto');
 
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
@@ -16,7 +17,7 @@ async function getTokens(userId) {
       .eq('enabled', true)
       .limit(1);
 
-    if (!error && data?.length > 0 && data[0].tokens) return data[0].tokens;
+    if (!error && data?.length > 0 && data[0].tokens) return decryptTokens(data[0].tokens);
   } catch (err) {
     console.error('[getTokens] DB error:', err.message);
   }
@@ -40,7 +41,7 @@ async function getTokens(userId) {
 async function saveTokens(userId, tokens) {
   const { error } = await supabase
     .from('connectors')
-    .upsert({ user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
+    .upsert({ user_id: userId, connector_id: 'google', enabled: true, tokens: encryptTokens(tokens), updated_at: new Date().toISOString() },
              { onConflict: 'user_id,connector_id' });
   if (error) throw error;
 }
@@ -52,10 +53,10 @@ async function markGoogleDisconnected(userId, tokens = {}) {
       user_id: userId,
       connector_id: 'google',
       enabled: false,
-      tokens: {
+      tokens: encryptTokens({
         client_id: tokens.client_id,
         client_secret: tokens.client_secret
-      },
+      }),
       updated_at: new Date().toISOString()
     }, { onConflict: 'user_id,connector_id' });
   if (error) throw error;

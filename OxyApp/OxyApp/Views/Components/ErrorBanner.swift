@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ErrorBanner: View {
     let message: String
+    var onRetry: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     var body: some View {
@@ -16,6 +17,12 @@ struct ErrorBanner: View {
                 .lineLimit(2)
 
             Spacer()
+
+            if let onRetry {
+                Button("Retry", action: onRetry)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.oxyStone)
+            }
 
             if let onDismiss {
                 Button(action: onDismiss) {
@@ -34,6 +41,6 @@ struct ErrorBanner: View {
 }
 
 #Preview {
-    ErrorBanner(message: "Network connection lost") {}
+    ErrorBanner(message: "Network connection lost", onDismiss: {})
         .background(Color.oxyBg)
 }

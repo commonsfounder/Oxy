@@ -26,12 +26,14 @@ final class ChatViewModel {
     var scrollTargetMessageID: UUID?
     var isViewingHistorySnapshot = false
     var historySnapshotLabel: String?
+    var networkError: String?
 
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
     @ObservationIgnored private var pendingLocalAction: ActionResult?
+    @ObservationIgnored private var lastFailedText: String?
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -122,6 +124,7 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         statusLabel = nil
+        networkError = nil
 
         let userMessage = Message(role: .user, content: text)
         messages.append(userMessage)
@@ -261,10 +264,14 @@ final class ChatViewModel {
                     case .done:
                         _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         statusLabel = nil
+                        networkError = nil
+                        lastFailedText = nil
                         isSending = false
                         currentSendTask = nil
 
                     case .error(let error):
+                        lastFailedText = text
+                        networkError = friendlyNetworkError(error)
                         if fullText.isEmpty {
                             _ = updateAssistantMessage(id: assistantID, { $0.content = "Something went wrong: \(error)" })
                         }
@@ -291,6 +298,13 @@ final class ChatViewModel {
         sendMessage(userId: userId)
     }
 
+    func retryLastFailedMessage(userId: String) {
+        guard let lastFailedText, !isSending else { return }
+        networkError = nil
+        inputText = lastFailedText
+        sendMessage(userId: userId)
+    }
+
     func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String) {
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = typed.isEmpty ? "Look at this image and tell me what you see." : typed
@@ -305,6 +319,7 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         statusLabel = "Looking at image"
+        networkError = nil
 
         let userMessage = Message(role: .user, content: "\(text)\n[Image attached]")
         messages.append(userMessage)
@@ -347,11 +362,15 @@ final class ChatViewModel {
                     } else {
                         statusLabel = nil
                     }
+                    networkError = nil
+                    lastFailedText = nil
                     isSending = false
                     currentSendTask = nil
                 }
             } catch {
                 await MainActor.run {
+                    lastFailedText = text
+                    networkError = friendlyNetworkError(error.localizedDescription)
                     _ = updateAssistantMessage(id: assistantID) {
                         $0.content = "Something went wrong with that image: \(error.localizedDescription)"
                         $0.isStreaming = false
@@ -374,6 +393,7 @@ final class ChatViewModel {
         inputText = ""
         isSending = false
         statusLabel = nil
+        networkError = nil
         scrollTargetMessageID = nil
         isViewingHistorySnapshot = false
         historySnapshotLabel = nil
@@ -479,8 +499,24 @@ final class ChatViewModel {
                 message.isStreaming = false
             }
             statusLabel = nil
+            networkError = "Oxy got stuck waiting for the network. Try again."
+            lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
         }
+    }
+
+    private func friendlyNetworkError(_ error: String) -> String {
+        let lower = error.lowercased()
+        if lower.contains("network") || lower.contains("internet") || lower.contains("lost") || lower.contains("offline") {
+            return "Network connection was lost. Try again."
+        }
+        if lower.contains("timed out") || lower.contains("timeout") {
+            return "That took too long. Try again."
+        }
+        if lower.contains("session expired") {
+            return "Session expired. Please sign in again."
+        }
+        return "Something went wrong. Try again."
     }
 
     nonisolated private static func nativeMusicTimeoutResult() -> NativeLocalActionResult {

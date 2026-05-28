@@ -1757,6 +1757,69 @@ body::after {
 ::-webkit-scrollbar-thumb { background: var(--s3); border-radius: 2px; }
 
 .hidden { display: none !important; }
+
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  display: grid;
+  gap: 8px;
+  z-index: 12000;
+  width: min(360px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  padding: 12px 14px;
+  border-radius: 13px;
+  background: rgba(21,21,21,0.94);
+  border: 1px solid var(--line2);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0,0,0,0.36);
+  backdrop-filter: blur(18px);
+  animation: toast-in 0.28s ease-out;
+  font-size: 13px;
+}
+
+.toast.error { border-color: rgba(192,80,62,0.32); }
+.toast.success { border-color: rgba(76,175,130,0.32); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.empty-state {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--s1);
+  color: var(--sub);
+  line-height: 1.6;
+}
+
+.empty-state strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.skeleton-stack { display: grid; gap: 10px; width: min(520px, 100%); }
+.skeleton-row {
+  height: 56px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, var(--s1), var(--s2), var(--s1));
+  background-size: 220% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border: 1px solid var(--line);
+}
+
+@keyframes shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
 </style>
 </head>
 <body>
@@ -1916,6 +1979,39 @@ const AUTO_OPEN_ACTIONS = new Set([
 ]);
 
 const VISUAL_ARTIFACT_TYPES = new Set(['image', 'diagram', 'slide_deck', 'image_analysis']);
+
+function LoadingSkeleton({ rows = 4 }) {
+  return (
+    <div className="page-content" style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>
+      <div className="skeleton-stack" aria-label="Loading">
+        {Array.from({ length: rows }).map((_, i) => <div key={i} className="skeleton-row" />)}
+      </div>
+    </div>
+  );
+}
+
+function ToastManager() {
+  const [toasts, setToasts] = useState([]);
+
+  useEffect(() => {
+    window.oxyToast = (message, type = 'info') => {
+      const id = `${Date.now()}-${Math.random()}`;
+      setToasts(prev => [...prev, { id, message, type }].slice(-3));
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4200);
+    };
+    return () => { delete window.oxyToast; };
+  }, []);
+
+  return (
+    <div className="toast-stack" role="status" aria-live="polite">
+      {toasts.map(t => <div key={t.id} className={`toast ${t.type}`}>{t.message}</div>)}
+    </div>
+  );
+}
+
+function notifyError(message) {
+  if (window.oxyToast) window.oxyToast(message || 'Something went wrong', 'error');
+}
 
 /* ── SVG ICONS ── */
 const Icons = {
@@ -3295,7 +3391,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
             </div>
 
             {(input.trim() || composerMode !== 'chat') ? (
-              <button className="composer-primary send" onClick={() => composerMode === 'image' ? sendImageRequest() : selectedImage?.file ? sendVisionMessage() : sendMessage()} disabled={loading || !input.trim()}>
+              <button className="composer-primary send" aria-label="Send message" onClick={() => composerMode === 'image' ? sendImageRequest() : selectedImage?.file ? sendVisionMessage() : sendMessage()} disabled={loading || !input.trim()}>
                 <span className="composer-primary-icon icon-send">{Icons.send}</span>
                 <span className="composer-primary-icon icon-mic">{Icons.mic}</span>
               </button>
@@ -3307,6 +3403,8 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                 onTouchStart={startRecording}
                 onTouchEnd={stopRecording}
                 title="Hold to record"
+                aria-label="Hold to record voice message"
+                aria-pressed={recording}
               >
                 <span className="composer-primary-icon icon-send">{Icons.send}</span>
                 <span className="composer-primary-icon icon-mic">{Icons.mic}</span>
@@ -3326,7 +3424,7 @@ function MemoryPage() {
     apiFetch('/memory/' + USER_ID)
       .then(r => r.json())
       .then(d => { if (d.summary) setSummary(d.summary); })
-      .catch(() => {});
+      .catch(err => notifyError(err.message || 'Failed to load memory.'));
   }, []);
 
   return (
@@ -3358,7 +3456,7 @@ function MemoryPage() {
             <div style={{color:'var(--dim)',fontSize:'12px'}}>
               {summary.lastUpdated
                 ? `Last memory update ${new Date(summary.lastUpdated).toLocaleString('en-GB', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' })}`
-                : 'No memory stored yet.'}
+                : 'No memory stored yet. Tell Oxy something in chat, like “remember my usual station is Birmingham New Street”.'}
             </div>
           </div>
         </div>
@@ -3481,6 +3579,7 @@ function ConnectorsPage() {
       })
       .catch(err => {
         setError(err.message || 'Failed to load connectors.');
+        notifyError(err.message || 'Failed to load connectors.');
         setLoading(false);
       });
   };
@@ -3545,9 +3644,7 @@ function ConnectorsPage() {
   };
 
   if (loading) return (
-    <div className="page-content" style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>
-      <span style={{color:'var(--dim)'}}>Loading…</span>
-    </div>
+    <LoadingSkeleton rows={4} />
   );
 
   const nonGoogle = connectors.filter(c => c.id !== 'google');
@@ -3616,6 +3713,12 @@ function ConnectorsPage() {
           </div>
         </div>
       ))}
+      {connectors.length === 0 && (
+        <div className="empty-state">
+          <strong>Connect your first service</strong>
+          Link Google or Telegram so Oxy can search, draft, send, schedule, and remember the useful bits around your real life.
+        </div>
+      )}
     </div>
   );
 }
@@ -3628,7 +3731,7 @@ function ActionHistoryPage() {
     apiFetch(`/action-log/${USER_ID}`)
       .then(r => r.json())
       .then(d => { setActions(d.actions || []); setLoading(false); })
-      .catch(() => setLoading(false));
+      .catch(err => { notifyError(err.message || 'Failed to load history.'); setLoading(false); });
   }, []);
 
   const formatAction = a => {
@@ -3646,9 +3749,7 @@ function ActionHistoryPage() {
   };
 
   if (loading) return (
-    <div className="page-content" style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100%'}}>
-      <span style={{color:'var(--dim)'}}>Loading…</span>
-    </div>
+    <LoadingSkeleton rows={4} />
   );
 
   return (
@@ -3656,7 +3757,10 @@ function ActionHistoryPage() {
       <div className="section">
         <div className="section-title">Action History</div>
         {actions.length === 0 ? (
-          <div style={{color:'var(--dim)',fontSize:'13px',paddingTop:'8px'}}>No actions yet.</div>
+          <div className="empty-state">
+            <strong>No actions yet</strong>
+            Actions Oxy takes for you will show up here: messages, calendar edits, app opens, routes, and connector work.
+          </div>
         ) : (
           <div className="history-list">
             {actions.map((a, i) => (
@@ -3994,9 +4098,9 @@ function App() {
             {isRecording ? 'Listening…' : isProcessing ? 'Processing…' : 'Online'}
           </div>
         </div>
-        <nav className="nav">
+        <nav className="nav" role="tablist" aria-label="Oxy sections">
           {navItems.map(n => (
-            <button key={n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
+            <button key={n.id} role="tab" aria-selected={page === n.id} className={`nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
               <span className="nav-icon">{n.icon}</span>
               {n.label}
             </button>
@@ -4041,14 +4145,15 @@ function App() {
       </div>
 
       {/* Mobile nav */}
-      <div className="mobile-nav">
+      <div className="mobile-nav" role="tablist" aria-label="Oxy sections">
         {navItems.map(n => (
-          <button key={n.id} className={`mob-nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
+          <button key={n.id} role="tab" aria-selected={page === n.id} className={`mob-nav-item ${page === n.id ? 'active' : ''}`} onClick={() => setPage(n.id)}>
             <span className="mob-nav-icon">{n.icon}</span>
             {n.label}
           </button>
         ))}
       </div>
+      <ToastManager />
     </div>
   );
 }
