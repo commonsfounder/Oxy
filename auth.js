@@ -51,8 +51,12 @@ function verifySignedPayload(token) {
   }
 }
 
-function createSessionToken(userId) {
-  return signPayload({ type: 'session', userId });
+function createSessionToken(userId, tokenVersion) {
+  const payload = { type: 'session', userId };
+  if (tokenVersion !== undefined && tokenVersion !== null) {
+    payload.tokenVersion = tokenVersion;
+  }
+  return signPayload(payload);
 }
 
 function getProvidedSessionToken(req) {
@@ -77,7 +81,7 @@ function requireSessionAuth(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  req.auth = { userId: payload.userId, exp: payload.exp };
+  req.auth = { userId: payload.userId, exp: payload.exp, tokenVersion: payload.tokenVersion };
   next();
 }
 
