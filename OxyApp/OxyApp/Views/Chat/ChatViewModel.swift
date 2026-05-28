@@ -572,7 +572,13 @@ final class ChatViewModel {
 
     func openActionLink(_ result: ActionResult) {
         if let link = result.deepLink, let url = URL(string: link) {
-            UIApplication.shared.open(url)
+            if url.scheme == "oxy-open-app" {
+                Task { @MainActor in
+                    await NativeIntegrationManager.shared.openBestEffortApp(from: url)
+                }
+            } else {
+                UIApplication.shared.open(url)
+            }
         } else if let link = result.webLink, let url = URL(string: link) {
             UIApplication.shared.open(url)
         }

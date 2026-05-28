@@ -92,6 +92,18 @@ private struct ITunesAlbum: Decodable {
     let collectionViewUrl: String?
 }
 
+private struct ITunesAppResult: Decodable {
+    let resultCount: Int
+    let results: [ITunesApp]
+}
+
+private struct ITunesApp: Decodable {
+    let trackId: Int?
+    let trackName: String?
+    let sellerName: String?
+    let trackViewUrl: String?
+}
+
 private struct NativeAppShortcut {
     let displayName: String
     let aliases: [String]
@@ -245,14 +257,14 @@ final class NativeIntegrationManager {
            let result = await answerNativeHealthRequest(normalized) {
             return result
         }
-        if let result = await openNativeApp(from: normalized) {
-            return result
-        }
         if let result = await updateLastNativeReminder(from: normalized) {
             return result
         }
         if shouldLetBrainHandleFirst(normalized) {
             return nil
+        }
+        if let result = await openNativeApp(from: normalized) {
+            return result
         }
         if lower.contains("uber") || lower.contains("taxi") || lower.contains("ride") {
             return nil
@@ -554,32 +566,44 @@ final class NativeIntegrationManager {
 
     private func openNativeApp(from message: String) async -> NativeLocalActionResult? {
         guard let target = requestedAppName(from: message),
-              let app = nativeAppShortcuts().first(where: { shortcut in
-                  shortcut.aliases.contains { alias in
-                      target == alias || target == "\(alias) app"
-                  }
-              }) else { return nil }
+              !isContextualOpenTarget(target) else { return nil }
 
-        let deepLink = app.schemes.compactMap(URL.init(string:)).first { UIApplication.shared.canOpenURL($0) }?.absoluteString
-        let link = deepLink ?? app.fallbackURL
-        guard let link else {
+        if let app = nativeAppShortcuts().first(where: { shortcut in
+            shortcut.aliases.contains { alias in
+                target == alias || target == "\(alias) app"
+            }
+        }) {
+            let deepLink = app.schemes.compactMap(URL.init(string:)).first { UIApplication.shared.canOpenURL($0) }?.absoluteString
+            let link = deepLink ?? app.fallbackURL
+            guard let link else {
+                return NativeLocalActionResult(
+                    action: "open_app",
+                    text: "I couldn't open \(app.displayName) from here.",
+                    cardText: app.displayName,
+                    actionSummary: "App unavailable",
+                    deepLink: nil,
+                    success: false,
+                    error: "\(app.displayName) URL scheme is unavailable."
+                )
+            }
+
             return NativeLocalActionResult(
                 action: "open_app",
-                text: "I couldn't open \(app.displayName) from here.",
+                text: "Opening \(app.displayName).",
                 cardText: app.displayName,
-                actionSummary: "App unavailable",
-                deepLink: nil,
-                success: false,
-                error: "\(app.displayName) URL scheme is unavailable."
+                actionSummary: "App opened",
+                deepLink: link
             )
         }
 
+        let displayName = titleCasedAppName(target)
+        // iOS has no public "open any installed app by name" API, so unknown apps use a best-effort launch handoff.
         return NativeLocalActionResult(
             action: "open_app",
-            text: "Opening \(app.displayName).",
-            cardText: app.displayName,
-            actionSummary: "App opened",
-            deepLink: link
+            text: "Opening the best app match for \(displayName).",
+            cardText: displayName,
+            actionSummary: "App opening",
+            deepLink: bestEffortAppOpenLink(for: target)
         )
     }
 
@@ -593,6 +617,111 @@ final class NativeIntegrationManager {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         guard !target.isEmpty, target.count <= 40 else { return nil }
         return target
+    }
+
+    private func isContextualOpenTarget(_ target: String) -> Bool {
+        let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if [
+            "it", "that", "this", "there", "same", "again", "that one", "this one",
+            "the other one", "last one", "nearest one", "nearest", "the nearest one",
+            "the nearest", "nearby one", "the nearby one"
+        ].contains(trimmed) {
+            return true
+        }
+        return trimmed.contains("what about")
+            || trimmed.contains("no i mean")
+            || trimmed.contains("actually")
+    }
+
+    private func bestEffortAppOpenLink(for target: String) -> String? {
+        var components = URLComponents()
+        components.scheme = "oxy-open-app"
+        components.host = "open"
+        components.queryItems = [URLQueryItem(name: "name", value: target)]
+        return components.url?.absoluteString
+    }
+
+    func openBestEffortApp(from url: URL) async {
+        guard url.scheme == "oxy-open-app" else {
+            _ = await openURLIfAccepted(url)
+            return
+        }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        guard let target = components?.queryItems?.first(where: { $0.name == "name" })?.value,
+              !target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        await openBestEffortApp(named: target)
+    }
+
+    private func openBestEffortApp(named rawTarget: String) async {
+        let target = rawTarget.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !target.isEmpty else { return }
+
+        if let known = nativeAppShortcuts().first(where: { shortcut in
+            shortcut.aliases.contains { alias in
+                target == alias || target == "\(alias) app"
+            }
+        }) {
+            for scheme in known.schemes {
+                if let url = URL(string: scheme), await openURLIfAccepted(url) { return }
+            }
+            if let fallback = known.fallbackURL, let url = URL(string: fallback) {
+                _ = await openURLIfAccepted(url)
+            }
+            return
+        }
+
+        for scheme in generatedAppSchemeCandidates(for: target) {
+            if let url = URL(string: scheme), await openURLIfAccepted(url) { return }
+        }
+
+        if let app = try? await searchITunesApp(target),
+           let appURL = appStoreURL(for: app) ?? URL(string: app.trackViewUrl ?? "") {
+            _ = await openURLIfAccepted(appURL)
+            return
+        }
+
+        if let searchURL = appStoreSearchURL(for: target) {
+            _ = await openURLIfAccepted(searchURL)
+        }
+    }
+
+    private func openURLIfAccepted(_ url: URL) async -> Bool {
+        await withCheckedContinuation { continuation in
+            UIApplication.shared.open(url, options: [:]) { accepted in
+                continuation.resume(returning: accepted)
+            }
+        }
+    }
+
+    private func generatedAppSchemeCandidates(for target: String) -> [String] {
+        let words = target
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty && $0 != "app" }
+        guard !words.isEmpty else { return [] }
+        let compact = words.joined()
+        let dashed = words.joined(separator: "-")
+        let underscored = words.joined(separator: "_")
+        let candidates = [
+            "\(compact)://",
+            "\(dashed)://",
+            "\(underscored)://",
+            "\(compact)app://",
+            "\(compact)-app://"
+        ]
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0).inserted }
+    }
+
+    private func titleCasedAppName(_ target: String) -> String {
+        target
+            .split(separator: " ")
+            .map { word in
+                let lower = word.lowercased()
+                return lower.prefix(1).uppercased() + String(lower.dropFirst())
+            }
+            .joined(separator: " ")
     }
 
     private func nativeAppShortcuts() -> [NativeAppShortcut] {
@@ -1207,6 +1336,54 @@ final class NativeIntegrationManager {
         }
     }
 
+    private func searchITunesApp(_ query: String) async throws -> ITunesApp? {
+        var components = URLComponents(string: "https://itunes.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: query),
+            URLQueryItem(name: "media", value: "software"),
+            URLQueryItem(name: "entity", value: "software"),
+            URLQueryItem(name: "limit", value: "5"),
+            URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "GB")
+        ]
+        guard let url = components?.url else {
+            throw NSError(domain: "OxyApps", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid app search URL"])
+        }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError(domain: "OxyApps", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "App search failed with HTTP \(http.statusCode)"])
+        }
+        let decoded = try JSONDecoder().decode(ITunesAppResult.self, from: data)
+        guard decoded.resultCount > 0 else { return nil }
+        let normalizedQuery = normalizeAppSearchText(query)
+        return decoded.results.first { app in
+            guard app.trackId != nil else { return false }
+            let name = normalizeAppSearchText(app.trackName ?? "")
+            return name == normalizedQuery
+                || name.contains(normalizedQuery)
+                || normalizedQuery.contains(name)
+        } ?? decoded.results.first { $0.trackId != nil }
+    }
+
+    private func appStoreURL(for app: ITunesApp) -> URL? {
+        guard let trackId = app.trackId else { return URL(string: app.trackViewUrl ?? "") }
+        return URL(string: "itms-apps://itunes.apple.com/app/id\(trackId)")
+    }
+
+    private func appStoreSearchURL(for query: String) -> URL? {
+        var components = URLComponents(string: "https://apps.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: query)
+        ]
+        return components?.url
+    }
+
+    private func normalizeAppSearchText(_ text: String) -> String {
+        text
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     private func musicPlaybackErrorMessage(_ error: Error) -> String {
         let details = String(describing: error)
