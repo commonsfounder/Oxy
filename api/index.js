@@ -1,5 +1,20 @@
 require('dotenv').config();
 
+// Error monitoring — set SENTRY_DSN environment variable to enable
+if (process.env.SENTRY_DSN) {
+  try {
+    const Sentry = require('@sentry/node');
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV || 'production',
+      tracesSampleRate: 0.1,
+    });
+    console.log(JSON.stringify({ severity: 'INFO', event: 'sentry.initialized' }));
+  } catch (e) {
+    console.error(JSON.stringify({ severity: 'WARN', event: 'sentry.init.failed', error: e.message }));
+  }
+}
+
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
@@ -52,6 +67,16 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const APP_URL = process.env.APP_URL || '';
 const ALLOWED_ORIGINS = [APP_URL].filter(Boolean);
+
+// Structured JSON logging
+function log(level, event, extra = {}) {
+  const entry = { timestamp: new Date().toISOString(), severity: level.toUpperCase(), event, ...extra };
+  if (level === 'error') {
+    console.error(JSON.stringify(entry));
+  } else {
+    console.log(JSON.stringify(entry));
+  }
+}
 
 function escapeHtml(str) {
   return String(str)
@@ -145,7 +170,11 @@ app.use((req, res, next) => {
       "frame-ancestors 'none'"
     ].join('; ')
   );
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(self), geolocation=(self)');
   next();
 });
 
@@ -157,14 +186,40 @@ app.use((req, res, next) => {
     '/privacy',
     '/terms',
     '/support',
+    '/robots.txt',
+    '/humans.txt',
+    '/changelog',
     '/install-shortcut',
     '/auth/google/callback',
     '/auth/register',
-    '/auth/login'
+    '/auth/login',
+    '/auth/forgot-password',
+    '/auth/reset-password'
   ]);
 
   if (publicPaths.has(req.path)) return next();
-  return requireSessionAuth(req, res, next);
+
+  // requireSessionAuth verifies signature + expiry, then we check token_version for revocation
+  return requireSessionAuth(req, res, async () => {
+    const { userId, tokenVersion } = req.auth;
+    // Only check token_version if it's present in the token (backwards compat)
+    if (tokenVersion !== undefined && tokenVersion !== null) {
+      try {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('token_version')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (userRow && userRow.token_version !== tokenVersion) {
+          log('warn', 'auth.middleware.rejected', { reason: 'token_version_mismatch', userId });
+          return res.status(401).json({ error: 'Session expired' });
+        }
+      } catch (e) {
+        log('warn', 'auth.middleware.token_version_check_failed', { error: e.message });
+      }
+    }
+    next();
+  });
 });
 
 const rateLimitStores = [];
@@ -187,6 +242,7 @@ function createRateLimiter(maxHits, windowMs, keyFn = requestIp) {
     const now = Date.now();
     const recentHits = (store.get(key) || []).filter(t => now - t < windowMs);
     if (recentHits.length >= maxHits) {
+      log('warn', 'rate_limit.exceeded', { key, endpoint: req.path });
       return res.status(429).json({ error: 'Too many requests. Try again in a moment.' });
     }
     store.set(key, [...recentHits, now]);
@@ -204,6 +260,7 @@ const registerRateLimiter = createRateLimiter(5, 60 * 1000);
 const loginRateLimiter = createRateLimiter(10, 60 * 1000);
 const chatRateLimiter = createRateLimiter(30, 60 * 1000, userOrIpRateKey);
 const imageRateLimiter = createRateLimiter(10, 60 * 1000, userOrIpRateKey);
+const forgotPasswordRateLimiter = createRateLimiter(3, 60 * 60 * 1000);
 const GEMINI_TTS_VOICES = new Set([
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
   'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
@@ -2364,8 +2421,19 @@ async function savePreference(userId, key, value) {
 async function getUserAccount(userId) {
   const { data, error } = await supabase
     .from('users')
-    .select('user_id, password_hash')
+    .select('user_id, password_hash, token_version, email')
     .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+async function getUserAccountByEmail(email) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('user_id, password_hash, token_version, email')
+    .eq('email', email)
     .maybeSingle();
 
   if (error) throw error;
@@ -2495,10 +2563,17 @@ Recent action outcomes: ${recentActions}`.slice(0, 2200);
 
 app.post('/auth/register', registerRateLimiter, async (req, res) => {
   try {
-    const { userId, password } = req.body || {};
+    const { userId, password, email } = req.body || {};
     if (!requireValidUserIdValue(userId, res)) return;
     if (typeof password !== 'string' || password.length < 8 || password.length > MAX_PASSWORD_LENGTH) {
       return res.status(400).json({ error: `Password must be between 8 and ${MAX_PASSWORD_LENGTH} characters.` });
+    }
+
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (email !== undefined && email !== null && email !== '') {
+      if (typeof email !== 'string' || !EMAIL_RE.test(email)) {
+        return res.status(400).json({ error: 'Invalid email address.' });
+      }
     }
 
     const existing = await getUserAccount(userId);
@@ -2507,37 +2582,219 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
     }
 
     const passwordHash = hashPassword(password);
-    const { error } = await supabase
-      .from('users')
-      .insert({
-        user_id: userId,
-        password_hash: passwordHash,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
+    const insertData = {
+      user_id: userId,
+      password_hash: passwordHash,
+      token_version: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    if (email) insertData.email = email;
 
+    const { error } = await supabase.from('users').insert(insertData);
     if (error) throw error;
 
-    res.json({ success: true, token: createSessionToken(userId), userId });
+    log('info', 'auth.register', { userId });
+
+    if (email) {
+      try {
+        const { sendWelcomeEmail } = require('./services/email');
+        await sendWelcomeEmail(email, userId);
+      } catch (e) {
+        log('warn', 'email.welcome.failed', { error: e.message });
+      }
+    }
+
+    res.json({ success: true, token: createSessionToken(userId, 1), userId });
   } catch (err) {
+    log('error', 'auth.register.error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/auth/login', loginRateLimiter, async (req, res) => {
   try {
-    const { userId, password } = req.body || {};
-    if (!requireValidUserIdValue(userId, res)) return;
+    const { userId, email, password } = req.body || {};
     if (typeof password !== 'string' || !password || password.length > MAX_PASSWORD_LENGTH) {
       return res.status(400).json({ error: 'Password is required and must be a reasonable length.' });
     }
 
-    const account = await getUserAccount(userId);
+    let account;
+    let resolvedUserId;
+
+    if (email) {
+      const trimmedEmail = String(email).trim();
+      account = await getUserAccountByEmail(trimmedEmail);
+      resolvedUserId = account?.user_id;
+    } else {
+      const trimmedUserId = String(userId || '').trim();
+      if (!requireValidUserIdValue(trimmedUserId, res)) return;
+      account = await getUserAccount(trimmedUserId);
+      resolvedUserId = trimmedUserId;
+    }
+
     if (!account || !verifyPassword(password, account.password_hash)) {
+      log('warn', 'auth.login.failed', { userId: resolvedUserId || 'unknown' });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
-    res.json({ success: true, token: createSessionToken(userId), userId });
+    const tokenVersion = account.token_version || 1;
+    log('info', 'auth.login', { userId: account.user_id });
+    res.json({ success: true, token: createSessionToken(account.user_id, tokenVersion), userId: account.user_id });
+  } catch (err) {
+    log('error', 'auth.login.error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/logout', (req, res) => {
+  res.json({ success: true });
+});
+
+app.post('/auth/logout-all', async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    const { data: userRow } = await supabase.from('users').select('token_version').eq('user_id', userId).single();
+    if (!userRow) return res.status(404).json({ error: 'User not found' });
+    const { error } = await supabase.from('users').update({ token_version: (userRow.token_version || 1) + 1 }).eq('user_id', userId);
+    if (error) throw error;
+    log('info', 'auth.logout_all', { userId });
+    res.json({ success: true });
+  } catch (err) {
+    log('error', 'auth.logout_all.error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/auth/sessions', async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { data: userRow } = await supabase.from('users').select('token_version, created_at').eq('user_id', userId).maybeSingle();
+    res.json({ tokenVersion: userRow?.token_version || 1, note: 'Use POST /auth/logout-all to revoke all sessions' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/change-password', async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const { currentPassword, newPassword } = req.body || {};
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'currentPassword is required.' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'newPassword must be at least 8 characters.' });
+    }
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ error: 'New password must be different from current password.' });
+    }
+    const account = await getUserAccount(userId);
+    if (!account || !verifyPassword(currentPassword, account.password_hash)) {
+      return res.status(401).json({ error: 'Current password is incorrect.' });
+    }
+    const newHash = hashPassword(newPassword);
+    const newVersion = (account.token_version || 1) + 1;
+    await supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', userId);
+    log('info', 'auth.change_password', { userId });
+    res.json({ success: true });
+  } catch (err) {
+    log('error', 'auth.change_password.error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/forgot-password', forgotPasswordRateLimiter, async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    const RESPONSE = { message: "If this email is registered, you'll receive a reset link shortly." };
+    if (!email || typeof email !== 'string') return res.json(RESPONSE);
+
+    const account = await getUserAccountByEmail(String(email).trim());
+    if (!account) return res.json(RESPONSE);
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await supabase.from('password_reset_tokens').insert({ user_id: account.user_id, token, expires_at: expiresAt });
+
+    const resetUrl = `${process.env.APP_URL || ''}/auth/reset-password?token=${token}`;
+    log('info', 'password_reset.token_created', { event: '[password-reset]', url: resetUrl });
+
+    try {
+      const { sendPasswordResetEmail } = require('./services/email');
+      await sendPasswordResetEmail(account.email, resetUrl);
+    } catch (e) {
+      log('warn', 'email.password_reset.failed', { error: e.message });
+    }
+
+    res.json(RESPONSE);
+  } catch (err) {
+    log('error', 'auth.forgot_password.error', { error: err.message });
+    res.json({ message: "If this email is registered, you'll receive a reset link shortly." });
+  }
+});
+
+app.get('/auth/reset-password', (req, res) => {
+  const { token } = req.query;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html><html><head><title>Reset Password · Oxy</title>
+  <style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px;color:#1a1a1a}
+  h2{margin-bottom:8px}input{width:100%;padding:10px;margin:8px 0 16px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px;font-size:15px}
+  button{width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:15px;cursor:pointer}</style>
+  </head><body>
+  <h2>Reset your password</h2>
+  <p>Enter a new password (minimum 8 characters).</p>
+  <form method="POST" action="/auth/reset-password">
+    <input type="hidden" name="token" value="${escapeHtml(String(token || ''))}">
+    <label>New Password<input type="password" name="newPassword" minlength="8" required></label>
+    <button type="submit">Reset Password</button>
+  </form>
+  </body></html>`);
+});
+
+app.post('/auth/reset-password', express.urlencoded({ extended: false }), async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    if (!token || !newPassword) return res.status(400).json({ error: 'Token and newPassword are required.' });
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+    }
+    const { data: tokenRow } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', token).maybeSingle();
+    if (!tokenRow || tokenRow.used || new Date(tokenRow.expires_at) < new Date()) {
+      return res.status(400).json({ error: 'Invalid or expired reset token.' });
+    }
+    const newHash = hashPassword(newPassword);
+    const account = await getUserAccount(tokenRow.user_id);
+    const newVersion = (account?.token_version || 1) + 1;
+    await Promise.all([
+      supabase.from('users').update({ password_hash: newHash, token_version: newVersion }).eq('user_id', tokenRow.user_id),
+      supabase.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id)
+    ]);
+    log('info', 'auth.password_reset.completed', { userId: tokenRow.user_id });
+    res.json({ success: true });
+  } catch (err) {
+    log('error', 'auth.reset_password.error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/verify-email', async (req, res) => {
+  try {
+    const userId = getAuthenticatedUserId(req);
+    const account = await getUserAccount(userId);
+    if (!account || !account.email) return res.status(400).json({ error: 'No email address on this account.' });
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await supabase.from('password_reset_tokens').insert({ user_id: userId, token, expires_at: expiresAt });
+    const verifyUrl = `${process.env.APP_URL || ''}/auth/verify-email/confirm?token=${token}`;
+    try {
+      const { sendVerificationEmail } = require('./services/email');
+      await sendVerificationEmail(account.email, verifyUrl);
+    } catch (e) {
+      log('warn', 'email.verify.failed', { error: e.message });
+    }
+    res.json({ success: true, message: 'Verification email sent.' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4528,10 +4785,10 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 app.get('/debug/:userId', async (req, res) => {
+  const debugToken = req.headers['x-debug-token'];
+  if (!process.env.DEBUG_SECRET) return res.status(404).json({ error: 'Not found' });
+  if (debugToken !== process.env.DEBUG_SECRET) return res.status(403).json({ error: 'Forbidden' });
   if (!requireMatchingUser(req, res, req.params.userId)) return;
-  if (String(process.env.OXY_ENABLE_DEBUG || '').toLowerCase() !== 'true') {
-    return res.status(404).json({ error: 'Not found' });
-  }
   const userId = req.params.userId;
   try {
     const enabledConnectors = await getEnabledConnectors(userId);
@@ -4561,17 +4818,41 @@ app.get('/debug/:userId', async (req, res) => {
   }
 });
 
-app.get('/health', (_req, res) => {
+app.get('/health', async (_req, res) => {
   const missingEnv = getMissingRuntimeEnv();
+  let dbStatus = 'ok';
+  let dbLatencyMs = 0;
+  try {
+    const dbStart = Date.now();
+    await supabase.from('users').select('id').limit(1);
+    dbLatencyMs = Date.now() - dbStart;
+  } catch (e) {
+    dbStatus = 'error';
+  }
+  const mem = process.memoryUsage();
+  const versionInfo = getRuntimeVersion();
   res.json({
-    status: missingEnv.length ? 'degraded' : 'ok',
+    status: (missingEnv.length || dbStatus !== 'ok') ? 'degraded' : 'ok',
+    db: { status: dbStatus, latencyMs: dbLatencyMs },
+    memory: { heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024), heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024) },
+    uptime: Math.round(process.uptime()),
     missingEnv,
-    version: getRuntimeVersion()
+    ...versionInfo
   });
 });
 
 app.get('/version', (_req, res) => {
   res.json(getRuntimeVersion());
+});
+
+app.get('/changelog', (req, res) => {
+  res.json([
+    { version: '2.0.0', date: '2026-05-28', changes: ['Multi-surface assistant: PWA + native iOS app', 'Gemini Live real-time voice', 'Proactive briefings with push notifications', 'Action safety review system', 'Memory extraction and persistence'] },
+    { version: '1.5.0', date: '2026-04-01', changes: ['Maps connector with Google Places', 'Trainline train search', 'Uber/UberEats/Deliveroo deep links', 'Netflix connector'] },
+    { version: '1.4.0', date: '2026-03-01', changes: ['Per-user authentication', 'Session tokens', 'Connector health diagnostics'] },
+    { version: '1.3.0', date: '2026-02-01', changes: ['Telegram User API connector', 'Google Calendar integration', 'Action contracts and risk levels'] },
+    { version: '1.2.0', date: '2026-01-01', changes: ['Gmail connector with OAuth', 'Context brain for conversation follow-ups', 'Prompt and context caching'] }
+  ]);
 });
 
 function legalPage(title, body) {
@@ -4600,62 +4881,140 @@ app.get('/privacy', (_req, res) => {
   res.send(legalPage('Privacy Policy', `
     <h1>Privacy Policy</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
-    <p>Oxy is a personal assistant. It uses the information you choose to provide so it can answer, remember, and act for you.</p>
-    <h2>Data Oxy Uses</h2>
+    <h2>Data Controller</h2>
+    <p>Oxy is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
+    <h2>What We Collect</h2>
     <ul>
-      <li>Chat messages and conversation history.</li>
-      <li>Memories you ask Oxy to keep, plus stable facts inferred from your messages.</li>
-      <li>Optional location, contacts, calendar, reminders, music, HealthKit, microphone, and notification permissions.</li>
-      <li>Optional connector data such as Google, Telegram, Trainline, Netflix, Maps, and Uber actions.</li>
+      <li>Chat messages and conversation history</li>
+      <li>Voice audio (transcribed and discarded after processing)</li>
+      <li>Location data (when location permission is granted)</li>
+      <li>Contacts (when contacts permission is granted)</li>
+      <li>Health data (when HealthKit permission is granted)</li>
+      <li>Calendar and reminder data (when calendar permission is granted)</li>
+      <li>Email content (when Gmail connector is connected)</li>
+      <li>OAuth tokens for connected services</li>
+      <li>Memories you ask Oxy to keep, plus stable facts inferred from conversations</li>
     </ul>
-    <h2>AI And Search</h2>
-    <p>Messages may be sent to Gemini and related Google services to generate answers, use search grounding, transcribe audio, or complete requested actions.</p>
-    <h2>Retention</h2>
-    <p>Conversations, memories, preferences, connector status, device records, and action history are stored until you delete them or delete your account.</p>
-    <h2>Controls</h2>
-    <p>You can sign out, edit memory, disconnect connectors, disable proactive features, export your data, and delete your account from Settings.</p>
+    <h2>How We Use It</h2>
+    <ul>
+      <li>Providing the AI assistant service and completing requested actions</li>
+      <li>Improving the service through aggregated usage analytics</li>
+    </ul>
+    <h2>Lawful Basis</h2>
+    <p>Contract performance for account and assistant features. Legitimate interests for service improvement.</p>
+    <h2>Third-Party Processors</h2>
+    <ul>
+      <li>Google (Gemini AI, Gmail, Calendar, Maps) — for AI processing and connector features</li>
+      <li>Supabase — database hosting (EU region)</li>
+      <li>Telegram — messaging connector (when enabled)</li>
+    </ul>
+    <h2>Data Retention</h2>
+    <ul>
+      <li>Conversations: 180 days</li>
+      <li>Memories: until you delete them</li>
+      <li>Account data: until you request deletion</li>
+    </ul>
     <h2>Your Rights</h2>
-    <p>You may request access to your data, export your data, and erase your account data. These controls support GDPR-style access and erasure rights.</p>
+    <p>You have the right to access, rectification, erasure, portability, restriction, and objection. To exercise these rights, email <a href="mailto:support@oxy.app">support@oxy.app</a>.</p>
     <h2>Security Incidents</h2>
     <p>If a data breach affects your account, Oxy will notify you within 72 hours of confirming the incident where legally required.</p>
     <h2>Contact</h2>
-    <p>For privacy or deletion requests, contact support using <a href="/support">Oxy Support</a>.</p>
+    <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   `));
 });
 
 app.get('/terms', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(legalPage('Terms', `
-    <h1>Terms</h1>
+  res.send(legalPage('Terms of Service', `
+    <h1>Terms of Service</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
-    <p>Oxy is provided as an assistant that can answer questions, summarize information, and prepare or open actions at your request.</p>
-    <h2>Your Responsibility</h2>
-    <p>Review important outputs before relying on them. Confirm any message, booking, payment, order, travel plan, or calendar action before treating it as final.</p>
-    <h2>Limitations</h2>
-    <p>Oxy may be wrong, delayed, or unavailable. Current facts should be checked when accuracy matters.</p>
-    <h2>Subscriptions</h2>
-    <p>Current product planning caps paid subscription pricing at a maximum of £15/month unless changed intentionally before release.</p>
-    <h2>Support</h2>
-    <p>See <a href="/support">Oxy Support</a> for issue reporting and data deletion requests.</p>
+    <h2>The Service</h2>
+    <p>Oxy is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
+    <h2>Acceptable Use</h2>
+    <ul>
+      <li>No illegal activity using Oxy or connected services</li>
+      <li>No abuse of connected services (e.g. sending spam)</li>
+      <li>No attempts to circumvent safety measures or extract training data</li>
+    </ul>
+    <h2>Subscription</h2>
+    <p>Oxy costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
+    <h2>Refund Policy</h2>
+    <p>You have a 14-day cooling-off period for new subscriptions under the UK Consumer Contracts Regulations 2013. Contact <a href="mailto:support@oxy.app">support@oxy.app</a> to request a refund within this period.</p>
+    <h2>Limitation of Liability</h2>
+    <p>Oxy is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Oxy's responses. Always verify important information independently.</p>
+    <h2>Governing Law</h2>
+    <p>These terms are governed by the laws of England and Wales.</p>
+    <h2>Contact</h2>
+    <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   `));
 });
 
 app.get('/support', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(legalPage('Support', `
-    <h1>Support</h1>
-    <p class="meta">Use this page when Oxy behaves incorrectly or you need account/data help.</p>
-    <h2>What To Include</h2>
-    <ul>
-      <li>Backend commit shown in Settings → Diagnostics.</li>
-      <li>Approximate time of issue.</li>
-      <li>The prompt you sent.</li>
-      <li>Screenshot, if useful.</li>
-      <li>Whether a connector or permission was involved.</li>
-    </ul>
-    <h2>Data Requests</h2>
-    <p>You can export your account data and delete your account from Oxy Settings. If you need help, include your account identifier and the request type. Do not send passwords, OAuth tokens, or private contact lists.</p>
-  `));
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html><html><head><title>Oxy Support</title>
+  <style>body{font-family:sans-serif;max-width:680px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}h1{font-size:28px}h2{font-size:20px;margin-top:32px}a{color:#2563eb}.faq{background:#f9f9f9;padding:16px;border-radius:8px;margin:12px 0}</style>
+  </head><body>
+  <h1>Oxy Support</h1>
+  <p><strong>Email:</strong> <a href="mailto:support@oxy.app">support@oxy.app</a></p>
+  <p>We aim to respond within 48 hours. For security issues: <a href="mailto:security@oxy.app">security@oxy.app</a></p>
+
+  <h2>Delete Your Data</h2>
+  <ol>
+    <li>Open Oxy and go to Settings</li>
+    <li>Scroll to "Danger Zone" at the bottom</li>
+    <li>Tap "Delete Account" and follow the confirmation steps</li>
+    <li>All your data (messages, memories, connected accounts) will be permanently deleted</li>
+  </ol>
+  <p>Alternatively, email <a href="mailto:support@oxy.app">support@oxy.app</a> with the subject "Delete my account" from your registered email address.</p>
+
+  <h2>Frequently Asked Questions</h2>
+  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Oxy only accesses your email when you ask it to.</div>
+  <div class="faq"><strong>What does Oxy remember?</strong><br>Oxy extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
+  <div class="faq"><strong>Can I cancel my subscription?</strong><br>Yes, anytime. Cancel from Settings &rarr; Subscription or via your App Store/payment provider. You have 14 days from first purchase for a full refund (UK consumer law).</div>
+  <div class="faq"><strong>Is my data secure?</strong><br>Your data is stored in encrypted databases. Connector tokens are encrypted at rest. We never sell your data. See our <a href="/privacy">Privacy Policy</a>.</div>
+  <div class="faq"><strong>How do I report a bug?</strong><br>Email <a href="mailto:support@oxy.app">support@oxy.app</a> with your device, app version (visible in Settings), and what happened.</div>
+
+  <p><a href="/privacy">Privacy Policy</a> &middot; <a href="/terms">Terms of Service</a></p>
+  </body></html>`);
+});
+
+app.get('/robots.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send('User-agent: *\nAllow: /\nDisallow: /debug\nDisallow: /admin\nDisallow: /api/\nSitemap: https://oxy.app/sitemap.xml');
+});
+
+app.get('/humans.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send('/* TEAM */\nChizi Gamonye-Wuchi — Founder & Builder\nLocation: Solihull, UK\n\n/* THANKS */\nGemini · Supabase · Cloud Run · Node.js\n\n/* SITE */\nLast update: 2026\nLanguage: English\nDoctype: HTML5\nIDE: Various');
+});
+
+app.post('/admin/cleanup-conversations', async (req, res) => {
+  if (!process.env.DEBUG_SECRET) return res.status(404).json({ error: 'Not found' });
+  if (req.headers['x-debug-token'] !== process.env.DEBUG_SECRET) return res.status(403).json({ error: 'Forbidden' });
+
+  const cutoff = new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: oldConvs, error } = await supabase.from('conversations').select('id, user_id, created_at').lt('created_at', cutoff);
+  if (error) return res.status(500).json({ error: error.message });
+
+  let deleted = 0;
+  const byUser = {};
+  for (const c of (oldConvs || [])) {
+    if (!byUser[c.user_id]) byUser[c.user_id] = [];
+    byUser[c.user_id].push(c.id);
+  }
+
+  for (const [userId, ids] of Object.entries(byUser)) {
+    const { count } = await supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+    if (count > 500) {
+      const toDelete = ids.slice(0, Math.min(ids.length, count - 500));
+      if (toDelete.length > 0) {
+        const { error: delErr } = await supabase.from('conversations').delete().in('id', toDelete);
+        if (!delErr) deleted += toDelete.length;
+      }
+    }
+  }
+
+  res.json({ deleted, message: `Cleaned up ${deleted} old conversations` });
 });
 
 app.get('/install-shortcut', (_req, res) => {
@@ -4675,6 +5034,14 @@ app.get('/', (_req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.resolve(__dirname, '..', 'index.html'));
 });
+
+// Sentry error handler must be last
+if (process.env.SENTRY_DSN) {
+  try {
+    const Sentry = require('@sentry/node');
+    app.use(Sentry.expressErrorHandler());
+  } catch (e) {}
+}
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
