@@ -307,6 +307,11 @@ struct SettingsView: View {
                 .foregroundStyle(Color.oxySub)
                 .textCase(.uppercase)
                 .tracking(0.5)
+                .scrollTransition(axis: .vertical) { content, phase in
+                    content
+                        .opacity(phase.isIdentity ? 1 : 0)
+                        .offset(y: phase.isIdentity ? 0 : 12)
+                }
 
             VStack(spacing: 0) {
                 content()
@@ -318,7 +323,9 @@ struct SettingsView: View {
                 RoundedRectangle(cornerRadius: 16)
                     .stroke(Color.oxyLine2, lineWidth: 1)
             )
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: title)
     }
 
     private func settingRow<Accessory: View>(

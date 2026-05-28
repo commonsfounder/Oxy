@@ -55,6 +55,7 @@ private struct OnboardingView: View {
     let onFinish: () -> Void
     @State private var pageIndex = 0
     @State private var motionIsLive = false
+    @State private var controlsVisible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let pages = [
@@ -198,6 +199,9 @@ private struct OnboardingView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        .opacity(controlsVisible ? 1 : 0)
+                        .offset(y: controlsVisible ? 0 : 18)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.30), value: controlsVisible)
                     }
                     .padding(.horizontal, 26)
                     .padding(.bottom, 42)
@@ -207,6 +211,13 @@ private struct OnboardingView: View {
         }
         .onAppear {
             motionIsLive = true
+            controlsVisible = true
+        }
+        .onChange(of: pageIndex) { _, _ in
+            controlsVisible = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                controlsVisible = true
+            }
         }
     }
 
@@ -227,6 +238,7 @@ private struct OnboardingPageView: View {
     let isSelected: Bool
     let motionIsLive: Bool
     let reduceMotion: Bool
+    @State private var copyVisible = false
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion || !motionIsLive || !isSelected)) { context in
@@ -280,12 +292,18 @@ private struct OnboardingPageView: View {
                         .lineSpacing(2)
                         .foregroundStyle(.white)
                         .fixedSize(horizontal: false, vertical: true)
+                        .opacity(copyVisible && isSelected ? 1 : 0)
+                        .offset(y: copyVisible && isSelected ? 0 : 22)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: copyVisible)
 
                     Text(page.subtitle)
                         .font(.system(size: 16, weight: .regular))
                         .lineSpacing(4)
                         .foregroundStyle(.white.opacity(0.78))
                         .fixedSize(horizontal: false, vertical: true)
+                        .opacity(copyVisible && isSelected ? 1 : 0)
+                        .offset(y: copyVisible && isSelected ? 0 : 18)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.15), value: copyVisible)
                 }
                 .padding(.horizontal, 32)
                 .padding(.bottom, 210)
@@ -293,6 +311,20 @@ private struct OnboardingPageView: View {
                 .opacity(isSelected ? 1 : 0.72)
                 .animation(.easeOut(duration: 0.45), value: isSelected)
             }
+        }
+        .onAppear { updateCopyVisibility() }
+        .onChange(of: isSelected) { _, _ in updateCopyVisibility() }
+    }
+
+    private func updateCopyVisibility() {
+        guard !reduceMotion else {
+            copyVisible = isSelected
+            return
+        }
+        copyVisible = false
+        guard isSelected else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06) {
+            copyVisible = true
         }
     }
 

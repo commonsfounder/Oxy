@@ -63,15 +63,16 @@ const ACTION_CONTRACTS = {
   send_email: {
     risk: 'high',
     required: ['to', 'body'],
-    optional: ['subject', 'tone', 'context'],
+    optional: ['subject', 'tone', 'context', 'thread_id', 'in_reply_to', 'references', 'sender_name', 'sender_address'],
     aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
     inputExample: {
       to: 'email',
       subject: 'optional subject inferred from the body if omitted',
       body: 'polished complete email draft based on the user intent, not a terse literal fragment',
-      tone: 'optional requested tone such as casual, warm, professional, apologetic, direct'
+      tone: 'optional requested tone such as casual, warm, professional, apologetic, direct',
+      thread_id: 'optional Gmail thread ID for replies'
     },
-    guidance: 'If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches.',
+    guidance: 'If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available, match the user tone, do not add pleasantries they would not use, and stop when the point is made.',
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
@@ -80,7 +81,8 @@ const ACTION_CONTRACTS = {
   get_emails: {
     risk: 'low',
     required: [],
-    inputExample: { max_results: 5 },
+    optional: ['max_results', 'label', 'labels'],
+    inputExample: { max_results: 5, label: 'INBOX' },
     successSummary: 'Emails checked',
     failureSummary: 'Email check failed',
     confirmation: 'none'

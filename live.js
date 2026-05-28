@@ -41,7 +41,10 @@ const LIVE_FUNCTION_DECLARATIONS = [
       properties: {
         to: { type: 'string' },
         subject: { type: 'string' },
-        body: { type: 'string' }
+        body: { type: 'string' },
+        thread_id: { type: 'string' },
+        in_reply_to: { type: 'string' },
+        references: { type: 'string' }
       },
       required: ['to', 'subject', 'body'],
       additionalProperties: false
@@ -53,7 +56,12 @@ const LIVE_FUNCTION_DECLARATIONS = [
     parametersJsonSchema: {
       type: 'object',
       properties: {
-        max_results: { type: 'number' }
+        max_results: { type: 'number' },
+        label: { type: 'string' },
+        labels: {
+          type: 'array',
+          items: { type: 'string' }
+        }
       },
       additionalProperties: false
     }

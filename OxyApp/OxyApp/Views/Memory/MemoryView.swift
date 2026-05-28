@@ -35,11 +35,30 @@ struct MemoryView: View {
                         message: saveMessage,
                         onSave: { Task { await saveMemory() } }
                     )
+                    .scrollTransition(axis: .vertical) { content, phase in
+                        content
+                            .opacity(phase.isIdentity ? 1 : 0)
+                            .offset(y: phase.isIdentity ? 0 : 24)
+                    }
 
-                    HStack(spacing: 10) {
-                        MemoryStat(title: "Saved", value: isLoading ? "..." : "\(summary.total)")
-                        MemoryStat(title: "Learned", value: isLoading ? "..." : "\(summary.learned)")
-                        MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
+                    if isLoading {
+                        HStack(spacing: 10) {
+                            OxySkeletonCard(height: 68, cornerRadius: 14)
+                            OxySkeletonCard(height: 68, cornerRadius: 14)
+                            OxySkeletonCard(height: 68, cornerRadius: 14)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    } else {
+                        HStack(spacing: 10) {
+                            MemoryStat(title: "Saved", value: "\(summary.total)")
+                            MemoryStat(title: "Learned", value: "\(summary.learned)")
+                            MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
+                        }
+                        .scrollTransition(axis: .vertical) { content, phase in
+                            content
+                                .opacity(phase.isIdentity ? 1 : 0)
+                                .offset(y: phase.isIdentity ? 0 : 22)
+                        }
                     }
 
                     if let lastUpdated = summary.lastUpdated {
@@ -48,9 +67,15 @@ struct MemoryView: View {
                             .foregroundStyle(Color.oxyDim)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.top, 6)
+                            .scrollTransition(axis: .vertical) { content, phase in
+                                content
+                                    .opacity(phase.isIdentity ? 1 : 0)
+                                    .offset(y: phase.isIdentity ? 0 : 16)
+                            }
                     }
                 }
                 .padding(16)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
             }
         }
         .navigationTitle("Memory")

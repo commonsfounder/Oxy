@@ -10,6 +10,7 @@ struct ConnectorsView: View {
     @State private var isLoading = true
     @State private var googleStatus: GoogleStatus = .idle
     @State private var errorMessage: String?
+    @State private var cardsVisible = false
 
     enum GoogleStatus: String {
         case idle, connecting, connected, needsReconnect, error
@@ -21,8 +22,12 @@ struct ConnectorsView: View {
                 Color.oxyBg.ignoresSafeArea()
 
                 if isLoading {
-                    ProgressView()
-                        .tint(Color.oxyStone)
+                    VStack(spacing: 12) {
+                        OxySkeletonCard(height: 92)
+                        OxySkeletonCard(height: 148)
+                        OxySkeletonCard(height: 148)
+                    }
+                    .padding(16)
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
@@ -32,6 +37,9 @@ struct ConnectorsView: View {
 
                             // Google section
                             googleSection
+                                .opacity(cardsVisible ? 1 : 0)
+                                .offset(y: cardsVisible ? 0 : 18)
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.02), value: cardsVisible)
 
                             // Grouped connectors
                             let nonGoogle = connectors.filter { $0.id != "google" && $0.implemented }
@@ -149,11 +157,14 @@ struct ConnectorsView: View {
                 GridItem(.flexible()),
                 GridItem(.flexible())
             ], spacing: 12) {
-                ForEach(connectors) { connector in
+                ForEach(Array(connectors.enumerated()), id: \.element.id) { index, connector in
                     ConnectorCard(
                         connector: connector,
                         onAction: { handleConnectorAction(connector) }
                     )
+                    .opacity(cardsVisible ? 1 : 0)
+                    .offset(y: cardsVisible ? 0 : 22)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(Double(index) * 0.08), value: cardsVisible)
                 }
             }
         }
@@ -176,6 +187,10 @@ struct ConnectorsView: View {
                 }
                 errorMessage = nil
                 isLoading = false
+                cardsVisible = false
+                DispatchQueue.main.async {
+                    cardsVisible = true
+                }
             }
         } catch {
             await MainActor.run {
@@ -184,6 +199,7 @@ struct ConnectorsView: View {
                     googleStatus = .error
                 }
                 isLoading = false
+                cardsVisible = true
             }
         }
     }
@@ -319,6 +335,13 @@ private struct ConnectorCard: View {
             }
             .disabled(!connector.implemented)
         }
+        .overlay(alignment: .topTrailing) {
+            if connector.enabled {
+                ConnectorCheckmark()
+                    .padding(10)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
@@ -329,6 +352,35 @@ private struct ConnectorCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.oxyLine2, lineWidth: 1)
         )
+    }
+}
+
+private struct ConnectorCheckmark: View {
+    @State private var isDrawn = false
+
+    var body: some View {
+        Circle()
+            .fill(Color.oxyGreen)
+            .frame(width: 18, height: 18)
+            .overlay {
+                CheckmarkShape()
+                    .trim(from: 0, to: isDrawn ? 1 : 0)
+                    .stroke(Color.oxyOnAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .frame(width: 8, height: 7)
+            }
+            .scaleEffect(isDrawn ? 1 : 0.72)
+            .onAppear { isDrawn = true }
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isDrawn)
+    }
+}
+
+private struct CheckmarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX * 0.82, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
     }
 }
 

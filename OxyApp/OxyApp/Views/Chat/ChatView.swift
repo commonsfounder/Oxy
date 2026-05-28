@@ -76,11 +76,12 @@ struct ChatView: View {
                                 }
                             }
                             .padding(.vertical, 12)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.messages.count)
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -90,7 +91,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages.last?.content) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -886,6 +887,7 @@ private struct ChatInputBar: View {
     let onVoice: () -> Void
     let onAttach: () -> Void
     let onRemoveAttachment: () -> Void
+    @State private var voicePulse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -946,6 +948,18 @@ private struct ChatInputBar: View {
 
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
+                        if isRecording && !canSend {
+                            Circle()
+                                .stroke(Color.oxyGreen.opacity(0.30), lineWidth: 2)
+                                .frame(width: 50, height: 50)
+                                .scaleEffect(voicePulse ? 1.32 : 0.78)
+                                .opacity(voicePulse ? 0 : 0.85)
+                            Circle()
+                                .stroke(Color.oxyGreen.opacity(0.20), lineWidth: 1.5)
+                                .frame(width: 62, height: 62)
+                                .scaleEffect(voicePulse ? 1.18 : 0.72)
+                                .opacity(voicePulse ? 0 : 0.65)
+                        }
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
@@ -959,13 +973,22 @@ private struct ChatInputBar: View {
                     .frame(width: 36, height: 36)
                     .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
                     .clipShape(Circle())
+                    .scaleEffect(isRecording && !canSend && voicePulse ? 1.05 : 1.0)
                 }
                 .disabled(!canAct)
-                .animation(.easeInOut(duration: 0.15), value: canAct)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: canAct)
+                .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color.oxySurface1)
+        }
+        .onAppear { voicePulse = true }
+        .onChange(of: isRecording) { _, recording in
+            if recording {
+                voicePulse = false
+                DispatchQueue.main.async { voicePulse = true }
+            }
         }
     }
 

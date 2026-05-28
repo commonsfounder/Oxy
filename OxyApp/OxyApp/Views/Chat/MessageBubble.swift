@@ -30,10 +30,18 @@ struct MessageBubble: View {
                     if isUser { Spacer(minLength: 60) }
 
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(message.content)
-                            .font(.system(size: isCompact ? 14 : 15))
-                            .foregroundStyle(isUser ? .white : Color.oxyText)
-                            .lineSpacing(isCompact ? 2 : 4)
+                        if message.isStreaming && !isUser {
+                            StreamingWordText(
+                                text: message.content,
+                                fontSize: isCompact ? 14 : 15,
+                                lineSpacing: isCompact ? 2 : 4
+                            )
+                        } else {
+                            Text(message.content)
+                                .font(.system(size: isCompact ? 14 : 15))
+                                .foregroundStyle(isUser ? .white : Color.oxyText)
+                                .lineSpacing(isCompact ? 2 : 4)
+                        }
                     }
                     .padding(.horizontal, isCompact ? 13 : 16)
                     .padding(.vertical, isCompact ? 8 : 11)
@@ -108,6 +116,37 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, isCompact ? 2 : 4)
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: message.content)
+    }
+}
+
+private struct StreamingWordText: View {
+    let text: String
+    let fontSize: CGFloat
+    let lineSpacing: CGFloat
+
+    private var words: [String] {
+        text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+    }
+
+    var body: some View {
+        Text(attributedText)
+            .font(.system(size: fontSize))
+            .foregroundStyle(Color.oxyText)
+            .lineSpacing(lineSpacing)
+            .animation(.easeOut(duration: 0.28), value: words.count)
+    }
+
+    private var attributedText: AttributedString {
+        var output = AttributedString()
+        for (index, word) in words.enumerated() {
+            var part = AttributedString(index == words.count - 1 ? word : "\(word) ")
+            let distanceFromEnd = words.count - index
+            part.foregroundColor = Color.oxyText.opacity(distanceFromEnd <= 4 ? 1 : 0.78)
+            output += part
+        }
+        return output
     }
 }
 

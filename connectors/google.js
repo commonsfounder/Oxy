@@ -98,9 +98,170 @@ async function getAccessToken(userId) {
   }
 }
 
-function buildMime(to, subject, body) {
-  const msg = [`To: ${to}`, `Subject: ${subject}`, 'Content-Type: text/plain; charset=utf-8', '', body].join('\n');
+function buildMime(to, subject, body, options = {}) {
+  const headers = [`To: ${to}`, `Subject: ${subject}`];
+  if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
+  if (options.references) headers.push(`References: ${options.references}`);
+  const msg = [...headers, 'Content-Type: text/plain; charset=utf-8', '', body].join('\n');
   return Buffer.from(msg).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function decodeBase64Url(data = '') {
+  if (!data) return '';
+  const normalized = String(data).replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function stripHtml(html = '') {
+  return String(html)
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeBody(text = '') {
+  return String(text)
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{4,}/g, '\n\n\n')
+    .trim();
+}
+
+function getHeader(headers = [], name) {
+  const wanted = String(name || '').toLowerCase();
+  return headers.find(header => String(header.name || '').toLowerCase() === wanted)?.value || '';
+}
+
+function parseEmailAddress(value = '') {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^(.*?)\s*<([^>]+)>$/);
+  if (match) {
+    return {
+      name: match[1].replace(/^"|"$/g, '').trim(),
+      address: match[2].trim(),
+      raw
+    };
+  }
+  return {
+    name: raw.includes('@') ? '' : raw,
+    address: raw.includes('@') ? raw : '',
+    raw
+  };
+}
+
+function collectBodyParts(part, out = { plain: [], html: [] }) {
+  if (!part) return out;
+  const mimeType = String(part.mimeType || '').toLowerCase();
+  const data = part.body?.data;
+  if (data && mimeType === 'text/plain') out.plain.push(decodeBase64Url(data));
+  if (data && mimeType === 'text/html') out.html.push(stripHtml(decodeBase64Url(data)));
+  for (const child of part.parts || []) collectBodyParts(child, out);
+  return out;
+}
+
+function extractMessageBody(payload = {}) {
+  const parts = collectBodyParts(payload);
+  const plain = normalizeBody(parts.plain.filter(Boolean).join('\n\n'));
+  if (plain) return plain;
+  return normalizeBody(parts.html.filter(Boolean).join('\n\n'));
+}
+
+function normalizeLabelFilter(params = {}) {
+  const source = params.labels || params.label || params.labelIds || params.label_ids || 'INBOX';
+  const labels = (Array.isArray(source) ? source : String(source).split(','))
+    .map(label => String(label || '').trim().toUpperCase())
+    .filter(Boolean)
+    .map(label => {
+      if (['INBOX', 'UNREAD', 'IMPORTANT'].includes(label)) return label;
+      if (label === 'STARRED') return 'STARRED';
+      return label;
+    });
+  return labels.length ? labels : ['INBOX'];
+}
+
+function gmailParams(params = {}) {
+  return {
+    params,
+    paramsSerializer: values => {
+      const search = new URLSearchParams();
+      for (const [key, value] of Object.entries(values || {})) {
+        if (Array.isArray(value)) {
+          value.forEach(item => search.append(key, item));
+        } else if (value !== undefined && value !== null) {
+          search.append(key, value);
+        }
+      }
+      return search.toString();
+    }
+  };
+}
+
+function messageToEmail(message = {}) {
+  const headers = message.payload?.headers || [];
+  const from = getHeader(headers, 'From');
+  const sender = parseEmailAddress(from);
+  return {
+    id: message.id,
+    threadId: message.threadId,
+    from,
+    senderName: sender.name,
+    senderAddress: sender.address,
+    to: getHeader(headers, 'To'),
+    subject: getHeader(headers, 'Subject'),
+    date: getHeader(headers, 'Date'),
+    messageId: getHeader(headers, 'Message-ID'),
+    references: getHeader(headers, 'References'),
+    inReplyTo: getHeader(headers, 'In-Reply-To'),
+    snippet: message.snippet || '',
+    labelIds: message.labelIds || [],
+    body: extractMessageBody(message.payload)
+  };
+}
+
+async function fetchFullMessage(headers, id) {
+  const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+    { headers, params: { format: 'full' }, timeout: 15000 });
+  return messageToEmail(detail.data);
+}
+
+async function fetchThreadMessages(headers, threadId) {
+  const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${threadId}`,
+    { headers, params: { format: 'full' }, timeout: 15000 });
+  return (detail.data.messages || []).map(messageToEmail);
+}
+
+function formatThreadText(messages = []) {
+  return messages.map((email, index) => {
+    const sender = email.senderName || email.senderAddress || email.from || 'Unknown sender';
+    const date = email.date || 'Unknown date';
+    const body = email.body || email.snippet || '';
+    return `Message ${index + 1} — ${sender} — ${date}\nSubject: ${email.subject || '(No subject)'}\n${body}`;
+  }).join('\n\n---\n\n').trim();
+}
+
+async function getThreadContext(userId, threadId) {
+  if (!threadId) return null;
+  const token = await getAccessToken(userId);
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const messages = await fetchThreadMessages(headers, threadId);
+  return {
+    threadId,
+    messages,
+    text: formatThreadText(messages)
+  };
 }
 
 function isGenericPlaceholderEmail(subject, body) {
@@ -168,6 +329,9 @@ async function execute(userId, action, params) {
         const to = params.to || params.email || params.recipient;
         const body = params.body || params.message || params.content;
         const subject = params.subject || inferEmailSubject(body);
+        const threadId = params.thread_id || params.threadId;
+        const inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
+        const references = params.references || inReplyTo;
         if (!to || !body) return { success: false, error: 'send_email requires a recipient and message body' };
         if (isGenericPlaceholderEmail(subject, body)) {
           return {
@@ -175,23 +339,22 @@ async function execute(userId, action, params) {
             error: 'Email content is too generic. Ask for the actual message before sending.'
           };
         }
+        const payload = { raw: buildMime(to, subject, body, { inReplyTo, references }) };
+        if (threadId) payload.threadId = threadId;
         await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-          { raw: buildMime(to, subject, body) }, { headers, timeout: 15000 });
+          payload, { headers, timeout: 15000 });
         return { success: true, text: `Email sent to ${to}` };
       }
 
       case 'get_emails': {
         const { max_results = 5 } = params;
+        const labelIds = normalizeLabelFilter(params);
         const list = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/messages',
-          { headers, params: { maxResults: max_results }, timeout: 15000 });
+          { headers, ...gmailParams({ maxResults: max_results, labelIds }), timeout: 15000 });
         if (!list.data.messages?.length) return { success: true, emails: [], text: 'No emails found' };
 
         const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
-          const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
-          const h = detail.data.payload?.headers || [];
-          const get = n => h.find(x => x.name === n)?.value || '';
-          return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
+          return fetchFullMessage(headers, msg.id);
         }));
         return { success: true, emails, text: summarizeEmails(emails) };
       }
@@ -204,11 +367,7 @@ async function execute(userId, action, params) {
         if (!list.data.messages?.length) return { success: true, emails: [], text: `No emails matching "${query}"` };
 
         const emails = await Promise.all(list.data.messages.slice(0, max_results).map(async msg => {
-          const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`,
-            { headers, params: { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }, timeout: 15000 });
-          const h = detail.data.payload?.headers || [];
-          const get = n => h.find(x => x.name === n)?.value || '';
-          return { id: msg.id, from: get('From'), subject: get('Subject'), date: get('Date') };
+          return fetchFullMessage(headers, msg.id);
         }));
         return {
           success: true,
@@ -255,4 +414,17 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = {
+  SUPPORTED_ACTIONS,
+  execute,
+  getThreadContext,
+  _private: {
+    decodeBase64Url,
+    stripHtml,
+    extractMessageBody,
+    messageToEmail,
+    normalizeLabelFilter,
+    formatThreadText,
+    buildMime
+  }
+};

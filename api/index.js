@@ -8,6 +8,7 @@ const multer = require('multer');
 const axios = require('axios');
 const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
+const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
@@ -540,7 +541,14 @@ function summarizeActionOutcome(entry) {
   const result = entry?.result || {};
   const status = result.success === false ? 'failed' : 'succeeded';
   const detail = (result.error || result.text || '').trim();
-  return `- ${humanizeActionType(type)}${summarizeActionInput(entry?.input || result?.input)}: ${status}${detail ? ` — ${detail}` : ''}`;
+  let emailContext = '';
+  if (['get_emails', 'search_emails'].includes(type) && Array.isArray(result.emails) && result.emails.length) {
+    emailContext = result.emails.slice(0, 3).map((email, index) => {
+      const body = String(email.body || email.snippet || '').slice(0, 1200);
+      return `\n  Email ${index + 1}: From ${email.from || 'Unknown'} | Subject ${email.subject || '(No subject)'} | Thread ${email.threadId || 'unknown'}${body ? `\n  Body: ${body}` : ''}`;
+    }).join('');
+  }
+  return `- ${humanizeActionType(type)}${summarizeActionInput(entry?.input || result?.input)}: ${status}${detail ? ` — ${detail}` : ''}${emailContext}`;
 }
 
 function toGeminiHistoryText(message) {
@@ -711,6 +719,107 @@ RESPONSE RULES:
 
 ---
 ${userContext}`;
+}
+
+function isEmailReplyDraftRequest(message = '') {
+  return /\b(reply|respond|email back|write back|get back to|send (him|her|them) back)\b/i.test(String(message || ''));
+}
+
+function senderMemoryContext(memory = '', sender = {}) {
+  const needles = [
+    sender.name,
+    sender.address,
+    String(sender.address || '').split('@')[0]
+  ].filter(Boolean).map(value => String(value).toLowerCase());
+  if (!needles.length) return '';
+  return String(memory || '')
+    .split(/\n|;+/)
+    .map(line => line.trim())
+    .filter(line => {
+      const lower = line.toLowerCase();
+      return needles.some(needle => needle.length >= 3 && lower.includes(needle));
+    })
+    .slice(0, 8)
+    .join('\n');
+}
+
+function scoreEmailCandidate(email = {}, message = '') {
+  const haystack = [
+    email.from,
+    email.senderName,
+    email.senderAddress,
+    email.subject
+  ].filter(Boolean).join(' ').toLowerCase();
+  const terms = String(message || '')
+    .toLowerCase()
+    .split(/[^a-z0-9@._+-]+/i)
+    .filter(term => term.length >= 3);
+  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+}
+
+function findRecentEmailTarget(history = [], message = '') {
+  const emails = [];
+  for (const turn of [...history].reverse()) {
+    for (const entry of [...(turn.actions || [])].reverse()) {
+      const action = entry?.action || entry?.type;
+      if (!['get_emails', 'search_emails'].includes(action)) continue;
+      const resultEmails = entry?.result?.emails;
+      if (Array.isArray(resultEmails)) emails.push(...resultEmails);
+    }
+    if (emails.length) break;
+  }
+  if (!emails.length) return null;
+  const ranked = emails
+    .map((email, index) => ({ email, index, score: scoreEmailCandidate(email, message) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  return ranked[0]?.email || null;
+}
+
+async function buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace = null) {
+  if (!isEmailReplyDraftRequest(message)) return '';
+  const target = findRecentEmailTarget(history, message);
+  if (!target?.threadId) return '';
+  try {
+    const thread = trace
+      ? await trace.run('gmail.thread_context.fetch', () => googleConnector.getThreadContext(userId, target.threadId))
+      : await googleConnector.getThreadContext(userId, target.threadId);
+    const latestFromThem = [...(thread?.messages || [])]
+      .reverse()
+      .find(email => (email.senderAddress || email.from) && (email.senderAddress || email.from) !== target.to) || target;
+    const sender = {
+      name: latestFromThem.senderName || target.senderName || '',
+      address: latestFromThem.senderAddress || target.senderAddress || '',
+      raw: latestFromThem.from || target.from || ''
+    };
+    const senderMemory = senderMemoryContext(memory, sender) || 'No sender-specific memory found.';
+    const threadText = String(thread?.text || target.body || target.snippet || '').slice(0, 14000);
+    if (!threadText) return '';
+    return `GMAIL REPLY DRAFTING CONTEXT:
+The user is replying to an existing Gmail thread.
+Thread ID: ${target.threadId}
+Sender name: ${sender.name || 'Unknown'}
+Sender address: ${sender.address || sender.raw || 'Unknown'}
+Memory about this sender:
+${senderMemory}
+
+User communication style/preferences:
+${preferences || 'No explicit communication preferences yet.'}
+
+Full thread text:
+${threadText}
+
+Reply drafting instruction:
+- If you produce a send_email action for this reply, include thread_id "${target.threadId}", to "${sender.address || sender.raw}", subject "${target.subject || ''}", in_reply_to "${target.messageId || ''}", and references "${target.references || target.messageId || ''}" when available.
+- Draft from the full thread, not only the latest snippet.
+- Match the user's normal tone and the relationship shown in memory/thread context.
+- Do not add pleasantries the user would not use.
+- Stop when the point is made. No filler.`;
+  } catch (err) {
+    if (trace) trace.log('gmail.thread_context.fetch_failed', err.message);
+    return `GMAIL REPLY DRAFTING CONTEXT:
+The user appears to be replying to a Gmail thread, but the full thread could not be fetched: ${err.message}
+Use the recent email result only if enough context is visible; otherwise ask one short clarification.`;
+  }
 }
 
 function buildLocationContext(location) {
@@ -3015,6 +3124,9 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const resolvedContext = requestContext.resolvedContext || (!quickTurn && isContextualReference(message)
     ? buildResolvedContext(history, recentActions)
     : null);
+  const emailReplyContext = quickTurn
+    ? ''
+    : await buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace);
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
     : buildDynamicSystemPrompt(
@@ -3026,6 +3138,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         buildLocationContext(requestContext.location),
         buildNativeHintsContext(requestContext.nativeHints),
         buildPendingActionContext(requestContext.pendingAction),
+        emailReplyContext,
         buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),
       statedContext
@@ -3480,7 +3593,7 @@ function buildStructuredDataSummary(entry) {
   if (entry?.action === 'get_emails' || entry?.action === 'search_emails') {
     if (!Array.isArray(result.emails) || result.emails.length === 0) return result.text || 'No emails found.';
     const emails = result.emails.map((email, index) => (
-      `${index + 1}. From: ${email.from || 'Unknown sender'} | Subject: ${email.subject || '(No subject)'}${email.date ? ` | Date: ${email.date}` : ''}`
+      `${index + 1}. From: ${email.from || 'Unknown sender'} | Subject: ${email.subject || '(No subject)'}${email.date ? ` | Date: ${email.date}` : ''}${email.body ? `\nBody: ${String(email.body).slice(0, 1200)}` : ''}`
     ));
     return `Email results:\n${emails.join('\n')}`;
   }
