@@ -2,6 +2,7 @@ import Foundation
 
 struct Message: Identifiable, Equatable {
     let id: UUID
+    let dbId: String?
     let role: Role
     var content: String
     let timestamp: Date
@@ -15,6 +16,7 @@ struct Message: Identifiable, Equatable {
 
     init(
         id: UUID = UUID(),
+        dbId: String? = nil,
         role: Role,
         content: String,
         timestamp: Date = Date(),
@@ -22,6 +24,7 @@ struct Message: Identifiable, Equatable {
         isStreaming: Bool = false
     ) {
         self.id = id
+        self.dbId = dbId
         self.role = role
         self.content = content
         self.timestamp = timestamp

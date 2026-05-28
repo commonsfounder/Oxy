@@ -3238,11 +3238,24 @@ app.get('/history/:userId/search', async (req, res) => {
 
 app.get('/history/:userId/around', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
-  const anchor = new Date(String(req.query.createdAt || ''));
-  if (Number.isNaN(anchor.getTime())) return res.status(400).json({ error: 'Invalid createdAt' });
-  const beforeLimit = Math.min(Math.max(Number(req.query.before) || 20, 1), 100);
-  const afterLimit = Math.min(Math.max(Number(req.query.after) || 20, 1), 100);
+  const messageId = String(req.query.messageId || '').trim();
+  let anchor = new Date(String(req.query.createdAt || ''));
+  const beforeLimit = Math.min(Math.max(Number(req.query.before) || 40, 1), 160);
+  const afterLimit = Math.min(Math.max(Number(req.query.after) || 40, 1), 160);
   try {
+    if (messageId) {
+      const { data: anchorRow, error: anchorError } = await supabase
+        .from('conversations')
+        .select('created_at')
+        .eq('user_id', req.params.userId)
+        .eq('id', messageId)
+        .maybeSingle();
+      if (anchorError) throw anchorError;
+      if (!anchorRow?.created_at) return res.status(404).json({ error: 'Message not found' });
+      anchor = new Date(anchorRow.created_at);
+    }
+    if (Number.isNaN(anchor.getTime())) return res.status(400).json({ error: 'Invalid createdAt' });
+
     const base = supabase
       .from('conversations')
       .select('id, role, content, created_at')

@@ -79,11 +79,11 @@ final class ChatViewModel {
         } catch {}
     }
 
-    func loadHistoryAround(userId: String, createdAt: String) async {
+    func loadHistoryAround(userId: String, createdAt: String, messageId: String? = nil) async {
         do {
-            let entries = try await chatService.loadHistoryAround(userId: userId, createdAt: createdAt)
+            let entries = try await chatService.loadHistoryAround(userId: userId, createdAt: createdAt, messageId: messageId)
             let loaded = messages(from: entries)
-            let targetID = closestMessageID(in: loaded, to: createdAt)
+            let targetID = closestMessageID(in: loaded, to: createdAt, messageId: messageId)
             let label = historyLabel(for: createdAt)
             await MainActor.run {
                 messages = loaded
@@ -407,6 +407,7 @@ final class ChatViewModel {
         entries.compactMap { entry -> Message? in
             guard let role = Message.Role(rawValue: entry.role) else { return nil }
             return Message(
+                dbId: entry.id,
                 role: role,
                 content: entry.content,
                 timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
@@ -431,7 +432,10 @@ final class ChatViewModel {
         "oxy_current_chat_started_at_\(userId)"
     }
 
-    private func closestMessageID(in messages: [Message], to createdAt: String) -> UUID? {
+    private func closestMessageID(in messages: [Message], to createdAt: String, messageId: String? = nil) -> UUID? {
+        if let messageId, let exact = messages.first(where: { $0.dbId == messageId }) {
+            return exact.id
+        }
         guard let target = Date.oxyParse(createdAt) else { return nil }
         return messages
             .min(by: { abs($0.timestamp.timeIntervalSince(target)) < abs($1.timestamp.timeIntervalSince(target)) })?

@@ -294,7 +294,7 @@ struct ChatView: View {
                     guard let createdAt = result.createdAt else { return }
                     showSearch = false
                     Task {
-                        await viewModel.loadHistoryAround(userId: appState.userId, createdAt: createdAt)
+                        await viewModel.loadHistoryAround(userId: appState.userId, createdAt: createdAt, messageId: result.messageId)
                     }
                 }
             }
@@ -870,13 +870,22 @@ private struct SearchResultRow: View {
 }
 
 struct SearchResult: Codable, Identifiable {
+    let messageId: String?
     let role: String
     let content: String
     let createdAt: String?
 
-    var id: String { (createdAt ?? "") + role + String(content.prefix(20)) }
+    var id: String { messageId ?? ((createdAt ?? "") + role + String(content.prefix(20))) }
+
+    init(messageId: String? = nil, role: String, content: String, createdAt: String?) {
+        self.messageId = messageId
+        self.role = role
+        self.content = content
+        self.createdAt = createdAt
+    }
 
     enum CodingKeys: String, CodingKey {
+        case messageId = "id"
         case role, content
         case createdAt = "created_at"
     }

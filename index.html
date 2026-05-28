@@ -1946,6 +1946,7 @@ function humanizeActionType(type) {
 
 function normalizeHistoryMessage(m) {
   return {
+    id: m.id || null,
     role: m.role,
     content: m.content || '',
     image: m.image || null,
@@ -2240,7 +2241,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   useEffect(() => {
     const target = pendingJumpRef.current;
     if (!target) return;
-    const exact = messageRefs.current[target.created_at];
+    const exact = messageRefs.current[target.id] || messageRefs.current[target.created_at];
     if (exact) {
       exact.scrollIntoView({ behavior: 'smooth', block: 'center' });
       pendingJumpRef.current = null;
@@ -2332,6 +2333,18 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     } catch {}
   }, []);
 
+  const loadHistoryWindow = useCallback(async (params) => {
+    const r = await apiFetch(`/history/${USER_ID}/around?${params}`).then(r => r.json());
+    if (r.history?.length) {
+      setMessages(r.history.map(normalizeHistoryMessage));
+      setSearchOpen(false);
+      setSearchResults([]);
+      setSearchQuery('');
+      return true;
+    }
+    return false;
+  }, []);
+
   const jumpToDate = useCallback(async (date) => {
     if (!date) return;
     try {
@@ -2343,13 +2356,21 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
         setSearchResults([]);
         setSearchQuery('');
       }
-    } catch {}
+    } catch { notifyError('Could not load that day.'); }
   }, []);
 
   const jumpToMessage = useCallback((msg) => {
-    pendingJumpRef.current = { created_at: msg.created_at, content: msg.content };
-    jumpToDate(msg.created_at.slice(0, 10));
-  }, [jumpToDate]);
+    pendingJumpRef.current = { id: msg.id, created_at: msg.created_at, content: msg.content };
+    const params = new URLSearchParams();
+    if (msg.id) params.set('messageId', msg.id);
+    if (msg.created_at) params.set('createdAt', msg.created_at);
+    params.set('before', '60');
+    params.set('after', '60');
+    loadHistoryWindow(params.toString()).catch(() => {
+      notifyError('Could not jump to that message.');
+      if (msg.created_at) jumpToDate(msg.created_at.slice(0, 10));
+    });
+  }, [jumpToDate, loadHistoryWindow]);
 
   const logAudioStage = useCallback((stage, extra = {}) => {
     console.log('[audio][frontend]', stage, extra);
@@ -3212,9 +3233,11 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                   const key = msg.created_at || `${msg.role}-${msg.time?.getTime?.() || i}-${i}`;
                   if (el) {
                     messageRefs.current[key] = el;
+                    if (msg.id) messageRefs.current[msg.id] = el;
                     el.dataset.msgContent = msg.content || '';
                   } else {
                     delete messageRefs.current[key];
+                    if (msg.id) delete messageRefs.current[msg.id];
                   }
                 }}
               >
