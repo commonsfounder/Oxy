@@ -17,6 +17,20 @@
 <script src="/animations.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<!-- Analytics: set window.POSTHOG_KEY before this script to enable -->
+<script>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]);t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+" (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId setPersonPropertiesForFlags".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  if (window.POSTHOG_KEY) {
+    posthog.init(window.POSTHOG_KEY, { api_host: 'https://eu.i.posthog.com', person_profiles: 'identified_only' });
+  }
+</script>
+<script>
+  let _deferredInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window._deferredInstallPrompt = e;
+  });
+</script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -311,6 +325,42 @@ body::after {
   vertical-align: middle;
 }
 .msg-play-btn:hover { background: var(--s4); color: var(--text); }
+
+/* Copy + reaction buttons beneath assistant messages */
+.msg-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.message.oxcy:hover .msg-meta-row { opacity: 1; }
+.msg-meta-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--line2);
+  background: var(--s1);
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 11px;
+  gap: 4px;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.msg-meta-btn:hover { background: var(--s3); color: var(--text); border-color: var(--line); }
+.msg-meta-btn.active { background: var(--s3); color: var(--text); border-color: var(--line); }
+
+/* Composer hint */
+.composer-hint {
+  font-size: 11px;
+  color: var(--dim);
+  text-align: center;
+  padding: 5px 0 2px;
+  letter-spacing: 0.1px;
+}
 
 .msg-image-wrap {
   margin-top: 10px;
@@ -2133,6 +2183,8 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   const [searchResults, setSearchResults] = useState([]);
   const [viewingDate, setViewingDate] = useState(null);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [copiedMsgId, setCopiedMsgId] = useState(null);
+  const [reactions, setReactions] = useState({}); // msgKey -> 'up'|'down'
   const setRecordingWithCb = v => { setRecording(v); onRecordingChange?.(v); };
   const setLoadingWithCb   = v => { setLoading(v);   onProcessingChange?.(v); };
   const messagesEndRef    = useRef(null);
@@ -3080,8 +3132,31 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     setLoadingWithCb(false);
   }, [input, loading, settings, memory, people, maybeOpenActionResults, enqueueAudioFromBase64, clearCurrentStatus, updateCurrentStatus, speaking, primeAudioPlayback]);
 
+  const copyMsgContent = (msgKey, content) => {
+    if (!content) return;
+    navigator.clipboard.writeText(content).catch(() => {});
+    setCopiedMsgId(msgKey);
+    setTimeout(() => setCopiedMsgId(k => k === msgKey ? null : k), 2000);
+  };
+
+  const reactToMsg = (msgKey, reaction) => {
+    setReactions(prev => {
+      const existing = prev[msgKey];
+      const next = existing === reaction ? null : reaction;
+      const updated = { ...prev };
+      if (next) updated[msgKey] = next; else delete updated[msgKey];
+      window.posthog?.capture('message_reaction', { reaction: next || 'removed', msgKey });
+      return updated;
+    });
+  };
+
   const handleKeyDown = e => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (composerMode === 'image') sendImageRequest();
+      else if (selectedImage?.file) sendVisionMessage();
+      else sendMessage();
+    } else if ((e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
       e.preventDefault();
       if (composerMode === 'image') sendImageRequest();
       else if (selectedImage?.file) sendVisionMessage();
@@ -3241,14 +3316,40 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                   }
                 }}
               >
-                {(msg.content || msg.audio) && (
-                  <div className="msg-bubble">
-                    {msg.content}
-                    {msg.audio && (
-                      <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
-                    )}
-                  </div>
-                )}
+                {(msg.content || msg.audio) && (() => {
+                  const msgKey = msg.id || msg.created_at || `${msg.role}-${i}`;
+                  return (
+                    <>
+                      <div className="msg-bubble">
+                        {msg.content}
+                        {msg.audio && (
+                          <button className="msg-play-btn" onClick={() => playAudioFromBase64(msg.audio)} title="Play">▶</button>
+                        )}
+                      </div>
+                      {msg.role === 'assistant' && msg.content && (
+                        <div className="msg-meta-row">
+                          <button
+                            className={`msg-meta-btn${copiedMsgId === msgKey ? ' active' : ''}`}
+                            onClick={() => copyMsgContent(msgKey, msg.content)}
+                            title="Copy response"
+                          >
+                            {copiedMsgId === msgKey ? '✓ Copied' : 'Copy'}
+                          </button>
+                          <button
+                            className={`msg-meta-btn${reactions[msgKey] === 'up' ? ' active' : ''}`}
+                            onClick={() => reactToMsg(msgKey, 'up')}
+                            title="Good response"
+                          >👍</button>
+                          <button
+                            className={`msg-meta-btn${reactions[msgKey] === 'down' ? ' active' : ''}`}
+                            onClick={() => reactToMsg(msgKey, 'down')}
+                            title="Bad response"
+                          >👎</button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {msg.image && (
                   <div className="msg-image-wrap">
                     <img className="msg-image" src={msg.image} alt="Generated by Oxy" />
@@ -3435,6 +3536,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
             )}
           </div>
         </div>
+        <div className="composer-hint">Enter to send · Shift+Enter for new line</div>
       </div>
     </div>
   );
@@ -3917,7 +4019,120 @@ function SettingsPage({ settings, setSettings, onPreviewVoice }) {
         </div>
       </div>
 
+      <div className="section">
+        <div className="section-title">About</div>
+        <div className="settings-group">
+          <VersionInfo />
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-title" style={{color:'var(--red)'}}>Danger Zone</div>
+        <div className="settings-group">
+          <DeleteAccountSection />
+        </div>
+      </div>
+
       {toast && <div className="toast">Saved</div>}
+    </div>
+  );
+}
+
+function VersionInfo() {
+  const [versionData, setVersionData] = React.useState(null);
+  const [swReg, setSwReg] = React.useState(null);
+
+  React.useEffect(() => {
+    fetch('/version').then(r => r.json()).then(d => setVersionData(d)).catch(() => {});
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then(reg => setSwReg(reg || null)).catch(() => {});
+    }
+  }, []);
+
+  const checkForUpdates = async () => {
+    if (swReg) {
+      try { await swReg.update(); } catch (e) {}
+    }
+    window.location.reload();
+  };
+
+  return (
+    <div style={{padding:'4px 0'}}>
+      {versionData ? (
+        <div style={{fontSize:'11px',color:'var(--sub)',lineHeight:'1.6'}}>
+          {versionData.gitCommit && <div>Backend: {String(versionData.gitCommit).slice(0,8)}</div>}
+          {versionData.builtAt && <div>Built: {versionData.builtAt}</div>}
+          {!versionData.gitCommit && !versionData.builtAt && <div>Backend connected</div>}
+        </div>
+      ) : (
+        <div style={{fontSize:'11px',color:'var(--dim)'}}>Loading version…</div>
+      )}
+      <button onClick={checkForUpdates} style={{marginTop:'8px',padding:'4px 10px',background:'none',border:'1px solid var(--line2)',borderRadius:'6px',color:'var(--sub)',fontSize:'11px',cursor:'pointer',fontFamily:'var(--font)'}}>
+        Check for updates
+      </button>
+    </div>
+  );
+}
+
+function DeleteAccountSection() {
+  const [showModal, setShowModal] = React.useState(false);
+  const [confirmText, setConfirmText] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const doDelete = async () => {
+    if (confirmText !== 'DELETE') {
+      setErr('Please type DELETE to confirm.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await apiFetch(`/user/${USER_ID}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const d = await r.json();
+        setErr(d.error || 'Failed to delete account.');
+        setBusy(false);
+        return;
+      }
+      clearSession();
+      window.location.reload();
+    } catch (e) {
+      setErr('Network error. Try again.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <button className="danger-btn" onClick={() => setShowModal(true)} style={{width:'100%',textAlign:'left',padding:'10px 12px',background:'none',border:'1px solid rgba(192,80,62,0.3)',borderRadius:'8px',color:'var(--red)',fontSize:'13px',cursor:'pointer',fontFamily:'var(--font)'}}>
+        Delete Account
+      </button>
+      {showModal && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999}}>
+          <div style={{background:'var(--s2)',borderRadius:'12px',padding:'24px',maxWidth:'340px',width:'90%',border:'1px solid var(--line)'}}>
+            <h3 style={{margin:'0 0 12px',fontSize:'16px',color:'var(--text)'}}>Delete Account?</h3>
+            <p style={{fontSize:'13px',color:'var(--sub)',margin:'0 0 16px',lineHeight:'1.5'}}>
+              This will permanently delete your account, all messages, memories, and connected services. This cannot be undone. Type DELETE to confirm.
+            </p>
+            <input
+              type="text"
+              placeholder="Type DELETE to confirm"
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              style={{width:'100%',padding:'8px 10px',background:'var(--s3)',border:'1px solid var(--line)',borderRadius:'6px',color:'var(--text)',fontSize:'13px',fontFamily:'var(--font)',boxSizing:'border-box',marginBottom:'8px'}}
+            />
+            {err && <div style={{color:'var(--red)',fontSize:'12px',marginBottom:'8px'}}>{err}</div>}
+            <div style={{display:'flex',gap:'8px'}}>
+              <button onClick={doDelete} disabled={busy} style={{flex:1,padding:'10px',background:'var(--red)',border:'none',borderRadius:'8px',color:'white',fontSize:'13px',cursor:'pointer',fontFamily:'var(--font)'}}>
+                {busy ? 'Deleting…' : 'Delete'}
+              </button>
+              <button onClick={() => { setShowModal(false); setConfirmText(''); setErr(''); }} style={{flex:1,padding:'10px',background:'var(--s3)',border:'1px solid var(--line)',borderRadius:'8px',color:'var(--sub)',fontSize:'13px',cursor:'pointer',fontFamily:'var(--font)'}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3944,6 +4159,24 @@ function App() {
   const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
+  const [gdprConsent, setGdprConsent] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
+  }, []);
+
+  useEffect(() => {
+    const count = parseInt(localStorage.getItem('oxy_message_count') || '0', 10);
+    if (count === 1 && window._deferredInstallPrompt && !localStorage.getItem('oxy_install_dismissed')) {
+      setShowInstallBanner(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAuth) return;
@@ -4017,6 +4250,10 @@ function App() {
       setAuthError('Enter both a user ID and password.');
       return;
     }
+    if (authMode === 'register' && !gdprConsent) {
+      setAuthError('Please accept the Privacy Policy and Terms of Service to continue.');
+      return;
+    }
 
     setAuthBusy(true);
     setAuthError('');
@@ -4033,6 +4270,12 @@ function App() {
         persistSession(d.token, d.userId || userId);
         setAuthPassword('');
         setIsAuth(true);
+        if (authMode === 'register') {
+          window.posthog?.capture('user_registered', { userId: d.userId || userId });
+        } else {
+          window.posthog?.identify(d.userId || userId);
+          window.posthog?.capture('user_logged_in');
+        }
       }
     } catch {
       setAuthError('Network error. Try again.');
@@ -4060,6 +4303,12 @@ function App() {
             <p>{authMode === 'register' ? 'Create your personal Oxy account' : 'Sign in to your Oxy account'}</p>
             <input type="text" className="auth-input" placeholder="User ID" value={authUserId} onChange={e => setAuthUserId(e.target.value)} />
             <input type="password" className="auth-input" placeholder={authMode === 'register' ? 'Password (8+ characters)' : 'Password'} value={authPassword} onChange={e => setAuthPassword(e.target.value)} onKeyDown={e => e.key === 'Enter' && !authBusy && submitAuth()} />
+            {authMode === 'register' && (
+              <label style={{display:'flex',alignItems:'flex-start',gap:'8px',fontSize:'12px',color:'var(--sub)',marginBottom:'12px',cursor:'pointer',lineHeight:'1.4'}}>
+                <input type="checkbox" checked={gdprConsent} onChange={e => setGdprConsent(e.target.checked)} style={{marginTop:'2px',flexShrink:0}} />
+                <span>I agree to the <a href="/privacy" target="_blank" style={{color:'var(--stone)'}}>Privacy Policy</a> and <a href="/terms" target="_blank" style={{color:'var(--stone)'}}>Terms of Service</a></span>
+              </label>
+            )}
             {authError && <div style={{color:'var(--red)',fontSize:'12px',marginBottom:'10px'}}>{authError}</div>}
             <button className="auth-btn" onClick={submitAuth} disabled={authBusy}>
               {authBusy ? 'Please wait…' : authMode === 'register' ? 'Create Account' : 'Sign In'}
@@ -4112,6 +4361,22 @@ function App() {
 
   return (
     <div className="app">
+      {/* Offline banner */}
+      {!isOnline && (
+        <div style={{position:'fixed',top:0,left:0,right:0,background:'rgba(217,119,6,0.9)',color:'white',textAlign:'center',padding:'8px 16px',fontSize:'13px',zIndex:9998,backdropFilter:'blur(4px)'}}>
+          You're offline — messages will be sent when connection is restored
+        </div>
+      )}
+      {/* PWA install banner */}
+      {showInstallBanner && (
+        <div style={{position:'fixed',top:0,left:0,right:0,background:'var(--s2)',borderBottom:'1px solid var(--line)',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',zIndex:9997,fontSize:'13px',color:'var(--text)'}}>
+          <span>Install Oxy for faster access</span>
+          <div style={{display:'flex',gap:'8px'}}>
+            <button onClick={async () => { if (window._deferredInstallPrompt) { window._deferredInstallPrompt.prompt(); } setShowInstallBanner(false); }} style={{padding:'4px 12px',background:'var(--stone)',border:'none',borderRadius:'6px',color:'#000',fontSize:'12px',cursor:'pointer',fontFamily:'var(--font)'}}>Install</button>
+            <button onClick={() => { localStorage.setItem('oxy_install_dismissed','1'); setShowInstallBanner(false); }} style={{padding:'4px 12px',background:'none',border:'1px solid var(--line)',borderRadius:'6px',color:'var(--sub)',fontSize:'12px',cursor:'pointer',fontFamily:'var(--font)'}}>Dismiss</button>
+          </div>
+        </div>
+      )}
       {/* Desktop sidebar */}
       <div className="sidebar">
         <div className="logo">
