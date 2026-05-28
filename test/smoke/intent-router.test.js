@@ -74,67 +74,32 @@ test('leave-time directions use preferred transport when no mode is explicit', (
   });
 });
 
-test('future train journey requests route to rail-first trip planning, not live rail', () => {
-  const routed = inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley');
-  assert.equal(routed.reason, 'rail_first_trip_plan');
-  assert.equal(routed.actions[0].type, 'plan_trip');
-  assert.deepEqual(routed.actions[0].input, {
-    destination: 'apsley',
-    departure_time: 'tomorrow 9am',
-    preference: 'balanced'
-  });
+test('future train journey requests defer to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley'), null);
 });
 
-test('train journey with explicit origin keeps from and to for trip planning', () => {
-  const routed = inferDeterministicAction('what train can i take from birmingham new street to apsley tomorrow around 9am');
-  assert.equal(routed.reason, 'rail_first_trip_plan');
-  assert.equal(routed.actions[0].type, 'plan_trip');
-  assert.deepEqual(routed.actions[0].input, {
-    origin: 'birmingham new street',
-    destination: 'apsley',
-    departure_time: 'tomorrow 9am',
-    preference: 'balanced'
-  });
+test('train journey with explicit origin defers to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction('what train can i take from birmingham new street to apsley tomorrow around 9am'), null);
 });
 
-test('future first train request routes to rail-first trip planning', () => {
-  const routed = inferDeterministicAction("when's the first train to london euston tomorrow");
-  assert.equal(routed.reason, 'rail_first_trip_plan');
-  assert.equal(routed.actions[0].type, 'plan_trip');
-  assert.deepEqual(routed.actions[0].input, {
-    destination: 'london euston',
-    departure_time: 'tomorrow 00:01',
-    preference: 'fastest'
-  });
+test('future first train request defers to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction("when's the first train to london euston tomorrow"), null);
 });
 
-test('direct train preference is preserved for trip planning', () => {
-  const routed = inferDeterministicAction('can i take a direct train to london with no changes tomorrow');
-  assert.equal(routed.reason, 'rail_first_trip_plan');
-  assert.equal(routed.actions[0].type, 'plan_trip');
-  assert.equal(routed.actions[0].input.destination, 'london');
-  assert.equal(routed.actions[0].input.preference, 'fewest_changes');
+test('direct train preference defers to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction('can i take a direct train to london with no changes tomorrow'), null);
 });
 
 test('vague train follow-up does not become a fake destination', () => {
   assert.equal(inferDeterministicAction('yeah but what train is it tomorrow'), null);
 });
 
-test('live station board requests route to station_board', () => {
-  const routed = inferDeterministicAction('departures from milton keynes central');
-  assert.equal(routed.reason, 'live_station_board');
-  assert.equal(routed.actions[0].type, 'station_board');
-  assert.deepEqual(routed.actions[0].input, { station: 'milton keynes central' });
+test('live station board requests defer to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction('departures from milton keynes central'), null);
 });
 
-test('live train between stations routes to search_trains', () => {
-  const routed = inferDeterministicAction('next train from milton keynes central to birmingham new street');
-  assert.equal(routed.reason, 'live_train_between_stations');
-  assert.equal(routed.actions[0].type, 'search_trains');
-  assert.deepEqual(routed.actions[0].input, {
-    origin: 'milton keynes central',
-    destination: 'birmingham new street'
-  });
+test('live train between stations defers to grounded answer instead of route connector', () => {
+  assert.equal(inferDeterministicAction('next train from milton keynes central to birmingham new street'), null);
 });
 
 test('plain factual question does not become local place action', () => {

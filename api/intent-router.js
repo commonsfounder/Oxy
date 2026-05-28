@@ -151,28 +151,11 @@ function cleanStationPhrase(value) {
 
 function inferLiveRailAction(message) {
   const text = normalizeText(message);
+  // Live rail data from the old transport connector is not reliable enough for
+  // a deterministic action. Let the model answer with search grounding instead.
   if (!/\b(train|trains|rail|station|platform|departures?|arrival board|station board)\b/i.test(text)) return null;
   if (!LIVE_RAIL_TERMS.test(text)) return null;
-
-  const fromTo = extractFromTo(text);
-  if (fromTo?.origin && fromTo?.destination && !FUTURE_TIME_TERMS.test(text.replace(/\bnext train\b/i, ''))) {
-    return {
-      reason: 'live_train_between_stations',
-      spoken: "I'll check that train route.",
-      actions: [{ type: 'search_trains', input: fromTo }]
-    };
-  }
-
-  if (/\b(tomorrow|later|around|about|at|by|after|before)\b/i.test(text)) return null;
-
-  const stationMatch = text.match(/\b(?:at|from)\s+(.+?)(?:[?.!]|$)/i);
-  const station = cleanStationPhrase(stationMatch?.[1] || text);
-  if (!station || /\b(to|towards)\b/i.test(station)) return null;
-    return {
-      reason: 'live_station_board',
-      spoken: "I'll check what rail information I can return.",
-      actions: [{ type: 'station_board', input: { station } }]
-    };
+  return null;
 }
 
 function inferDeterministicAction(message, options = {}) {
@@ -184,6 +167,11 @@ function inferDeterministicAction(message, options = {}) {
 
   const liveRail = inferLiveRailAction(text);
   if (liveRail) return liveRail;
+  if (/\b(train|trains|rail|platforms?|departures?|station board|arrival board)\b/i.test(text) &&
+      !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text) &&
+      (LIVE_RAIL_TERMS.test(text) || RAIL_TRIP_TERMS.test(text) || /\bfrom\b.+\bto\b/i.test(text))) {
+    return null;
+  }
 
   if (looksLikeRideRequest(text) && looksLikeLocalPlaceRequest(text)) {
     return {
@@ -209,13 +197,7 @@ function inferDeterministicAction(message, options = {}) {
     const departureTime = !arrivalTime ? extractDepartureTime(text) : undefined;
     if (departureTime) input.departure_time = departureTime;
     if (RAIL_TRIP_TERMS.test(text) && !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text)) {
-      delete input.mode;
-      input.preference = extractTripPreference(text);
-      return {
-        reason: 'rail_first_trip_plan',
-        spoken: "I'll plan the train route.",
-        actions: [{ type: 'plan_trip', input }]
-      };
+      return null;
     }
     return {
       reason: input.mode === 'transit' ? 'transit_directions_to_place' : 'directions_to_local_place',

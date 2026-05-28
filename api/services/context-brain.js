@@ -276,10 +276,13 @@ function contextualActionForMessage(message, contexts = [], memory = '', setting
   }
 
   if (latestRoute && /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text)) {
-    const reason = latestRoute.result?.error ||
+    let reason = latestRoute.result?.error ||
       latestRoute.result?.text ||
       latestRoute.routeContext?.reason ||
       'I did not have enough reliable route data to answer that fully.';
+    if (/couldn'?t get a reliable|no (transit |train |rail )?route summary|route unavailable|route_summary_unavailable/i.test(reason)) {
+      reason = 'The route source did not return a usable itinerary for that journey, so I did not have reliable departure times, changes, or platform details to quote.';
+    }
     return {
       reason: 'contextual_route_failure_explanation',
       spokenOnly: true,

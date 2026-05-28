@@ -92,6 +92,13 @@ private struct ITunesAlbum: Decodable {
     let collectionViewUrl: String?
 }
 
+private struct NativeAppShortcut {
+    let displayName: String
+    let aliases: [String]
+    let schemes: [String]
+    let fallbackURL: String?
+}
+
 struct NativeCapabilities: Codable {
     var notifications: Bool
     var healthKit: Bool
@@ -113,6 +120,9 @@ final class NativeIntegrationManager {
     private var lastMusicArtist: String?
     private var lastMusicError: String?
     private var musicHistory: [String] = []
+    private var lastReminderIdentifier: String?
+    private var lastReminderTitle: String?
+    private var lastReminderDueDate: Date?
 
     private init() {}
 
@@ -219,6 +229,9 @@ final class NativeIntegrationManager {
         lastMusicArtist = nil
         lastMusicError = nil
         musicHistory.removeAll()
+        lastReminderIdentifier = nil
+        lastReminderTitle = nil
+        lastReminderDueDate = nil
     }
 
     func executeLocalRequest(_ message: String) async -> NativeLocalActionResult? {
@@ -232,6 +245,12 @@ final class NativeIntegrationManager {
            let result = await answerNativeHealthRequest(normalized) {
             return result
         }
+        if let result = await openNativeApp(from: normalized) {
+            return result
+        }
+        if let result = await updateLastNativeReminder(from: normalized) {
+            return result
+        }
         if shouldLetBrainHandleFirst(normalized) {
             return nil
         }
@@ -240,11 +259,6 @@ final class NativeIntegrationManager {
         }
 
         if let result = await prepareNativeMessage(from: normalized) {
-            return result
-        }
-
-        if !requiresOnlineMusicResolution(normalized),
-           let result = await handleNativeMusicRequest(normalized) {
             return result
         }
 
@@ -257,6 +271,11 @@ final class NativeIntegrationManager {
         }
 
         if let result = await createNativeCalendarEvent(from: normalized) {
+            return result
+        }
+
+        if !requiresOnlineMusicResolution(normalized),
+           let result = await handleNativeMusicRequest(normalized) {
             return result
         }
 
@@ -533,11 +552,72 @@ final class NativeIntegrationManager {
         return nil
     }
 
+    private func openNativeApp(from message: String) async -> NativeLocalActionResult? {
+        guard let target = requestedAppName(from: message),
+              let app = nativeAppShortcuts().first(where: { shortcut in
+                  shortcut.aliases.contains { alias in
+                      target == alias || target == "\(alias) app"
+                  }
+              }) else { return nil }
+
+        let deepLink = app.schemes.compactMap(URL.init(string:)).first { UIApplication.shared.canOpenURL($0) }?.absoluteString
+        let link = deepLink ?? app.fallbackURL
+        guard let link else {
+            return NativeLocalActionResult(
+                action: "open_app",
+                text: "I couldn't open \(app.displayName) from here.",
+                cardText: app.displayName,
+                actionSummary: "App unavailable",
+                deepLink: nil,
+                success: false,
+                error: "\(app.displayName) URL scheme is unavailable."
+            )
+        }
+
+        return NativeLocalActionResult(
+            action: "open_app",
+            text: "Opening \(app.displayName).",
+            cardText: app.displayName,
+            actionSummary: "App opened",
+            deepLink: link
+        )
+    }
+
+    private func requestedAppName(from message: String) -> String? {
+        let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard lower.range(of: #"^(open|launch|start)\s+"#, options: .regularExpression) != nil else { return nil }
+        let target = lower
+            .replacingOccurrences(of: #"^(open|launch|start)\s+(the\s+)?"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+for\s+me$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+please$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        guard !target.isEmpty, target.count <= 40 else { return nil }
+        return target
+    }
+
+    private func nativeAppShortcuts() -> [NativeAppShortcut] {
+        [
+            NativeAppShortcut(displayName: "TikTok", aliases: ["tiktok", "tik tok"], schemes: ["tiktok://", "snssdk1233://"], fallbackURL: "https://www.tiktok.com/"),
+            NativeAppShortcut(displayName: "Instagram", aliases: ["instagram", "insta"], schemes: ["instagram://app"], fallbackURL: "https://www.instagram.com/"),
+            NativeAppShortcut(displayName: "YouTube", aliases: ["youtube", "you tube"], schemes: ["youtube://"], fallbackURL: "https://www.youtube.com/"),
+            NativeAppShortcut(displayName: "WhatsApp", aliases: ["whatsapp", "whats app"], schemes: ["whatsapp://"], fallbackURL: "https://wa.me/"),
+            NativeAppShortcut(displayName: "Spotify", aliases: ["spotify"], schemes: ["spotify://"], fallbackURL: "https://open.spotify.com/"),
+            NativeAppShortcut(displayName: "Apple Music", aliases: ["apple music", "music"], schemes: ["music://"], fallbackURL: "https://music.apple.com/"),
+            NativeAppShortcut(displayName: "Uber", aliases: ["uber"], schemes: ["uber://"], fallbackURL: "https://m.uber.com/ul/"),
+            NativeAppShortcut(displayName: "Netflix", aliases: ["netflix"], schemes: ["nflx://"], fallbackURL: "https://www.netflix.com/"),
+            NativeAppShortcut(displayName: "Telegram", aliases: ["telegram"], schemes: ["tg://"], fallbackURL: "https://t.me/"),
+            NativeAppShortcut(displayName: "Deliveroo", aliases: ["deliveroo"], schemes: ["deliveroo://"], fallbackURL: "https://deliveroo.co.uk/"),
+            NativeAppShortcut(displayName: "Trainline", aliases: ["trainline", "the trainline"], schemes: ["thetrainline://"], fallbackURL: "https://www.thetrainline.com/"),
+            NativeAppShortcut(displayName: "Maps", aliases: ["maps", "apple maps"], schemes: ["maps://"], fallbackURL: "https://maps.apple.com/")
+        ]
+    }
+
     private func handleNativeMusicRequest(_ message: String) async -> NativeLocalActionResult? {
         let lower = message.lowercased()
         guard lower.contains("music")
             || lower.contains("song")
             || lower.contains("playlist")
+            || lower.contains("album")
             || lower == "pause"
             || lower.hasPrefix("pause ")
             || lower == "resume"
@@ -553,16 +633,27 @@ final class NativeIntegrationManager {
             || lower.contains("skip")
             || lower.hasPrefix("play ")
             || lower.hasPrefix("listen to ")
-            || lower.hasPrefix("add ") else { return nil }
+            || isMusicAddRequest(lower) else { return nil }
 
         if let result = await handleMusicTransportCommand(lower) {
             return result
         }
 
-        if lower.contains("playlist") || lower.hasPrefix("add ") {
+        if lower.contains("playlist") || isMusicAddRequest(lower) {
             return await addNativeMusicItem(from: message)
         }
         return await playNativeMusic(from: message)
+    }
+
+    private func isMusicAddRequest(_ lower: String) -> Bool {
+        guard lower.hasPrefix("add ") else { return false }
+        return lower.contains("playlist")
+            || lower.contains("library")
+            || lower.contains("music")
+            || lower.contains("song")
+            || lower.contains("track")
+            || lower.contains("album")
+            || lower.contains("apple music")
     }
 
     private func requiresOnlineMusicResolution(_ message: String) -> Bool {
@@ -2032,6 +2123,9 @@ final class NativeIntegrationManager {
         }
         do {
             try eventStore.save(reminder, commit: true)
+            lastReminderIdentifier = reminder.calendarItemIdentifier
+            lastReminderTitle = title
+            lastReminderDueDate = parsedDate
             let timeText = parsedDate.map { DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short) }
             return NativeLocalActionResult(
                 action: "create_reminder",
@@ -2045,9 +2139,92 @@ final class NativeIntegrationManager {
         }
     }
 
+    private func updateLastNativeReminder(from message: String) async -> NativeLocalActionResult? {
+        guard isReminderUpdateFollowUp(message),
+              let identifier = lastReminderIdentifier,
+              let reminder = eventStore.calendarItem(withIdentifier: identifier) as? EKReminder else { return nil }
+        await requestReminderPermission()
+        guard remindersAuthorized else {
+            return NativeLocalActionResult(action: "create_reminder", text: "Turn on Reminders access and I can update that natively.", cardText: "Enable Reminders access", actionSummary: "Reminder needs access", deepLink: nil)
+        }
+        guard let dueDate = reminderFollowUpDate(in: message) else { return nil }
+        reminder.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: dueDate)
+        reminder.alarms?.forEach { reminder.removeAlarm($0) }
+        reminder.addAlarm(EKAlarm(absoluteDate: dueDate))
+
+        do {
+            try eventStore.save(reminder, commit: true)
+            lastReminderIdentifier = reminder.calendarItemIdentifier
+            lastReminderTitle = reminder.title
+            lastReminderDueDate = dueDate
+            let label = formatReminderFollowUpDate(dueDate)
+            return NativeLocalActionResult(
+                action: "create_reminder",
+                text: "Reminder moved to \(label): \(reminder.title ?? lastReminderTitle ?? "reminder").",
+                cardText: "\(reminder.title ?? lastReminderTitle ?? "Reminder") · \(label)",
+                actionSummary: "Reminder updated",
+                deepLink: "x-apple-reminderkit://"
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    private func isReminderUpdateFollowUp(_ message: String) -> Bool {
+        let lower = message.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard lastReminderIdentifier != nil else { return false }
+        guard lower.contains("tomorrow")
+            || lower.contains("today")
+            || lower.range(of: #"\b(at|by)\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b"#, options: .regularExpression) != nil
+            || lower.range(of: #"\b\d{1,2}(?::\d{2})?\s*(am|pm)\b"#, options: .regularExpression) != nil
+            else { return false }
+        return lower.contains("that")
+            || lower.contains("it")
+            || lower.contains("reminder")
+            || lower.hasPrefix("actually")
+            || lower.hasPrefix("make ")
+            || lower.hasPrefix("change ")
+            || lower.hasPrefix("move ")
+    }
+
+    private func reminderFollowUpDate(in message: String) -> Date? {
+        let lower = message.lowercased()
+        let calendar = Calendar.current
+        let parsed = detectedDate(in: message)
+        let hasExplicitTime = lower.range(of: #"\b(at|by)\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b"#, options: .regularExpression) != nil
+            || lower.range(of: #"\b\d{1,2}(?::\d{2})?\s*(am|pm)\b"#, options: .regularExpression) != nil
+
+        if lower.contains("tomorrow") || lower.contains("today") {
+            let dayOffset = lower.contains("tomorrow") ? 1 : 0
+            guard let targetDay = calendar.date(byAdding: .day, value: dayOffset, to: calendar.startOfDay(for: Date())) else {
+                return parsed
+            }
+            let timeSource = hasExplicitTime ? parsed : lastReminderDueDate
+            let time = timeSource.map { calendar.dateComponents([.hour, .minute], from: $0) }
+            var components = calendar.dateComponents([.year, .month, .day], from: targetDay)
+            components.hour = time?.hour ?? 9
+            components.minute = time?.minute ?? 0
+            return calendar.date(from: components) ?? parsed
+        }
+
+        return parsed
+    }
+
+    private func formatReminderFollowUpDate(_ date: Date) -> String {
+        let time = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+        if Calendar.current.isDateInTomorrow(date) {
+            return "tomorrow at \(time)"
+        }
+        if Calendar.current.isDateInToday(date) {
+            return "today at \(time)"
+        }
+        return DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .short)
+    }
+
     private func createNativeCalendarEvent(from message: String) async -> NativeLocalActionResult? {
         let lower = message.lowercased()
-        guard lower.contains("calendar") || lower.contains("add event") || lower.contains("schedule") else { return nil }
+        let looksLikeDatedAdd = lower.hasPrefix("add ") && detectedDate(in: message) != nil && !isMusicAddRequest(lower)
+        guard lower.contains("calendar") || lower.contains("add event") || lower.contains("schedule") || looksLikeDatedAdd else { return nil }
         await requestCalendarPermission()
         guard calendarAuthorized else {
             return NativeLocalActionResult(action: "create_calendar_event", text: "Turn on Calendar access and I can create that natively.", cardText: "Enable Calendar access", actionSummary: "Calendar needs access", deepLink: nil)
@@ -2105,6 +2282,7 @@ final class NativeIntegrationManager {
         if let match = dateMatch(in: message) {
             title = title.replacingOccurrences(of: match, with: "")
         }
+        title = title.replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
         return title.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 

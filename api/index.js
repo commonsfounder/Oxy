@@ -418,10 +418,10 @@ ABSOLUTE RULES:
 4. Never fabricate information — search instead if you need real-world data
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
-7. For search_trains: if the user doesn't say where they're travelling from, infer it from their known home location in memory. If you genuinely don't know their location, ask once
-7a. For journey-planning train questions like "what train can I take tomorrow around 9", "how do I get to Apsley", or "train to London tomorrow", use plan_trip; include origin when known, departure_time for "around/at/after", arrival_time for "by", and preference when the user asks for direct/fewer changes/fastest.
-7b. Use get_directions for generic local directions, walking, driving, and bus-only questions. Use search_trains only for live train departures between two named stations now. Use station_board for live departures/platform/station-board questions at one station.
-7c. If the train tool says live departures could not be checked, say that plainly. Do not paraphrase it into "there are no trains"
+7. For train/rail questions, prefer a grounded text answer from search over the old transport connector. Do not use plan_trip, search_trains, or station_board just to answer live train times, platforms, or journey options.
+7a. Only use get_directions/plan_trip for travel when the user explicitly asks you to open a route, navigation, Maps, or a ride handoff. Otherwise answer with the actual information you can ground.
+7b. Use get_directions for generic local directions, walking, driving, and bus questions when a route summary is useful. Never pretend a route opened if all you have is a text answer.
+7c. If train or route data is unavailable, say why plainly and give the best grounded alternative. Do not paraphrase failures into "there are no trains".
 7d. For follow-ups like "yeah but what train is it" or "what about tomorrow", use the recent route/action context instead of treating the whole sentence as a new destination.
 8. If you are unsure, ask a brief clarifying question instead of guessing
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
@@ -852,6 +852,18 @@ function cleanCalendarTitle(text) {
     .replace(/^["']|["']$/g, '');
 }
 
+function isCalendarCorrectionOnly(text) {
+  const cleaned = String(text || '')
+    .toLowerCase()
+    .replace(/[?.!]+$/g, '')
+    .replace(/\b(today|tomorrow)\b/g, ' ')
+    .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return /^(no|nah|actually|wait|sorry)?\s*(i\s+mean\s+)?(the\s+)?(my\s+)?calendar$/.test(cleaned) ||
+    /^(no|nah|actually|wait|sorry)?\s*(add|put|make)\s+(it|that|this)\s+(to|in|on)\s+(my\s+)?calendar$/.test(cleaned);
+}
+
 function extractCalendarEventInput(message, fallbackMessage = '') {
   const source = String(message || '');
   const fallback = String(fallbackMessage || '');
@@ -864,8 +876,11 @@ function extractCalendarEventInput(message, fallbackMessage = '') {
   if (!dateYMD) return null;
 
   const allDay = /\ball\s+day\b/i.test(combined);
-  let title = cleanCalendarTitle(source);
-  if (!title || /^(it|that)$/i.test(title)) title = cleanCalendarTitle(fallback);
+  const correctionOnly = isCalendarCorrectionOnly(source);
+  let title = correctionOnly ? '' : cleanCalendarTitle(source);
+  if (!title || /^(it|that|this|calendar)$/i.test(title) || /\bi\s+mean\s+calendar\b/i.test(title)) {
+    title = cleanCalendarTitle(fallback);
+  }
   if (!title) return null;
 
   if (allDay) {
@@ -976,10 +991,16 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   }
 
   const isCalendarCorrection = /\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text);
-  if (/\b(calendar|schedule|event)\b/i.test(text) || isCalendarCorrection) {
+  const isDatedCalendarAdd = /\b(add|put|create)\b.+\b(today|tomorrow|all day|at\s+\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i.test(text) &&
+    !/\b(song|album|playlist|music|apple music)\b/i.test(text);
+  if (/\b(calendar|schedule|event)\b/i.test(text) || isCalendarCorrection || isDatedCalendarAdd) {
     const history = await getHistory(userId, trace, 8, historyOptions);
     const previousUser = [...history].reverse()
-      .find(row => row.role === 'user' && row.content !== message && /\b(calendar|schedule|event|tomorrow|today|all day)\b/i.test(row.content || ''));
+      .find(row => row.role === 'user' && row.content !== message && (
+        isCalendarCorrection
+          ? !isCalendarCorrectionOnly(row.content || '')
+          : /\b(calendar|schedule|event|tomorrow|today|all day)\b/i.test(row.content || '')
+      ));
     const input = extractCalendarEventInput(text, previousUser?.content || '');
     if (input) {
       return {

@@ -45,7 +45,7 @@ final class ChatViewModel {
     private static let autoOpenActions: Set<String> = [
         "book_uber", "order_deliveroo", "order_uber_eats",
         "search_netflix_title", "add_to_netflix_list",
-        "make_call", "add_to_music_playlist"
+        "make_call", "add_to_music_playlist", "open_app"
     ]
 
     private static let localRequestTerms = [

@@ -116,7 +116,12 @@ test('context brain explains route failure for why not without model fallback', 
   });
   assert.equal(turn.reason, 'contextual_route_failure_explanation');
   assert.equal(turn.spokenOnly, true);
-  assert.match(turn.spoken, /couldn't get a reliable transit route summary/i);
+  assert.match(turn.spoken, /route source did not return a usable itinerary/i);
+});
+
+test('train timetable questions request search grounding instead of stale route tools', () => {
+  assert.equal(getSearchReason('next train from Birmingham New Street to Apsley'), 'public-transport-live');
+  assert.equal(getSearchReason('what train can i take tomorrow around 9am'), 'public-transport-live');
 });
 
 test('context brain sends the latest assistant content to a named contact', () => {

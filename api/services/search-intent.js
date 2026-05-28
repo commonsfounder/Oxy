@@ -2,6 +2,7 @@
 const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
   { reason: 'current-music-chart', pattern: /\b(billboard|hot\s*100|official singles chart|charts?|number\s*one|no\.?\s*1|top\s+(song|track|single)|most popular song|most streamed|viral song)\b|(?=.*\b(song|track|single|music)\b)(?=.*\b(right now|currently|today|latest|trending|most popular|top|number\s*one|no\.?\s*1)\b)/i },
+  { reason: 'public-transport-live', pattern: /\b(next|first|last|live|departures?|platforms?)\s+(train|bus|tram|tube)\b|\b(what|which)\s+(train|bus|tram|tube)\b|\b(train|bus|tram|tube)\s+from\b.+\bto\b/i },
   { reason: 'public-safety-events', pattern: /\b(assassination|assassinate|attempt(?:ed)?|shooting|shooter|gunman|armed|rally|campaign rally|security incident|suspect|arrested|charged|identified|names?|who did it|who was it)\b/i },
   { reason: 'time-sensitive', pattern: /\b(weather|forecast|temperature|rain|snow|traffic|delay|delays|schedule|schedules|arrival|departure|when does|when is|opening hours|closing time|wait time|wait times|availability)\b/i },
   { reason: 'market-data', pattern: /\b(stocks?|share price|price|pricing|market cap|valuation|earnings|revenue|exchange rate|exchange rates|interest rate|interest rates|how much is)\b/i },

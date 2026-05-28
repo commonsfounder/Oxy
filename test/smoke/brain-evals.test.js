@@ -82,10 +82,11 @@ const evalCases = [
     deterministicAction: null
   },
   {
-    name: 'live departures route to train lookup, not generic web answer',
+    name: 'live departures use grounded search instead of stale train connector',
     message: 'next train from Milton Keynes Central to Birmingham New Street',
-    expectSearch: false,
-    deterministicAction: 'search_trains'
+    expectSearch: true,
+    searchReason: 'public-transport-live',
+    deterministicAction: null
   }
 ];
 
