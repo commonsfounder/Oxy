@@ -40,6 +40,33 @@ struct ChatView: View {
                         .background(Color.oxyStone.opacity(0.1))
                     }
 
+                    if viewModel.isViewingHistorySnapshot {
+                        HStack(spacing: 10) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.system(size: 12, weight: .semibold))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Viewing history")
+                                    .font(.system(size: 12, weight: .semibold))
+                                if let label = viewModel.historySnapshotLabel {
+                                    Text(label)
+                                        .font(.system(size: 11))
+                                }
+                            }
+                            Spacer()
+                            Button("Current Chat") {
+                                Task {
+                                    await viewModel.returnToCurrentChat(userId: appState.userId)
+                                }
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.oxyStone)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.oxyStone.opacity(0.1))
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {
@@ -636,24 +663,66 @@ struct ChatSearchView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var results: [SearchResult] = []
+    @State private var sessions: [ChatSessionSummary] = []
     @State private var isSearching = false
+    @State private var isLoadingSessions = true
 
     var body: some View {
         NavigationStack {
             ZStack {
                 Color.oxyBg.ignoresSafeArea()
 
-                if results.isEmpty && !isSearching && query.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 36))
-                            .foregroundStyle(Color.oxyDim)
-                        Text("Search conversations")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.oxySub)
-                        Text("Find messages from your chat history")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.oxyDim)
+                if query.isEmpty {
+                    if isLoadingSessions {
+                        ProgressView()
+                            .tint(Color.oxyStone)
+                    } else if sessions.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 36))
+                                .foregroundStyle(Color.oxyDim)
+                            Text("Search conversations")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Color.oxySub)
+                            Text("Find messages from your chat history")
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color.oxyDim)
+                        }
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                Text("Recent chats")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.oxyDim)
+                                    .textCase(.uppercase)
+                                    .tracking(0.4)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+
+                                ForEach(sessions) { session in
+                                    Button {
+                                        onSelect(SearchResult(
+                                            role: "user",
+                                            content: session.title,
+                                            createdAt: session.lastAt
+                                        ))
+                                        dismiss()
+                                    } label: {
+                                        ChatSessionRow(session: session)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+
+                                    if session.id != sessions.last?.id {
+                                        Divider()
+                                            .overlay(Color.oxyLine)
+                                            .padding(.leading, 52)
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 8)
+                        }
                     }
                 } else if results.isEmpty && !isSearching && !query.isEmpty {
                     VStack(spacing: 12) {
@@ -705,6 +774,9 @@ struct ChatSearchView: View {
                 }
             }
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search messages...")
+            .task {
+                await loadSessions()
+            }
             .onChange(of: query) { _, newValue in
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else {
@@ -732,6 +804,18 @@ struct ChatSearchView: View {
             results = []
         }
         isSearching = false
+    }
+
+    private func loadSessions() async {
+        isLoadingSessions = true
+        do {
+            let data = try await APIClient.shared.request(path: "/history/\(userId)/sessions")
+            let response = try JSONDecoder().decode(ChatSessionsResponse.self, from: data)
+            sessions = response.sessions
+        } catch {
+            sessions = []
+        }
+        isLoadingSessions = false
     }
 }
 
@@ -794,6 +878,74 @@ struct SearchResult: Codable, Identifiable {
 
 struct SearchResponse: Codable {
     let results: [SearchResult]
+}
+
+private struct ChatSessionRow: View {
+    let session: ChatSessionSummary
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.oxyStone.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxyStone)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(session.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                    .lineLimit(1)
+
+                Text(session.preview)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxySub)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    if let date = session.formattedDate {
+                        Text(date)
+                    }
+                    Text("\(session.messageCount) messages")
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(Color.oxyDim)
+            }
+
+            Spacer()
+        }
+    }
+}
+
+struct ChatSessionSummary: Codable, Identifiable {
+    let id: String
+    let title: String
+    let preview: String
+    let startedAt: String?
+    let lastAt: String?
+    let messageCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, preview
+        case startedAt = "started_at"
+        case lastAt = "last_at"
+        case messageCount = "message_count"
+    }
+
+    var formattedDate: String? {
+        let date = Date.oxyParse(lastAt ?? startedAt)
+        guard let date else { return nil }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "d MMM · HH:mm"
+        return fmt.string(from: date)
+    }
+}
+
+struct ChatSessionsResponse: Codable {
+    let sessions: [ChatSessionSummary]
 }
 
 // MARK: - Welcome Card

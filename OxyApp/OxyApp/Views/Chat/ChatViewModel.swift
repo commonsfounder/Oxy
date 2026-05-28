@@ -24,6 +24,8 @@ final class ChatViewModel {
     var isSending = false
     var statusLabel: String?
     var scrollTargetMessageID: UUID?
+    var isViewingHistorySnapshot = false
+    var historySnapshotLabel: String?
 
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
@@ -69,6 +71,8 @@ final class ChatViewModel {
             await MainActor.run {
                 messages = loaded
                 scrollTargetMessageID = nil
+                isViewingHistorySnapshot = false
+                historySnapshotLabel = nil
             }
         } catch {}
     }
@@ -77,13 +81,21 @@ final class ChatViewModel {
         do {
             let entries = try await chatService.loadHistoryAround(userId: userId, createdAt: createdAt)
             let loaded = messages(from: entries)
-            let targetID = loaded.first(where: { datesMatch($0.timestamp, createdAt) })?.id
+            let targetID = closestMessageID(in: loaded, to: createdAt)
+            let label = historyLabel(for: createdAt)
             await MainActor.run {
                 messages = loaded
                 statusLabel = nil
+                isViewingHistorySnapshot = true
+                historySnapshotLabel = label
                 scrollTargetMessageID = targetID
             }
         } catch {}
+    }
+
+    func returnToCurrentChat(userId: String) async {
+        activeChatStartedAt = chatStartedAt(for: userId)
+        await loadHistory(userId: userId)
     }
 
     func startNewChat(userId: String) {
@@ -91,15 +103,20 @@ final class ChatViewModel {
         let startedAt = Date().oxyISO8601String
         activeChatStartedAt = startedAt
         UserDefaults.standard.set(startedAt, forKey: chatStartedAtKey(userId))
+        isViewingHistorySnapshot = false
+        historySnapshotLabel = nil
         nativeManager.resetConversationContext()
     }
 
     func sendMessage(userId: String) {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        if isViewingHistorySnapshot {
+            startNewChat(userId: userId)
+        }
         if activeChatStartedAt == nil {
             activeChatStartedAt = chatStartedAt(for: userId)
         }
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
         let pendingDecision = localActionDecision(for: text)
 
         inputText = ""
@@ -275,12 +292,15 @@ final class ChatViewModel {
     }
 
     func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String) {
-        if activeChatStartedAt == nil {
-            activeChatStartedAt = chatStartedAt(for: userId)
-        }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = typed.isEmpty ? "Look at this image and tell me what you see." : typed
         guard !isSending else { return }
+        if isViewingHistorySnapshot {
+            startNewChat(userId: userId)
+        }
+        if activeChatStartedAt == nil {
+            activeChatStartedAt = chatStartedAt(for: userId)
+        }
 
         inputText = ""
         isSending = true
@@ -355,6 +375,8 @@ final class ChatViewModel {
         isSending = false
         statusLabel = nil
         scrollTargetMessageID = nil
+        isViewingHistorySnapshot = false
+        historySnapshotLabel = nil
     }
 
     func requestLocationAccess() {
@@ -375,7 +397,9 @@ final class ChatViewModel {
 
     private func chatStartedAt(for userId: String) -> String {
         let key = chatStartedAtKey(userId)
-        if let saved = UserDefaults.standard.string(forKey: key), Date.oxyParse(saved) != nil {
+        if let saved = UserDefaults.standard.string(forKey: key),
+           let savedDate = Date.oxyParse(saved),
+           Date().timeIntervalSince(savedDate) < TimeInterval(12 * 60 * 60) {
             return saved
         }
         let startedAt = Date().oxyISO8601String
@@ -387,9 +411,18 @@ final class ChatViewModel {
         "oxy_current_chat_started_at_\(userId)"
     }
 
-    private func datesMatch(_ date: Date, _ createdAt: String) -> Bool {
-        guard let target = Date.oxyParse(createdAt) else { return false }
-        return abs(date.timeIntervalSince(target)) < 0.001
+    private func closestMessageID(in messages: [Message], to createdAt: String) -> UUID? {
+        guard let target = Date.oxyParse(createdAt) else { return nil }
+        return messages
+            .min(by: { abs($0.timestamp.timeIntervalSince(target)) < abs($1.timestamp.timeIntervalSince(target)) })?
+            .id
+    }
+
+    private func historyLabel(for createdAt: String) -> String? {
+        guard let date = Date.oxyParse(createdAt) else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d MMM yyyy · HH:mm"
+        return formatter.string(from: date)
     }
 
     @discardableResult

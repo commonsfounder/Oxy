@@ -43,13 +43,41 @@ extension Date {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = fractional.date(from: value) { return date }
-        return ISO8601DateFormatter().date(from: value)
+        if let date = ISO8601DateFormatter().date(from: value) { return date }
+
+        let normalized = value.replacingOccurrences(of: " ", with: "T")
+        if let date = fractional.date(from: Self.trimFractionalSeconds(normalized)) { return date }
+        if let date = ISO8601DateFormatter().date(from: Self.trimFractionalSeconds(normalized)) { return date }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        for format in [
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ssZ"
+        ] {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: Self.trimFractionalSeconds(normalized)) {
+                return date
+            }
+        }
+        return nil
     }
 
     var oxyISO8601String: String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: self)
+    }
+
+    private static func trimFractionalSeconds(_ value: String) -> String {
+        value.replacingOccurrences(
+            of: #"\.(\d{3})\d+([Zz]|[+-]\d{2}:?\d{2})"#,
+            with: ".$1$2",
+            options: .regularExpression
+        )
     }
 }
 

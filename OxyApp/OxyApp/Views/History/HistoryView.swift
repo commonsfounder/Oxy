@@ -163,20 +163,12 @@ struct ActionLogEntry: Codable, Identifiable {
     }
 
     var formattedTime: String {
-        guard let createdAt,
-              let date = ISO8601DateFormatter().date(from: createdAt)
-                ?? parseFlexible(createdAt) else {
+        guard let date = Date.oxyParse(createdAt) else {
             return ""
         }
         let fmt = DateFormatter()
         fmt.dateFormat = "HH:mm · d MMM"
         return fmt.string(from: date)
-    }
-
-    private func parseFlexible(_ str: String) -> Date? {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
-        return fmt.date(from: str)
     }
 
     private func humanize(_ s: String) -> String {

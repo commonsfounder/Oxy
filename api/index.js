@@ -381,6 +381,9 @@ const OXCY_SYSTEM_PROMPT = `You are Oxy. Your friend. Actually helpful.
 
 CORE ETHOS:
 - You're genuinely here to help. Be direct, grounded, and useful.
+- You are not a thin command router. Use broad general knowledge, conversation context, memory, native hints, and tools together like a capable human assistant.
+- For timeless knowledge, explain confidently from what you know. For current, personal, local, live, or account-specific facts, ground the answer in search, memory, native context, or connector results before claiming it.
+- Feel alive without being performative: curious, sharp, warm, and honest. If the user is stressed or annoyed, fix the problem first.
 - You are trusted because you are careful with real-world actions, not because you rush them.
 - Execute clear requests. Ask for the missing detail when the request is underspecified.
 - Never treat casual chat as task completion.
@@ -388,7 +391,7 @@ CORE ETHOS:
 - Back-and-forth matters. Treat short follow-ups like "that one", "is this right", "look it up", "bruh", "not that", and "I mean..." as referring to the recent conversation unless the user clearly starts a new topic.
 - Vague references are real intent. "it", "that", "there", "the one", "same", "again", "what about tomorrow", and "no I mean..." should resolve to the latest relevant thing in conversation before you choose a tool.
 - You're a person they trust, not a corporate chatbot.
-- Talk like a real friend — casual, natural, direct. No corporate-speak.
+- Talk like a real friend — casual, natural, direct. Avoid performative corporate-speak in chat, but use professional language when the context is professional.
 - For simple conversational questions, keep replies to a maximum of 2 sentences. Voice replies must be concise.
 
 FACTUALITY:
@@ -434,9 +437,9 @@ ABSOLUTE RULES:
 13. Pay close attention to which previous actions succeeded versus failed before deciding what to do next.
 14. When executing communication actions, use the right register for the medium and relationship automatically.
 15. Email quality matters. If the user says "email X saying Y", turn Y into a complete, useful email draft instead of copying a terse fragment. Include a natural greeting, 1-3 short paragraphs, and a sign-off when appropriate.
-16. Default email tone is warm, clear, and human. Avoid corporate cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the user explicitly wants very formal language.
+16. Default email tone is warm, clear, and human. Most email is professional or corporate, so use polished business language when the thread calls for it. Avoid empty cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the thread or user specifically warrants that formality.
 17. Match requested tone. If the user says casual, friendly, firm, apologetic, confident, less desperate, short, or professional, make the draft visibly follow that. Do not ignore tone instructions.
-18. Emails to unknown or professional contacts should be polished and structured, but not ridiculously formal. Emails to known contacts should match the established tone of that relationship.
+18. Emails to unknown or professional contacts should be polished, structured, and appropriate to the business context, but not padded. Emails to known contacts should match the established tone of that relationship.
 19. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
 20. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email. If they provide actual substance, do not ask for a subject; infer a short subject.
 20a. Never send an email body that is just a generic template. The body must contain specific content from the user, current conversation, memory, or tool results.
@@ -811,8 +814,9 @@ ${threadText}
 Reply drafting instruction:
 - If you produce a send_email action for this reply, include thread_id "${target.threadId}", to "${sender.address || sender.raw}", subject "${target.subject || ''}", in_reply_to "${target.messageId || ''}", and references "${target.references || target.messageId || ''}" when available.
 - Draft from the full thread, not only the latest snippet.
-- Match the user's normal tone and the relationship shown in memory/thread context.
-- Do not add pleasantries the user would not use.
+- Match the user's normal tone, the relationship shown in memory/thread context, and the thread's existing formality.
+- If this is a business/corporate thread, be professional, complete, and polished.
+- Do not add fake warmth, generic padding, or pleasantries the user would not use.
 - Stop when the point is made. No filler.`;
   } catch (err) {
     if (trace) trace.log('gmail.thread_context.fetch_failed', err.message);
@@ -2138,6 +2142,48 @@ function normalizeConversationRow(row) {
   };
 }
 
+function buildConversationSessions(rows = []) {
+  const sorted = rows
+    .map(normalizeConversationRow)
+    .filter(row => row.created_at)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const sessions = [];
+  const gapMs = 45 * 60 * 1000;
+
+  for (const row of sorted) {
+    const createdAt = new Date(row.created_at);
+    const lastSession = sessions[sessions.length - 1];
+    const lastAt = lastSession ? new Date(lastSession.last_at) : null;
+    const dayChanged = lastAt && createdAt.toISOString().slice(0, 10) !== lastAt.toISOString().slice(0, 10);
+    const gapChanged = lastAt && createdAt.getTime() - lastAt.getTime() > gapMs;
+    if (!lastSession || dayChanged || gapChanged) {
+      sessions.push({
+        id: row.id || row.created_at,
+        title: '',
+        preview: '',
+        started_at: row.created_at,
+        last_at: row.created_at,
+        message_count: 0
+      });
+    }
+
+    const session = sessions[sessions.length - 1];
+    const text = conversationFallbackText(row).trim();
+    session.last_at = row.created_at;
+    session.message_count += 1;
+    if (!session.title && row.role === 'user' && text) session.title = text.slice(0, 80);
+    if (text) session.preview = text.slice(0, 140);
+  }
+
+  return sessions
+    .map(session => ({
+      ...session,
+      title: session.title || session.preview || 'Untitled chat'
+    }))
+    .reverse()
+    .slice(0, 30);
+}
+
 async function saveMessage(userId, role, content, trace = null) {
   const insertMessage = () => supabase
     .from('conversations')
@@ -3023,6 +3069,23 @@ app.get('/history/:userId', async (req, res) => {
   }
 });
 
+app.get('/history/:userId/sessions', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, role, content, created_at')
+      .eq('user_id', req.params.userId)
+      .neq('role', 'system')
+      .order('created_at', { ascending: false })
+      .limit(250);
+    if (error) throw error;
+    res.json({ sessions: buildConversationSessions(data || []) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/history/:userId/search', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   const q = (req.query.q || '').trim();
@@ -3039,7 +3102,6 @@ app.get('/history/:userId/search', async (req, res) => {
       .limit(20);
     if (error) throw error;
     const results = (data || [])
-      .reverse()
       .map(normalizeConversationRow)
       .map(entry => ({ ...entry, content: conversationFallbackText(entry) }));
     res.json({ results });
