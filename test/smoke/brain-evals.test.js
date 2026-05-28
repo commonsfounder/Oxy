@@ -87,6 +87,13 @@ const evalCases = [
     expectSearch: true,
     searchReason: 'public-transport-live',
     deterministicAction: null
+  },
+  {
+    name: 'platform follow-up searches with context instead of guessing',
+    message: 'what platform',
+    expectSearch: true,
+    searchReason: 'public-transport-live',
+    deterministicAction: null
   }
 ];
 

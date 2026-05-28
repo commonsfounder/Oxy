@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  extractAssistantContexts,
   extractSongFromText,
   isContextualReference,
   resolveContextualTurn
@@ -122,6 +123,24 @@ test('context brain explains route failure for why not without model fallback', 
 test('train timetable questions request search grounding instead of stale route tools', () => {
   assert.equal(getSearchReason('next train from Birmingham New Street to Apsley'), 'public-transport-live');
   assert.equal(getSearchReason('what train can i take tomorrow around 9am'), 'public-transport-live');
+  assert.equal(getSearchReason('what platform'), 'public-transport-live');
+});
+
+test('context brain keeps route context from assistant train answers for platform follow-ups', () => {
+  const contexts = extractAssistantContexts([
+    {
+      role: 'assistant',
+      content: "The first train from Birmingham New Street to Apsley today is at 05:30. It's a direct service."
+    }
+  ]);
+  const route = contexts.find(ctx => ctx.kind === 'route');
+  assert.equal(isContextualReference('what platform'), true);
+  assert.equal(route.label, 'Birmingham New Street to Apsley');
+  assert.deepEqual(route.input, {
+    origin: 'Birmingham New Street',
+    destination: 'Apsley',
+    departure_time: '05:30'
+  });
 });
 
 test('context brain sends the latest assistant content to a named contact', () => {

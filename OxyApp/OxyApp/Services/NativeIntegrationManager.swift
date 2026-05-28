@@ -601,6 +601,7 @@ final class NativeIntegrationManager {
             NativeAppShortcut(displayName: "Instagram", aliases: ["instagram", "insta"], schemes: ["instagram://app"], fallbackURL: "https://www.instagram.com/"),
             NativeAppShortcut(displayName: "YouTube", aliases: ["youtube", "you tube"], schemes: ["youtube://"], fallbackURL: "https://www.youtube.com/"),
             NativeAppShortcut(displayName: "WhatsApp", aliases: ["whatsapp", "whats app"], schemes: ["whatsapp://"], fallbackURL: "https://wa.me/"),
+            NativeAppShortcut(displayName: "Chrome", aliases: ["chrome", "google chrome"], schemes: ["googlechrome://", "googlechromes://"], fallbackURL: "https://www.google.com/"),
             NativeAppShortcut(displayName: "Spotify", aliases: ["spotify"], schemes: ["spotify://"], fallbackURL: "https://open.spotify.com/"),
             NativeAppShortcut(displayName: "Apple Music", aliases: ["apple music", "music"], schemes: ["music://"], fallbackURL: "https://music.apple.com/"),
             NativeAppShortcut(displayName: "Uber", aliases: ["uber"], schemes: ["uber://"], fallbackURL: "https://m.uber.com/ul/"),

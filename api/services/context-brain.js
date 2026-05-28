@@ -14,6 +14,7 @@ function isContextualReference(message) {
   return /\b(it|that|this|one|there|same|again|other one|last one)\b/i.test(text) ||
     /\bwhat about\b/i.test(text) ||
     /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text) ||
+    /^(what|which)\s+platform(\s+is\s+it)?\??$/i.test(text) ||
     /\b(no|nah|actually),?\s+i\s+mean\b/i.test(text) ||
     /\b(is|was)\s+(that|this|it)\s+(right|correct|true)\b/i.test(text) ||
     /\b(do you remember|remember)\b/i.test(text);
@@ -144,6 +145,28 @@ function extractSongFromText(text) {
   return null;
 }
 
+function extractRouteFromText(text) {
+  const source = normalizeText(text);
+  if (!source) return null;
+  const firstTrain = source.match(/\b(?:first|next)\s+train\s+from\s+(.+?)\s+to\s+(.+?)\s+(?:today|tomorrow|on\s+\w+)?\s*(?:is|leaves|departs)?\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+  if (!firstTrain) return null;
+  const origin = firstTrain[1].replace(/[.,;]+$/g, '').trim();
+  const destination = firstTrain[2].replace(/\s+(today|tomorrow)$/i, '').replace(/[.,;]+$/g, '').trim();
+  const departure = firstTrain[3].trim();
+  if (!origin || !destination) return null;
+  return {
+    kind: 'route',
+    label: `${origin} to ${destination}`,
+    source: 'assistant_answer',
+    confidence: 'high',
+    suggestedAction: 'search_trains',
+    input: { origin, destination, departure_time: departure },
+    result: { text: source },
+    routeContext: { origin, destination, mode: 'rail', departure_time: departure },
+    itinerary: []
+  };
+}
+
 function extractAssistantContexts(history = []) {
   const contexts = [];
   for (const row of [...history].reverse()) {
@@ -169,6 +192,8 @@ function extractAssistantContexts(history = []) {
           suggestedAction: 'play_music'
         });
       }
+      const route = extractRouteFromText(text);
+      if (route) contexts.push(route);
       if (/\b(weather|forecast|billboard|hot 100|right now|current|latest|today|revenue|price|stock|chart)\b/i.test(text)) {
         contexts.push({
           kind: 'factual_claim',
