@@ -32,6 +32,8 @@ struct NativeLocalActionResult: Equatable, Sendable {
     let deepLink: String?
     let success: Bool
     let error: String?
+    let risk: String?
+    let confirmation: String?
 
     init(
         action: String,
@@ -40,7 +42,9 @@ struct NativeLocalActionResult: Equatable, Sendable {
         actionSummary: String,
         deepLink: String?,
         success: Bool = true,
-        error: String? = nil
+        error: String? = nil,
+        risk: String? = nil,
+        confirmation: String? = nil
     ) {
         self.action = action
         self.text = text
@@ -49,6 +53,8 @@ struct NativeLocalActionResult: Equatable, Sendable {
         self.deepLink = deepLink
         self.success = success
         self.error = error
+        self.risk = risk
+        self.confirmation = confirmation
     }
 }
 
@@ -107,8 +113,26 @@ private struct ITunesApp: Decodable {
 private struct NativeAppShortcut {
     let displayName: String
     let aliases: [String]
+    let universalLinks: [String]
     let schemes: [String]
     let fallbackURL: String?
+    let sensitive: Bool
+
+    init(
+        displayName: String,
+        aliases: [String],
+        universalLinks: [String] = [],
+        schemes: [String] = [],
+        fallbackURL: String? = nil,
+        sensitive: Bool = false
+    ) {
+        self.displayName = displayName
+        self.aliases = aliases
+        self.universalLinks = universalLinks
+        self.schemes = schemes
+        self.fallbackURL = fallbackURL
+        self.sensitive = sensitive
+    }
 }
 
 struct NativeCapabilities: Codable {
@@ -573,8 +597,7 @@ final class NativeIntegrationManager {
                 target == alias || target == "\(alias) app"
             }
         }) {
-            let deepLink = app.schemes.compactMap(URL.init(string:)).first { UIApplication.shared.canOpenURL($0) }?.absoluteString
-            let link = deepLink ?? app.fallbackURL
+            let link = bestEffortAppOpenLink(for: target)
             guard let link else {
                 return NativeLocalActionResult(
                     action: "open_app",
@@ -589,10 +612,12 @@ final class NativeIntegrationManager {
 
             return NativeLocalActionResult(
                 action: "open_app",
-                text: "Opening \(app.displayName).",
+                text: app.sensitive ? "Open \(app.displayName)? Say yes to continue." : "Opening \(app.displayName).",
                 cardText: app.displayName,
-                actionSummary: "App opened",
-                deepLink: link
+                actionSummary: app.sensitive ? "Confirm app open" : "App opening",
+                deepLink: link,
+                risk: app.sensitive ? "sensitive_app" : nil,
+                confirmation: app.sensitive ? "open_app_confirmation" : nil
             )
         }
 
@@ -661,6 +686,9 @@ final class NativeIntegrationManager {
                 target == alias || target == "\(alias) app"
             }
         }) {
+            for link in known.universalLinks {
+                if let url = URL(string: link), await openUniversalLinkIfAssociated(url) { return }
+            }
             for scheme in known.schemes {
                 if let url = URL(string: scheme), await openURLIfAccepted(url) { return }
             }
@@ -682,6 +710,17 @@ final class NativeIntegrationManager {
 
         if let searchURL = appStoreSearchURL(for: target) {
             _ = await openURLIfAccepted(searchURL)
+        }
+    }
+
+    private func openUniversalLinkIfAssociated(_ url: URL) async -> Bool {
+        await withCheckedContinuation { continuation in
+            UIApplication.shared.open(
+                url,
+                options: [.universalLinksOnly: true]
+            ) { accepted in
+                continuation.resume(returning: accepted)
+            }
         }
     }
 
@@ -726,19 +765,22 @@ final class NativeIntegrationManager {
 
     private func nativeAppShortcuts() -> [NativeAppShortcut] {
         [
-            NativeAppShortcut(displayName: "TikTok", aliases: ["tiktok", "tik tok"], schemes: ["tiktok://", "snssdk1233://"], fallbackURL: "https://www.tiktok.com/"),
-            NativeAppShortcut(displayName: "Instagram", aliases: ["instagram", "insta"], schemes: ["instagram://app"], fallbackURL: "https://www.instagram.com/"),
-            NativeAppShortcut(displayName: "YouTube", aliases: ["youtube", "you tube"], schemes: ["youtube://"], fallbackURL: "https://www.youtube.com/"),
-            NativeAppShortcut(displayName: "WhatsApp", aliases: ["whatsapp", "whats app"], schemes: ["whatsapp://"], fallbackURL: "https://wa.me/"),
+            NativeAppShortcut(displayName: "TikTok", aliases: ["tiktok", "tik tok"], universalLinks: ["https://www.tiktok.com/"], schemes: ["tiktok://", "snssdk1233://"], fallbackURL: "https://www.tiktok.com/"),
+            NativeAppShortcut(displayName: "Instagram", aliases: ["instagram", "insta"], universalLinks: ["https://www.instagram.com/"], schemes: ["instagram://app"], fallbackURL: "https://www.instagram.com/"),
+            NativeAppShortcut(displayName: "YouTube", aliases: ["youtube", "you tube"], universalLinks: ["https://www.youtube.com/"], schemes: ["youtube://"], fallbackURL: "https://www.youtube.com/"),
+            NativeAppShortcut(displayName: "WhatsApp", aliases: ["whatsapp", "whats app"], universalLinks: ["https://wa.me/"], schemes: ["whatsapp://"], fallbackURL: "https://wa.me/"),
             NativeAppShortcut(displayName: "Chrome", aliases: ["chrome", "google chrome"], schemes: ["googlechrome://", "googlechromes://"], fallbackURL: "https://www.google.com/"),
-            NativeAppShortcut(displayName: "Spotify", aliases: ["spotify"], schemes: ["spotify://"], fallbackURL: "https://open.spotify.com/"),
-            NativeAppShortcut(displayName: "Apple Music", aliases: ["apple music", "music"], schemes: ["music://"], fallbackURL: "https://music.apple.com/"),
+            NativeAppShortcut(displayName: "Spotify", aliases: ["spotify"], universalLinks: ["https://open.spotify.com/"], schemes: ["spotify://"], fallbackURL: "https://open.spotify.com/"),
+            NativeAppShortcut(displayName: "Apple Music", aliases: ["apple music", "music"], universalLinks: ["https://music.apple.com/"], schemes: ["music://"], fallbackURL: "https://music.apple.com/"),
             NativeAppShortcut(displayName: "Uber", aliases: ["uber"], schemes: ["uber://"], fallbackURL: "https://m.uber.com/ul/"),
-            NativeAppShortcut(displayName: "Netflix", aliases: ["netflix"], schemes: ["nflx://"], fallbackURL: "https://www.netflix.com/"),
-            NativeAppShortcut(displayName: "Telegram", aliases: ["telegram"], schemes: ["tg://"], fallbackURL: "https://t.me/"),
-            NativeAppShortcut(displayName: "Deliveroo", aliases: ["deliveroo"], schemes: ["deliveroo://"], fallbackURL: "https://deliveroo.co.uk/"),
-            NativeAppShortcut(displayName: "Trainline", aliases: ["trainline", "the trainline"], schemes: ["thetrainline://"], fallbackURL: "https://www.thetrainline.com/"),
-            NativeAppShortcut(displayName: "Maps", aliases: ["maps", "apple maps"], schemes: ["maps://"], fallbackURL: "https://maps.apple.com/")
+            NativeAppShortcut(displayName: "Netflix", aliases: ["netflix"], universalLinks: ["https://www.netflix.com/"], schemes: ["nflx://"], fallbackURL: "https://www.netflix.com/"),
+            NativeAppShortcut(displayName: "Telegram", aliases: ["telegram"], universalLinks: ["https://t.me/"], schemes: ["tg://"], fallbackURL: "https://t.me/"),
+            NativeAppShortcut(displayName: "Deliveroo", aliases: ["deliveroo"], universalLinks: ["https://deliveroo.co.uk/"], schemes: ["deliveroo://"], fallbackURL: "https://deliveroo.co.uk/"),
+            NativeAppShortcut(displayName: "Trainline", aliases: ["trainline", "the trainline"], universalLinks: ["https://www.thetrainline.com/"], schemes: ["thetrainline://"], fallbackURL: "https://www.thetrainline.com/"),
+            NativeAppShortcut(displayName: "Monzo", aliases: ["monzo"], universalLinks: ["https://monzo.com/"], schemes: ["monzo://"], fallbackURL: "https://apps.apple.com/search?term=Monzo", sensitive: true),
+            NativeAppShortcut(displayName: "Revolut", aliases: ["revolut"], universalLinks: ["https://www.revolut.com/"], schemes: ["revolut://"], fallbackURL: "https://apps.apple.com/search?term=Revolut", sensitive: true),
+            NativeAppShortcut(displayName: "Starling", aliases: ["starling", "starling bank"], universalLinks: ["https://www.starlingbank.com/"], schemes: ["starlingbank://"], fallbackURL: "https://apps.apple.com/search?term=Starling%20Bank", sensitive: true),
+            NativeAppShortcut(displayName: "Maps", aliases: ["maps", "apple maps"], universalLinks: ["https://maps.apple.com/"], schemes: ["maps://"], fallbackURL: "https://maps.apple.com/")
         ]
     }
 

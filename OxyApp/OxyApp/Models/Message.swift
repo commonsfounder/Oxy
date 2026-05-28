@@ -112,7 +112,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
             deepLink: result.deepLink,
             webLink: result.deepLink,
             cardText: result.cardText,
-            actionSummary: result.actionSummary
+            actionSummary: result.actionSummary,
+            risk: result.risk,
+            confirmation: result.confirmation
         )
     }
 

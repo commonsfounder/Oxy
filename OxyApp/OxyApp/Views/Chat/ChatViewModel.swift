@@ -29,6 +29,7 @@ final class ChatViewModel {
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
+    @ObservationIgnored private var pendingLocalAction: ActionResult?
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -99,6 +100,7 @@ final class ChatViewModel {
         }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
+        let pendingDecision = localActionDecision(for: text)
 
         inputText = ""
         isSending = true
@@ -122,6 +124,40 @@ final class ChatViewModel {
                     sendWatchdogTask = nil
                 }
             }
+
+            if let pendingAction = pendingLocalAction, let pendingDecision {
+                await MainActor.run {
+                    pendingLocalAction = nil
+                    _ = updateAssistantMessage(id: assistantID) {
+                        if pendingDecision {
+                            $0.content = "Opening \(pendingAction.cardText ?? "that app")."
+                            $0.actions = [pendingAction]
+                            openActionLink(pendingAction)
+                        } else {
+                            $0.content = "Cancelled."
+                            $0.actions = []
+                        }
+                        $0.isStreaming = false
+                    }
+                    statusLabel = nil
+                    isSending = false
+                    currentSendTask = nil
+                }
+                if pendingDecision {
+                    await chatService.logNativeLocalAction(
+                        userId: userId,
+                        message: text,
+                        result: pendingAction,
+                        chatStartedAt: activeChatStartedAt
+                    )
+                }
+                return
+            } else if pendingDecision == nil {
+                await MainActor.run {
+                    pendingLocalAction = nil
+                }
+            }
+
             var location = locationManager.locationDict
             if needsFreshLocation {
                 await MainActor.run {
@@ -132,16 +168,19 @@ final class ChatViewModel {
 
             if let localResult = await executeLocalRequestWithTimeout(text) {
                 let actionResult = ActionResult(native: localResult)
+                let holdForConfirmation = shouldHoldForLocalConfirmation(actionResult, settings: settings)
                 await MainActor.run {
                     _ = updateAssistantMessage(id: assistantID) {
-                        $0.content = localResult.text
+                        $0.content = holdForConfirmation ? confirmationPrompt(for: actionResult) : localResult.text
                         $0.actions = [actionResult]
                         $0.isStreaming = false
                     }
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
-                    if Self.autoOpenActions.contains(actionResult.action) {
+                    if holdForConfirmation {
+                        pendingLocalAction = actionResult
+                    } else if shouldAutoOpen(actionResult, settings: settings) {
                         openActionLink(actionResult)
                     }
                 }
@@ -310,6 +349,7 @@ final class ChatViewModel {
         currentSendTask = nil
         sendWatchdogTask?.cancel()
         sendWatchdogTask = nil
+        pendingLocalAction = nil
         messages.removeAll()
         inputText = ""
         isSending = false
@@ -560,12 +600,52 @@ final class ChatViewModel {
             || lower.contains("trending")
     }
 
+    private func localActionDecision(for text: String) -> Bool? {
+        let lower = text
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        let confirmCommands = [
+            "yes", "yep", "yeah", "yea", "sure", "confirm", "continue",
+            "go ahead", "do it", "open it", "open", "ok", "okay"
+        ]
+        if confirmCommands.contains(lower) { return true }
+        if lower.range(of: #"^(yes|yeah|yep|sure|confirm|continue|go ahead|open it|do it)\b"#, options: .regularExpression) != nil {
+            return true
+        }
+        let cancelCommands = ["no", "nope", "cancel", "stop", "never mind", "nevermind", "don't", "dont"]
+        if cancelCommands.contains(lower) { return false }
+        if lower.range(of: #"^(no|nope|cancel|stop|don'?t)\b"#, options: .regularExpression) != nil {
+            return false
+        }
+        return nil
+    }
+
+    private func shouldHoldForLocalConfirmation(_ action: ActionResult, settings: OxySettings) -> Bool {
+        guard action.action == "open_app" else { return false }
+        if settings.reviewBeforeOpeningApps { return true }
+        return action.risk == "sensitive_app" && settings.confirmSensitiveAppOpens
+    }
+
+    private func confirmationPrompt(for action: ActionResult) -> String {
+        let target = action.cardText ?? "that app"
+        if action.risk == "sensitive_app" {
+            return "Open \(target)? Say yes to continue."
+        }
+        return "Open \(target)?"
+    }
+
+    private func shouldAutoOpen(_ action: ActionResult, settings: OxySettings) -> Bool {
+        guard Self.autoOpenActions.contains(action.action) else { return false }
+        return !shouldHoldForLocalConfirmation(action, settings: settings)
+    }
+
     // MARK: - Deep Links
 
     private func openDeepLinks(_ results: [ActionResult]) {
-        if currentSettings.reviewBeforeOpeningApps { return }
+        let settings = currentSettings
+        if settings.reviewBeforeOpeningApps { return }
         for result in results {
-            guard Self.autoOpenActions.contains(result.action) else { continue }
+            guard shouldAutoOpen(result, settings: settings) else { continue }
             openActionLink(result)
         }
     }

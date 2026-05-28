@@ -35,7 +35,8 @@ struct ChatService {
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
-                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps
+                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps,
+                "confirmSensitiveAppOpens": settings.confirmSensitiveAppOpens
             ]
         }
 
@@ -125,7 +126,8 @@ struct ChatService {
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
-                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps
+                "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps,
+                "confirmSensitiveAppOpens": settings.confirmSensitiveAppOpens
             ]
             if let data = try? JSONSerialization.data(withJSONObject: payload),
                let json = String(data: data, encoding: .utf8) {

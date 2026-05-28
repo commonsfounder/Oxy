@@ -156,6 +156,15 @@ struct SettingsView: View {
                                     .tint(Color.oxyGreen)
                                     .onChange(of: settings.reviewBeforeOpeningApps) { _, _ in saveSettings() }
                             }
+
+                            Divider().overlay(Color.oxyLine)
+
+                            settingRow(label: "Confirm Sensitive Apps", description: "Ask before opening banking-style apps") {
+                                Toggle("", isOn: $settings.confirmSensitiveAppOpens)
+                                    .labelsHidden()
+                                    .tint(Color.oxyGreen)
+                                    .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
+                            }
                         }
 
                         settingsSection(title: "Account") {
@@ -696,11 +705,13 @@ struct OxySettings: Codable {
     var preferredMapsApp: String = "apple"
     var preferredTransportMode: String = "driving"
     var reviewBeforeOpeningApps: Bool = false
+    var confirmSensitiveAppOpens: Bool = true
 
     enum CodingKeys: String, CodingKey {
         case name, voice, voiceOn, voiceEngine, autonomy, proactiveBriefings, healthAlerts, locationReminders
         case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
         case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
+        case confirmSensitiveAppOpens
     }
 
     init() {}
@@ -726,6 +737,7 @@ struct OxySettings: Codable {
         preferredMapsApp = try container.decodeIfPresent(String.self, forKey: .preferredMapsApp) ?? "apple"
         preferredTransportMode = try container.decodeIfPresent(String.self, forKey: .preferredTransportMode) ?? "driving"
         reviewBeforeOpeningApps = try container.decodeIfPresent(Bool.self, forKey: .reviewBeforeOpeningApps) ?? false
+        confirmSensitiveAppOpens = try container.decodeIfPresent(Bool.self, forKey: .confirmSensitiveAppOpens) ?? true
     }
 
     struct VoiceOption: Identifiable {
