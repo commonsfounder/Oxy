@@ -80,6 +80,18 @@ private struct ITunesSong: Decodable {
     let trackViewUrl: String?
 }
 
+private struct ITunesAlbumResult: Decodable {
+    let resultCount: Int
+    let results: [ITunesAlbum]
+}
+
+private struct ITunesAlbum: Decodable {
+    let collectionId: Int?
+    let collectionName: String?
+    let artistName: String?
+    let collectionViewUrl: String?
+}
+
 struct NativeCapabilities: Codable {
     var notifications: Bool
     var healthKit: Bool
@@ -98,6 +110,7 @@ final class NativeIntegrationManager {
     private let eventStore = EKEventStore()
     private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
     private var lastMusicQuery: String?
+    private var lastMusicArtist: String?
     private var lastMusicError: String?
     private var musicHistory: [String] = []
 
@@ -635,7 +648,18 @@ final class NativeIntegrationManager {
             )
         }
 
-        if lower == "next" || lower.contains("next song") || lower.contains("skip this") || lower.contains("skip song") {
+        if lower == "next"
+            || lower == "skip"
+            || lower == "skip it"
+            || lower == "skip track"
+            || lower == "skip the track"
+            || lower == "skip song"
+            || lower == "skip the song"
+            || lower.contains("next song")
+            || lower.contains("next track")
+            || lower.contains("skip this")
+            || lower.contains("skip song")
+            || lower.contains("skip track") {
             try? await ApplicationMusicPlayer.shared.skipToNextEntry()
             try? await SystemMusicPlayer.shared.skipToNextEntry()
             systemPlayer.skipToNextItem()
@@ -653,9 +677,95 @@ final class NativeIntegrationManager {
     }
 
     private func playNativeMusic(from message: String) async -> NativeLocalActionResult? {
+        if isAlbumPlaybackRequest(message) {
+            let query = resolvedAlbumQuery(from: message)
+            guard !query.isEmpty else { return nil }
+            return await playNativeAlbumQuery(query)
+        }
         let query = resolvedMusicQuery(from: message)
         guard !query.isEmpty else { return nil }
         return await playNativeMusicQuery(query)
+    }
+
+    private func playNativeAlbumQuery(_ query: String) async -> NativeLocalActionResult? {
+        guard await requestMusicPermission() else {
+            return NativeLocalActionResult(
+                action: "play_music",
+                text: "Turn on Apple Music access and I can play that album natively.",
+                cardText: "Enable Apple Music access",
+                actionSummary: "Music needs access",
+                deepLink: nil,
+                success: false,
+                error: "Apple Music permission is not authorized."
+            )
+        }
+
+        var failures: [String] = []
+        for candidate in albumSearchCandidates(for: query) {
+            do {
+                if let iTunesAlbum = try await withMusicTimeout(seconds: 4, operation: { try await self.searchITunesAlbum(candidate) }),
+                   let collectionId = iTunesAlbum.collectionId {
+                    try await playWithStoreID(String(collectionId))
+                    let title = iTunesAlbum.collectionName ?? query
+                    let artist = iTunesAlbum.artistName ?? "Apple Music"
+                    recordPlayedMusic("\(title) \(artist)", artist: artist)
+                    lastMusicError = nil
+                    return NativeLocalActionResult(
+                        action: "play_music",
+                        text: "Playing \(title) by \(artist).",
+                        cardText: "\(title) · \(artist)",
+                        actionSummary: "Album playing",
+                        deepLink: iTunesAlbum.collectionViewUrl
+                    )
+                }
+            } catch {
+                failures.append("iTunes album \(candidate): \(String(describing: error))")
+            }
+
+            do {
+                if let album = try await withMusicTimeout(seconds: 4, operation: { try await self.searchCatalogAlbum(candidate) }) {
+                    try await playWithStoreID(album.id.rawValue)
+                    recordPlayedMusic("\(album.title) \(album.artistName)", artist: album.artistName)
+                    lastMusicError = nil
+                    return NativeLocalActionResult(
+                        action: "play_music",
+                        text: "Playing \(album.title) by \(album.artistName).",
+                        cardText: "\(album.title) · \(album.artistName)",
+                        actionSummary: "Album playing",
+                        deepLink: album.url?.absoluteString
+                    )
+                }
+            } catch {
+                failures.append("MusicKit album \(candidate): \(String(describing: error))")
+            }
+        }
+
+        do {
+            try await playLocalLibraryAlbum(matching: query)
+            recordPlayedMusic(query)
+            lastMusicError = nil
+            return NativeLocalActionResult(
+                action: "play_music",
+                text: "Playing \(query).",
+                cardText: query,
+                actionSummary: "Album playing",
+                deepLink: nil
+            )
+        } catch {
+            failures.append("Local album: \(String(describing: error))")
+        }
+
+        let detail = failures.joined(separator: " | ")
+        lastMusicError = detail
+        return NativeLocalActionResult(
+            action: "play_music",
+            text: "I couldn't find that album clearly enough to play it.",
+            cardText: query,
+            actionSummary: "Album not found",
+            deepLink: nil,
+            success: false,
+            error: detail.isEmpty ? "No album result for \(query)." : detail
+        )
     }
 
     private func playNativeMusicQuery(_ query: String) async -> NativeLocalActionResult? {
@@ -681,7 +791,7 @@ final class NativeIntegrationManager {
                 try await playWithStoreID(String(trackId))
                 let title = iTunesSong.trackName ?? query
                 let artist = iTunesSong.artistName ?? "Apple Music"
-                recordPlayedMusic("\(title) \(artist)")
+                recordPlayedMusic("\(title) \(artist)", artist: artist)
                 lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
@@ -698,7 +808,7 @@ final class NativeIntegrationManager {
         do {
             if let song = try await withMusicTimeout(seconds: 4, operation: { try await self.searchCatalogSong(query) }) {
                 try await playResolvedSong(song, query: query)
-                recordPlayedMusic("\(song.title) \(song.artistName)")
+                recordPlayedMusic("\(song.title) \(song.artistName)", artist: song.artistName)
                 lastMusicError = nil
                 return NativeLocalActionResult(
                     action: "play_music",
@@ -913,6 +1023,35 @@ final class NativeIntegrationManager {
         }
     }
 
+    private func playLocalLibraryAlbum(matching query: String) async throws {
+        let normalizedQuery = normalizeMusicText(query)
+        guard !normalizedQuery.isEmpty else {
+            throw NSError(domain: "OxyMusic", code: 14, userInfo: [NSLocalizedDescriptionKey: "Empty album query"])
+        }
+        let albumQuery = MPMediaQuery.albums()
+        let collection = albumQuery.collections?.first { collection in
+            guard let item = collection.representativeItem else { return false }
+            let albumTitle = normalizeMusicText(item.albumTitle ?? "")
+            let artist = normalizeMusicText(item.albumArtist ?? item.artist ?? "")
+            let combined = normalizeMusicText("\(item.albumTitle ?? "") \(item.albumArtist ?? item.artist ?? "")")
+            return combined.contains(normalizedQuery)
+                || normalizedQuery.contains(combined)
+                || albumTitle.contains(normalizedQuery)
+                || normalizedQuery.contains(albumTitle)
+                || (!artist.isEmpty && normalizedQuery.contains(artist) && !albumTitle.isEmpty && normalizedQuery.contains(albumTitle))
+        }
+        guard let collection else {
+            throw NSError(domain: "OxyMusic", code: 15, userInfo: [NSLocalizedDescriptionKey: "No matching local library album"])
+        }
+        try prepareAudioSessionForMusic()
+        let player = MPMusicPlayerController.applicationMusicPlayer
+        player.setQueue(with: collection)
+        player.play()
+        try await withMusicTimeout(seconds: 4) {
+            try await self.waitForMediaPlayerToStart(player, label: "local album")
+        }
+    }
+
     private func prepareAudioSessionForMusic() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playback, mode: .default)
@@ -941,6 +1080,30 @@ final class NativeIntegrationManager {
         guard decoded.resultCount > 0 else { return nil }
         return decoded.results.first { $0.trackId != nil }
     }
+
+    private func searchITunesAlbum(_ query: String) async throws -> ITunesAlbum? {
+        var components = URLComponents(string: "https://itunes.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: query),
+            URLQueryItem(name: "media", value: "music"),
+            URLQueryItem(name: "entity", value: "album"),
+            URLQueryItem(name: "limit", value: "3"),
+            URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "GB")
+        ]
+        guard let url = components?.url else {
+            throw NSError(domain: "OxyMusic", code: 16, userInfo: [NSLocalizedDescriptionKey: "Invalid iTunes album search URL"])
+        }
+        let (data, response) = try await withMusicTimeout(seconds: 4) {
+            try await URLSession.shared.data(from: url)
+        }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw NSError(domain: "OxyMusic", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "iTunes album search failed with HTTP \(http.statusCode)"])
+        }
+        let decoded = try JSONDecoder().decode(ITunesAlbumResult.self, from: data)
+        guard decoded.resultCount > 0 else { return nil }
+        return decoded.results.first { $0.collectionId != nil }
+    }
+
 
     private func musicPlaybackErrorMessage(_ error: Error) -> String {
         let details = String(describing: error)
@@ -1073,6 +1236,13 @@ final class NativeIntegrationManager {
         return response.songs.first
     }
 
+    private func searchCatalogAlbum(_ query: String) async throws -> Album? {
+        var request = MusicCatalogSearchRequest(term: query, types: [Album.self])
+        request.limit = 1
+        let response = try await request.response()
+        return response.albums.first
+    }
+
     private func withMusicTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {
@@ -1127,8 +1297,22 @@ final class NativeIntegrationManager {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
+    private func cleanAlbumQuery(_ message: String) -> String {
+        cleanMusicQuery(message)
+            .replacingOccurrences(of: #"(?i)\bthe album\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\balbum\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\brecord\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
     private func resolvedMusicQuery(from message: String) -> String {
         let query = cleanMusicQuery(message)
+        return resolvedMusicReference(query)
+    }
+
+    private func resolvedAlbumQuery(from message: String) -> String {
+        let query = cleanAlbumQuery(message)
         return resolvedMusicReference(query)
     }
 
@@ -1148,15 +1332,42 @@ final class NativeIntegrationManager {
         return query
     }
 
+    private func isAlbumPlaybackRequest(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        guard lower.hasPrefix("play ") || lower.hasPrefix("listen to ") else { return false }
+        return lower.contains(" album") || lower.contains("album ") || lower.contains(" record") || lower.contains("record ")
+    }
+
+    private func albumSearchCandidates(for query: String) -> [String] {
+        var candidates = [query]
+        let normalized = normalizeMusicText(query)
+        if let lastMusicArtist,
+           !lastMusicArtist.isEmpty,
+           !normalized.contains(normalizeMusicText(lastMusicArtist)),
+           query.range(of: #"\b(by|from)\b"#, options: .regularExpression) == nil {
+            candidates.append("\(query) \(lastMusicArtist)")
+        }
+        var seen = Set<String>()
+        return candidates.filter { candidate in
+            let key = normalizeMusicText(candidate)
+            guard !key.isEmpty, !seen.contains(key) else { return false }
+            seen.insert(key)
+            return true
+        }
+    }
+
     private var previousMusicQuery: String? {
         guard musicHistory.count >= 2 else { return nil }
         return musicHistory[musicHistory.count - 2]
     }
 
-    private func recordPlayedMusic(_ query: String) {
+    private func recordPlayedMusic(_ query: String, artist: String? = nil) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         lastMusicQuery = trimmed
+        if let artist = artist?.trimmingCharacters(in: .whitespacesAndNewlines), !artist.isEmpty {
+            lastMusicArtist = artist
+        }
         if musicHistory.last != trimmed {
             musicHistory.append(trimmed)
         }
