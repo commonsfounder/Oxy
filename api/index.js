@@ -893,13 +893,18 @@ function extractCalendarEventInput(message, fallbackMessage = '') {
   return { title, start_date: start, end_date: end, timezone: TIMEZONE };
 }
 
-async function getRecentLoggedActions(userId, trace = null, limit = 8) {
-  const fetchActions = () => supabase
-    .from('action_log')
-    .select('action, status, error, created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(Math.min(Math.max(Number(limit) || 8, 1), 20));
+async function getRecentLoggedActions(userId, trace = null, limit = 8, options = {}) {
+  const since = parseClientTimestamp(options.since);
+  const fetchActions = () => {
+    let query = supabase
+      .from('action_log')
+      .select('action, status, error, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Math.max(Number(limit) || 8, 1), 20));
+    if (since) query = query.gte('created_at', since.toISOString());
+    return query;
+  };
   const { data, error } = trace
     ? await trace.run('supabase.action_log.contextual_fetch', fetchActions)
     : await fetchActions();
@@ -926,14 +931,15 @@ function isClarificationRequest(message) {
   return /^(huh|what|what\?|wdym|what do you mean|what does that mean|i don'?t get it)$/i.test(String(message || '').trim());
 }
 
-async function inferContextualDeterministicTurn(userId, message, settings, trace = null) {
+async function inferContextualDeterministicTurn(userId, message, settings, trace = null, options = {}) {
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
+  const historyOptions = { since: options.since };
 
   if (isContextualReference(text)) {
     const [history, recentActions, memory] = await Promise.all([
-      getHistory(userId, trace, 12),
-      getRecentLoggedActions(userId, trace, 10),
+      getHistory(userId, trace, 12, historyOptions),
+      getRecentLoggedActions(userId, trace, 10, historyOptions),
       getMemory(userId, trace)
     ]);
     const resolvedTurn = resolveContextualTurn({
@@ -958,7 +964,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   }
 
   if (isClarificationRequest(text)) {
-    const history = await getHistory(userId, trace, 10);
+    const history = await getHistory(userId, trace, 10, historyOptions);
     const lastAssistant = [...history].reverse().find(row => row.role === 'assistant' && String(row.content || '').trim());
     if (lastAssistant?.content) {
       return {
@@ -971,7 +977,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
 
   const isCalendarCorrection = /\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text);
   if (/\b(calendar|schedule|event)\b/i.test(text) || isCalendarCorrection) {
-    const history = await getHistory(userId, trace, 8);
+    const history = await getHistory(userId, trace, 8, historyOptions);
     const previousUser = [...history].reverse()
       .find(row => row.role === 'user' && row.content !== message && /\b(calendar|schedule|event|tomorrow|today|all day)\b/i.test(row.content || ''));
     const input = extractCalendarEventInput(text, previousUser?.content || '');
@@ -985,7 +991,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   }
 
   if (/\b(i'?m|im|i am)\s+taking\s+the\s+(bus|train|tube|tram|transit)\b/i.test(normalized) || /^by\s+(bus|train|tube|tram|transit)$/i.test(normalized)) {
-    const actions = await getRecentLoggedActions(userId, trace, 8);
+    const actions = await getRecentLoggedActions(userId, trace, 8, historyOptions);
     const lastTravel = lastActionOfType(actions, ['get_directions', 'plan_trip']);
     const destination = lastTravel?.input?.destination;
     if (destination) {
@@ -1003,7 +1009,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   }
 
   if (shouldClarifyPreviousPlace(normalized)) {
-    const actions = await getRecentLoggedActions(userId, trace, 8);
+    const actions = await getRecentLoggedActions(userId, trace, 8, historyOptions);
     const lastPlace = lastActionOfType(actions, 'find_place');
     if (lastPlace?.input?.query) {
       return {
@@ -1923,14 +1929,28 @@ function isMemoryDeletionRequest(text) {
     || /\bforget that\b/i.test(String(text || ''));
 }
 
-async function getHistory(userId, trace = null, limit = 12) {
-  const fetchHistory = () => supabase
-    .from('conversations')
-    .select('role, content, created_at')
-    .eq('user_id', userId)
-    .neq('role', 'system')
-    .order('created_at', { ascending: false })
-    .limit(Math.min(Math.max(Number(limit) || 12, 1), 200));
+function parseClientTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return null;
+  const now = Date.now();
+  if (parsed.getTime() > now + 5 * 60 * 1000) return null;
+  return parsed;
+}
+
+async function getHistory(userId, trace = null, limit = 12, options = {}) {
+  const since = parseClientTimestamp(options.since);
+  const fetchHistory = () => {
+    let query = supabase
+      .from('conversations')
+      .select('id, role, content, created_at')
+      .eq('user_id', userId)
+      .neq('role', 'system')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Math.max(Number(limit) || 12, 1), 200));
+    if (since) query = query.gte('created_at', since.toISOString());
+    return query;
+  };
   const { data, error } = trace
     ? await trace.run('supabase.conversations.fetch_history', fetchHistory)
     : await fetchHistory();
@@ -2396,6 +2416,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     const userId = req.body.userId;
     const message = (req.body.message || '').trim();
     const settings = safeParseJSON(req.body.settings) || {};
+    const chatStartedAt = req.body.chatStartedAt || null;
     const wantsTTS = req.query.tts === 'true';
 
     if (!requireMatchingUser(req, res, userId)) return;
@@ -2403,7 +2424,7 @@ app.post('/chat-with-image', upload.single('image'), async (req, res) => {
     if (!message) return res.status(400).json({ error: 'message is required.' });
 
     const [{ history, useSearch, dynamicSystemPrompt, cachedContentName }] = await Promise.all([
-      buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL),
+      buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL, { chatStartedAt }),
       saveMessage(userId, 'user', `${message}\n\n[Attached image: ${req.file.originalname || 'image'}]`)
     ]);
     const baseHistory = normalizeGeminiHistory(history);
@@ -2863,7 +2884,9 @@ app.get('/briefing/:userId', async (req, res) => {
 app.get('/history/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const history = await getHistory(req.params.userId, null, req.query.limit || 50);
+    const history = await getHistory(req.params.userId, null, req.query.limit || 50, {
+      since: req.query.since
+    });
     res.json({ history });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2878,7 +2901,7 @@ app.get('/history/:userId/search', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('conversations')
-      .select('role, content, created_at')
+      .select('id, role, content, created_at')
       .eq('user_id', req.params.userId)
       .neq('role', 'system')
       .ilike('content', `%${escapedQuery}%`)
@@ -2904,14 +2927,14 @@ app.get('/history/:userId/around', async (req, res) => {
   try {
     const base = supabase
       .from('conversations')
-      .select('role, content, created_at')
+      .select('id, role, content, created_at')
       .eq('user_id', req.params.userId)
       .neq('role', 'system');
     const [before, after] = await Promise.all([
       base.lte('created_at', anchor.toISOString()).order('created_at', { ascending: false }).limit(beforeLimit),
       supabase
         .from('conversations')
-        .select('role, content, created_at')
+        .select('id, role, content, created_at')
         .eq('user_id', req.params.userId)
         .neq('role', 'system')
         .gt('created_at', anchor.toISOString())
@@ -2939,7 +2962,7 @@ app.get('/history/:userId/date', async (req, res) => {
     const end   = new Date(date + 'T23:59:59.999Z').toISOString();
     const { data, error } = await supabase
       .from('conversations')
-      .select('role, content, created_at')
+      .select('id, role, content, created_at')
       .eq('user_id', req.params.userId)
       .neq('role', 'system')
       .gte('created_at', start)
@@ -2956,14 +2979,15 @@ app.get('/history/:userId/date', async (req, res) => {
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
+  const historyOptions = { since: requestContext.chatStartedAt };
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
-    getHistory(userId, trace),
+    getHistory(userId, trace, 12, historyOptions),
     getPreferences(userId, trace),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
     getPromptCacheName(trace, modelName),
-    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8)
+    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   const statedContext = extractAlreadyStatedContext(history);
@@ -3528,7 +3552,7 @@ app.post('/chat', async (req, res) => {
   const streaming = req.query.stream === 'true';
 
   try {
-    const { message, userId, settings = {}, location = null, nativeHints = null } = req.body;
+    const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
 
@@ -3629,7 +3653,9 @@ app.post('/chat', async (req, res) => {
       return res.json(result);
     }
 
-    const contextualTurn = await inferContextualDeterministicTurn(userId, message, settings, trace);
+    const contextualTurn = await inferContextualDeterministicTurn(userId, message, settings, trace, {
+      since: chatStartedAt
+    });
     if (contextualTurn?.spokenOnly) {
       trace.log(`context_router.match ${contextualTurn.reason}`);
       await respondWithResult({
@@ -3714,6 +3740,7 @@ app.post('/chat', async (req, res) => {
     const requestContext = {
       location,
       nativeHints,
+      chatStartedAt,
       pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
     };
     const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));

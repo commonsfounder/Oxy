@@ -11,6 +11,7 @@ struct ChatService {
     func sendMessage(
         userId: String,
         message: String,
+        chatStartedAt: String? = nil,
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
         nativeHints: [String: Any]? = nil,
@@ -20,6 +21,10 @@ struct ChatService {
             "userId": userId,
             "message": message
         ]
+
+        if let chatStartedAt {
+            body["chatStartedAt"] = chatStartedAt
+        }
 
         if let settings {
             body["settings"] = [
@@ -55,10 +60,14 @@ struct ChatService {
         )
     }
 
-    func loadHistory(userId: String, limit: Int = 50) async throws -> [HistoryEntry] {
+    func loadHistory(userId: String, limit: Int = 50, since: String? = nil) async throws -> [HistoryEntry] {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let since {
+            queryItems.append(URLQueryItem(name: "since", value: since))
+        }
         let data = try await api.request(
             path: "/history/\(userId)",
-            queryItems: [URLQueryItem(name: "limit", value: String(limit))]
+            queryItems: queryItems
         )
         return try JSONDecoder().decode(HistoryResponse.self, from: data).history
     }
@@ -75,15 +84,19 @@ struct ChatService {
         return try JSONDecoder().decode(HistoryResponse.self, from: data).history
     }
 
-    func logNativeLocalAction(userId: String, message: String, result: ActionResult) async {
+    func logNativeLocalAction(userId: String, message: String, result: ActionResult, chatStartedAt: String? = nil) async {
+        var body: [String: Any] = [
+            "userId": userId,
+            "message": message,
+            "result": result.dictionary
+        ]
+        if let chatStartedAt {
+            body["chatStartedAt"] = chatStartedAt
+        }
         _ = try? await api.request(
             path: "/native/local-action",
             method: "POST",
-            body: [
-                "userId": userId,
-                "message": message,
-                "result": result.dictionary
-            ]
+            body: body
         )
     }
 
@@ -93,12 +106,16 @@ struct ChatService {
         imageData: Data,
         fileName: String,
         mimeType: String,
+        chatStartedAt: String? = nil,
         settings: OxySettings? = nil
     ) async throws -> ImageChatResponse {
         var fields: [String: String] = [
             "userId": userId,
             "message": message
         ]
+        if let chatStartedAt {
+            fields["chatStartedAt"] = chatStartedAt
+        }
         if let settings {
             let payload: [String: Any] = [
                 "name": settings.name,

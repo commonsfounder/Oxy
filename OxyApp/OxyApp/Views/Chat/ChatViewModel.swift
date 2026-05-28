@@ -23,10 +23,12 @@ final class ChatViewModel {
     var inputText = ""
     var isSending = false
     var statusLabel: String?
+    var scrollTargetMessageID: UUID?
 
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
+    @ObservationIgnored private var activeChatStartedAt: String?
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -54,12 +56,18 @@ final class ChatViewModel {
         "public transport", "walk", "walking", "drive", "driving"
     ]
 
+    func prepareChat(userId: String) async {
+        activeChatStartedAt = chatStartedAt(for: userId)
+        await loadHistory(userId: userId)
+    }
+
     func loadHistory(userId: String) async {
         do {
-            let entries = try await chatService.loadHistory(userId: userId)
+            let entries = try await chatService.loadHistory(userId: userId, since: activeChatStartedAt)
             let loaded = messages(from: entries)
             await MainActor.run {
                 messages = loaded
+                scrollTargetMessageID = nil
             }
         } catch {}
     }
@@ -68,14 +76,27 @@ final class ChatViewModel {
         do {
             let entries = try await chatService.loadHistoryAround(userId: userId, createdAt: createdAt)
             let loaded = messages(from: entries)
+            let targetID = loaded.first(where: { datesMatch($0.timestamp, createdAt) })?.id
             await MainActor.run {
                 messages = loaded
                 statusLabel = nil
+                scrollTargetMessageID = targetID
             }
         } catch {}
     }
 
+    func startNewChat(userId: String) {
+        clearChat()
+        let startedAt = Date().oxyISO8601String
+        activeChatStartedAt = startedAt
+        UserDefaults.standard.set(startedAt, forKey: chatStartedAtKey(userId))
+        nativeManager.resetConversationContext()
+    }
+
     func sendMessage(userId: String) {
+        if activeChatStartedAt == nil {
+            activeChatStartedAt = chatStartedAt(for: userId)
+        }
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
 
@@ -124,7 +145,12 @@ final class ChatViewModel {
                         openActionLink(actionResult)
                     }
                 }
-                await chatService.logNativeLocalAction(userId: userId, message: text, result: actionResult)
+                await chatService.logNativeLocalAction(
+                    userId: userId,
+                    message: text,
+                    result: actionResult,
+                    chatStartedAt: activeChatStartedAt
+                )
                 return
             }
 
@@ -133,6 +159,7 @@ final class ChatViewModel {
             let stream = chatService.sendMessage(
                 userId: userId,
                 message: text,
+                chatStartedAt: activeChatStartedAt,
                 settings: settings,
                 location: location,
                 nativeHints: nativeHints
@@ -209,6 +236,9 @@ final class ChatViewModel {
     }
 
     func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String) {
+        if activeChatStartedAt == nil {
+            activeChatStartedAt = chatStartedAt(for: userId)
+        }
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = typed.isEmpty ? "Look at this image and tell me what you see." : typed
         guard !isSending else { return }
@@ -240,6 +270,7 @@ final class ChatViewModel {
                     imageData: imageData,
                     fileName: fileName,
                     mimeType: mimeType,
+                    chatStartedAt: activeChatStartedAt,
                     settings: settings
                 )
                 let actions = response.actions ?? []
@@ -283,6 +314,7 @@ final class ChatViewModel {
         inputText = ""
         isSending = false
         statusLabel = nil
+        scrollTargetMessageID = nil
     }
 
     func requestLocationAccess() {
@@ -295,10 +327,29 @@ final class ChatViewModel {
             return Message(
                 role: role,
                 content: entry.content,
-                timestamp: ISO8601DateFormatter().date(from: entry.createdAt ?? "") ?? Date(),
+                timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
                 actions: entry.actions ?? []
             )
         }
+    }
+
+    private func chatStartedAt(for userId: String) -> String {
+        let key = chatStartedAtKey(userId)
+        if let saved = UserDefaults.standard.string(forKey: key), Date.oxyParse(saved) != nil {
+            return saved
+        }
+        let startedAt = Date().oxyISO8601String
+        UserDefaults.standard.set(startedAt, forKey: key)
+        return startedAt
+    }
+
+    private func chatStartedAtKey(_ userId: String) -> String {
+        "oxy_current_chat_started_at_\(userId)"
+    }
+
+    private func datesMatch(_ date: Date, _ createdAt: String) -> Bool {
+        guard let target = Date.oxyParse(createdAt) else { return false }
+        return abs(date.timeIntervalSince(target)) < 0.001
     }
 
     @discardableResult
@@ -485,7 +536,12 @@ final class ChatViewModel {
             $0.actions = [nativeAction]
             $0.isStreaming = false
         }
-        await chatService.logNativeLocalAction(userId: userId, message: originalMessage, result: nativeAction)
+        await chatService.logNativeLocalAction(
+            userId: userId,
+            message: originalMessage,
+            result: nativeAction,
+            chatStartedAt: activeChatStartedAt
+        )
     }
 
     private func musicQueryStillNeedsResolution(_ query: String) -> Bool {

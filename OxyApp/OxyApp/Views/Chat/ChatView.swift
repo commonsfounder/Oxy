@@ -79,6 +79,7 @@ struct ChatView: View {
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: viewModel.messages.count) {
+                            guard viewModel.scrollTargetMessageID == nil else { return }
                             withAnimation(.easeOut(duration: 0.2)) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
@@ -88,12 +89,24 @@ struct ChatView: View {
                             }
                         }
                         .onChange(of: viewModel.messages.last?.content) {
+                            guard viewModel.scrollTargetMessageID == nil else { return }
                             withAnimation(.easeOut(duration: 0.2)) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
                                     proxy.scrollTo("status", anchor: .bottom)
                                 }
+                            }
+                        }
+                        .onChange(of: viewModel.scrollTargetMessageID) { _, targetID in
+                            guard let targetID else { return }
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(150))
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    proxy.scrollTo(targetID, anchor: .center)
+                                }
+                                try? await Task.sleep(for: .milliseconds(700))
+                                viewModel.scrollTargetMessageID = nil
                             }
                         }
                         .onChange(of: viewModel.messages) {
@@ -200,6 +213,14 @@ struct ChatView: View {
                     Menu {
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
+                                viewModel.startNewChat(userId: appState.userId)
+                            }
+                        }) {
+                            Label("New Chat", systemImage: "square.and.pencil")
+                        }
+                        Divider()
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
                                 isIncognito.toggle()
                             }
                         }) {
@@ -286,7 +307,7 @@ struct ChatView: View {
             }
         }
         .task {
-            await viewModel.loadHistory(userId: appState.userId)
+            await viewModel.prepareChat(userId: appState.userId)
         }
         .onAppear {
             viewModel.requestLocationAccess()
@@ -762,11 +783,7 @@ struct SearchResult: Codable, Identifiable {
     }
 
     var formattedDate: String? {
-        guard let createdAt else { return nil }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = iso.date(from: createdAt)
-            ?? ISO8601DateFormatter().date(from: createdAt)
+        let date = Date.oxyParse(createdAt)
         guard let date else { return nil }
         let fmt = DateFormatter()
         fmt.dateFormat = "d MMM · HH:mm"

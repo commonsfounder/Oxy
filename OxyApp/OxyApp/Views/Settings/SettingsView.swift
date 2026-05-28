@@ -105,31 +105,7 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Voice", description: selectedVoiceLabel) {
-                                HStack(spacing: 8) {
-                                    Picker("Voice", selection: $settings.voice) {
-                                        ForEach(OxySettings.voiceOptions, id: \.value) { voice in
-                                            Text(voice.label).tag(voice.value)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .pickerStyle(.menu)
-                                    .tint(Color.oxyStone)
-                                    .onChange(of: settings.voice) { _, _ in saveSettings() }
-
-                                    Button {
-                                        previewVoice(settings.voice)
-                                    } label: {
-                                        Image(systemName: voicePreview.isLoading ? "hourglass" : (voicePreview.isPlaying ? "speaker.wave.2.fill" : "play.fill"))
-                                            .font(.system(size: 12, weight: .bold))
-                                            .foregroundStyle(Color.oxyOnAccent)
-                                            .frame(width: 30, height: 30)
-                                            .background(Color.oxyStone)
-                                            .clipShape(Circle())
-                                    }
-                                    .disabled(voicePreview.isLoading)
-                                }
-                            }
+                            voicePickerRow
                         }
 
                         // Autonomy
@@ -381,6 +357,70 @@ struct SettingsView: View {
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Color.oxyDim)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var voicePickerRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Voice")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.oxyText)
+                    Text(selectedVoiceLabel)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                }
+                Spacer()
+                Button {
+                    previewVoice(settings.voice)
+                } label: {
+                    Image(systemName: voicePreview.isLoading ? "hourglass" : (voicePreview.isPlaying ? "speaker.wave.2.fill" : "play.fill"))
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color.oxyOnAccent)
+                        .frame(width: 32, height: 32)
+                        .background(Color.oxyStone)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(voicePreview.isLoading)
+            }
+
+            Menu {
+                ForEach(OxySettings.voiceOptions, id: \.value) { voice in
+                    Button {
+                        settings.voice = voice.value
+                        saveSettings()
+                    } label: {
+                        if settings.voice == voice.value {
+                            Label(voice.label, systemImage: "checkmark")
+                        } else {
+                            Text(voice.label)
+                        }
+                    }
+                }
+            } label: {
+                HStack {
+                    Text(selectedVoiceLabel)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.oxyText)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Color.oxySub)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 11)
+                .background(Color.oxySurface1)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.oxyLine2, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
         }
         .padding(.vertical, 4)
     }

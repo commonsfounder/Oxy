@@ -37,6 +37,22 @@ struct Message: Identifiable, Equatable {
     }
 }
 
+extension Date {
+    static func oxyParse(_ value: String?) -> Date? {
+        guard let value, !value.isEmpty else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+        return ISO8601DateFormatter().date(from: value)
+    }
+
+    var oxyISO8601String: String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: self)
+    }
+}
+
 struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String

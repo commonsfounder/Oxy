@@ -214,6 +214,13 @@ final class NativeIntegrationManager {
         return hints
     }
 
+    func resetConversationContext() {
+        lastMusicQuery = nil
+        lastMusicArtist = nil
+        lastMusicError = nil
+        musicHistory.removeAll()
+    }
+
     func executeLocalRequest(_ message: String) async -> NativeLocalActionResult? {
         let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
