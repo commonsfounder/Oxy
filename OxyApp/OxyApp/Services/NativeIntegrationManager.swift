@@ -703,7 +703,7 @@ final class NativeIntegrationManager {
         var failures: [String] = []
         for candidate in albumSearchCandidates(for: query) {
             do {
-                if let iTunesAlbum = try await withMusicTimeout(seconds: 4, operation: { try await self.searchITunesAlbum(candidate) }),
+                if let iTunesAlbum = try await withMusicTimeout(seconds: 4, operation: { try await self.searchITunesAlbum(candidate, originalQuery: query) }),
                    let collectionId = iTunesAlbum.collectionId {
                     try await playWithStoreID(String(collectionId))
                     let title = iTunesAlbum.collectionName ?? query
@@ -723,7 +723,7 @@ final class NativeIntegrationManager {
             }
 
             do {
-                if let album = try await withMusicTimeout(seconds: 4, operation: { try await self.searchCatalogAlbum(candidate) }) {
+                if let album = try await withMusicTimeout(seconds: 4, operation: { try await self.searchCatalogAlbum(candidate, originalQuery: query) }) {
                     try await playWithStoreID(album.id.rawValue)
                     recordPlayedMusic("\(album.title) \(album.artistName)", artist: album.artistName)
                     lastMusicError = nil
@@ -1038,6 +1038,8 @@ final class NativeIntegrationManager {
                 || normalizedQuery.contains(combined)
                 || albumTitle.contains(normalizedQuery)
                 || normalizedQuery.contains(albumTitle)
+                || compactMusicText(combined).contains(compactMusicText(normalizedQuery))
+                || compactMusicText(albumTitle).contains(compactMusicText(normalizedQuery))
                 || (!artist.isEmpty && normalizedQuery.contains(artist) && !albumTitle.isEmpty && normalizedQuery.contains(albumTitle))
         }
         guard let collection else {
@@ -1081,13 +1083,13 @@ final class NativeIntegrationManager {
         return decoded.results.first { $0.trackId != nil }
     }
 
-    private func searchITunesAlbum(_ query: String) async throws -> ITunesAlbum? {
+    private func searchITunesAlbum(_ query: String, originalQuery: String) async throws -> ITunesAlbum? {
         var components = URLComponents(string: "https://itunes.apple.com/search")
         components?.queryItems = [
             URLQueryItem(name: "term", value: query),
             URLQueryItem(name: "media", value: "music"),
             URLQueryItem(name: "entity", value: "album"),
-            URLQueryItem(name: "limit", value: "3"),
+            URLQueryItem(name: "limit", value: "10"),
             URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "GB")
         ]
         guard let url = components?.url else {
@@ -1101,7 +1103,9 @@ final class NativeIntegrationManager {
         }
         let decoded = try JSONDecoder().decode(ITunesAlbumResult.self, from: data)
         guard decoded.resultCount > 0 else { return nil }
-        return decoded.results.first { $0.collectionId != nil }
+        return decoded.results.first {
+            $0.collectionId != nil && iTunesAlbumMatches($0, originalQuery: originalQuery, candidate: query)
+        }
     }
 
 
@@ -1236,11 +1240,11 @@ final class NativeIntegrationManager {
         return response.songs.first
     }
 
-    private func searchCatalogAlbum(_ query: String) async throws -> Album? {
+    private func searchCatalogAlbum(_ query: String, originalQuery: String) async throws -> Album? {
         var request = MusicCatalogSearchRequest(term: query, types: [Album.self])
-        request.limit = 1
+        request.limit = 5
         let response = try await request.response()
-        return response.albums.first
+        return response.albums.first { catalogAlbumMatches($0, originalQuery: originalQuery, candidate: query) }
     }
 
     private func withMusicTimeout<T>(seconds: Double, operation: @escaping () async throws -> T) async throws -> T {
@@ -1339,7 +1343,7 @@ final class NativeIntegrationManager {
     }
 
     private func albumSearchCandidates(for query: String) -> [String] {
-        var candidates = [query]
+        var candidates: [String] = []
         let normalized = normalizeMusicText(query)
         if let lastMusicArtist,
            !lastMusicArtist.isEmpty,
@@ -1347,6 +1351,7 @@ final class NativeIntegrationManager {
            query.range(of: #"\b(by|from)\b"#, options: .regularExpression) == nil {
             candidates.append("\(query) \(lastMusicArtist)")
         }
+        candidates.append(query)
         var seen = Set<String>()
         return candidates.filter { candidate in
             let key = normalizeMusicText(candidate)
@@ -1418,6 +1423,40 @@ final class NativeIntegrationManager {
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func compactMusicText(_ text: String) -> String {
+        normalizeMusicText(text).replacingOccurrences(of: " ", with: "")
+    }
+
+    private func musicTextMatches(_ value: String, query: String) -> Bool {
+        let normalizedValue = normalizeMusicText(value)
+        let normalizedQuery = normalizeMusicText(query)
+        guard !normalizedValue.isEmpty, !normalizedQuery.isEmpty else { return false }
+        if normalizedValue == normalizedQuery
+            || normalizedValue.contains(normalizedQuery)
+            || normalizedQuery.contains(normalizedValue) {
+            return true
+        }
+        let compactValue = compactMusicText(value)
+        let compactQuery = compactMusicText(query)
+        return compactValue == compactQuery
+            || compactValue.contains(compactQuery)
+            || compactQuery.contains(compactValue)
+    }
+
+    private func iTunesAlbumMatches(_ album: ITunesAlbum, originalQuery: String, candidate: String) -> Bool {
+        let title = album.collectionName ?? ""
+        let artist = album.artistName ?? ""
+        return musicTextMatches(title, query: originalQuery)
+            || musicTextMatches("\(title) \(artist)", query: candidate)
+            || musicTextMatches("\(title) \(artist)", query: originalQuery)
+    }
+
+    private func catalogAlbumMatches(_ album: Album, originalQuery: String, candidate: String) -> Bool {
+        musicTextMatches(album.title, query: originalQuery)
+            || musicTextMatches("\(album.title) \(album.artistName)", query: candidate)
+            || musicTextMatches("\(album.title) \(album.artistName)", query: originalQuery)
     }
 
     private func answerNativeHealthRequest(_ message: String) async -> NativeLocalActionResult? {

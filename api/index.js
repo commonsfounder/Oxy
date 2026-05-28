@@ -3390,7 +3390,11 @@ function summarizeCompletedActionsConcise(actionResults) {
   const successful = actionResults.filter(entry => entry?.result?.success !== false);
   if (!successful.length) return '';
   const dataOnly = successful.every(entry => DATA_ACTIONS.has(entry.action));
-  if (dataOnly) return '';
+  if (dataOnly) {
+    return successful.every(entry => DIRECT_SUMMARY_ACTIONS.has(entry.action))
+      ? summarizeActionResults(successful)
+      : '';
+  }
 
   const resultText = summarizeActionResults(successful);
   if (resultText) return resultText;
