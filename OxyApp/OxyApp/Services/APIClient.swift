@@ -7,9 +7,13 @@ extension Notification.Name {
 final class APIClient: @unchecked Sendable {
     static let shared = APIClient()
 
-    /// Base URL of the Oxy backend. Set via the OXY_BASE_URL build setting or
-    /// edit this default to point at your Cloud Run deployment.
+    /// Base URL of the Oxy backend.
+    /// Priority: UserDefaults override > OXY_BASE_URL build setting > hardcoded default.
+    /// Users can set a custom URL via Settings → Diagnostics or the `oxy_custom_backend_url` UserDefaults key.
     var baseURL: String {
+        if let custom = UserDefaults.standard.string(forKey: "oxy_custom_backend_url"), !custom.isEmpty {
+            return custom.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
         if let envURL = Bundle.main.infoDictionary?["OXY_BASE_URL"] as? String, !envURL.isEmpty {
             return envURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }

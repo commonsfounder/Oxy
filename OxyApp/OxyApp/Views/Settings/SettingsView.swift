@@ -7,14 +7,18 @@ struct SettingsView: View {
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
+    @State private var showSignOutAllConfirm = false
     @State private var showDeleteAccountConfirm = false
     @State private var showAccentPicker = false
+    @State private var showBackendURLEditor = false
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
     @State private var accountStatusText: String?
     @State private var isExportingData = false
     @State private var isDeletingAccount = false
+    @State private var isSigningOutAll = false
     @State private var sharePayload: SharePayload?
+    @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     var body: some View {
         NavigationStack {
@@ -230,6 +234,26 @@ struct SettingsView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Sign out")
 
+                            Divider().overlay(Color.oxyLine)
+
+                            Button(action: { showSignOutAllConfirm = true }) {
+                                HStack {
+                                    Image(systemName: isSigningOutAll ? "hourglass" : "rectangle.portrait.and.arrow.right.fill")
+                                        .font(.system(size: 14))
+                                    Text(isSigningOutAll ? "Signing Out…" : "Sign Out All Devices")
+                                        .font(.system(size: 15, weight: .medium))
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.oxyDim)
+                                }
+                                .foregroundStyle(Color.oxyRed)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSigningOutAll)
+                            .accessibilityLabel("Sign out all devices")
+
                             if let accountStatusText {
                                 Divider().overlay(Color.oxyLine)
                                 Text(accountStatusText)
@@ -272,6 +296,28 @@ struct SettingsView: View {
                                 .foregroundStyle(Color.oxyStone)
                             }
                             .padding(.vertical, 4)
+
+                            Divider().overlay(Color.oxyLine)
+
+                            Button(action: { showBackendURLEditor = true }) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Backend URL")
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundStyle(Color.oxyText)
+                                        Text(customBackendURL.isEmpty ? "Default (Cloud Run)" : customBackendURL)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(Color.oxySub)
+                                            .lineLimit(1)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(Color.oxyDim)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
                         }
 
                         // App info
@@ -301,6 +347,12 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .alert("Sign Out All Devices", isPresented: $showSignOutAllConfirm) {
+                Button("Sign Out All", role: .destructive) { signOutAllDevices() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will invalidate all active sessions on every device. You will be signed out here too.")
+            }
             .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
                 Button("Delete", role: .destructive) { deleteAccount() }
                 Button("Cancel", role: .cancel) {}
@@ -311,6 +363,14 @@ struct SettingsView: View {
                 AccentPickerSheet(selection: $settings.accentColor) {
                     saveSettings()
                     showAccentPicker = false
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showBackendURLEditor) {
+                BackendURLEditorSheet(currentURL: $customBackendURL) {
+                    showBackendURLEditor = false
+                    loadBackendVersion()
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
@@ -385,6 +445,26 @@ struct SettingsView: View {
                 await MainActor.run {
                     isExportingData = false
                     accountStatusText = "Could not export your data: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func signOutAllDevices() {
+        guard !isSigningOutAll else { return }
+        accountStatusText = nil
+        isSigningOutAll = true
+        Task {
+            do {
+                _ = try await APIClient.shared.request(path: "/auth/logout-all", method: "POST")
+                await MainActor.run {
+                    isSigningOutAll = false
+                    appState.logout()
+                }
+            } catch {
+                await MainActor.run {
+                    isSigningOutAll = false
+                    accountStatusText = "Could not sign out all devices: \(error.localizedDescription)"
                 }
             }
         }
@@ -610,6 +690,76 @@ struct SettingsView: View {
 private struct SharePayload: Identifiable {
     let id = UUID()
     let url: URL
+}
+
+private struct BackendURLEditorSheet: View {
+    @Binding var currentURL: String
+    let onDone: () -> Void
+    @State private var draft = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.oxyBg.ignoresSafeArea()
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Custom backend URL")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.oxySub)
+                        .textCase(.uppercase)
+                        .tracking(0.4)
+
+                    TextField("https://your-backend.run.app", text: $draft)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.oxyText)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .padding(14)
+                        .background(Color.oxySurface2)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.oxyLine2, lineWidth: 1)
+                        )
+
+                    Text("Leave blank to use the default Cloud Run backend.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+
+                    if !currentURL.isEmpty {
+                        Button(role: .destructive) {
+                            draft = ""
+                            currentURL = ""
+                            onDone()
+                        } label: {
+                            Text("Reset to default")
+                                .font(.system(size: 14, weight: .medium))
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(20)
+            }
+            .navigationTitle("Backend URL")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onDone() }
+                        .foregroundStyle(Color.oxyStone)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        currentURL = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onDone()
+                    }
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.oxyStone)
+                }
+            }
+        }
+        .onAppear { draft = currentURL }
+    }
 }
 
 private struct ShareSheet: UIViewControllerRepresentable {

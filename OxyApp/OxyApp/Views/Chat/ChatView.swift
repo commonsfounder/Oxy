@@ -1,4 +1,5 @@
 import MessageUI
+import Network
 import PhotosUI
 import SwiftUI
 
@@ -19,6 +20,8 @@ struct ChatView: View {
     @State private var pendingImageData: Data?
     @State private var pendingImageName: String?
     @State private var pendingImageMimeType = "image/jpeg"
+    @State private var isOffline = false
+    private let networkMonitor = NWPathMonitor()
 
     var body: some View {
         NavigationStack {
@@ -26,6 +29,21 @@ struct ChatView: View {
                 Color.oxyBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
+                    // Offline banner
+                    if isOffline {
+                        HStack(spacing: 8) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("No internet connection")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(Color.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(Color(red: 0.85, green: 0.62, blue: 0.22))
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     // Incognito banner
                     if isIncognito {
                         HStack(spacing: 8) {
@@ -177,7 +195,7 @@ struct ChatView: View {
                     // Input bar
                     ChatInputBar(
                         text: $viewModel.inputText,
-                        isSending: viewModel.isSending,
+                        isSending: viewModel.isSending || isOffline,
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isPreparing,
                         attachmentLabel: pendingImageName,
@@ -353,6 +371,14 @@ struct ChatView: View {
         }
         .onAppear {
             viewModel.requestLocationAccess()
+            networkMonitor.pathUpdateHandler = { path in
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isOffline = path.status != .satisfied
+                    }
+                }
+            }
+            networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
     }
 
