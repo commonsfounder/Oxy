@@ -71,6 +71,20 @@ function mapsDirectionsFallback(destination, params = {}) {
   const originPart = cleanedOrigin ? `saddr=${encodeURIComponent(cleanedOrigin)}&` : '';
   const link = `https://maps.apple.com/?${originPart}daddr=${encodeURIComponent(cleanedDestination)}&dirflg=${flag}`;
   const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
+  if (flag === 'r') {
+    return {
+      success: true,
+      text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
+      actionSummary: 'Route unavailable',
+      cardText: 'No transit route summary available',
+      routeContext: {
+        origin: cleanedOrigin || 'current location',
+        destination: cleanedDestination,
+        mode: 'transit',
+        reason: 'route_summary_unavailable'
+      }
+    };
+  }
   return {
     success: true,
     text: `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${cleanedDestination} are ready.`,
@@ -321,11 +335,15 @@ async function planTrip(destination, params = {}) {
   if (!getGoogleDirectionsKey()) {
     return {
       success: true,
-      text: `I can open a rail check for ${cleanedDestination}. Live route planning needs the Google Directions key on the server.`,
-      actionSummary: 'Trip ready',
-      cardText: 'Check tickets in Trainline',
-      deepLink: bookingUrl,
-      webLink: bookingUrl
+      text: `I couldn't get a rail route summary to ${cleanedDestination} because the server is missing a Google Directions key.`,
+      actionSummary: 'Route unavailable',
+      cardText: 'No route summary available',
+      routeContext: {
+        origin: params.origin || 'current location',
+        destination: cleanedDestination,
+        mode: 'rail',
+        reason: 'google_directions_key_missing'
+      }
     };
   }
   const railRoutes = await fetchTransitRoutes(cleanedDestination, params, true).catch(err => {
@@ -340,11 +358,15 @@ async function planTrip(destination, params = {}) {
   if (!best) {
     return {
       success: true,
-      text: `I can open transit options for ${cleanedDestination}, but I couldn't get a reliable route summary right now.`,
-      actionSummary: 'Trip ready',
-      cardText: 'Open transit directions in Maps',
-      deepLink: fallbackLink,
-      webLink: fallbackLink
+      text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
+      actionSummary: 'Route unavailable',
+      cardText: 'No route summary available',
+      routeContext: {
+        origin: params.origin || 'current location',
+        destination: cleanedDestination,
+        mode: 'transit',
+        reason: 'route_summary_unavailable'
+      }
     };
   }
   const summary = summarizeTripRoute(best, cleanedDestination, params, Boolean(railRoutes));
@@ -400,7 +422,30 @@ function summarizeDirectionsRoute(route, modeLabel) {
   const text = [opener, naturalSteps.join('. '), waits[0] ? `On the change, ${waits[0]}.` : '', platformNote]
     .filter(Boolean)
     .join(' ');
-  return { headline, detail, text };
+  const itinerary = transitSteps.map(step => ({
+    type: isRailStep(step) ? 'rail' : 'transit',
+    service: step.service,
+    line: step.line,
+    from: step.from,
+    to: step.to,
+    departure: step.departure,
+    arrival: step.arrival,
+    platform: step.platform || null,
+    stops: Number.isFinite(Number(step.stops)) ? Number(step.stops) : null
+  }));
+  return {
+    headline,
+    detail,
+    text,
+    itinerary,
+    routeContext: {
+      departure,
+      arrival,
+      duration,
+      mode: modeLabel,
+      firstTransitLeg: itinerary[0] || null
+    }
+  };
 }
 
 async function getGoogleDirections(destination, place, params = {}) {
@@ -468,14 +513,23 @@ async function execute(userId, action, params) {
         ? `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(place.formattedAddress || destination)}&dirflg=${flag}`
         : `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(destination)}&dirflg=${flag}`;
       const label = placeLabel(place, destination);
-      const routeText = route?.text || (route?.headline ? `${route.headline}: ${route.detail}` : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`);
+      const routeText = route?.text || (route?.headline ? `${route.headline}: ${route.detail}` : flag === 'r'
+        ? `I couldn't get a reliable transit route summary to ${label} right now.`
+        : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`);
       return {
         success: true,
         text: routeText,
-        deepLink: link,
-        webLink: link,
-        actionSummary: 'Directions ready',
-        cardText: route?.detail || `Open ${modeLabel} directions in Maps`
+        deepLink: route ? link : (flag === 'r' ? undefined : link),
+        webLink: route ? link : (flag === 'r' ? undefined : link),
+        actionSummary: route || flag !== 'r' ? 'Directions ready' : 'Route unavailable',
+        cardText: route?.detail || (flag === 'r' ? 'No transit route summary available' : `Open ${modeLabel} directions in Maps`),
+        itinerary: route?.itinerary,
+        routeContext: route?.routeContext || {
+          origin: params.origin || 'current location',
+          destination: label,
+          mode: modeLabel,
+          reason: 'route_summary_unavailable'
+        }
       };
     }
 

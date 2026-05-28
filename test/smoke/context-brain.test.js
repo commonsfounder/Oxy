@@ -77,6 +77,48 @@ test('context brain reuses route for what about tomorrow', () => {
   assert.equal(turn.actions[0].input.departure_time, 'tomorrow');
 });
 
+test('context brain answers next bus confirmation from last route without model fallback', () => {
+  const turn = resolveContextualTurn({
+    message: "so that's the next bus?",
+    recentActions: [
+      {
+        type: 'get_directions',
+        input: { destination: 'John Lewis Solihull', mode: 'transit' },
+        status: 'executed',
+        result: {
+          text: 'You should leave around 4:17 AM.',
+          itinerary: [
+            { type: 'transit', service: 'National Express Coventry X1', departure: '4:22 AM', from: 'Steyning Road', to: 'Adderley Street', arrival: '4:36 AM' }
+          ]
+        }
+      }
+    ]
+  });
+  assert.equal(turn.reason, 'contextual_confirm_next_bus');
+  assert.equal(turn.spokenOnly, true);
+  assert.match(turn.spoken, /National Express Coventry X1/);
+});
+
+test('context brain explains route failure for why not without model fallback', () => {
+  const turn = resolveContextualTurn({
+    message: 'why not?',
+    recentActions: [
+      {
+        type: 'plan_trip',
+        input: { destination: 'Apsley', preference: 'balanced' },
+        status: 'executed',
+        result: {
+          text: "I couldn't get a reliable transit route summary to Apsley right now.",
+          routeContext: { reason: 'route_summary_unavailable' }
+        }
+      }
+    ]
+  });
+  assert.equal(turn.reason, 'contextual_route_failure_explanation');
+  assert.equal(turn.spokenOnly, true);
+  assert.match(turn.spoken, /couldn't get a reliable transit route summary/i);
+});
+
 test('context brain sends the latest assistant content to a named contact', () => {
   const turn = resolveContextualTurn({
     message: 'send it to Josh',
@@ -122,6 +164,7 @@ test('contextual reference detector catches corrections and tomorrow follow-ups'
   assert.equal(isContextualReference('no I mean calendar tomorrow'), true);
   assert.equal(isContextualReference('what about tomorrow'), true);
   assert.equal(isContextualReference('the other one'), true);
+  assert.equal(isContextualReference('why not?'), true);
   assert.equal(isContextualReference('nearest Aldi'), false);
 });
 

@@ -1,4 +1,5 @@
 const SUPPORTED_ACTIONS = ['search_trains', 'station_board'];
+const { getGoogleDirectionsKey } = require('../api/services/maps-config');
 
 function getAxios() {
   return require('axios');
@@ -53,25 +54,7 @@ async function lookupCRS(name) {
   // Fast path — hardcoded common stations
   const local = toCRS(name);
   if (local) return local;
-
-  // Fallback — TransportAPI station search
-  if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) return null;
-  try {
-    const axios = getAxios();
-    const resp = await axios.get('https://transportapi.com/v3/uk/places.json', {
-      params: {
-        query: name,
-        type: 'train_station',
-        app_id: process.env.TRANSPORT_API_APP_ID,
-        app_key: process.env.TRANSPORT_API_APP_KEY,
-      },
-      timeout: 5000,
-    });
-    const match = resp.data?.results?.[0];
-    return match?.station_code || null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 async function getNextTrains(originCRS, destCRS) {
@@ -222,78 +205,12 @@ async function execute(userId, action, params) {
     if (action === 'station_board') {
       const station = String(params?.station || params?.origin || '').trim();
       if (!station) return { success: false, error: 'station_board requires a station' };
-
-      const stationCRS = await lookupCRS(station);
-      const bookingUrl = stationCRS
-        ? `https://www.thetrainline.com/stations/${stationCRS.toLowerCase()}`
-        : `https://www.thetrainline.com/search?origin=${encodeURIComponent(station)}`;
-
-      if (!stationCRS) {
-        return {
-          success: true,
-          text: `I couldn't verify "${station}" as a rail station for live departures, but I can open Trainline so you can confirm it there.`,
-          cardText: 'Open station in Trainline',
-          actionSummary: 'Trainline ready',
-          webLink: bookingUrl,
-          bookingUrl,
-          trains: []
-        };
-      }
-
-      if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
-        return {
-          success: true,
-          text: `I couldn't check the live station board for ${station} because live rail data isn't configured right now. I can still open Trainline for the station.`,
-          cardText: 'Open station in Trainline',
-          actionSummary: 'Trainline ready',
-          webLink: bookingUrl,
-          bookingUrl,
-          trains: []
-        };
-      }
-
-      const { trains, accessDenied } = await getStationBoard(stationCRS);
-      if (accessDenied) {
-        return {
-          success: true,
-          text: `I couldn't access the live station board for ${station} with the current rail data permissions, but I can open Trainline for you.`,
-          cardText: 'Open station in Trainline',
-          actionSummary: 'Trainline ready',
-          webLink: bookingUrl,
-          bookingUrl,
-          trains: []
-        };
-      }
-
-      if (!trains.length) {
-        return {
-          success: true,
-          text: `I couldn't find any live departures at ${station} in the current feed. I've included Trainline to double-check.`,
-          cardText: 'Open station in Trainline',
-          actionSummary: 'Trainline ready',
-          webLink: bookingUrl,
-          bookingUrl,
-          trains: []
-        };
-      }
-
-      const lines = trains.map((t, i) => {
-        const dep = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
-          ? `${t.scheduledDeparture} (exp ${t.estimatedDeparture})`
-          : t.scheduledDeparture;
-        const plat = t.platform ? ` · Platform ${t.platform}` : '';
-        const status = t.cancelled ? ' · CANCELLED' : '';
-        return `${i + 1}. ${dep} to ${t.destination || 'destination TBC'}${plat}${status}`;
-      });
-
       return {
         success: true,
-        text: `Live departures at ${station}:\n${lines.join('\n')}`,
-        trains,
-        cardText: lines[0].replace(/^1\.\s*/, ''),
-        actionSummary: 'Station board ready',
-        webLink: bookingUrl,
-        bookingUrl
+        text: `I can't give a reliable live station board for ${station} yet because the TransportAPI rail feed is disabled. Ask for a train route with an origin and destination and I'll return the best itinerary I can from route data.`,
+        trains: [],
+        cardText: 'Live station board unavailable',
+        actionSummary: 'Live rail unavailable'
       };
     }
 
@@ -302,78 +219,36 @@ async function execute(userId, action, params) {
     const { origin, destination } = params;
     if (!origin || !destination) return { success: false, error: 'search_trains requires origin and destination' };
 
-    const [originCRS, destCRS] = await Promise.all([lookupCRS(origin), lookupCRS(destination)]);
-
-    if (!originCRS || !destCRS) {
-      const missing = !originCRS ? origin : destination;
-      const bookingUrl = buildTrainlineFallbackURL(origin, destination);
+    if (!getGoogleDirectionsKey()) {
       return {
         success: true,
-        text: `I couldn't verify "${missing}" as a rail station for live departures, but I can open the route in Trainline so you can confirm it there.`,
-        cardText: 'Open route in Trainline',
-        actionSummary: 'Trainline ready',
-        webLink: bookingUrl,
-        bookingUrl,
-        trains: []
+        text: `I couldn't get a train route summary from ${origin} to ${destination} because route data is not configured on the server.`,
+        cardText: 'No train route summary available',
+        actionSummary: 'Route unavailable',
+        trains: [],
+        transportApiDisabled: true,
+        routeContext: {
+          origin,
+          destination,
+          mode: 'rail',
+          reason: 'google_directions_key_missing'
+        }
       };
     }
 
-    const bookingUrl = buildTrainlineURL(originCRS, destCRS);
-
-    if (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY) {
-      return {
-        success: true,
-        text: `I couldn't check live departures for ${origin} to ${destination} because live rail data isn't configured right now. I can still open Trainline for the route.`,
-        cardText: 'Open route in Trainline',
-        webLink: bookingUrl,
-        bookingUrl
-      };
-    }
-
-    const { trains, accessDenied } = await getNextTrains(originCRS, destCRS);
-
-    if (accessDenied) {
-      return {
-        success: true,
-        text: `I couldn't access live departures for ${origin} to ${destination} with the current rail data permissions, but I can open the route in Trainline for you.`,
-        cardText: 'Open route in Trainline',
-        webLink: bookingUrl,
-        bookingUrl,
-        trains: []
-      };
-    }
-
-    if (!trains.length) {
-      return {
-        success: true,
-        text: `I couldn't find any matching live departures from ${origin} to ${destination} in the current feed. That doesn't necessarily mean there are no trains at all, so I've included Trainline to double-check.`,
-        cardText: 'Open route in Trainline',
-        webLink: bookingUrl,
-        bookingUrl
-      };
-    }
-
-    const lines = trains.map((t, i) => {
-      const dep = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
-        ? `${t.scheduledDeparture} (exp ${t.estimatedDeparture})` : t.scheduledDeparture;
-      const rawArr = t.estimatedArrival || t.scheduledArrival || '';
-      const depCompareValue = t.estimatedDeparture && t.estimatedDeparture !== 'On time'
-        ? t.estimatedDeparture
-        : t.scheduledDeparture;
-      const arr = compareClockTimes(rawArr, depCompareValue) === -1 ? '' : rawArr;
-      const plat = t.platform ? ` · Platform ${t.platform}` : '';
-      const status = t.cancelled ? ' ✗ CANCELLED' : '';
-      const arrivalPart = arr ? ` → ${arr}` : '';
-      return `${i + 1}. ${dep}${arrivalPart}${plat}${status}`;
+    const maps = require('./maps');
+    const planned = await maps.execute(userId, 'plan_trip', {
+      ...params,
+      origin,
+      destination,
+      preference: params?.preference || 'fastest'
     });
-
     return {
-      success: true,
-      text: `Next trains from ${origin} to ${destination}:\n${lines.join('\n')}`,
-      trains,
-      cardText: 'Open route in Trainline',
-      webLink: bookingUrl,
-      bookingUrl,
+      ...planned,
+      actionSummary: planned?.actionSummary === 'Route unavailable' ? 'Route unavailable' : 'Train route checked',
+      cardText: planned?.cardText || 'Train route checked',
+      trains: [],
+      transportApiDisabled: true
     };
   } catch (err) {
     return { success: false, error: `Trainline error: ${err.message}` };

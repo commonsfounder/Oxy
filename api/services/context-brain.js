@@ -13,6 +13,7 @@ function isContextualReference(message) {
   if (/^(it|that|this|there|same|again|do it|book it|book that|open it|open that|send it|play it|play that|play this|that one|this one|the other one|last one)$/i.test(text)) return true;
   return /\b(it|that|this|one|there|same|again|other one|last one)\b/i.test(text) ||
     /\bwhat about\b/i.test(text) ||
+    /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text) ||
     /\b(no|nah|actually),?\s+i\s+mean\b/i.test(text) ||
     /\b(is|was)\s+(that|this|it)\s+(right|correct|true)\b/i.test(text) ||
     /\b(do you remember|remember)\b/i.test(text);
@@ -71,13 +72,17 @@ function contextFromAction(action, source = 'action_result') {
     };
   }
   if (['get_directions', 'plan_trip', 'search_trains', 'station_board'].includes(type)) {
+    const result = action?.result || {};
     return {
       kind: 'route',
       label: input.destination || input.station || label || 'that route',
       source,
       confidence: input.destination || input.station ? 'high' : 'medium',
       suggestedAction: type,
-      input
+      input,
+      result,
+      routeContext: result.routeContext || null,
+      itinerary: Array.isArray(result.itinerary) ? result.itinerary : []
     };
   }
   if (type === 'play_music' || type === 'add_to_music_playlist') {
@@ -205,6 +210,26 @@ function extractContact(message) {
   return match ? match[1].trim() : '';
 }
 
+function firstRouteLeg(ctx, modePattern) {
+  const itinerary = Array.isArray(ctx?.itinerary) ? ctx.itinerary : [];
+  return itinerary.find(leg => modePattern.test([leg?.type, leg?.service, leg?.line].filter(Boolean).join(' '))) ||
+    ctx?.routeContext?.firstTransitLeg ||
+    itinerary[0] ||
+    ctx?.routeContext?.mainRailLeg ||
+    null;
+}
+
+function routeLegSentence(leg, fallbackText = '') {
+  if (!leg) return normalizeText(fallbackText).slice(0, 280);
+  const service = leg.service || leg.line || (leg.type === 'rail' ? 'the train' : 'the bus');
+  const dep = leg.departure ? ` at ${leg.departure}` : '';
+  const from = leg.from ? ` from ${leg.from}` : '';
+  const to = leg.to ? ` to ${leg.to}` : '';
+  const arr = leg.arrival ? `, arriving ${leg.arrival}` : '';
+  const platform = leg.platform ? ` Platform ${leg.platform}.` : '';
+  return `${service}${dep}${from}${to}${arr}.${platform}`.trim();
+}
+
 function contextualActionForMessage(message, contexts = [], memory = '', settings = {}) {
   const text = normalizeText(message);
   const lower = text.toLowerCase();
@@ -235,6 +260,33 @@ function contextualActionForMessage(message, contexts = [], memory = '', setting
   const latestRoute = contexts.find(ctx => ctx.kind === 'route' && ctx.confidence !== 'low');
   const latestMedia = contexts.find(ctx => ctx.kind === 'media' && ctx.confidence !== 'low');
   const latestContent = contexts.find(ctx => ctx.kind === 'content' && ctx.label);
+
+  if (latestRoute && /\b(next|that'?s|that is|is that|so that).*\b(bus|train|route)\b/i.test(text)) {
+    const wantsTrain = /\btrain\b/i.test(text);
+    const leg = firstRouteLeg(latestRoute, wantsTrain ? /rail|train/i : /bus|transit/i);
+    const fallback = latestRoute.result?.text || latestRoute.label;
+    return {
+      reason: wantsTrain ? 'contextual_confirm_next_train' : 'contextual_confirm_next_bus',
+      spokenOnly: true,
+      spoken: leg
+        ? `That is the first ${wantsTrain ? 'train' : 'transit leg'} I found for that route: ${routeLegSentence(leg)}`
+        : `That is the route information I found: ${normalizeText(fallback).slice(0, 320)}`,
+      resolvedContext: latestRoute
+    };
+  }
+
+  if (latestRoute && /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text)) {
+    const reason = latestRoute.result?.error ||
+      latestRoute.result?.text ||
+      latestRoute.routeContext?.reason ||
+      'I did not have enough reliable route data to answer that fully.';
+    return {
+      reason: 'contextual_route_failure_explanation',
+      spokenOnly: true,
+      spoken: normalizeText(reason).slice(0, 360),
+      resolvedContext: latestRoute
+    };
+  }
 
   if (/\b(book|get|order|call)\s+(me\s+)?(an?\s+)?(uber|taxi|ride)\b/i.test(text) && /\b(it|that|this|there|one)\b/i.test(text)) {
     if (!latestPlace?.label) return null;

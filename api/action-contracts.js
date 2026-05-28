@@ -155,7 +155,7 @@ const ACTION_CONTRACTS = {
     required: ['origin', 'destination'],
     aliases: { origin: ['from'], destination: ['to'] },
     inputExample: { origin: 'station name or CRS code', destination: 'station name or CRS code' },
-    successSummary: 'Trainline ready',
+    successSummary: 'Train route checked',
     failureSummary: 'Train search failed',
     confirmation: 'none'
   },

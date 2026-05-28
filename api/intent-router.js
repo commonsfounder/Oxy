@@ -158,7 +158,7 @@ function inferLiveRailAction(message) {
   if (fromTo?.origin && fromTo?.destination && !FUTURE_TIME_TERMS.test(text.replace(/\bnext train\b/i, ''))) {
     return {
       reason: 'live_train_between_stations',
-      spoken: "I'll check live train departures.",
+      spoken: "I'll check that train route.",
       actions: [{ type: 'search_trains', input: fromTo }]
     };
   }
@@ -168,11 +168,11 @@ function inferLiveRailAction(message) {
   const stationMatch = text.match(/\b(?:at|from)\s+(.+?)(?:[?.!]|$)/i);
   const station = cleanStationPhrase(stationMatch?.[1] || text);
   if (!station || /\b(to|towards)\b/i.test(station)) return null;
-  return {
-    reason: 'live_station_board',
-    spoken: "I'll check the live station board.",
-    actions: [{ type: 'station_board', input: { station } }]
-  };
+    return {
+      reason: 'live_station_board',
+      spoken: "I'll check what rail information I can return.",
+      actions: [{ type: 'station_board', input: { station } }]
+    };
 }
 
 function inferDeterministicAction(message, options = {}) {
@@ -219,7 +219,7 @@ function inferDeterministicAction(message, options = {}) {
     }
     return {
       reason: input.mode === 'transit' ? 'transit_directions_to_place' : 'directions_to_local_place',
-      spoken: "I'll open directions.",
+      spoken: input.mode === 'transit' ? "I'll check the transit route." : "I'll check directions.",
       actions: [{ type: 'get_directions', input }]
     };
   }
