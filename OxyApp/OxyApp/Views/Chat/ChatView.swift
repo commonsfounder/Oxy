@@ -408,6 +408,13 @@ struct ChatView: View {
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
+            guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
+            let messageId = notification.userInfo?["messageId"] as? String
+            Task {
+                await viewModel.loadHistoryAround(userId: appState.userId, createdAt: lastAt, messageId: messageId)
+            }
+        }
     }
 
     private func sendCurrentDraft() {
@@ -803,12 +810,12 @@ struct ChatSearchView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                    .padding(.vertical, 12)
 
                                     if session.id != sessions.last?.id {
                                         Divider()
                                             .overlay(Color.oxyLine)
-                                            .padding(.leading, 52)
+                                            .padding(.horizontal, 16)
                                     }
                                 }
                             }
@@ -835,13 +842,13 @@ struct ChatSearchView: View {
                                     SearchResultRow(result: result)
                                 }
                                 .buttonStyle(.plain)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
 
                                 if result.id != results.last?.id {
                                     Divider()
                                         .overlay(Color.oxyLine)
-                                        .padding(.leading, 52)
+                                        .padding(.horizontal, 16)
                                 }
                             }
                         }
@@ -920,25 +927,14 @@ private struct SearchResultRow: View {
     let result: SearchResult
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(result.role == "user" ? Color.oxyStone.opacity(0.15) : Color.oxySurface3)
-                    .frame(width: 36, height: 36)
-                Image(systemName: result.role == "user" ? "person.fill" : "sparkles")
-                    .font(.system(size: 13))
-                    .foregroundStyle(result.role == "user" ? Color.oxyStone : Color.oxySub)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(result.role == "user" ? "You" : "Oxy")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-
-                Text(result.content)
-                    .font(.system(size: 13))
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(result.role == "user" ? "YOU" : "OXY")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.oxySub)
-                    .lineLimit(3)
+                    .tracking(0.5)
+
+                Spacer()
 
                 if let date = result.formattedDate {
                     Text(date)
@@ -947,7 +943,10 @@ private struct SearchResultRow: View {
                 }
             }
 
-            Spacer()
+            Text(result.content)
+                .font(.system(size: 14))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(3)
         }
     }
 }
@@ -990,38 +989,19 @@ private struct ChatSessionRow: View {
     let session: ChatSessionSummary
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.oxyStone.opacity(0.12))
-                    .frame(width: 36, height: 36)
-                Image(systemName: "bubble.left.and.bubble.right.fill")
+        HStack(spacing: 0) {
+            Text(session.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            if let date = session.formattedDate {
+                Text(date)
                     .font(.system(size: 13))
-                    .foregroundStyle(Color.oxyStone)
+                    .foregroundStyle(Color.oxyDim)
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                    .lineLimit(1)
-
-                Text(session.preview)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxySub)
-                    .lineLimit(2)
-
-                HStack(spacing: 6) {
-                    if let date = session.formattedDate {
-                        Text(date)
-                    }
-                    Text("\(session.messageCount) messages")
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(Color.oxyDim)
-            }
-
-            Spacer()
         }
     }
 }
@@ -1078,11 +1058,11 @@ private struct WelcomeCard: View {
             }
 
             VStack(spacing: 6) {
-                Text("Hey! I'm Oxy")
+                Text("Hey, I'm Oxy")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
 
-                Text("Your AI assistant. Ask me anything\nor tell me to do something.")
+                Text("What can I help with?")
                     .font(.system(size: 13))
                     .foregroundStyle(Color.oxySub)
                     .multilineTextAlignment(.center)

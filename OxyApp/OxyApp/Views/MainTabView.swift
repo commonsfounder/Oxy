@@ -28,7 +28,7 @@ struct MainTabView: View {
             HistoryView()
                 .tabItem {
                     Image(systemName: "clock.fill")
-                    Text("History")
+                    Text("Chats")
                 }
                 .tag(Tab.history)
 
@@ -48,6 +48,9 @@ struct MainTabView: View {
         }
         .tint(Color.oxyStone)
         .id(accentColor)
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
+            withAnimation { selectedTab = .chat }
+        }
     }
 }
 

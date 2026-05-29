@@ -2,6 +2,7 @@ import Foundation
 
 extension Notification.Name {
     static let oxySessionExpired = Notification.Name("oxy.sessionExpired")
+    static let oxyJumpToChat = Notification.Name("oxy.jumpToChat")
 }
 
 final class APIClient: @unchecked Sendable {
