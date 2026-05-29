@@ -898,12 +898,20 @@ body::after {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
-  border-radius: 999px;
+  padding: 5px 10px 5px 5px;
+  border-radius: 12px;
   background: var(--s1);
   border: 1px solid var(--line2);
   color: var(--sub);
   font-size: 12px;
+}
+
+.attachment-thumb {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
 }
 
 .attachment-pill strong {
@@ -2196,7 +2204,10 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   const pendingJumpRef    = useRef(null);
   const imageInputRef     = useRef(null);
   const cameraInputRef    = useRef(null);
+  const fileInputRef      = useRef(null);
   const pendingImageModeRef = useRef('vision');
+  const searchAbortRef    = useRef(null);
+  const searchTimerRef    = useRef(null);
   const liveSocketRef     = useRef(null);
   const liveAudioContextRef = useRef(null);
   const liveAudioCursorRef = useRef(0);
@@ -2377,12 +2388,34 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     e.target.value = '';
   }, [pickImageFile]);
 
-  const runSearch = useCallback(async (q) => {
+  const onFilePicked = useCallback(e => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setSelectedImage(prev => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      const isImage = file.type.startsWith('image/');
+      return { file, name: file.name, previewUrl: isImage ? URL.createObjectURL(file) : null };
+    });
+    setComposerMode('vision');
+    setComposerMenuOpen(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const runSearch = useCallback((q) => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (!q.trim()) { setSearchResults([]); return; }
-    try {
-      const r = await apiFetch(`/history/${USER_ID}/search?q=${encodeURIComponent(q)}`).then(r => r.json());
-      setSearchResults(r.results || []);
-    } catch {}
+    searchTimerRef.current = setTimeout(async () => {
+      if (searchAbortRef.current) searchAbortRef.current.abort();
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      try {
+        const r = await apiFetch(`/history/${USER_ID}/search?q=${encodeURIComponent(q)}`, { signal: controller.signal }).then(r => r.json());
+        if (!controller.signal.aborted) setSearchResults(r.results || []);
+      } catch (e) {
+        if (e.name !== 'AbortError') setSearchResults([]);
+      }
+    }, 300);
   }, []);
 
   const loadHistoryWindow = useCallback(async (params) => {
@@ -2976,7 +3009,9 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
   const sendVisionMessage = useCallback(async (overrideText) => {
     const text = (overrideText || input).trim();
     if (!text || loading || !selectedImage?.file) return;
-    setMessages(prev => [...prev, { role: 'user', content: `${text}\n\n[Attached image: ${selectedImage.name}]`, time: new Date() }]);
+    const isFileImage = selectedImage.file.type.startsWith('image/');
+    const fileLabel = isFileImage ? 'image' : 'file';
+    setMessages(prev => [...prev, { role: 'user', content: `${text}\n\n[Attached ${fileLabel}: ${selectedImage.name}]`, time: new Date() }]);
     if (!overrideText) setInput('');
     setLoadingWithCb(true);
     stopSpeaking();
@@ -2984,7 +3019,8 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     const placeholderId = Date.now();
-    setMessages(prev => [...prev, { role: 'assistant', content: 'Looking through the image…', time: new Date(), _streamId: placeholderId }]);
+    const thinkingMsg = isFileImage ? 'Looking through the image…' : 'Reading the file…';
+    setMessages(prev => [...prev, { role: 'assistant', content: thinkingMsg, time: new Date(), _streamId: placeholderId }]);
 
     try {
       await primeAudioPlayback('vision-message');
@@ -2998,7 +3034,7 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
 
       const resp = await apiFetch(`/chat-with-image${params.toString() ? `?${params}` : ''}`, { method: 'POST', body: formData });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'Image analysis failed.');
+      if (!resp.ok) throw new Error(data.error || (isFileImage ? 'Image analysis failed.' : 'File analysis failed.'));
 
       let finalText = data.text || 'I looked through it.';
       if (data.ttsError) finalText = `${finalText}\n\n[Voice unavailable: ${data.ttsError}]`.trim();
@@ -3442,19 +3478,29 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
         <div className="composer-stack">
           <input ref={imageInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={onImagePicked} />
           <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={onImagePicked} />
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.txt,.csv,.md,.json,.docx,.doc,.xlsx,.xls" style={{display:'none'}} onChange={onFilePicked} />
 
-          {(selectedImage || composerMode === 'image') && (
-            <div className="attachment-strip">
-              <div className="attachment-pill">
-                <span>{Icons.image}</span>
-                <span>
-                  <strong>{selectedImage ? selectedImage.name : 'Generate image'}</strong>
-                  {selectedImage ? (composerMode === 'image' ? ' ready to turn into a visual' : ' ready for analysis or workflows') : ' using prompt only'}
-                </span>
-                <button className="attachment-clear" onClick={resetImageDraft} title="Remove">×</button>
+          {(selectedImage || composerMode === 'image') && (() => {
+            const isImg = selectedImage?.file?.type?.startsWith('image/');
+            const labelText = selectedImage
+              ? (composerMode === 'image' ? ' · ready to turn into a visual' : isImg ? ' · ready for analysis' : ' · ready to read')
+              : ' · using prompt only';
+            return (
+              <div className="attachment-strip">
+                <div className="attachment-pill">
+                  {selectedImage?.previewUrl
+                    ? <img src={selectedImage.previewUrl} className="attachment-thumb" alt="" />
+                    : <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{isImg === false ? Icons.paperclip : Icons.image}</span>
+                  }
+                  <span>
+                    <strong>{selectedImage ? selectedImage.name : 'Generate image'}</strong>
+                    {labelText}
+                  </span>
+                  <button className="attachment-clear" onClick={resetImageDraft} title="Remove">×</button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           <div className="input-row">
             <div className="composer-plus-wrap">
@@ -3478,6 +3524,13 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                       <span>Analyze a screenshot or photo</span>
                     </span>
                   </button>
+                  <button className="composer-menu-item" onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}>
+                    <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.paperclip}</span>
+                    <span className="composer-menu-copy">
+                      <strong>Upload file</strong>
+                      <span>PDF, CSV, text, or document</span>
+                    </span>
+                  </button>
                   <button className="composer-menu-item" onClick={() => { pendingImageModeRef.current = 'vision'; setComposerMode('vision'); setComposerMenuOpen(false); cameraInputRef.current?.click(); }}>
                     <span style={{display:'flex',alignItems:'center',justifyContent:'center',width:16,height:16}}>{Icons.camera}</span>
                     <span className="composer-menu-copy">
@@ -3494,7 +3547,9 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                 <div className="composer-mode">
                   {composerMode === 'image'
                     ? (selectedImage ? 'Visual mode with reference image' : 'Visual generation mode')
-                    : 'Image context mode'}
+                    : selectedImage?.file && !selectedImage.file.type.startsWith('image/')
+                      ? 'File context mode'
+                      : 'Image context mode'}
                 </div>
               )}
               <textarea
@@ -3503,9 +3558,11 @@ function ChatPage({ settings, memory, people, initialQuery, proactiveBriefing, o
                 placeholder={
                   composerMode === 'image'
                     ? `Describe the visual you want ${selectedImage ? 'made from this image' : 'made'}…`
-                    : composerMode === 'vision'
-                      ? 'Ask Oxy to analyze this screenshot, build slides, explain what it sees, or make a diagram…'
-                      : `Message ${settings.name}…`
+                    : composerMode === 'vision' && selectedImage?.file && !selectedImage.file.type.startsWith('image/')
+                      ? 'Ask Oxy a question about this file, summarise it, or extract specific data…'
+                      : composerMode === 'vision'
+                        ? 'Ask Oxy to analyze this screenshot, build slides, explain what it sees, or make a diagram…'
+                        : `Message ${settings.name}…`
                 }
                 value={input}
                 onChange={handleInput}
