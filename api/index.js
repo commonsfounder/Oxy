@@ -2756,13 +2756,22 @@ app.get('/auth/reset-password', (req, res) => {
 app.post('/auth/reset-password', express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const { token, newPassword } = req.body || {};
-    if (!token || !newPassword) return res.status(400).json({ error: 'Token and newPassword are required.' });
+    // Browser form submissions get an HTML page; API clients (JSON) get JSON.
+    const wantsHtml = (req.get('Accept') || '').includes('text/html');
+    const fail = (status, message) => {
+      if (wantsHtml) {
+        res.status(status).setHeader('Content-Type', 'text/html; charset=utf-8');
+        return res.send(`<!DOCTYPE html><html><head><title>Reset Password · Oxy</title><style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px;color:#1a1a1a;text-align:center}</style></head><body><h2>Couldn't reset password</h2><p>${escapeHtml(message)}</p><p><a href="/auth/forgot-password">Request a new reset link</a></p></body></html>`);
+      }
+      return res.status(status).json({ error: message });
+    };
+    if (!token || !newPassword) return fail(400, 'Token and newPassword are required.');
     if (typeof newPassword !== 'string' || newPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+      return fail(400, 'Password must be at least 8 characters.');
     }
     const { data: tokenRow } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', token).maybeSingle();
     if (!tokenRow || tokenRow.used || new Date(tokenRow.expires_at) < new Date()) {
-      return res.status(400).json({ error: 'Invalid or expired reset token.' });
+      return fail(400, 'Invalid or expired reset token.');
     }
     const newHash = hashPassword(newPassword);
     const account = await getUserAccount(tokenRow.user_id);
@@ -2772,6 +2781,10 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
       supabase.from('password_reset_tokens').update({ used: true }).eq('id', tokenRow.id)
     ]);
     log('info', 'auth.password_reset.completed', { userId: tokenRow.user_id });
+    if (wantsHtml) {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(`<!DOCTYPE html><html><head><title>Password Reset · Oxy</title><style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px;color:#1a1a1a;text-align:center}</style></head><body><h2>Password reset ✓</h2><p>Your password has been changed and all other sessions have been signed out. You can now sign in with your new password.</p></body></html>`);
+    }
     res.json({ success: true });
   } catch (err) {
     log('error', 'auth.reset_password.error', { error: err.message });
