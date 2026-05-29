@@ -305,9 +305,11 @@ final class ChatViewModel {
         sendMessage(userId: userId)
     }
 
-    func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String) {
+    func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String, isImage: Bool = true) {
         let typed = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let text = typed.isEmpty ? "Look at this image and tell me what you see." : typed
+        let text = typed.isEmpty
+            ? (isImage ? "Look at this image and tell me what you see." : "Read this file and tell me what's in it.")
+            : typed
         guard !isSending else { return }
         if isViewingHistorySnapshot {
             startNewChat(userId: userId)
@@ -318,10 +320,11 @@ final class ChatViewModel {
 
         inputText = ""
         isSending = true
-        statusLabel = "Looking at image"
+        statusLabel = isImage ? "Looking at image" : "Reading file"
         networkError = nil
 
-        let userMessage = Message(role: .user, content: "\(text)\n[Image attached]")
+        let attachmentTag = isImage ? "[Image attached]" : "[File attached: \(fileName)]"
+        let userMessage = Message(role: .user, content: "\(text)\n\(attachmentTag)")
         messages.append(userMessage)
 
         let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
@@ -372,7 +375,7 @@ final class ChatViewModel {
                     lastFailedText = text
                     networkError = friendlyNetworkError(error.localizedDescription)
                     _ = updateAssistantMessage(id: assistantID) {
-                        $0.content = "Something went wrong with that image: \(error.localizedDescription)"
+                        $0.content = "Something went wrong with that \(isImage ? "image" : "file"): \(error.localizedDescription)"
                         $0.isStreaming = false
                     }
                     statusLabel = nil
@@ -752,6 +755,7 @@ private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
     private var audioPlayer: AVAudioPlayer?
     private var pendingAudio: [Data] = []
     private var onError: ((String) -> Void)?
+    private var sessionConfigured = false
 
     func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
         guard let data = Data(base64Encoded: base64Audio) else { return }
@@ -760,15 +764,26 @@ private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
         playNextAudioIfNeeded()
     }
 
-    private func playNextAudioIfNeeded() {
-        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
-        let data = pendingAudio.removeFirst()
-
+    // Configure the audio session once. Reconfiguring on every chunk added latency
+    // and audible gaps between streamed sentence clips.
+    private func ensureSessionActive() {
+        guard !sessionConfigured else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try session.setActive(true)
+            sessionConfigured = true
+        } catch {
+            // Non-fatal: playback may still work with the default session.
+        }
+    }
 
+    private func playNextAudioIfNeeded() {
+        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
+        let data = pendingAudio.removeFirst()
+
+        ensureSessionActive()
+        do {
             let player = try AVAudioPlayer(data: data)
             player.delegate = self
             player.prepareToPlay()
