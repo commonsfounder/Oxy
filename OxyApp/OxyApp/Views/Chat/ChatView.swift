@@ -2,6 +2,8 @@ import MessageUI
 import Network
 import PhotosUI
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 struct ChatView: View {
     @Environment(AppState.self) private var appState
@@ -16,10 +18,13 @@ struct ChatView: View {
     @State private var handledReviewActionIDs = Set<String>()
     @State private var handledMessageComposeActionIDs = Set<String>()
     @State private var showPhotoPicker = false
+    @State private var showFileImporter = false
+    @State private var showAttachMenu = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var pendingImageName: String?
     @State private var pendingImageMimeType = "image/jpeg"
+    @State private var pendingIsImage = true
     @State private var isOffline = false
     private let networkMonitor = NWPathMonitor()
 
@@ -199,6 +204,8 @@ struct ChatView: View {
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isPreparing,
                         attachmentLabel: pendingImageName,
+                        attachmentData: pendingImageData,
+                        attachmentIsImage: pendingIsImage,
                         isFocused: $isInputFocused,
                         onSend: {
                             sendCurrentDraft()
@@ -215,11 +222,12 @@ struct ChatView: View {
                             }
                         },
                         onAttach: {
-                            showPhotoPicker = true
+                            showAttachMenu = true
                         },
                         onRemoveAttachment: {
                             pendingImageData = nil
                             pendingImageName = nil
+                            pendingIsImage = true
                             selectedPhotoItem = nil
                         }
                     )
@@ -347,7 +355,26 @@ struct ChatView: View {
             } message: {
                 Text(messageComposerAlert ?? "")
             }
+            .confirmationDialog("Add attachment", isPresented: $showAttachMenu, titleVisibility: .visible) {
+                Button("Photo Library") { showPhotoPicker = true }
+                Button("Files") { showFileImporter = true }
+                Button("Cancel", role: .cancel) {}
+            }
             .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.pdf, .plainText, .commaSeparatedText, .json, .image, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                guard let url = try? result.get().first else { return }
+                let didAccess = url.startAccessingSecurityScopedResource()
+                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                guard let data = try? Data(contentsOf: url) else { return }
+                pendingImageData = data
+                pendingImageName = url.lastPathComponent
+                pendingImageMimeType = mimeType(for: url)
+                pendingIsImage = pendingImageMimeType.hasPrefix("image/")
+            }
             .onChange(of: selectedPhotoItem) { _, item in
                 guard let item else { return }
                 Task {
@@ -356,6 +383,7 @@ struct ChatView: View {
                             pendingImageData = data
                             pendingImageName = "Photo"
                             pendingImageMimeType = data.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? "image/png" : "image/jpeg"
+                            pendingIsImage = true
                         }
                     }
                 }
@@ -380,21 +408,50 @@ struct ChatView: View {
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
+            guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
+            let messageId = notification.userInfo?["messageId"] as? String
+            Task {
+                await viewModel.loadHistoryAround(userId: appState.userId, createdAt: lastAt, messageId: messageId)
+            }
+        }
     }
 
     private func sendCurrentDraft() {
         if let pendingImageData {
+            let defaultName = pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg"
             viewModel.sendImageMessage(
                 userId: appState.userId,
                 imageData: pendingImageData,
-                fileName: pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg",
-                mimeType: pendingImageMimeType
+                fileName: (pendingIsImage ? nil : pendingImageName) ?? defaultName,
+                mimeType: pendingImageMimeType,
+                isImage: pendingIsImage
             )
             self.pendingImageData = nil
             pendingImageName = nil
+            pendingIsImage = true
             selectedPhotoItem = nil
         } else {
             viewModel.sendMessage(userId: appState.userId)
+        }
+    }
+
+    private func mimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "pdf": return "application/pdf"
+        case "txt", "text": return "text/plain"
+        case "md", "markdown": return "text/markdown"
+        case "csv": return "text/csv"
+        case "json": return "application/json"
+        case "png": return "image/png"
+        case "jpg", "jpeg": return "image/jpeg"
+        case "heic": return "image/heic"
+        case "webp": return "image/webp"
+        case "doc": return "application/msword"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "xls": return "application/vnd.ms-excel"
+        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        default: return "application/octet-stream"
         }
     }
 
@@ -706,6 +763,7 @@ struct ChatSearchView: View {
     @State private var sessions: [ChatSessionSummary] = []
     @State private var isSearching = false
     @State private var isLoadingSessions = true
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -752,12 +810,12 @@ struct ChatSearchView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                    .padding(.vertical, 12)
 
                                     if session.id != sessions.last?.id {
                                         Divider()
                                             .overlay(Color.oxyLine)
-                                            .padding(.leading, 52)
+                                            .padding(.horizontal, 16)
                                     }
                                 }
                             }
@@ -784,13 +842,13 @@ struct ChatSearchView: View {
                                     SearchResultRow(result: result)
                                 }
                                 .buttonStyle(.plain)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
 
                                 if result.id != results.last?.id {
                                     Divider()
                                         .overlay(Color.oxyLine)
-                                        .padding(.leading, 52)
+                                        .padding(.horizontal, 16)
                                 }
                             }
                         }
@@ -819,31 +877,37 @@ struct ChatSearchView: View {
             }
             .onChange(of: query) { _, newValue in
                 let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                searchTask?.cancel()
                 guard !trimmed.isEmpty else {
                     results = []
+                    isSearching = false
                     return
                 }
-                Task {
+                searchTask = Task {
                     try? await Task.sleep(for: .milliseconds(300))
+                    if Task.isCancelled { return }
                     await search(trimmed)
                 }
             }
+            .onDisappear { searchTask?.cancel() }
         }
     }
 
     private func search(_ q: String) async {
         isSearching = true
+        defer { if !Task.isCancelled { isSearching = false } }
         do {
             let data = try await APIClient.shared.request(
                 path: "/history/\(userId)/search",
                 queryItems: [URLQueryItem(name: "q", value: q)]
             )
+            // Drop stale results: a newer keystroke cancelled this task while in flight.
+            if Task.isCancelled { return }
             let response = try JSONDecoder().decode(SearchResponse.self, from: data)
             results = response.results
         } catch {
-            results = []
+            if !Task.isCancelled { results = [] }
         }
-        isSearching = false
     }
 
     private func loadSessions() async {
@@ -863,25 +927,14 @@ private struct SearchResultRow: View {
     let result: SearchResult
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(result.role == "user" ? Color.oxyStone.opacity(0.15) : Color.oxySurface3)
-                    .frame(width: 36, height: 36)
-                Image(systemName: result.role == "user" ? "person.fill" : "sparkles")
-                    .font(.system(size: 13))
-                    .foregroundStyle(result.role == "user" ? Color.oxyStone : Color.oxySub)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(result.role == "user" ? "You" : "Oxy")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-
-                Text(result.content)
-                    .font(.system(size: 13))
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(result.role == "user" ? "YOU" : "OXY")
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Color.oxySub)
-                    .lineLimit(3)
+                    .tracking(0.5)
+
+                Spacer()
 
                 if let date = result.formattedDate {
                     Text(date)
@@ -890,7 +943,10 @@ private struct SearchResultRow: View {
                 }
             }
 
-            Spacer()
+            Text(result.content)
+                .font(.system(size: 14))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(3)
         }
     }
 }
@@ -933,38 +989,19 @@ private struct ChatSessionRow: View {
     let session: ChatSessionSummary
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(Color.oxyStone.opacity(0.12))
-                    .frame(width: 36, height: 36)
-                Image(systemName: "bubble.left.and.bubble.right.fill")
+        HStack(spacing: 0) {
+            Text(session.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(1)
+
+            Spacer(minLength: 12)
+
+            if let date = session.formattedDate {
+                Text(date)
                     .font(.system(size: 13))
-                    .foregroundStyle(Color.oxyStone)
+                    .foregroundStyle(Color.oxyDim)
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(session.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                    .lineLimit(1)
-
-                Text(session.preview)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxySub)
-                    .lineLimit(2)
-
-                HStack(spacing: 6) {
-                    if let date = session.formattedDate {
-                        Text(date)
-                    }
-                    Text("\(session.messageCount) messages")
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(Color.oxyDim)
-            }
-
-            Spacer()
         }
     }
 }
@@ -1021,11 +1058,11 @@ private struct WelcomeCard: View {
             }
 
             VStack(spacing: 6) {
-                Text("Hey! I'm Oxy")
+                Text("Hey, I'm Oxy")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
 
-                Text("Your AI assistant. Ask me anything\nor tell me to do something.")
+                Text("What can I help with?")
                     .font(.system(size: 13))
                     .foregroundStyle(Color.oxySub)
                     .multilineTextAlignment(.center)
@@ -1083,6 +1120,8 @@ private struct ChatInputBar: View {
     let isRecording: Bool
     let isPreparingVoice: Bool
     let attachmentLabel: String?
+    let attachmentData: Data?
+    let attachmentIsImage: Bool
     var isFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
     let onVoice: () -> Void
@@ -1096,25 +1135,42 @@ private struct ChatInputBar: View {
                 .overlay(Color.oxyLine2)
 
             if let attachmentLabel {
-                HStack(spacing: 8) {
-                    Image(systemName: "photo.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.oxyStone)
-                    Text(attachmentLabel)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.oxySub)
+                HStack(spacing: 10) {
+                    if attachmentIsImage, let attachmentData, let uiImage = UIImage(data: attachmentData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 38, height: 38)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    } else {
+                        Image(systemName: attachmentIsImage ? "photo.fill" : "doc.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.oxyStone)
+                            .frame(width: 38, height: 38)
+                            .background(Color.oxySurface3)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(attachmentLabel)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.oxyText)
+                            .lineLimit(1)
+                        Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.oxyDim)
+                    }
                     Spacer()
                     Button(action: onRemoveAttachment) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
+                            .font(.system(size: 16))
                             .foregroundStyle(Color.oxyDim)
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.oxySurface2)
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             }

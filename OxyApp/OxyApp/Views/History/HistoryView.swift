@@ -2,7 +2,7 @@ import SwiftUI
 
 struct HistoryView: View {
     @Environment(AppState.self) private var appState
-    @State private var actions: [ActionLogEntry] = []
+    @State private var sessions: [ChatSessionSummary] = []
     @State private var isLoading = true
 
     var body: some View {
@@ -13,31 +13,37 @@ struct HistoryView: View {
                 if isLoading {
                     ProgressView()
                         .tint(Color.oxyStone)
-                } else if actions.isEmpty {
+                } else if sessions.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "clock")
+                        Image(systemName: "bubble.left.and.bubble.right")
                             .font(.system(size: 40))
                             .foregroundStyle(Color.oxyDim)
-                        Text("No actions yet")
+                        Text("No conversations yet")
                             .font(.system(size: 15))
                             .foregroundStyle(Color.oxySub)
-                        Text("Actions Oxy takes on your behalf\nwill appear here.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.oxyDim)
-                            .multilineTextAlignment(.center)
                     }
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(actions) { action in
-                                ActionRow(action: action)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
+                            ForEach(sessions) { session in
+                                Button {
+                                    NotificationCenter.default.post(
+                                        name: .oxyJumpToChat,
+                                        object: nil,
+                                        userInfo: [
+                                            "sessionId": session.id,
+                                            "lastAt": session.lastAt ?? ""
+                                        ]
+                                    )
+                                } label: {
+                                    SessionRow(session: session)
+                                }
+                                .buttonStyle(.plain)
 
-                                if action.id != actions.last?.id {
+                                if session.id != sessions.last?.id {
                                     Divider()
                                         .overlay(Color.oxyLine)
-                                        .padding(.leading, 60)
+                                        .padding(.horizontal, 16)
                                 }
                             }
                         }
@@ -45,26 +51,26 @@ struct HistoryView: View {
                     }
                 }
             }
-            .navigationTitle("History")
+            .navigationTitle("Chats")
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .task {
-                await loadActions()
+                await loadSessions()
             }
             .refreshable {
-                await loadActions()
+                await loadSessions()
             }
         }
     }
 
-    private func loadActions() async {
+    private func loadSessions() async {
         do {
             let data = try await APIClient.shared.request(
-                path: "/action-log/\(appState.userId)"
+                path: "/history/\(appState.userId)/sessions"
             )
-            let response = try JSONDecoder().decode(ActionLogResponse.self, from: data)
-            actions = response.actions
+            let response = try JSONDecoder().decode(ChatSessionsResponse.self, from: data)
+            sessions = response.sessions
             isLoading = false
         } catch {
             isLoading = false
@@ -72,141 +78,43 @@ struct HistoryView: View {
     }
 }
 
-// MARK: - Action Row
+// MARK: - Session Row
 
-private struct ActionRow: View {
-    let action: ActionLogEntry
+private struct SessionRow: View {
+    let session: ChatSessionSummary
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(statusColor.opacity(0.15))
-                    .frame(width: 36, height: 36)
+        HStack(spacing: 0) {
+            Text(session.title)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(1)
 
-                Image(systemName: iconForStatus)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(statusColor)
-            }
+            Spacer(minLength: 12)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(action.formattedAction)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
-
-                Text(action.formattedTime)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.oxyDim)
-            }
-
-            Spacer()
-
-            Text(action.status.capitalized)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(statusColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(statusColor.opacity(0.12))
-                .clipShape(Capsule())
+            Text(session.relativeTime)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.oxyDim)
         }
-    }
-
-    private var statusColor: Color {
-        switch action.status {
-        case "success", "executed": return Color.oxyGreen
-        case "error", "failed": return Color.oxyRed
-        default: return Color.oxySub
-        }
-    }
-
-    private var iconForStatus: String {
-        switch action.status {
-        case "success", "executed": return "checkmark"
-        case "error", "failed": return "xmark"
-        default: return "ellipsis"
-        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 }
 
-// MARK: - Models
+// MARK: - ChatSessionSummary extension
 
-struct ActionLogEntry: Codable, Identifiable {
-    let id: String?
-    let action: ActionValue
-    let status: String
-    let createdAt: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case action
-        case status
-        case createdAt = "created_at"
-    }
-
-    var stableId: String { id ?? UUID().uuidString }
-
-    var formattedAction: String {
-        switch action {
-        case .string(let s):
-            if let data = s.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let type = obj["type"] as? String {
-                return type == "shortcut"
-                    ? (obj["name"] as? String ?? "Shortcut")
-                    : humanize(type)
-            }
-            return humanize(s)
-        case .object(let obj):
-            if obj.type == "shortcut" { return obj.name ?? "Shortcut" }
-            return humanize(obj.type ?? "unknown")
-        }
-    }
-
-    var formattedTime: String {
-        guard let date = Date.oxyParse(createdAt) else {
-            return ""
-        }
+private extension ChatSessionSummary {
+    var relativeTime: String {
+        guard let date = Date.oxyParse(lastAt ?? startedAt) else { return "" }
+        let diff = Date().timeIntervalSince(date)
+        if diff < 60 { return "just now" }
+        if diff < 3600 { return "\(Int(diff / 60))m ago" }
+        if diff < 86400 { return "\(Int(diff / 3600))h ago" }
+        if diff < 7 * 86400 { return "\(Int(diff / 86400))d ago" }
         let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm · d MMM"
+        fmt.dateFormat = "d MMM"
         return fmt.string(from: date)
     }
-
-    private func humanize(_ s: String) -> String {
-        s.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-}
-
-enum ActionValue: Codable {
-    case string(String)
-    case object(ActionObject)
-
-    struct ActionObject: Codable {
-        let type: String?
-        let name: String?
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let s = try? container.decode(String.self) {
-            self = .string(s)
-        } else if let obj = try? container.decode(ActionObject.self) {
-            self = .object(obj)
-        } else {
-            self = .string("unknown")
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .string(let s): try container.encode(s)
-        case .object(let obj): try container.encode(obj)
-        }
-    }
-}
-
-struct ActionLogResponse: Codable {
-    let actions: [ActionLogEntry]
 }
 
 #Preview {

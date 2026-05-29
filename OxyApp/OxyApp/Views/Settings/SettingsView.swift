@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var showDeleteAccountConfirm = false
     @State private var showAccentPicker = false
     @State private var showBackendURLEditor = false
+    @State private var versionTapCount = 0
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
     @State private var accountStatusText: String?
@@ -77,7 +78,7 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Theme", description: "Chat surface") {
+                            settingRow(label: "Theme", description: nil) {
                                 Picker("Theme", selection: $settings.appTheme) {
                                     Text("Light").tag("light")
                                     Text("Dark").tag("dark")
@@ -91,7 +92,7 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Bubbles", description: "Message density") {
+                            settingRow(label: "Bubbles", description: nil) {
                                 Picker("Bubbles", selection: $settings.bubbleStyle) {
                                     Text("Comfort").tag("comfort")
                                     Text("Compact").tag("compact")
@@ -105,7 +106,7 @@ struct SettingsView: View {
 
                         // Voice
                         settingsSection(title: "Voice") {
-                            settingRow(label: "Voice Playback", description: "Generate audio for responses") {
+                            settingRow(label: "Voice Replies", description: nil) {
                                 Toggle("", isOn: $settings.voiceOn)
                                     .labelsHidden()
                                     .tint(Color.oxyGreen)
@@ -118,12 +119,12 @@ struct SettingsView: View {
                         }
 
                         // Autonomy
-                        settingsSection(title: "Behaviour") {
+                        settingsSection(title: "Assistant") {
                             InitiativeScroller(selection: $settings.autonomy, onChange: saveSettings)
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Proactive Briefings", description: "Wake, midday, and evening updates") {
+                            settingRow(label: "Briefings", description: nil) {
                                 Toggle("", isOn: $settings.proactiveBriefings)
                                     .labelsHidden()
                                     .tint(Color.oxyGreen)
@@ -132,7 +133,7 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "Action Defaults") {
-                            settingRow(label: "Preferred Maps", description: "Used for directions links") {
+                            settingRow(label: "Preferred Maps", description: nil) {
                                 Picker("Preferred Maps", selection: $settings.preferredMapsApp) {
                                     Text("Apple Maps").tag("apple")
                                     Text("Google Maps").tag("google")
@@ -145,7 +146,7 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Transport", description: "Default route mode") {
+                            settingRow(label: "Transport", description: nil) {
                                 Picker("Transport", selection: $settings.preferredTransportMode) {
                                     Text("Driving").tag("driving")
                                     Text("Transit").tag("transit")
@@ -159,16 +160,7 @@ struct SettingsView: View {
 
                             Divider().overlay(Color.oxyLine)
 
-                            settingRow(label: "Review App Opens", description: "Ask before opening Maps/Uber-style links") {
-                                Toggle("", isOn: $settings.reviewBeforeOpeningApps)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
-                                    .onChange(of: settings.reviewBeforeOpeningApps) { _, _ in saveSettings() }
-                            }
-
-                            Divider().overlay(Color.oxyLine)
-
-                            settingRow(label: "Confirm Sensitive Apps", description: "Ask before opening banking-style apps") {
+                            settingRow(label: "Confirm Sensitive Apps", description: nil) {
                                 Toggle("", isOn: $settings.confirmSensitiveAppOpens)
                                     .labelsHidden()
                                     .tint(Color.oxyGreen)
@@ -271,68 +263,24 @@ struct SettingsView: View {
                             legalLink(label: "Privacy Policy", path: "/privacy", icon: "hand.raised.fill")
                             Divider().overlay(Color.oxyLine)
                             legalLink(label: "Terms of Use", path: "/terms", icon: "doc.text.fill")
-                        }
-
-                        settingsSection(title: "Diagnostics") {
-                            HStack(spacing: 12) {
-                                Image(systemName: "server.rack")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Color.oxyStone)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Backend")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Color.oxyText)
-                                    Text(backendVersionText)
-                                        .font(.system(size: 12, weight: .medium))
-                                        .foregroundStyle(Color.oxySub)
-                                        .lineLimit(2)
-                                }
-                                Spacer()
-                                Button(action: { loadBackendVersion() }) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 14, weight: .semibold))
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundStyle(Color.oxyStone)
-                            }
-                            .padding(.vertical, 4)
-
                             Divider().overlay(Color.oxyLine)
-
-                            Button(action: { showBackendURLEditor = true }) {
+                            Button(action: handleVersionTap) {
                                 HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Backend URL")
-                                            .font(.system(size: 14, weight: .medium))
-                                            .foregroundStyle(Color.oxyText)
-                                        Text(customBackendURL.isEmpty ? "Default (Cloud Run)" : customBackendURL)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(Color.oxySub)
-                                            .lineLimit(1)
-                                    }
+                                    Text("Version")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(Color.oxyText)
                                     Spacer()
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 12, weight: .semibold))
+                                    Text(backendVersionText)
+                                        .font(.system(size: 12))
                                         .foregroundStyle(Color.oxyDim)
+                                        .lineLimit(1)
                                 }
                                 .padding(.vertical, 4)
                             }
                             .buttonStyle(.plain)
                         }
 
-                        // App info
-                        VStack(spacing: 4) {
-                            Text("Oxy")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color.oxyDim)
-                            Text("Wearable AI")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.oxyDim)
-                                .tracking(1)
-                                .textCase(.uppercase)
-                        }
-                        .padding(.top, 8)
-                        .padding(.bottom, 32)
+                        Spacer().frame(height: 32)
                     }
                     .padding(16)
                 }
@@ -671,6 +619,14 @@ struct SettingsView: View {
         }
         Task {
             await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
+        }
+    }
+
+    private func handleVersionTap() {
+        versionTapCount += 1
+        if versionTapCount >= 5 {
+            versionTapCount = 0
+            showBackendURLEditor = true
         }
     }
 

@@ -2963,12 +2963,18 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     const wantsTTS = req.query.tts === 'true';
 
     if (!requireMatchingUser(req, res, userId)) return;
-    if (!req.file) return res.status(400).json({ error: 'image is required.' });
+    if (!req.file) return res.status(400).json({ error: 'file is required.' });
     if (!message) return res.status(400).json({ error: 'message is required.' });
+
+    const isImage = (req.file.mimetype || '').startsWith('image/');
+    const fileLabel = isImage ? 'image' : 'file';
+    const fileContextHint = isImage
+      ? `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}`
+      : `The user attached a file (${req.file.originalname || 'document'}, type: ${req.file.mimetype}). Use its content to answer their question.\n\n${message}`;
 
     const [{ history, useSearch, dynamicSystemPrompt, cachedContentName }] = await Promise.all([
       buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL, { chatStartedAt }),
-      saveMessage(userId, 'user', `${message}\n\n[Attached image: ${req.file.originalname || 'image'}]`)
+      saveMessage(userId, 'user', `${message}\n\n[Attached ${fileLabel}: ${req.file.originalname || fileLabel}]`)
     ]);
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({
@@ -2979,7 +2985,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       userContent: {
         role: 'user',
         parts: [
-          { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
+          { text: fileContextHint },
           { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
         ]
       }
@@ -3010,14 +3016,14 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
         userContent: {
           role: 'user',
           parts: [
-            { text: `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}` },
+            { text: fileContextHint },
             { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
           ]
         }
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '...' }] },
-        { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached image context. Do not invent unstated facts.` }] }
+        { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached ${fileLabel} context. Do not invent unstated facts.` }] }
       );
       const followUp = await modernGenAI.models.generateContent({
         model: PRIMARY_CHAT_MODEL,
@@ -4426,6 +4432,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
             fullText += text;
             emitSafeDisplayText(text);
+            // Kick off TTS for complete sentences as they arrive, not after full generation
+            if (ttsStreamer && !actionMarkupStarted) ttsStreamer.ingest(fullText);
           }
         }
         flushSafeDisplayText();
@@ -4496,6 +4504,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             if (text) {
               spoken += text;
               emitSafeDisplayText(text);
+              if (ttsStreamer) ttsStreamer.ingest(spoken);
             }
           }
           flushSafeDisplayText();
