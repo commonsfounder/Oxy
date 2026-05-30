@@ -2637,9 +2637,26 @@ final class PendantBLEManager: NSObject {
     private(set) var rxCharacteristic: CBCharacteristic?
     private(set) var txCharacteristic: CBCharacteristic?
 
+    private var isRecording = false
+    private var audioBuffer = Data()
+    private var recordingCompletion: ((Data) -> Void)?
+
+    private static let doneSignal = Data("DONE".utf8)
+
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    func startRecording(completion: @escaping (Data) -> Void) {
+        audioBuffer = Data()
+        recordingCompletion = completion
+        isRecording = true
+        write(Data("START".utf8))
+    }
+
+    func stopRecording() {
+        write(Data("STOP".utf8))
     }
 
     func write(_ data: Data) {
@@ -2722,7 +2739,21 @@ extension PendantBLEManager: CBPeripheralDelegate {
                     error: Error?) {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
-        NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
+
+        if isRecording {
+            if data == PendantBLEManager.doneSignal {
+                isRecording = false
+                let completed = audioBuffer
+                audioBuffer = Data()
+                let handler = recordingCompletion
+                recordingCompletion = nil
+                handler?(completed)
+            } else {
+                audioBuffer.append(data)
+            }
+        } else {
+            NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
