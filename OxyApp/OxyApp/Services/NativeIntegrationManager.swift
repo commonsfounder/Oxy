@@ -2636,6 +2636,7 @@ enum PendantConnectionState: String {
 @Observable
 final class PendantBLEManager: NSObject {
     static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
+    static let didConnect = Notification.Name("PendantBLEManagerDidConnect")
     static let didDisconnect = Notification.Name("PendantBLEManagerDidDisconnect")
     static let namePrefix = "Oxy"
     private static let pairedPeripheralKey = "oxy_paired_pendant_uuid"
@@ -2968,6 +2969,7 @@ extension PendantBLEManager: CBPeripheralDelegate {
         } else {
             print("[Pendant] Subscribed to TX notifications — ready")
             connectionState = .connected
+            NotificationCenter.default.post(name: PendantBLEManager.didConnect, object: nil)
         }
     }
 }
