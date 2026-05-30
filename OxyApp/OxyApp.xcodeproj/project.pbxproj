@@ -32,6 +32,7 @@
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
 		A10000010000000000000025 /* ProactiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000027 /* ProactiveView.swift */; };
+		A10000010000000000000026 /* PendantAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000028 /* PendantAudioBridge.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +64,7 @@
 		A20000010000000000000025 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000010000000000000026 /* OxyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OxyApp.entitlements; sourceTree = "<group>"; };
 		A20000010000000000000027 /* ProactiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveView.swift; sourceTree = "<group>"; };
+		A20000010000000000000028 /* PendantAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantAudioBridge.swift; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -120,6 +122,7 @@
 				A20000010000000000000021 /* LocationManager.swift */,
 				A20000010000000000000022 /* VoiceInputManager.swift */,
 				A20000010000000000000024 /* NativeIntegrationManager.swift */,
+				A20000010000000000000028 /* PendantAudioBridge.swift */,
 				A20000010000000000000025 /* AppDelegate.swift */,
 			);
 			path = Services;
@@ -325,6 +328,7 @@
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,
 				A10000010000000000000025 /* ProactiveView.swift in Sources */,
+				A10000010000000000000026 /* PendantAudioBridge.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
