@@ -21,7 +21,7 @@ struct LoginView: View {
                         icon: "mic.fill",
                         subIcon: "waveform",
                         title: "Ask Oxy",
-                        body: "Messages, bookings, reminders\n— just say it."
+                        content: "Messages, bookings, reminders\n— just say it."
                     )
                     .tag(0)
 
@@ -29,7 +29,7 @@ struct LoginView: View {
                         icon: "arrow.triangle.branch",
                         subIcon: nil,
                         title: "Connected",
-                        body: "Gmail, Telegram, Uber and more\n— one request, done."
+                        content: "Gmail, Telegram, Uber and more\n— one request, done."
                     )
                     .tag(1)
 
@@ -37,7 +37,7 @@ struct LoginView: View {
                         icon: "brain.head.profile",
                         subIcon: nil,
                         title: "Remembers you",
-                        body: "Gets better\nthe more you use it."
+                        content: "Gets better\nthe more you use it."
                     )
                     .tag(2)
 
@@ -112,7 +112,7 @@ private struct OnboardingSlide: View {
     let icon: String
     let subIcon: String?
     let title: String
-    let body: String
+    let content: String
 
     var body: some View {
         VStack(spacing: 36) {
@@ -141,7 +141,7 @@ private struct OnboardingSlide: View {
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.oxyText)
 
-                Text(body)
+                Text(content)
                     .font(.system(size: 16))
                     .foregroundStyle(Color.oxySub)
                     .multilineTextAlignment(.center)
