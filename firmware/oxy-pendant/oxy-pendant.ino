@@ -1,15 +1,14 @@
 /*
  * Oxy Pendant Firmware — Seeed XIAO nRF52840 Sense
  *
- * Captures audio from the onboard PDM microphone when the user
- * touches/presses the button, streams 16-bit PCM @ 16 kHz over
- * BLE Nordic UART Service, and sends "DONE" when finished.
+ * Streams audio from the onboard PDM microphone over BLE Nordic UART
+ * as soon as a central (the iOS app) connects. Recording stops when
+ * the central disconnects.
  *
  * Board: Seeed XIAO nRF52840 Sense
  * Arduino core: Seeed nRF52 (Adafruit BSP fork)
  *
  * Pin mapping:
- *   D1 — touch/button input (active LOW with internal pull-up)
  *   Built-in PDM mic on P0.20 (CLK) and P0.21 (DIN)
  *   Built-in LED on LED_BUILTIN
  */
@@ -17,7 +16,7 @@
 #include <bluefruit.h>
 #include <PDM.h>
 
-// ── BLE Nordic UART Service UUIDs ──────────────────────────────
+// ── BLE Nordic UART Service ────────────────────────────────────
 BLEUart bleuart;
 
 // ── Audio config ───────────────────────────────────────────────
@@ -27,23 +26,16 @@ static const int BUFFER_SAMPLES = 512;     // samples per PDM callback
 static int16_t   pdmBuffer[BUFFER_SAMPLES];
 volatile bool    pdmReady = false;
 
-// ── Button / touch config ──────────────────────────────────────
-static const int BUTTON_PIN = D1;          // touch or tactile button
-static const unsigned long DEBOUNCE_MS = 50;
-
 // ── State ──────────────────────────────────────────────────────
-enum State { IDLE, RECORDING };
-volatile State currentState = IDLE;
-bool lastButtonState = HIGH;
-unsigned long lastDebounceTime = 0;
+volatile bool isStreaming = false;
 
 // ── BLE device name ────────────────────────────────────────────
 static const char* DEVICE_NAME = "OxyPendant";
 
 // ── Forward declarations ───────────────────────────────────────
 void onPDMData();
-void startRecording();
-void stopRecording();
+void startStreaming();
+void stopStreaming();
 void setupBLE();
 void connectCallback(uint16_t conn_handle);
 void disconnectCallback(uint16_t conn_handle, uint8_t reason);
@@ -54,7 +46,6 @@ void disconnectCallback(uint16_t conn_handle, uint8_t reason);
 void setup() {
   Serial.begin(115200);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH); // LED off (active LOW on XIAO)
 
@@ -63,40 +54,19 @@ void setup() {
   PDM.onReceive(onPDMData);
   PDM.setBufferSize(BUFFER_SAMPLES * sizeof(int16_t));
 
-  Serial.println("[Oxy] Pendant ready");
+  Serial.println("[Oxy] Pendant ready — will stream on BLE connect");
 }
 
 // ================================================================
-// Main loop — poll button, stream audio when recording
+// Main loop — stream audio when connected
 // ================================================================
 void loop() {
-  // Read button with debounce
-  bool reading = digitalRead(BUTTON_PIN);
-  if (reading != lastButtonState) {
-    lastDebounceTime = millis();
-  }
-  if ((millis() - lastDebounceTime) > DEBOUNCE_MS) {
-    static bool buttonState = HIGH;
-    if (reading != buttonState) {
-      buttonState = reading;
-      if (buttonState == LOW) { // pressed
-        if (currentState == IDLE) {
-          startRecording();
-        } else {
-          stopRecording();
-        }
-      }
-    }
-  }
-  lastButtonState = reading;
-
-  // Stream audio chunks over BLE
-  if (currentState == RECORDING && pdmReady) {
+  if (isStreaming && pdmReady) {
     pdmReady = false;
     if (Bluefruit.connected() && bleuart.notifyEnabled()) {
       const uint8_t* data = (const uint8_t*)pdmBuffer;
       int remaining = BUFFER_SAMPLES * sizeof(int16_t);
-      // BLE MTU is typically 20 bytes for writes; send in chunks
+      // BLE MTU is typically 20 bytes; send in chunks
       while (remaining > 0) {
         int chunk = min(remaining, 20);
         bleuart.write(data, chunk);
@@ -119,36 +89,25 @@ void onPDMData() {
 }
 
 // ================================================================
-// Recording control
+// Streaming control
 // ================================================================
-void startRecording() {
-  if (!Bluefruit.connected()) {
-    Serial.println("[Oxy] Not connected — ignoring button press");
-    return;
-  }
-
-  Serial.println("[Oxy] Recording started");
-  currentState = RECORDING;
-  digitalWrite(LED_BUILTIN, LOW); // LED on
+void startStreaming() {
+  Serial.println("[Oxy] Starting audio stream");
+  isStreaming = true;
+  digitalWrite(LED_BUILTIN, LOW); // LED on while streaming
 
   if (!PDM.begin(AUDIO_CHANNELS, SAMPLE_RATE)) {
     Serial.println("[Oxy] Failed to start PDM mic");
-    currentState = IDLE;
+    isStreaming = false;
     digitalWrite(LED_BUILTIN, HIGH);
-    return;
   }
 }
 
-void stopRecording() {
-  Serial.println("[Oxy] Recording stopped");
+void stopStreaming() {
+  Serial.println("[Oxy] Stopping audio stream");
   PDM.end();
-  currentState = IDLE;
+  isStreaming = false;
   digitalWrite(LED_BUILTIN, HIGH); // LED off
-
-  // Signal the app that audio is complete
-  if (Bluefruit.connected() && bleuart.notifyEnabled()) {
-    bleuart.write("DONE", 4);
-  }
 }
 
 // ================================================================
@@ -171,32 +130,31 @@ void setupBLE() {
   Bluefruit.ScanResponse.addName();
 
   Bluefruit.Advertising.restartOnDisconnect(true);
-  Bluefruit.Advertising.setInterval(32, 244); // fast then slow (in 0.625ms units)
-  Bluefruit.Advertising.setFastTimeout(30);   // seconds in fast mode
-  Bluefruit.Advertising.start(0);             // 0 = never stop
+  Bluefruit.Advertising.setInterval(32, 244); // fast then slow
+  Bluefruit.Advertising.setFastTimeout(30);
+  Bluefruit.Advertising.start(0);             // never stop
 
   Serial.println("[Oxy] BLE advertising as " + String(DEVICE_NAME));
 }
 
 void connectCallback(uint16_t conn_handle) {
-  Serial.println("[Oxy] BLE connected");
-  // Blink LED briefly to acknowledge
+  Serial.println("[Oxy] BLE connected — starting audio stream");
+
+  // Blink LED to acknowledge connection
   for (int i = 0; i < 3; i++) {
     digitalWrite(LED_BUILTIN, LOW);
     delay(100);
     digitalWrite(LED_BUILTIN, HIGH);
     delay(100);
   }
+
+  // Small delay to let BLE negotiation complete
+  delay(500);
+  startStreaming();
 }
 
 void disconnectCallback(uint16_t conn_handle, uint8_t reason) {
   Serial.print("[Oxy] BLE disconnected, reason: 0x");
   Serial.println(reason, HEX);
-
-  // Stop recording if active
-  if (currentState == RECORDING) {
-    PDM.end();
-    currentState = IDLE;
-    digitalWrite(LED_BUILTIN, HIGH);
-  }
+  stopStreaming();
 }
