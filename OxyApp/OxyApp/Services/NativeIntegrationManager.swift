@@ -9,6 +9,7 @@ import MediaPlayer
 import MessageUI
 import AVFoundation
 import MusicKit
+import Observation
 import UIKit
 import UserNotifications
 
@@ -146,11 +147,9 @@ struct NativeCapabilities: Codable {
 }
 
 @MainActor
-final class NativeIntegrationManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
+final class NativeIntegrationManager: NSObject {
     static let shared = NativeIntegrationManager()
 
-    private var centralManager: CBCentralManager!
-    private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private let healthStore = HKHealthStore()
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
@@ -166,61 +165,6 @@ final class NativeIntegrationManager: NSObject, CBCentralManagerDelegate, CBPeri
 
     private override init() {
         super.init()
-        centralManager = CBCentralManager(delegate: self, queue: nil)
-    }
-
-    func startScanning() {
-        guard centralManager.state == .poweredOn else { return }
-        centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
-    }
-
-    func stopScanning() {
-        centralManager.stopScan()
-    }
-
-    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        guard central.state == .poweredOn else { return }
-        Task { @MainActor in
-            self.startScanning()
-        }
-    }
-
-    nonisolated func centralManager(
-        _ central: CBCentralManager,
-        didDiscover peripheral: CBPeripheral,
-        advertisementData: [String: Any],
-        rssi RSSI: NSNumber
-    ) {
-        Task { @MainActor in
-            self.discoveredPeripherals[peripheral.identifier] = peripheral
-            peripheral.delegate = self
-            if peripheral.state == .disconnected {
-                central.connect(peripheral)
-            }
-        }
-    }
-
-    nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.delegate = self
-        peripheral.discoverServices(nil)
-    }
-
-    nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard error == nil, let services = peripheral.services else { return }
-        for service in services {
-            peripheral.discoverCharacteristics(nil, for: service)
-        }
-    }
-
-    nonisolated func peripheral(
-        _ peripheral: CBPeripheral,
-        didDiscoverCharacteristicsFor service: CBService,
-        error: Error?
-    ) {
-        guard error == nil, let characteristics = service.characteristics else { return }
-        for characteristic in characteristics where characteristic.properties.contains(.notify) {
-            peripheral.setNotifyValue(true, for: characteristic)
-        }
     }
 
     func bootstrap(userId: String) {
@@ -2681,8 +2625,20 @@ private extension HKWorkoutActivityType {
 
 // MARK: - PendantBLEManager
 
+enum PendantConnectionState: String {
+    case disconnected
+    case scanning
+    case connecting
+    case connected
+    case error
+}
+
+@Observable
 final class PendantBLEManager: NSObject {
     static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
+    static let namePrefix = "Oxy"
+    private static let pairedPeripheralKey = "oxy_paired_pendant_uuid"
+    private static let connectionTimeout: TimeInterval = 10
 
     private enum UART {
         static let service    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -2690,16 +2646,25 @@ final class PendantBLEManager: NSObject {
         static let tx         = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") // central subscribes
     }
 
-    private var central: CBCentralManager!
-    private(set) var peripheral: CBPeripheral?
-    private(set) var rxCharacteristic: CBCharacteristic?
-    private(set) var txCharacteristic: CBCharacteristic?
+    private(set) var connectionState: PendantConnectionState = .disconnected
+    private(set) var peripheralName: String?
+    private(set) var lastError: String?
 
-    private var isRecording = false
-    private var audioBuffer = Data()
-    private var recordingCompletion: ((Data) -> Void)?
+    @ObservationIgnored private var central: CBCentralManager!
+    @ObservationIgnored private(set) var peripheral: CBPeripheral?
+    @ObservationIgnored private(set) var rxCharacteristic: CBCharacteristic?
+    @ObservationIgnored private(set) var txCharacteristic: CBCharacteristic?
+
+    @ObservationIgnored private var isRecording = false
+    @ObservationIgnored private var audioBuffer = Data()
+    @ObservationIgnored private var recordingCompletion: ((Data) -> Void)?
+    @ObservationIgnored private var connectionTimer: Timer?
+    @ObservationIgnored private var retryCount = 0
+    private static let maxRetries = 3
 
     private static let doneSignal = Data("DONE".utf8)
+
+    var isConnected: Bool { connectionState == .connected }
 
     override init() {
         super.init()
@@ -2723,39 +2688,163 @@ final class PendantBLEManager: NSObject {
         p.writeValue(data, for: rx, type: .withResponse)
     }
 
-    private func startScan() {
+    func startScan() {
         guard central.state == .poweredOn else { return }
+
+        if let savedUUID = pairedPeripheralUUID {
+            let known = central.retrievePeripherals(withIdentifiers: [savedUUID])
+            if let cached = known.first, cached.state == .disconnected {
+                print("[Pendant] Reconnecting to saved peripheral \(cached.name ?? savedUUID.uuidString)")
+                connectionState = .connecting
+                peripheral = cached
+                cached.delegate = self
+                startConnectionTimer()
+                central.connect(cached, options: nil)
+                return
+            }
+        }
+
         print("[Pendant] Scanning for Nordic UART Service (\(UART.service))")
-        central.scanForPeripherals(withServices: [UART.service], options: nil)
+        connectionState = .scanning
+        lastError = nil
+        central.scanForPeripherals(
+            withServices: [UART.service],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
+    }
+
+    func stopScan() {
+        central.stopScan()
+        cancelConnectionTimer()
+        if connectionState == .scanning {
+            connectionState = .disconnected
+        }
+    }
+
+    func unpair() {
+        cancelConnectionTimer()
+        if let p = peripheral, p.state == .connected || p.state == .connecting {
+            central.cancelPeripheralConnection(p)
+        }
+        clearPairedPeripheralUUID()
+        rxCharacteristic = nil
+        txCharacteristic = nil
+        peripheral = nil
+        peripheralName = nil
+        connectionState = .disconnected
+        lastError = nil
+        retryCount = 0
+        print("[Pendant] Unpaired")
+    }
+
+    // MARK: - Peripheral identity persistence
+
+    private var pairedPeripheralUUID: UUID? {
+        get {
+            guard let str = UserDefaults.standard.string(forKey: Self.pairedPeripheralKey) else { return nil }
+            return UUID(uuidString: str)
+        }
+        set {
+            if let uuid = newValue {
+                UserDefaults.standard.set(uuid.uuidString, forKey: Self.pairedPeripheralKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Self.pairedPeripheralKey)
+            }
+        }
+    }
+
+    private func clearPairedPeripheralUUID() {
+        UserDefaults.standard.removeObject(forKey: Self.pairedPeripheralKey)
+    }
+
+    // MARK: - Connection timeout
+
+    private func startConnectionTimer() {
+        cancelConnectionTimer()
+        connectionTimer = Timer.scheduledTimer(withTimeInterval: Self.connectionTimeout, repeats: false) { [weak self] _ in
+            self?.handleConnectionTimeout()
+        }
+    }
+
+    private func cancelConnectionTimer() {
+        connectionTimer?.invalidate()
+        connectionTimer = nil
+    }
+
+    private func handleConnectionTimeout() {
+        guard connectionState == .connecting, let p = peripheral else { return }
+        print("[Pendant] Connection timed out for \(p.name ?? p.identifier.uuidString)")
+        central.cancelPeripheralConnection(p)
+        rxCharacteristic = nil
+        txCharacteristic = nil
+        peripheral = nil
+
+        retryCount += 1
+        if retryCount < Self.maxRetries {
+            print("[Pendant] Retrying scan (attempt \(retryCount + 1)/\(Self.maxRetries))")
+            startScan()
+        } else {
+            connectionState = .error
+            lastError = "Connection timed out after \(Self.maxRetries) attempts"
+            retryCount = 0
+            print("[Pendant] \(lastError!)")
+        }
     }
 }
 
 extension PendantBLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         print("[Pendant] CBCentralManager state: \(central.state.rawValue)")
-        if central.state == .poweredOn { startScan() }
+        if central.state == .poweredOn {
+            startScan()
+        } else {
+            connectionState = .disconnected
+        }
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
-        print("[Pendant] Discovered peripheral — name: \(peripheral.name ?? "<nil>"), UUID: \(peripheral.identifier), RSSI: \(RSSI)")
+        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        print("[Pendant] Discovered peripheral — name: \(name ?? "<nil>"), UUID: \(peripheral.identifier), RSSI: \(RSSI)")
+
+        let nameMatches: Bool
+        if pairedPeripheralUUID != nil {
+            nameMatches = peripheral.identifier == pairedPeripheralUUID
+        } else if let name {
+            nameMatches = name.hasPrefix(Self.namePrefix)
+        } else {
+            nameMatches = false
+        }
+
+        guard nameMatches else {
+            print("[Pendant] Ignoring peripheral — name does not start with \"\(Self.namePrefix)\"")
+            return
+        }
+
         central.stopScan()
         self.peripheral = peripheral
+        self.peripheralName = name
         peripheral.delegate = self
-        print("[Pendant] Connecting to \(peripheral.name ?? peripheral.identifier.uuidString)…")
+        connectionState = .connecting
+        retryCount = 0
+        startConnectionTimer()
+        print("[Pendant] Connecting to \(name ?? peripheral.identifier.uuidString)…")
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        cancelConnectionTimer()
         print("[Pendant] Connected to \(peripheral.name ?? peripheral.identifier.uuidString)")
+        pairedPeripheralUUID = peripheral.identifier
         peripheral.discoverServices([UART.service])
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        cancelConnectionTimer()
         if let error {
             print("[Pendant] Disconnected from \(peripheral.name ?? peripheral.identifier.uuidString) with error: \(error.localizedDescription)")
         } else {
@@ -2764,17 +2853,35 @@ extension PendantBLEManager: CBCentralManagerDelegate {
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
-        startScan()
+        connectionState = .disconnected
+
+        if pairedPeripheralUUID != nil {
+            print("[Pendant] Will attempt reconnection to paired pendant")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.startScan()
+            }
+        }
     }
 
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
-        print("[Pendant] Failed to connect to \(peripheral.name ?? peripheral.identifier.uuidString): \(error?.localizedDescription ?? "unknown error")")
+        cancelConnectionTimer()
+        let desc = error?.localizedDescription ?? "unknown error"
+        print("[Pendant] Failed to connect to \(peripheral.name ?? peripheral.identifier.uuidString): \(desc)")
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
-        startScan()
+
+        retryCount += 1
+        if retryCount < Self.maxRetries {
+            print("[Pendant] Retrying scan (attempt \(retryCount + 1)/\(Self.maxRetries))")
+            startScan()
+        } else {
+            connectionState = .error
+            lastError = "Failed to connect: \(desc)"
+            retryCount = 0
+        }
     }
 }
 
@@ -2782,10 +2889,14 @@ extension PendantBLEManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
             print("[Pendant] Service discovery error: \(error.localizedDescription)")
+            connectionState = .error
+            lastError = "Service discovery failed: \(error.localizedDescription)"
             return
         }
         guard let service = peripheral.services?.first(where: { $0.uuid == UART.service }) else {
             print("[Pendant] Nordic UART Service not found among discovered services: \(peripheral.services?.map(\.uuid) ?? [])")
+            connectionState = .error
+            lastError = "UART service not found on device"
             return
         }
         print("[Pendant] Discovered Nordic UART Service — discovering characteristics")
@@ -2797,6 +2908,8 @@ extension PendantBLEManager: CBPeripheralDelegate {
                     error: Error?) {
         if let error {
             print("[Pendant] Characteristic discovery error: \(error.localizedDescription)")
+            connectionState = .error
+            lastError = "Characteristic discovery failed: \(error.localizedDescription)"
             return
         }
         for characteristic in service.characteristics ?? [] {
@@ -2841,8 +2954,11 @@ extension PendantBLEManager: CBPeripheralDelegate {
                     error: Error?) {
         if let error {
             print("[Pendant] Failed to subscribe to \(characteristic.uuid): \(error.localizedDescription)")
+            connectionState = .error
+            lastError = "Failed to subscribe to notifications"
         } else {
             print("[Pendant] Subscribed to TX notifications — ready")
+            connectionState = .connected
         }
     }
 }
