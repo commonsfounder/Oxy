@@ -1,4 +1,5 @@
 import Contacts
+import CoreBluetooth
 import CoreLocation
 import EventKit
 import Foundation
@@ -159,6 +160,7 @@ final class NativeIntegrationManager {
     private var lastReminderIdentifier: String?
     private var lastReminderTitle: String?
     private var lastReminderDueDate: Date?
+    let pendant = PendantBLEManager()
 
     private init() {}
 
@@ -2616,5 +2618,116 @@ private extension HKWorkoutActivityType {
         case .other: return "Workout"
         default: return "Workout"
         }
+    }
+}
+
+// MARK: - PendantBLEManager
+
+final class PendantBLEManager: NSObject {
+    static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
+
+    private enum UART {
+        static let service    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+        static let rx         = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E") // central writes
+        static let tx         = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E") // central subscribes
+    }
+
+    private var central: CBCentralManager!
+    private(set) var peripheral: CBPeripheral?
+    private(set) var rxCharacteristic: CBCharacteristic?
+    private(set) var txCharacteristic: CBCharacteristic?
+
+    override init() {
+        super.init()
+        central = CBCentralManager(delegate: self, queue: .main)
+    }
+
+    func write(_ data: Data) {
+        guard let p = peripheral, let rx = rxCharacteristic,
+              p.state == .connected else { return }
+        p.writeValue(data, for: rx, type: .withResponse)
+    }
+
+    private func startScan() {
+        guard central.state == .poweredOn else { return }
+        central.scanForPeripherals(withServices: [UART.service], options: nil)
+    }
+}
+
+extension PendantBLEManager: CBCentralManagerDelegate {
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn { startScan() }
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didDiscover peripheral: CBPeripheral,
+                        advertisementData: [String: Any],
+                        rssi RSSI: NSNumber) {
+        central.stopScan()
+        self.peripheral = peripheral
+        peripheral.delegate = self
+        central.connect(peripheral, options: nil)
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.discoverServices([UART.service])
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didDisconnectPeripheral peripheral: CBPeripheral,
+                        error: Error?) {
+        rxCharacteristic = nil
+        txCharacteristic = nil
+        self.peripheral = nil
+        startScan()
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                        didFailToConnect peripheral: CBPeripheral,
+                        error: Error?) {
+        rxCharacteristic = nil
+        txCharacteristic = nil
+        self.peripheral = nil
+        startScan()
+    }
+}
+
+extension PendantBLEManager: CBPeripheralDelegate {
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard error == nil,
+              let service = peripheral.services?.first(where: { $0.uuid == UART.service })
+        else { return }
+        peripheral.discoverCharacteristics([UART.rx, UART.tx], for: service)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didDiscoverCharacteristicsFor service: CBService,
+                    error: Error?) {
+        guard error == nil else { return }
+        for characteristic in service.characteristics ?? [] {
+            switch characteristic.uuid {
+            case UART.rx:
+                rxCharacteristic = characteristic
+            case UART.tx:
+                txCharacteristic = characteristic
+                peripheral.setNotifyValue(true, for: characteristic)
+            default:
+                break
+            }
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateValueFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        guard error == nil, characteristic.uuid == UART.tx,
+              let data = characteristic.value else { return }
+        NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
+    }
+
+    func peripheral(_ peripheral: CBPeripheral,
+                    didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                    error: Error?) {
+        // Subscription confirmed; no action needed.
     }
 }
