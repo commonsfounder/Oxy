@@ -35,6 +35,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		9693E9D62FCB47AF00B8A2C7 /* .swift */ = {isa = PBXFileReference; lastKnownFileType = text; path = .swift; sourceTree = "<group>"; };
 		A20000010000000000000001 /* OxyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OxyApp.swift; sourceTree = "<group>"; };
 		A20000010000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A20000010000000000000003 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
@@ -79,6 +80,7 @@
 		A50000010000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				9693E9D62FCB47AF00B8A2C7 /* .swift */,
 				A50000010000000000000002 /* OxyApp */,
 				A50000010000000000000099 /* Products */,
 			);

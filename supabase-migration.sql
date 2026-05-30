@@ -1,4 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- User accounts
 CREATE TABLE IF NOT EXISTS users (
@@ -13,7 +12,8 @@ CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);
 
 -- Chat history
 CREATE TABLE IF NOT EXISTS conversations (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  id UUID DEFAULT gen_random_uuid() PRIMARYCREATE EXTENSION IF NOT EXISTS pgcrypto;
+ KEY,
   user_id TEXT NOT NULL,
   role TEXT NOT NULL,
   content TEXT NOT NULL,

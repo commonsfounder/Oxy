@@ -146,9 +146,11 @@ struct NativeCapabilities: Codable {
 }
 
 @MainActor
-final class NativeIntegrationManager {
+final class NativeIntegrationManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let shared = NativeIntegrationManager()
 
+    private var centralManager: CBCentralManager!
+    private var discoveredPeripherals: [UUID: CBPeripheral] = [:]
     private let healthStore = HKHealthStore()
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
@@ -162,7 +164,64 @@ final class NativeIntegrationManager {
     private var lastReminderDueDate: Date?
     let pendant = PendantBLEManager()
 
-    private init() {}
+    private override init() {
+        super.init()
+        centralManager = CBCentralManager(delegate: self, queue: nil)
+    }
+
+    func startScanning() {
+        guard centralManager.state == .poweredOn else { return }
+        centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+    }
+
+    func stopScanning() {
+        centralManager.stopScan()
+    }
+
+    nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard central.state == .poweredOn else { return }
+        Task { @MainActor in
+            self.startScanning()
+        }
+    }
+
+    nonisolated func centralManager(
+        _ central: CBCentralManager,
+        didDiscover peripheral: CBPeripheral,
+        advertisementData: [String: Any],
+        rssi RSSI: NSNumber
+    ) {
+        Task { @MainActor in
+            self.discoveredPeripherals[peripheral.identifier] = peripheral
+            peripheral.delegate = self
+            if peripheral.state == .disconnected {
+                central.connect(peripheral)
+            }
+        }
+    }
+
+    nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.delegate = self
+        peripheral.discoverServices(nil)
+    }
+
+    nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard error == nil, let services = peripheral.services else { return }
+        for service in services {
+            peripheral.discoverCharacteristics(nil, for: service)
+        }
+    }
+
+    nonisolated func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
+        guard error == nil, let characteristics = service.characteristics else { return }
+        for characteristic in characteristics where characteristic.properties.contains(.notify) {
+            peripheral.setNotifyValue(true, for: characteristic)
+        }
+    }
 
     func bootstrap(userId: String) {
         guard !userId.isEmpty else { return }
@@ -2479,7 +2538,6 @@ final class NativeIntegrationManager {
         if #available(iOS 17.0, *) {
             return status == .fullAccess || status == .writeOnly
         }
-        return status == .authorized
     }
 
     private var calendarAuthorized: Bool {
