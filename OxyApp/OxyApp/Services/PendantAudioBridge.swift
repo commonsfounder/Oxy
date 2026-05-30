@@ -6,9 +6,8 @@ import Speech
 /// Bridges continuous pendant BLE audio to the chat pipeline.
 ///
 /// The pendant streams PCM audio continuously once connected. This bridge
-/// feeds it into Apple's live speech recognizer, detects when the user
-/// finishes speaking (via silence timeout), and sends the transcript
-/// to the chat.
+/// feeds ALL incoming audio into Apple's live speech recognizer (which has
+/// its own built-in VAD), and delivers the final transcript to the chat.
 @Observable
 @MainActor
 final class PendantAudioBridge {
@@ -25,19 +24,19 @@ final class PendantAudioBridge {
 
     @ObservationIgnored private var observer: NSObjectProtocol?
     @ObservationIgnored private var connectionObserver: NSObjectProtocol?
+    @ObservationIgnored private var connectObserver: NSObjectProtocol?
     @ObservationIgnored private let sampleRate: Double = 16000
 
     // Live recognition
     @ObservationIgnored private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     @ObservationIgnored private var recognitionTask: SFSpeechRecognitionTask?
     @ObservationIgnored private var recognizer: SFSpeechRecognizer?
+    @ObservationIgnored private var isSessionActive = false
 
-    // Voice activity detection via audio energy
-    @ObservationIgnored private var isSpeechActive = false
-    @ObservationIgnored private var silenceTimer: Timer?
-    @ObservationIgnored private let silenceTimeout: TimeInterval = 2.0
-    @ObservationIgnored private let speechThreshold: Float = 200.0
-    @ObservationIgnored private var partialTranscript = ""
+    // Restart timer — Apple limits recognition to ~60s per session,
+    // so we restart periodically when no speech is detected.
+    @ObservationIgnored private var restartTimer: Timer?
+    @ObservationIgnored private let sessionTimeout: TimeInterval = 55
 
     // Audio format (matches pendant: 16-bit PCM mono @ 16 kHz)
     @ObservationIgnored private lazy var audioFormat: AVAudioFormat = {
@@ -65,6 +64,17 @@ final class PendantAudioBridge {
             }
         }
 
+        // Start recognition when pendant connects
+        connectObserver = NotificationCenter.default.addObserver(
+            forName: PendantBLEManager.didConnect,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.startRecognitionSession()
+            }
+        }
+
         // Stop recognition when pendant disconnects
         connectionObserver = NotificationCenter.default.addObserver(
             forName: PendantBLEManager.didDisconnect,
@@ -78,92 +88,51 @@ final class PendantAudioBridge {
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let connectionObserver {
-            NotificationCenter.default.removeObserver(connectionObserver)
-        }
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        if let connectionObserver { NotificationCenter.default.removeObserver(connectionObserver) }
+        if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
     }
 
     // MARK: - Audio handling
 
     private func handleIncomingAudio(_ data: Data) {
-        let energy = computeEnergy(data)
-
-        if energy > speechThreshold {
-            if !isSpeechActive {
-                isSpeechActive = true
-                startRecognition()
-            }
-            resetSilenceTimer()
-        } else if isSpeechActive {
-            // Below threshold — might be a pause; silence timer handles it
+        // Start a recognition session if we don't have one yet
+        if !isSessionActive {
+            startRecognitionSession()
         }
 
-        // Feed audio to recognizer if active
-        if isSpeechActive, let request = recognitionRequest {
-            let frameCount = UInt32(data.count / MemoryLayout<Int16>.size)
-            guard frameCount > 0,
-                  let pcmBuf = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) else {
-                return
-            }
-            pcmBuf.frameLength = frameCount
-            data.withUnsafeBytes { raw in
-                if let src = raw.baseAddress {
-                    memcpy(pcmBuf.int16ChannelData![0], src, data.count)
-                }
-            }
-            request.append(pcmBuf)
+        guard let request = recognitionRequest else { return }
+
+        // Convert raw PCM bytes to AVAudioPCMBuffer and feed to recognizer
+        let frameCount = UInt32(data.count / MemoryLayout<Int16>.size)
+        guard frameCount > 0,
+              let pcmBuf = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: frameCount) else {
+            return
         }
-    }
-
-    private func computeEnergy(_ data: Data) -> Float {
-        let sampleCount = data.count / MemoryLayout<Int16>.size
-        guard sampleCount > 0 else { return 0 }
-
-        return data.withUnsafeBytes { raw -> Float in
-            guard let ptr = raw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return 0 }
-            var sum: Float = 0
-            for i in 0..<sampleCount {
-                let sample = Float(ptr[i])
-                sum += sample * sample
-            }
-            return sqrt(sum / Float(sampleCount)) // RMS
-        }
-    }
-
-    // MARK: - Silence detection
-
-    private func resetSilenceTimer() {
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceTimeout, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.onSilenceDetected()
+        pcmBuf.frameLength = frameCount
+        data.withUnsafeBytes { raw in
+            if let src = raw.baseAddress {
+                memcpy(pcmBuf.int16ChannelData![0], src, data.count)
             }
         }
-    }
-
-    private func onSilenceDetected() {
-        guard isSpeechActive else { return }
-        isSpeechActive = false
-        finishRecognition()
+        request.append(pcmBuf)
     }
 
     // MARK: - Speech recognition
 
-    private func startRecognition() {
+    private func startRecognitionSession() {
+        guard !isSessionActive else { return }
         guard let recognizer, recognizer.isAvailable else {
+            print("[PendantBridge] Speech recognizer not available")
             errorMessage = "Speech recognition not available"
             return
         }
 
-        // Check/request authorization
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             Task {
                 let status = await requestSpeechAuthorization()
                 if status == .authorized {
-                    startRecognition()
+                    startRecognitionSession()
                 } else {
                     errorMessage = "Speech recognition not authorized"
                 }
@@ -171,83 +140,95 @@ final class PendantAudioBridge {
             return
         }
 
-        // Cancel any existing session
+        // Cancel any previous session
         recognitionTask?.cancel()
         recognitionRequest = nil
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        // Let Apple's recognizer handle VAD — it will return isFinal
+        // when the user stops speaking
+        request.requiresOnDeviceRecognition = false
         recognitionRequest = request
+        isSessionActive = true
 
         state = .listening
         errorMessage = nil
-        partialTranscript = ""
+
+        print("[PendantBridge] Starting speech recognition session")
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
                 guard let self else { return }
+
                 if let result {
-                    self.partialTranscript = result.bestTranscription.formattedString
-                    self.lastTranscript = self.partialTranscript
+                    let transcript = result.bestTranscription.formattedString
+                    self.lastTranscript = transcript
 
                     if result.isFinal {
-                        self.deliverTranscript(self.partialTranscript)
+                        print("[PendantBridge] Final transcript: \(transcript)")
+                        self.deliverTranscript(transcript)
+                        // Restart session for next utterance
+                        self.isSessionActive = false
+                        self.startRecognitionSession()
                     }
                 }
-                if error != nil && self.partialTranscript.isEmpty {
-                    // Recognition error with no transcript — reset
-                    self.state = .idle
+
+                if let error {
+                    print("[PendantBridge] Recognition error: \(error.localizedDescription)")
+                    // Session ended — restart for next utterance
+                    self.isSessionActive = false
+                    if self.state != .idle {
+                        self.state = .listening
+                        self.startRecognitionSession()
+                    }
                 }
+            }
+        }
+
+        // Apple limits recognition sessions to ~60s. Restart before that.
+        restartTimer?.invalidate()
+        restartTimer = Timer.scheduledTimer(withTimeInterval: sessionTimeout, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.restartSession()
             }
         }
     }
 
-    private func finishRecognition() {
-        state = .transcribing
-        silenceTimer?.invalidate()
-        silenceTimer = nil
-
+    private func restartSession() {
+        print("[PendantBridge] Restarting recognition session (timeout)")
         recognitionRequest?.endAudio()
-
-        // If we already have a partial transcript, deliver it after a short delay
-        // to allow the recognizer to finalize
-        let transcript = partialTranscript
-        if !transcript.isEmpty {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                guard let self else { return }
-                if self.state == .transcribing {
-                    self.deliverTranscript(self.lastTranscript ?? transcript)
-                }
-            }
-        }
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        recognitionRequest = nil
+        isSessionActive = false
+        startRecognitionSession()
     }
 
     private func deliverTranscript(_ transcript: String) {
-        guard !transcript.isEmpty else {
-            state = .idle
-            return
-        }
-        print("[PendantBridge] Transcript: \(transcript)")
+        guard !transcript.isEmpty else { return }
+        print("[PendantBridge] Delivering transcript: \(transcript)")
         lastTranscript = transcript
-        state = .idle
+        state = .transcribing
         onTranscript?(transcript)
 
-        // Clean up for next utterance
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-        partialTranscript = ""
+        // Brief transcribing state, then back to listening
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            if self?.state == .transcribing {
+                self?.state = .listening
+            }
+        }
     }
 
     private func stopRecognition() {
-        silenceTimer?.invalidate()
-        silenceTimer = nil
-        isSpeechActive = false
+        print("[PendantBridge] Stopping recognition")
+        restartTimer?.invalidate()
+        restartTimer = nil
+        isSessionActive = false
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
-        partialTranscript = ""
         state = .idle
     }
 

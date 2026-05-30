@@ -414,9 +414,12 @@ struct ChatView: View {
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
 
-            pendantBridge.onTranscript = { [viewModel, appState] transcript in
-                viewModel.inputText = transcript
-                viewModel.sendMessage(userId: appState.userId)
+            let vm = viewModel
+            let state = appState
+            pendantBridge.onTranscript = { transcript in
+                print("[PendantBridge] Sending transcript to chat: \(transcript)")
+                vm.inputText = transcript
+                vm.sendMessage(userId: state.userId)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
