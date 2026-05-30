@@ -2636,6 +2636,7 @@ enum PendantConnectionState: String {
 @Observable
 final class PendantBLEManager: NSObject {
     static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
+    static let didDisconnect = Notification.Name("PendantBLEManagerDidDisconnect")
     static let namePrefix = "Oxy"
     private static let pairedPeripheralKey = "oxy_paired_pendant_uuid"
     private static let connectionTimeout: TimeInterval = 10
@@ -2861,6 +2862,7 @@ extension PendantBLEManager: CBCentralManagerDelegate {
         txCharacteristic = nil
         self.peripheral = nil
         connectionState = .disconnected
+        NotificationCenter.default.post(name: PendantBLEManager.didDisconnect, object: nil)
 
         if pairedPeripheralUUID != nil {
             print("[Pendant] Will attempt reconnection to paired pendant")

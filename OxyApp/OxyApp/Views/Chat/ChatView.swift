@@ -26,6 +26,7 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
+    @State private var pendantBridge = PendantAudioBridge()
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
@@ -195,6 +196,11 @@ struct ChatView: View {
                                 voiceInput.stopRecording()
                             }
                         )
+                    }
+
+                    // Pendant listening indicator
+                    if pendantBridge.state != .idle {
+                        PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
                     }
 
                     // Input bar
@@ -407,6 +413,11 @@ struct ChatView: View {
                 }
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
+
+            pendantBridge.onTranscript = { [viewModel, appState] transcript in
+                viewModel.inputText = transcript
+                viewModel.sendMessage(userId: appState.userId)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
             guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
@@ -1274,6 +1285,46 @@ private struct StatusIndicator: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 2)
+    }
+}
+
+// MARK: - Pendant Listening Bar
+
+private struct PendantListeningBar: View {
+    let state: PendantAudioBridge.BridgeState
+    let transcript: String?
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(state == .listening ? Color.oxyGreen : Color.oxyStone)
+                .frame(width: 10, height: 10)
+                .scaleEffect(pulse ? 1.3 : 1.0)
+                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(state == .listening ? "Pendant listening…" : "Transcribing…")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                if let transcript, !transcript.isEmpty {
+                    Text(transcript)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            if state == .transcribing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.oxyStone)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.oxySurface2)
+        .onAppear { pulse = true }
     }
 }
 
