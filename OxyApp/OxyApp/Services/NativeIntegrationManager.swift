@@ -2666,9 +2666,13 @@ final class PendantBLEManager: NSObject {
 
     var isConnected: Bool { connectionState == .connected }
 
+    @ObservationIgnored private var centralReady = false
+
     override init() {
         super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+        central = CBCentralManager(delegate: self, queue: .main, options: [
+            CBCentralManagerOptionShowPowerAlertKey: false
+        ])
     }
 
     func startRecording(completion: @escaping (Data) -> Void) {
@@ -2795,8 +2799,11 @@ final class PendantBLEManager: NSObject {
 extension PendantBLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         print("[Pendant] CBCentralManager state: \(central.state.rawValue)")
+        centralReady = central.state == .poweredOn
         if central.state == .poweredOn {
-            startScan()
+            if pairedPeripheralUUID != nil {
+                startScan()
+            }
         } else {
             connectionState = .disconnected
         }
