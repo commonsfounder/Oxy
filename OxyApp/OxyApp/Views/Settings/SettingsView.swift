@@ -168,6 +168,9 @@ struct SettingsView: View {
                             }
                         }
 
+                        // Pendant / Hardware
+                        PendantSettingsSection(pendant: NativeIntegrationManager.shared.pendant)
+
                         settingsSection(title: "Account") {
                             Button(action: exportMyData) {
                                 HStack {
@@ -1180,6 +1183,142 @@ private struct DesignPreview: View {
             .padding(.vertical, 7)
             .background(selected ? accent : Color.oxySurface3)
             .clipShape(Capsule())
+    }
+}
+
+// MARK: - PendantSettingsSection
+
+private struct PendantSettingsSection: View {
+    var pendant: PendantBLEManager
+    @State private var showUnpairConfirm = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("PENDANT")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxySub)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Status")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.oxyText)
+                        Text(statusDescription)
+                            .font(.system(size: 12))
+                            .foregroundStyle(statusColor)
+                    }
+                    Spacer()
+                    statusIndicator
+                }
+                .padding(.vertical, 4)
+
+                if let name = pendant.peripheralName, pendant.isConnected {
+                    Divider().overlay(Color.oxyLine)
+                    HStack {
+                        Text("Device")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.oxyText)
+                        Spacer()
+                        Text(name)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.oxySub)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                if let error = pendant.lastError {
+                    Divider().overlay(Color.oxyLine)
+                    Text(error)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red.opacity(0.8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                }
+
+                Divider().overlay(Color.oxyLine)
+
+                HStack(spacing: 12) {
+                    if pendant.isConnected {
+                        Button("Unpair") {
+                            showUnpairConfirm = true
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.red.opacity(0.85))
+                    } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
+                        Button("Cancel") {
+                            pendant.stopScan()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.oxySub)
+                    } else {
+                        Button("Scan for Pendant") {
+                            pendant.startScan()
+                        }
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.oxyStone)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+            }
+            .padding(16)
+            .background(Color.oxySurface2)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.oxyLine2, lineWidth: 1)
+            )
+        }
+        .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
+            Button("Unpair", role: .destructive) { pendant.unpair() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will disconnect and forget the paired pendant. You can pair again later.")
+        }
+    }
+
+    private var statusDescription: String {
+        switch pendant.connectionState {
+        case .disconnected: return "Not connected"
+        case .scanning: return "Scanning…"
+        case .connecting: return "Connecting…"
+        case .connected: return "Connected"
+        case .error: return "Error"
+        }
+    }
+
+    private var statusColor: Color {
+        switch pendant.connectionState {
+        case .connected: return Color.oxyGreen
+        case .error: return .red.opacity(0.8)
+        case .scanning, .connecting: return Color.oxyStone
+        default: return Color.oxySub
+        }
+    }
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        switch pendant.connectionState {
+        case .connected:
+            Circle()
+                .fill(Color.oxyGreen)
+                .frame(width: 10, height: 10)
+        case .scanning, .connecting:
+            ProgressView()
+                .controlSize(.small)
+                .tint(Color.oxyStone)
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(.red.opacity(0.8))
+        case .disconnected:
+            Circle()
+                .fill(Color.oxySub.opacity(0.4))
+                .frame(width: 10, height: 10)
+        }
     }
 }
 
