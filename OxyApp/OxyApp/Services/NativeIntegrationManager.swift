@@ -2667,12 +2667,14 @@ final class PendantBLEManager: NSObject {
 
     private func startScan() {
         guard central.state == .poweredOn else { return }
+        print("[Pendant] Scanning for Nordic UART Service (\(UART.service))")
         central.scanForPeripherals(withServices: [UART.service], options: nil)
     }
 }
 
 extension PendantBLEManager: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        print("[Pendant] CBCentralManager state: \(central.state.rawValue)")
         if central.state == .poweredOn { startScan() }
     }
 
@@ -2680,19 +2682,27 @@ extension PendantBLEManager: CBCentralManagerDelegate {
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
+        print("[Pendant] Discovered peripheral — name: \(peripheral.name ?? "<nil>"), UUID: \(peripheral.identifier), RSSI: \(RSSI)")
         central.stopScan()
         self.peripheral = peripheral
         peripheral.delegate = self
+        print("[Pendant] Connecting to \(peripheral.name ?? peripheral.identifier.uuidString)…")
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("[Pendant] Connected to \(peripheral.name ?? peripheral.identifier.uuidString)")
         peripheral.discoverServices([UART.service])
     }
 
     func centralManager(_ central: CBCentralManager,
                         didDisconnectPeripheral peripheral: CBPeripheral,
                         error: Error?) {
+        if let error {
+            print("[Pendant] Disconnected from \(peripheral.name ?? peripheral.identifier.uuidString) with error: \(error.localizedDescription)")
+        } else {
+            print("[Pendant] Disconnected from \(peripheral.name ?? peripheral.identifier.uuidString)")
+        }
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
@@ -2702,6 +2712,7 @@ extension PendantBLEManager: CBCentralManagerDelegate {
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
+        print("[Pendant] Failed to connect to \(peripheral.name ?? peripheral.identifier.uuidString): \(error?.localizedDescription ?? "unknown error")")
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
@@ -2711,21 +2722,32 @@ extension PendantBLEManager: CBCentralManagerDelegate {
 
 extension PendantBLEManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard error == nil,
-              let service = peripheral.services?.first(where: { $0.uuid == UART.service })
-        else { return }
+        if let error {
+            print("[Pendant] Service discovery error: \(error.localizedDescription)")
+            return
+        }
+        guard let service = peripheral.services?.first(where: { $0.uuid == UART.service }) else {
+            print("[Pendant] Nordic UART Service not found among discovered services: \(peripheral.services?.map(\.uuid) ?? [])")
+            return
+        }
+        print("[Pendant] Discovered Nordic UART Service — discovering characteristics")
         peripheral.discoverCharacteristics([UART.rx, UART.tx], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        guard error == nil else { return }
+        if let error {
+            print("[Pendant] Characteristic discovery error: \(error.localizedDescription)")
+            return
+        }
         for characteristic in service.characteristics ?? [] {
             switch characteristic.uuid {
             case UART.rx:
+                print("[Pendant] Found RX characteristic (write) \(characteristic.uuid)")
                 rxCharacteristic = characteristic
             case UART.tx:
+                print("[Pendant] Found TX characteristic (notify) \(characteristic.uuid) — subscribing")
                 txCharacteristic = characteristic
                 peripheral.setNotifyValue(true, for: characteristic)
             default:
@@ -2759,6 +2781,10 @@ extension PendantBLEManager: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
-        // Subscription confirmed; no action needed.
+        if let error {
+            print("[Pendant] Failed to subscribe to \(characteristic.uuid): \(error.localizedDescription)")
+        } else {
+            print("[Pendant] Subscribed to TX notifications — ready")
+        }
     }
 }
