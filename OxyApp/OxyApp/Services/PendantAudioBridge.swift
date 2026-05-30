@@ -59,6 +59,9 @@ final class PendantAudioBridge {
     // Gain to amplify quiet PDM mic samples
     @ObservationIgnored private let micGain: Float = 8.0
 
+    // Diagnostic counter for periodic audio logging
+    @ObservationIgnored private var diagnosticCounter: Int = 0
+
     var onTranscript: ((String) -> Void)?
 
     init() {
@@ -151,12 +154,25 @@ final class PendantAudioBridge {
         }
         pcmBuf.frameLength = UInt32(sampleCount)
 
+        var maxAbs: Int16 = 0
+        var sumAbs: Int64 = 0
         data.withUnsafeBytes { raw in
             guard let src = raw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
             guard let dst = pcmBuf.floatChannelData?[0] else { return }
             for i in 0..<sampleCount {
-                dst[i] = (Float(src[i]) / 32768.0) * micGain
+                let sample = src[i]
+                let absSample = abs(Int16(clamping: Int32(sample)))
+                if absSample > maxAbs { maxAbs = absSample }
+                sumAbs += Int64(absSample)
+                dst[i] = (Float(sample) / 32768.0) * micGain
             }
+        }
+
+        // Log audio stats periodically for debugging
+        diagnosticCounter += 1
+        if diagnosticCounter % 10 == 0 {
+            let avg = sampleCount > 0 ? Int(sumAbs / Int64(sampleCount)) : 0
+            print("[PendantBridge] Audio batch: \(sampleCount) samples, max=\(maxAbs), avg=\(avg)")
         }
 
         request.append(pcmBuf)

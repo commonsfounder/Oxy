@@ -20,13 +20,15 @@ The iOS app handles voice activity detection (VAD) — it detects when you start
 
 ## Setup — Arduino IDE
 
+**IMPORTANT:** You must use the **Seeed nRF52 mbed-enabled Boards** package (NOT the Adafruit nRF52 BSP). The Adafruit BSP has a known PDM bug that drops audio samples.
+
 1. **Add Seeed board package:**
    - Open Arduino IDE → Settings → Additional Board Manager URLs
    - Add: `https://files.seeedstudio.com/arduino/package_seeedstudio_boards_index.json`
-   - Go to Tools → Board Manager → search "Seeed nRF52" → Install
+   - Go to Tools → Board Manager → search **"Seeed nRF52 mbed"** → Install **"Seeed nRF52 mbed-enabled Boards"**
 
 2. **Select board:**
-   - Tools → Board → Seeed nRF52 Boards → Seeed XIAO nRF52840 Sense
+   - Tools → Board → Seeed nRF52 mbed-enabled Boards → **Seeed XIAO BLE Sense - nRF52840**
 
 3. **Open sketch:**
    - File → Open → navigate to `firmware/oxy-pendant/oxy-pendant.ino`
@@ -49,19 +51,23 @@ The iOS app handles voice activity detection (VAD) — it detects when you start
 5. Speak near the pendant — the app detects your voice, transcribes it, and sends it to Oxy
 6. Enable **Voice Replies** in the app's Settings for spoken responses
 
+**Debugging:** Check the Xcode console for `[PendantBridge] Audio batch:` lines — these show the audio levels being received. If `max` and `avg` are near 0, the pendant mic isn't capturing audio. If they're reasonable numbers (max > 100) but speech still isn't detected, the issue is on the recognition side.
+
 ## Audio format
 
 - **Sample rate:** 16,000 Hz
 - **Bit depth:** 16-bit signed PCM (little-endian)
 - **Channels:** 1 (mono)
 - **BLE chunk size:** 20 bytes (10 samples per BLE packet)
+- **PDM gain:** 40 (boosted from default 20, range 0-80)
 
 ## How voice detection works
 
 The pendant streams audio continuously. The iOS app (`PendantAudioBridge`) handles:
-- **Voice Activity Detection (VAD):** Monitors RMS energy of incoming audio
-- **Speech start:** When energy exceeds threshold, starts Apple Speech recognition
-- **Speech end:** After 2 seconds of silence, finalizes transcription and sends to Oxy
+- **Chunk accumulation:** Buffers BLE chunks (~0.6ms each) into ~256ms batches
+- **Format conversion:** Converts Int16 PCM → Float32 with 8× gain amplification
+- **Speech recognition:** Feeds batches into Apple's SFSpeechRecognizer
+- **Apple's built-in VAD:** Detects speech start/end automatically
 - **Automatic restart:** Ready for the next utterance immediately
 
 ## Pin mapping
