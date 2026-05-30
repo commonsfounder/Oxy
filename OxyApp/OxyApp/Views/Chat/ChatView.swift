@@ -417,9 +417,8 @@ struct ChatView: View {
             let vm = viewModel
             let state = appState
             pendantBridge.onTranscript = { transcript in
-                print("[PendantBridge] Sending transcript to chat: \(transcript)")
-                vm.inputText = transcript
-                vm.sendMessage(userId: state.userId)
+                print("[PendantBridge] Executing silently: \(transcript)")
+                vm.executeSilently(transcript, userId: state.userId)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in

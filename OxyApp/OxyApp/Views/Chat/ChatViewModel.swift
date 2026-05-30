@@ -298,6 +298,87 @@ final class ChatViewModel {
         sendMessage(userId: userId)
     }
 
+    /// Execute a voice command silently — runs through local actions + API
+    /// but does NOT add user/assistant message bubbles to the chat.
+    func executeSilently(_ command: String, userId: String) {
+        let text = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isSending else { return }
+        print("[ChatVM] Silent exec: \(text)")
+
+        if activeChatStartedAt == nil {
+            activeChatStartedAt = chatStartedAt(for: userId)
+        }
+
+        isSending = true
+        let settings = currentSettings
+
+        Task {
+            defer {
+                Task { @MainActor in
+                    self.isSending = false
+                }
+            }
+
+            // Try local actions first (music, reminders, etc.)
+            if let localResult = await executeLocalRequestWithTimeout(text) {
+                let actionResult = ActionResult(native: localResult)
+                print("[ChatVM] Silent local result: \(localResult.text)")
+                await MainActor.run {
+                    if shouldAutoOpen(actionResult, settings: settings) {
+                        openActionLink(actionResult)
+                    }
+                }
+                await chatService.logNativeLocalAction(
+                    userId: userId,
+                    message: text,
+                    result: actionResult,
+                    chatStartedAt: activeChatStartedAt
+                )
+                return
+            }
+
+            // Fall back to API
+            let nativeHints = await nativeManager.localContextHints(for: text)
+            let location = locationManager.locationDict
+
+            let stream = chatService.sendMessage(
+                userId: userId,
+                message: text,
+                chatStartedAt: activeChatStartedAt,
+                settings: settings,
+                location: location,
+                nativeHints: nativeHints
+            )
+
+            for await event in stream {
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    switch event {
+                    case .actions(let results):
+                        self.openDeepLinks(results)
+                        // For silent exec, resolve music actions directly
+                        for result in results where result.action == "play_music" && result.success {
+                            let query = (result.cardText ?? result.text ?? "")
+                                .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+                                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+                            if !query.isEmpty {
+                                Task {
+                                    _ = await self.executeNativeMusicWithTimeout(query: query)
+                                }
+                            }
+                        }
+                    case .audio(let base64Audio, _):
+                        self.playAudio(base64Audio)
+                    case .done, .error:
+                        break
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+    }
+
     func retryLastFailedMessage(userId: String) {
         guard let lastFailedText, !isSending else { return }
         networkError = nil
