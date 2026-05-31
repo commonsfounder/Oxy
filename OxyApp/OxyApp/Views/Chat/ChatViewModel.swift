@@ -28,6 +28,9 @@ final class ChatViewModel {
     var historySnapshotLabel: String?
     var networkError: String?
 
+    /// Called on the main actor when a silent pendant execution finishes.
+    var onSilentExecComplete: (() -> Void)?
+
     @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
@@ -316,6 +319,7 @@ final class ChatViewModel {
             defer {
                 Task { @MainActor in
                     self.isSending = false
+                    self.onSilentExecComplete?()
                 }
             }
 

@@ -2657,14 +2657,9 @@ final class PendantBLEManager: NSObject {
     @ObservationIgnored private(set) var rxCharacteristic: CBCharacteristic?
     @ObservationIgnored private(set) var txCharacteristic: CBCharacteristic?
 
-    @ObservationIgnored private var isRecording = false
-    @ObservationIgnored private var audioBuffer = Data()
-    @ObservationIgnored private var recordingCompletion: ((Data) -> Void)?
     @ObservationIgnored private var connectionTimer: Timer?
     @ObservationIgnored private var retryCount = 0
     private static let maxRetries = 3
-
-    private static let doneSignal = Data("DONE".utf8)
 
     var isConnected: Bool { connectionState == .connected }
 
@@ -2677,21 +2672,13 @@ final class PendantBLEManager: NSObject {
         ])
     }
 
-    func startRecording(completion: @escaping (Data) -> Void) {
-        audioBuffer = Data()
-        recordingCompletion = completion
-        isRecording = true
-        write(Data("START".utf8))
-    }
-
-    func stopRecording() {
-        write(Data("STOP".utf8))
-    }
-
-    func write(_ data: Data) {
+    /// Send a short ASCII command to the pendant (e.g. "THINK", "DONE", "PING").
+    func sendCommand(_ cmd: String) {
         guard let p = peripheral, let rx = rxCharacteristic,
               p.state == .connected else { return }
-        p.writeValue(data, for: rx, type: .withResponse)
+        let data = Data(cmd.utf8)
+        // Use withoutResponse for low-latency feedback; pendant doesn't need ACK
+        p.writeValue(data, for: rx, type: .withoutResponse)
     }
 
     func startScan() {
@@ -2943,20 +2930,7 @@ extension PendantBLEManager: CBPeripheralDelegate {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
 
-        if isRecording {
-            if data == PendantBLEManager.doneSignal {
-                isRecording = false
-                let completed = audioBuffer
-                audioBuffer = Data()
-                let handler = recordingCompletion
-                recordingCompletion = nil
-                handler?(completed)
-            } else {
-                audioBuffer.append(data)
-            }
-        } else {
-            NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
-        }
+        NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
