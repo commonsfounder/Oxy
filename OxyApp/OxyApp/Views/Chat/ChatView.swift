@@ -420,6 +420,9 @@ struct ChatView: View {
                 print("[PendantBridge] Executing silently: \(transcript)")
                 vm.executeSilently(transcript, userId: state.userId)
             }
+            vm.onSilentExecComplete = {
+                NativeIntegrationManager.shared.pendant.sendCommand("DONE")
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
             guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
