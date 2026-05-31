@@ -26,7 +26,7 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
-    @State private var pendantBridge = PendantAudioBridge()
+    @State private var pendantLive = PendantLiveService()
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
@@ -199,8 +199,8 @@ struct ChatView: View {
                     }
 
                     // Pendant listening indicator
-                    if pendantBridge.state != .idle {
-                        PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
+                    if pendantLive.liveState != .idle {
+                        PendantListeningBar(state: pendantLive.liveState, transcript: pendantLive.userTranscript)
                     }
 
                     // Input bar
@@ -416,12 +416,26 @@ struct ChatView: View {
 
             let vm = viewModel
             let state = appState
-            pendantBridge.onTranscript = { transcript in
-                print("[PendantBridge] Executing silently: \(transcript)")
-                vm.executeSilently(transcript, userId: state.userId)
-            }
-            vm.onSilentExecComplete = {
-                NativeIntegrationManager.shared.pendant.sendCommand("DONE")
+            // Native actions signalled by Gemini Live (play_music, make_call)
+            // are dispatched here so ChatViewModel can use its existing native handlers.
+            NotificationCenter.default.addObserver(
+                forName: .pendantNativeAction,
+                object: nil,
+                queue: .main
+            ) { notification in
+                guard let signal = notification.userInfo?["signal"] as? String else { return }
+                switch signal {
+                case "play_music":
+                    let query = (notification.userInfo?["data"] as? [String: Any])?["query"] as? String ?? ""
+                    vm.executeSilently("play \(query)", userId: state.userId)
+                case "make_call":
+                    let contact = (notification.userInfo?["data"] as? [String: Any])?["contact"] as? String ?? ""
+                    if let url = URL(string: "tel://\(contact.filter { $0.isNumber || $0 == "+" })") {
+                        UIApplication.shared.open(url)
+                    }
+                default:
+                    break
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
@@ -1296,20 +1310,38 @@ private struct StatusIndicator: View {
 // MARK: - Pendant Listening Bar
 
 private struct PendantListeningBar: View {
-    let state: PendantAudioBridge.BridgeState
+    let state: PendantLiveService.LiveState
     let transcript: String?
     @State private var pulse = false
+
+    private var dotColor: Color {
+        switch state {
+        case .idle:       Color.oxyStone
+        case .connecting: Color.oxyStone
+        case .listening:  Color.oxyGreen
+        case .processing: Color.oxyStone
+        }
+    }
+
+    private var label: String {
+        switch state {
+        case .idle:        ""
+        case .connecting:  "Pendant connecting…"
+        case .listening:   "Pendant listening…"
+        case .processing:  "Processing…"
+        }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(state == .listening ? Color.oxyGreen : Color.oxyStone)
+                .fill(dotColor)
                 .frame(width: 10, height: 10)
-                .scaleEffect(pulse ? 1.3 : 1.0)
+                .scaleEffect(pulse && state == .listening ? 1.3 : 1.0)
                 .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(state == .listening ? "Pendant listening…" : "Transcribing…")
+                Text(label)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
                 if let transcript, !transcript.isEmpty {
@@ -1320,7 +1352,7 @@ private struct PendantListeningBar: View {
                 }
             }
             Spacer()
-            if state == .transcribing {
+            if state == .connecting || state == .processing {
                 ProgressView()
                     .controlSize(.small)
                     .tint(Color.oxyStone)

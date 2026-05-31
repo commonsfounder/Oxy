@@ -256,6 +256,30 @@ const LIVE_FUNCTION_DECLARATIONS = [
       required: ['topic'],
       additionalProperties: false
     }
+  },
+  {
+    name: 'play_music',
+    description: 'Play a song, artist, album, or playlist on the user\'s phone.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to play — song title, artist, genre, or playlist name' }
+      },
+      required: ['query'],
+      additionalProperties: false
+    }
+  },
+  {
+    name: 'make_call',
+    description: 'Make a phone call to a contact or number.',
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        contact: { type: 'string', description: 'Contact name or phone number to call' }
+      },
+      required: ['contact'],
+      additionalProperties: false
+    }
   }
 ];
 
@@ -480,9 +504,19 @@ async function executeFunctionCalls(userId, functionCalls = []) {
     let result;
 
     try {
-      result = name === 'forget_memory'
-        ? await forgetMemory(userId, input)
-        : await dispatch(userId, name, input);
+      if (name === 'forget_memory') {
+        result = await forgetMemory(userId, input);
+      } else if (name === 'play_music') {
+        // Native iOS action — signal the client to handle it
+        const query = String(input.query || '').trim();
+        result = { success: true, text: `Playing ${query || 'music'} on your phone.`, nativeSignal: 'play_music', query };
+      } else if (name === 'make_call') {
+        // Native iOS action — signal the client to handle it
+        const contact = String(input.contact || '').trim();
+        result = { success: true, text: `Calling ${contact}.`, nativeSignal: 'make_call', contact };
+      } else {
+        result = await dispatch(userId, name, input);
+      }
     } catch (error) {
       result = { success: false, error: error?.message || `Failed to execute ${name}.` };
     }
