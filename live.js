@@ -7,9 +7,7 @@ const { verifySignedPayload } = require('./auth');
 const supabase = createSupabaseServiceClient();
 
 const LIVE_MODEL = process.env.OXY_LIVE_MODEL
-  || (String(process.env.GOOGLE_GENAI_USE_ENTERPRISE || '').toLowerCase() === 'true'
-    ? 'gemini-live-2.5-flash-preview-native-audio'
-    : 'gemini-live-2.5-flash-preview');
+  || 'gemini-live-2.5-flash-native-audio';
 
 const LIVE_VOICE_SET = new Set([
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
