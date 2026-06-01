@@ -107,6 +107,28 @@ struct ChatService {
         )
     }
 
+    /// Polish a raw voice transcript through Gemini — removes filler words,
+    /// fixes grammar, preserves intent.  Falls back to the original text on error.
+    func polishTranscript(userId: String, transcript: String) async -> String {
+        do {
+            let body: [String: Any] = [
+                "userId": userId,
+                "transcript": transcript
+            ]
+            let data = try await api.request(
+                path: "/polish-transcript",
+                method: "POST",
+                body: body
+            )
+            struct PolishResponse: Decodable { let polished: String }
+            let decoded = try JSONDecoder().decode(PolishResponse.self, from: data)
+            return decoded.polished.isEmpty ? transcript : decoded.polished
+        } catch {
+            print("[ChatService] Polish failed, using raw transcript: \(error.localizedDescription)")
+            return transcript
+        }
+    }
+
     func sendImageMessage(
         userId: String,
         message: String,

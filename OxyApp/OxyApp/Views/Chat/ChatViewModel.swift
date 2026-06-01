@@ -304,9 +304,9 @@ final class ChatViewModel {
     /// Execute a voice command silently — runs through local actions + API
     /// but does NOT add user/assistant message bubbles to the chat.
     func executeSilently(_ command: String, userId: String) {
-        let text = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
-        print("[ChatVM] Silent exec: \(text)")
+        let rawText = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawText.isEmpty, !isSending else { return }
+        print("[ChatVM] Silent exec (raw): \(rawText)")
 
         if activeChatStartedAt == nil {
             activeChatStartedAt = chatStartedAt(for: userId)
@@ -321,6 +321,12 @@ final class ChatViewModel {
                     self.isSending = false
                     self.onSilentExecComplete?()
                 }
+            }
+
+            // Polish the raw transcript — removes filler words, fixes grammar
+            let text = await chatService.polishTranscript(userId: userId, transcript: rawText)
+            if text != rawText {
+                print("[ChatVM] Polished: \(text)")
             }
 
             // Try local actions first (music, reminders, etc.)
