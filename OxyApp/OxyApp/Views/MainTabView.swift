@@ -6,51 +6,120 @@ struct MainTabView: View {
     @State private var selectedTab = Tab.chat
 
     enum Tab: String {
-        case chat, proactive, history, connectors, settings
+        case chat, today, more
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
             ChatView()
                 .tabItem {
-                    Image(systemName: "bubble.left.fill")
+                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
                     Text("Chat")
                 }
                 .tag(Tab.chat)
 
             ProactiveView()
                 .tabItem {
-                    Image(systemName: "sparkles")
+                    Image(systemName: selectedTab == .today ? "sun.max.fill" : "sun.max")
                     Text("Today")
                 }
-                .tag(Tab.proactive)
+                .tag(Tab.today)
 
-            HistoryView()
+            MoreView()
                 .tabItem {
-                    Image(systemName: "clock.fill")
-                    Text("Chats")
+                    Image(systemName: selectedTab == .more ? "square.grid.2x2.fill" : "square.grid.2x2")
+                    Text("More")
                 }
-                .tag(Tab.history)
-
-            ConnectorsView()
-                .tabItem {
-                    Image(systemName: "link")
-                    Text("Connectors")
-                }
-                .tag(Tab.connectors)
-
-            SettingsView()
-                .tabItem {
-                    Image(systemName: "gearshape.fill")
-                    Text("Settings")
-                }
-                .tag(Tab.settings)
+                .tag(Tab.more)
         }
         .tint(Color.oxyStone)
         .id(accentColor)
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }
+    }
+}
+
+// MARK: - More View (consolidates History, Connectors, Settings)
+
+struct MoreView: View {
+    @Environment(AppState.self) private var appState
+    @State private var destination: MoreDestination?
+
+    enum MoreDestination: Identifiable {
+        case history, connectors, settings
+        var id: String { "\(self)" }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.oxyBg.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: 8) {
+                        moreSection {
+                            Button { destination = .history } label: {
+                                moreRow(icon: "clock.fill", title: "Chats", color: .oxySub)
+                            }
+
+                            Button { destination = .connectors } label: {
+                                moreRow(icon: "link", title: "Connectors", color: .oxyStone)
+                            }
+                        }
+
+                        moreSection {
+                            Button { destination = .settings } label: {
+                                moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub)
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("More")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .fullScreenCover(item: $destination) { dest in
+                switch dest {
+                case .history: HistoryView()
+                case .connectors: ConnectorsView()
+                case .settings: SettingsView()
+                }
+            }
+        }
+    }
+
+    private func moreSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+        }
+        .background(Color.oxySurface2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func moreRow(icon: String, title: String, color: Color) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 28, height: 28)
+                .background(color.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxyDim)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 }
 

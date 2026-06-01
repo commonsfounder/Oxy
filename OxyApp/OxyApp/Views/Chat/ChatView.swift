@@ -253,37 +253,10 @@ struct ChatView: View {
                 }
 
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.oxyStone.opacity(0.3), Color.oxyStone.opacity(0.15)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 34, height: 34)
-
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyStone)
-                        }
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Oxy")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.oxyText)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.oxyGreen)
-                                    .frame(width: 6, height: 6)
-                                Text("Online")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.oxySub)
-                            }
-                        }
-                    }
+                    Text("Oxy")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.oxyText)
+                        .tracking(0.3)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
