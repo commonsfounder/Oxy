@@ -808,7 +808,7 @@ final class ChatViewModel {
 
     // MARK: - Deep Links
 
-    private func openDeepLinks(_ results: [ActionResult]) {
+    func openDeepLinks(_ results: [ActionResult]) {
         let settings = currentSettings
         if settings.reviewBeforeOpeningApps { return }
         for result in results {
