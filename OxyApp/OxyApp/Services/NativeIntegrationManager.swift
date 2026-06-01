@@ -2694,14 +2694,24 @@ final class PendantBLEManager: NSObject {
                 startConnectionTimer()
                 central.connect(cached, options: nil)
                 return
+            } else {
+                // Saved UUID no longer known to the system (e.g. after a BSP
+                // change that altered the BLE MAC address).  Clear it so we
+                // fall through to a fresh scan.
+                print("[Pendant] Saved peripheral \(savedUUID.uuidString) no longer available — clearing")
+                clearPairedPeripheralUUID()
             }
         }
 
-        print("[Pendant] Scanning for Nordic UART Service (\(UART.service))")
+        print("[Pendant] Scanning for peripherals (name prefix: \(Self.namePrefix))")
         connectionState = .scanning
         lastError = nil
+        // Scan with nil services: ArduinoBLE's advertising packet (31 bytes max)
+        // may not fit both the local name and the 128-bit service UUID, so the
+        // UUID can get silently dropped.  We filter by name prefix instead and
+        // validate the UART service after connection during service discovery.
         central.scanForPeripherals(
-            withServices: [UART.service],
+            withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
     }
@@ -2771,6 +2781,14 @@ final class PendantBLEManager: NSObject {
         rxCharacteristic = nil
         txCharacteristic = nil
         peripheral = nil
+
+        // If we timed out trying to reconnect to a saved peripheral, its UUID
+        // is likely stale (e.g. the firmware BSP changed the BLE MAC).  Clear
+        // it immediately so the next attempt does a fresh name-based scan.
+        if pairedPeripheralUUID != nil {
+            print("[Pendant] Clearing stale paired UUID after timeout")
+            clearPairedPeripheralUUID()
+        }
 
         retryCount += 1
         if retryCount < Self.maxRetries {
