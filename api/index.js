@@ -3332,6 +3332,49 @@ app.post('/native/local-action', async (req, res) => {
   }
 });
 
+// ── Pendant speech polish ──────────────────────────────────────────────────
+// Takes raw speech transcription and returns cleaned, polished text.
+// Removes filler words, fixes grammar, normalises phrasing — but preserves
+// the original intent so commands still execute correctly.
+app.post('/polish-transcript', chatRateLimiter, async (req, res) => {
+  try {
+    const { userId, transcript } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!transcript?.trim()) {
+      return res.status(400).json({ error: 'transcript is required.' });
+    }
+
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const result = await model.generateContent({
+      contents: [{
+        role: 'user',
+        parts: [{
+          text: `You are a speech-to-text post-processor. Your job is to clean up raw voice transcriptions into clear, polished text while preserving the speaker's exact intent.
+
+Rules:
+- Remove filler words (um, uh, like, you know, basically, so, well, I mean)
+- Fix grammar, punctuation, and capitalisation
+- Remove false starts and repetitions
+- Keep the meaning and tone identical — do NOT add, remove, or change any intent
+- If the input is a command or request (e.g. "play music", "send a message", "set a timer"), keep it as a direct command
+- If the input is already clean, return it unchanged
+- Return ONLY the polished text, nothing else — no quotes, no explanation
+
+Raw transcription: ${transcript}`
+        }]
+      }],
+      generationConfig: { temperature: 0, maxOutputTokens: 1024 }
+    });
+
+    const polished = (result.response?.text?.() || transcript).trim();
+    res.json({ polished });
+  } catch (err) {
+    // If polishing fails, return the original transcript — never block execution
+    console.error('[polish-transcript] Error:', err.message);
+    res.json({ polished: req.body?.transcript?.trim() || '' });
+  }
+});
+
 app.get('/briefings/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
