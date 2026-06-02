@@ -304,8 +304,8 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
-const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3-flash-preview';
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.5-flash';
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();

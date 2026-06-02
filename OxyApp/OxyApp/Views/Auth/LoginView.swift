@@ -60,9 +60,16 @@ struct LoginView: View {
                             .font(.system(size: 17, weight: .semibold))
                             .frame(maxWidth: .infinity)
                             .frame(height: 54)
-                            .background(Color.oxyStone)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                             .foregroundStyle(Color.oxyOnAccent)
                             .clipShape(RoundedRectangle(cornerRadius: 16))
+                            .shadow(color: Color.oxyStone.opacity(0.25), radius: 12, y: 6)
                     }
                     .padding(.horizontal, 28)
                     .padding(.bottom, 48)
@@ -113,45 +120,67 @@ private struct OnboardingSlide: View {
     let subIcon: String?
     let title: String
     let content: String
+    @State private var appeared = false
 
     var body: some View {
-        VStack(spacing: 36) {
+        VStack(spacing: 44) {
             Spacer()
 
             ZStack {
+                // Outer glow ring
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.oxyStone.opacity(0.12), Color.oxyStone.opacity(0.03), .clear],
+                            center: .center,
+                            startRadius: 40,
+                            endRadius: 110
+                        )
+                    )
+                    .frame(width: 180, height: 180)
+                    .scaleEffect(appeared ? 1.0 : 0.8)
+
+                // Inner circle
                 Circle()
                     .fill(Color.oxyStone.opacity(0.1))
-                    .frame(width: 148, height: 148)
+                    .frame(width: 120, height: 120)
 
-                VStack(spacing: 10) {
+                VStack(spacing: 6) {
                     Image(systemName: icon)
-                        .font(.system(size: 54, weight: .semibold))
+                        .font(.system(size: 44, weight: .medium))
                         .foregroundStyle(Color.oxyStone)
+                        .symbolEffect(.pulse, isActive: appeared)
 
                     if let subIcon {
                         Image(systemName: subIcon)
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(Color.oxyStone.opacity(0.55))
+                            .font(.system(size: 16, weight: .medium))
+                            .foregroundStyle(Color.oxyStone.opacity(0.5))
                     }
                 }
             }
 
             VStack(spacing: 14) {
                 Text(title)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.oxyText)
 
                 Text(content)
                     .font(.system(size: 16))
                     .foregroundStyle(Color.oxySub)
                     .multilineTextAlignment(.center)
-                    .lineSpacing(3)
+                    .lineSpacing(4)
             }
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 12)
 
             Spacer()
             Spacer()
         }
         .padding(.horizontal, 36)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+        }
+        .onDisappear { appeared = false }
     }
 }
 

@@ -24,30 +24,29 @@ struct HistoryView: View {
                     }
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(sessions) { session in
-                                Button {
-                                    NotificationCenter.default.post(
-                                        name: .oxyJumpToChat,
-                                        object: nil,
-                                        userInfo: [
-                                            "sessionId": session.id,
-                                            "lastAt": session.lastAt ?? ""
-                                        ]
-                                    )
-                                } label: {
-                                    SessionRow(session: session)
-                                }
-                                .buttonStyle(.plain)
-
-                                if session.id != sessions.last?.id {
-                                    Divider()
-                                        .overlay(Color.oxyLine)
-                                        .padding(.horizontal, 16)
+                        LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+                            ForEach(groupedSessions, id: \.label) { group in
+                                Section {
+                                    ForEach(group.sessions) { session in
+                                        Button {
+                                            NotificationCenter.default.post(
+                                                name: .oxyJumpToChat,
+                                                object: nil,
+                                                userInfo: [
+                                                    "sessionId": session.id,
+                                                    "lastAt": session.lastAt ?? ""
+                                                ]
+                                            )
+                                        } label: {
+                                            SessionRow(session: session)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                } header: {
+                                    SectionHeader(label: group.label)
                                 }
                             }
                         }
-                        .padding(.vertical, 8)
                     }
                 }
             }
@@ -64,6 +63,46 @@ struct HistoryView: View {
         }
     }
 
+    // MARK: - Date grouping
+
+    private struct SessionGroup {
+        let label: String
+        let sessions: [ChatSessionSummary]
+    }
+
+    private var groupedSessions: [SessionGroup] {
+        let calendar = Calendar.current
+        let now = Date()
+
+        var today: [ChatSessionSummary] = []
+        var yesterday: [ChatSessionSummary] = []
+        var thisWeek: [ChatSessionSummary] = []
+        var earlier: [ChatSessionSummary] = []
+
+        for session in sessions {
+            guard let date = Date.oxyParse(session.lastAt ?? session.startedAt) else {
+                earlier.append(session)
+                continue
+            }
+            if calendar.isDateInToday(date) {
+                today.append(session)
+            } else if calendar.isDateInYesterday(date) {
+                yesterday.append(session)
+            } else if let weekAgo = calendar.date(byAdding: .day, value: -7, to: now), date >= weekAgo {
+                thisWeek.append(session)
+            } else {
+                earlier.append(session)
+            }
+        }
+
+        var groups: [SessionGroup] = []
+        if !today.isEmpty { groups.append(SessionGroup(label: "Today", sessions: today)) }
+        if !yesterday.isEmpty { groups.append(SessionGroup(label: "Yesterday", sessions: yesterday)) }
+        if !thisWeek.isEmpty { groups.append(SessionGroup(label: "This Week", sessions: thisWeek)) }
+        if !earlier.isEmpty { groups.append(SessionGroup(label: "Earlier", sessions: earlier)) }
+        return groups
+    }
+
     private func loadSessions() async {
         do {
             let data = try await APIClient.shared.request(
@@ -78,26 +117,55 @@ struct HistoryView: View {
     }
 }
 
+// MARK: - Section Header
+
+private struct SectionHeader: View {
+    let label: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxySub)
+                .textCase(.uppercase)
+                .tracking(0.5)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.oxyBg)
+    }
+}
+
 // MARK: - Session Row
 
 private struct SessionRow: View {
     let session: ChatSessionSummary
 
     var body: some View {
-        HStack(spacing: 0) {
-            Text(session.title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 0) {
+                Text(session.title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                    .lineLimit(1)
 
-            Spacer(minLength: 12)
+                Spacer(minLength: 12)
 
-            Text(session.relativeTime)
-                .font(.system(size: 13))
-                .foregroundStyle(Color.oxyDim)
+                Text(session.relativeTime)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxyDim)
+            }
+
+            if !session.preview.isEmpty {
+                Text(session.preview)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.oxySub)
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
     }
 }
 

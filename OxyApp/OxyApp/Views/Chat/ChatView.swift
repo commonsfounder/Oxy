@@ -27,6 +27,7 @@ struct ChatView: View {
     @State private var pendingIsImage = true
     @State private var isOffline = false
     @State private var pendantBridge = PendantAudioBridge()
+    @State private var liveSession = PendantLiveSession()
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
@@ -198,8 +199,10 @@ struct ChatView: View {
                         )
                     }
 
-                    // Pendant listening indicator
-                    if pendantBridge.state != .idle {
+                    // Pendant listening indicator — prefer Live session state
+                    if liveSession.state != .disconnected {
+                        PendantLiveBar(state: liveSession.state, userTranscript: liveSession.userTranscript, assistantTranscript: liveSession.assistantTranscript)
+                    } else if pendantBridge.state != .idle {
                         PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
                     }
 
@@ -250,37 +253,10 @@ struct ChatView: View {
                 }
 
                 ToolbarItem(placement: .principal) {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.oxyStone.opacity(0.3), Color.oxyStone.opacity(0.15)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 34, height: 34)
-
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyStone)
-                        }
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Oxy")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.oxyText)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.oxyGreen)
-                                    .frame(width: 6, height: 6)
-                                Text("Online")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.oxySub)
-                            }
-                        }
-                    }
+                    Text("Oxy")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.oxyText)
+                        .tracking(0.3)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -416,7 +392,15 @@ struct ChatView: View {
 
             let vm = viewModel
             let state = appState
+
+            // Live session handles actions via WebSocket — no silent exec needed
+            liveSession.onActionResults = { results in
+                vm.openDeepLinks(results)
+            }
+
+            // Fallback: if Live session isn't available, use the old bridge
             pendantBridge.onTranscript = { transcript in
+                guard liveSession.state == .disconnected else { return }
                 print("[PendantBridge] Executing silently: \(transcript)")
                 vm.executeSilently(transcript, userId: state.userId)
             }
@@ -1321,6 +1305,76 @@ private struct PendantListeningBar: View {
             }
             Spacer()
             if state == .transcribing {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.oxyStone)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.oxySurface2)
+        .onAppear { pulse = true }
+    }
+}
+
+// MARK: - Pendant Live Session Bar
+
+private struct PendantLiveBar: View {
+    let state: PendantLiveSession.SessionState
+    let userTranscript: String?
+    let assistantTranscript: String?
+    @State private var pulse = false
+
+    private var statusText: String {
+        switch state {
+        case .disconnected: return "Pendant offline"
+        case .connecting: return "Connecting…"
+        case .ready, .listening: return "Pendant listening…"
+        case .speaking: return "Oxy speaking…"
+        }
+    }
+
+    private var dotColor: Color {
+        switch state {
+        case .disconnected: return .oxyDim
+        case .connecting: return .oxyStone
+        case .ready, .listening: return .oxyGreen
+        case .speaking: return .oxyStone
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(dotColor)
+                .frame(width: 10, height: 10)
+                .scaleEffect(pulse ? 1.3 : 1.0)
+                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(statusText)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyText)
+                if let userTranscript, !userTranscript.isEmpty {
+                    Text(userTranscript)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxySub)
+                        .lineLimit(1)
+                }
+                if let assistantTranscript, !assistantTranscript.isEmpty {
+                    Text(assistantTranscript)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.oxyStone)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            if state == .speaking {
+                Image(systemName: "waveform")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.oxyStone)
+                    .symbolEffect(.variableColor.iterative, isActive: true)
+            } else if state == .connecting {
                 ProgressView()
                     .controlSize(.small)
                     .tint(Color.oxyStone)
