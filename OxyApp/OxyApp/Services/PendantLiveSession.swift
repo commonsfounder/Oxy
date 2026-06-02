@@ -52,7 +52,13 @@ final class PendantLiveSession {
     /// keeps handling audio — the user is never left dead if the live handshake
     /// stalls or the backend is unreachable. Live "upgrades" once it's ready.
     var isActive: Bool {
-        state == .ready || state == .listening || state == .speaking
+        if state != .ready && state != .listening && state != .speaking { return false }
+        // If we've been "active" for a while without any server response,
+        // treat the session as dead so audio falls back to the local bridge.
+        if let ts = lastServerEventTime, Date().timeIntervalSince(ts) > healthTimeout {
+            return false
+        }
+        return true
     }
 
     // Pendant sends 16-bit PCM @ 16kHz; batch ~100ms before forwarding
@@ -61,6 +67,11 @@ final class PendantLiveSession {
 
     // Track whether we have active pendant audio
     @ObservationIgnored private var isForwardingAudio = false
+
+    // Health: timestamp of the last meaningful server event. If nothing arrives
+    // for `healthTimeout` seconds, isActive returns false so audio falls back.
+    @ObservationIgnored private var lastServerEventTime: Date?
+    @ObservationIgnored private let healthTimeout: TimeInterval = 10
 
     init() {
         connectObserver = NotificationCenter.default.addObserver(
@@ -117,6 +128,7 @@ final class PendantLiveSession {
 
         state = .connecting
         errorMessage = nil
+        lastServerEventTime = nil
         print("[LiveSession] Connecting to \(url)")
 
         let config = URLSessionConfiguration.default
@@ -133,6 +145,15 @@ final class PendantLiveSession {
         sendJSON(["type": "session.start", "voice": voiceName])
 
         receiveLoop()
+
+        // If the server doesn't respond with session.ready within 8 s,
+        // give up so the local bridge can take over immediately.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard let self, self.state == .connecting else { return }
+            print("[LiveSession] Connection timeout — giving up")
+            self.disconnect()
+        }
     }
 
     func disconnect() {
@@ -148,6 +169,7 @@ final class PendantLiveSession {
         pendingAudioData = Data()
         userTranscript = nil
         assistantTranscript = nil
+        lastServerEventTime = nil
     }
 
     // MARK: - WebSocket communication
@@ -201,6 +223,8 @@ final class PendantLiveSession {
         guard let data = text.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = json["type"] as? String else { return }
+
+        lastServerEventTime = Date()
 
         switch type {
         case "session.ready":
@@ -281,7 +305,10 @@ final class PendantLiveSession {
     /// Routed audio sink. Called by ChatView's audio router while this session
     /// owns the audio path. Buffers until ready, then forwards over the socket.
     func ingest(_ data: Data) {
-        guard state == .ready || state == .listening || state == .speaking else { return }
+        guard state == .ready || state == .listening || state == .speaking else {
+            // Should not happen — the router checks isActive before calling ingest.
+            return
+        }
 
         pendingAudioData.append(data)
         if pendingAudioData.count >= minBytesPerForward {

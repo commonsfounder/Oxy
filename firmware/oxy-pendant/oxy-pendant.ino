@@ -44,7 +44,10 @@ volatile int     pdmBytesAvail = 0;
 bool isStreaming = false;
 
 // ── BLE device name ────────────────────────────────────────────
-static const char* DEVICE_NAME = "OxyPendant";
+// Keep ≤5 chars so name + 128-bit service UUID fits in the 31-byte
+// BLE advertising packet.  ArduinoBLE silently drops the UUID if
+// the packet overflows, which stops iOS service-based scanning.
+static const char* DEVICE_NAME = "Oxy";
 
 // ── Non-blocking LED blink state machine ──────────────────────
 struct LEDBlinker {
