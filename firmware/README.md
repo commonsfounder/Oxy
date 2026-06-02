@@ -4,7 +4,7 @@ Arduino firmware for the Oxy pendant, targeting the **Seeed XIAO nRF52840 Sense*
 
 ## What it does
 
-1. Advertises over BLE as **"OxyPendant"** using Nordic UART Service
+1. Advertises over BLE as **"Oxy"** using Nordic UART Service
 2. Waits for the iOS app to connect
 3. **Immediately starts streaming** audio from the onboard PDM microphone once connected
 4. Streams 16-bit PCM @ 16 kHz mono over BLE UART in 20-byte chunks
@@ -20,15 +20,15 @@ The iOS app handles voice activity detection (VAD) — it detects when you start
 
 ## Setup — Arduino IDE
 
-**IMPORTANT:** You must use the **Seeed nRF52 mbed-enabled Boards** package (NOT the Adafruit nRF52 BSP). The Adafruit BSP has a known PDM bug that drops audio samples.
+Uses the **Adafruit nRF52 BSP** with the Seeed XIAO nRF52840 Sense board.
 
-1. **Add Seeed board package:**
+1. **Install board package:**
    - Open Arduino IDE → Settings → Additional Board Manager URLs
-   - Add: `https://files.seeedstudio.com/arduino/package_seeedstudio_boards_index.json`
-   - Go to Tools → Board Manager → search **"Seeed nRF52 mbed"** → Install **"Seeed nRF52 mbed-enabled Boards"**
+   - Add: `https://www.adafruit.com/package_adafruit_index.json`
+   - Go to Tools → Board Manager → search **"Adafruit nRF52"** → Install **"Adafruit nRF52"**
 
 2. **Select board:**
-   - Tools → Board → Seeed nRF52 mbed-enabled Boards → **Seeed XIAO BLE Sense - nRF52840**
+   - Tools → Board → Adafruit nRF52 → **Seeed XIAO nRF52840 Sense**
 
 3. **Open sketch:**
    - File → Open → navigate to `firmware/oxy-pendant/oxy-pendant.ino`
