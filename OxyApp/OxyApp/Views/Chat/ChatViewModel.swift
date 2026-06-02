@@ -79,7 +79,9 @@ final class ChatViewModel {
                 isViewingHistorySnapshot = false
                 historySnapshotLabel = nil
             }
-        } catch {}
+        } catch {
+            print("[ChatVM] History load failed: \(error.localizedDescription)")
+        }
     }
 
     func loadHistoryAround(userId: String, createdAt: String, messageId: String? = nil) async {
@@ -95,7 +97,9 @@ final class ChatViewModel {
                 historySnapshotLabel = label
                 scrollTargetMessageID = targetID
             }
-        } catch {}
+        } catch {
+            print("[ChatVM] History-around load failed: \(error.localizedDescription)")
+        }
     }
 
     func returnToCurrentChat(userId: String) async {

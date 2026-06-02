@@ -181,7 +181,9 @@ final class NativeIntegrationManager: NSObject {
             if granted {
                 UIApplication.shared.registerForRemoteNotifications()
             }
-        } catch {}
+        } catch {
+            print("[Native] Notification permission error: \(error.localizedDescription)")
+        }
     }
 
     func registerPushToken(_ deviceToken: Data, userId: String) async {
@@ -198,7 +200,9 @@ final class NativeIntegrationManager: NSObject {
                     "timezone": TimeZone.current.identifier
                 ]
             )
-        } catch {}
+        } catch {
+            print("[Native] Push token registration failed: \(error.localizedDescription)")
+        }
     }
 
     func requestNativePermissions(userId: String) async {
@@ -226,7 +230,9 @@ final class NativeIntegrationManager: NSObject {
         }
         do {
             _ = try await APIClient.shared.request(path: "/native/context", method: "POST", body: body)
-        } catch {}
+        } catch {
+            print("[Native] Context sync failed: \(error.localizedDescription)")
+        }
     }
 
     func markCurrentLocationAsHome(userId: String) async {
@@ -789,28 +795,20 @@ final class NativeIntegrationManager: NSObject {
         ]
     }
 
+    private static let musicContentKeywords: Set<String> = ["music", "song", "playlist", "album", "skip"]
+    private static let musicExactKeywords: Set<String> = ["pause", "resume", "resume it", "unpause", "next", "previous", "back"]
+    private static let musicPrefixes = ["pause ", "resume ", "unpause ", "play ", "listen to "]
+
+    private func isMusicRelated(_ lower: String) -> Bool {
+        Self.musicContentKeywords.contains(where: { lower.contains($0) })
+        || Self.musicExactKeywords.contains(lower)
+        || Self.musicPrefixes.contains(where: { lower.hasPrefix($0) })
+        || isMusicAddRequest(lower)
+    }
+
     private func handleNativeMusicRequest(_ message: String) async -> NativeLocalActionResult? {
         let lower = message.lowercased()
-        guard lower.contains("music")
-            || lower.contains("song")
-            || lower.contains("playlist")
-            || lower.contains("album")
-            || lower == "pause"
-            || lower.hasPrefix("pause ")
-            || lower == "resume"
-            || lower.hasPrefix("resume ")
-            || lower == "resume it"
-            || lower == "unpause"
-            || lower.hasPrefix("unpause ")
-            || lower == "next"
-            || lower == "previous"
-            || lower == "back"
-            || lower.contains("pause playback")
-            || lower.contains("resume playback")
-            || lower.contains("skip")
-            || lower.hasPrefix("play ")
-            || lower.hasPrefix("listen to ")
-            || isMusicAddRequest(lower) else { return nil }
+        guard isMusicRelated(lower) else { return nil }
 
         if let result = await handleMusicTransportCommand(lower) {
             return result
@@ -866,86 +864,44 @@ final class NativeIntegrationManager: NSObject {
         }
     }
 
-    private func handleMusicTransportCommand(_ lower: String) async -> NativeLocalActionResult? {
-        let systemPlayer = MPMusicPlayerController.systemMusicPlayer
-        let appPlayer = MPMusicPlayerController.applicationMusicPlayer
+    private static let previousKeywords: Set<String> = ["previous", "back", "previous song", "last track"]
+    private static let pauseKeywords: Set<String> = ["pause", "pause music", "pause playback"]
+    private static let resumeKeywords: Set<String> = ["resume", "resume it", "play", "unpause", "resume music", "resume playback", "unpause music", "unpause playback"]
+    private static let skipKeywords: Set<String> = ["next", "skip", "skip it", "skip track", "skip the track", "skip song", "skip the song", "next song", "next track", "skip this"]
 
-        if lower == "previous" || lower == "back" || lower.contains("previous song") || lower.contains("last track") {
+    private func matchesTransport(_ lower: String, keywords: Set<String>) -> Bool {
+        keywords.contains(lower) || keywords.contains(where: { lower.contains($0) })
+    }
+
+    private func handleMusicTransportCommand(_ lower: String) async -> NativeLocalActionResult? {
+        if matchesTransport(lower, keywords: Self.previousKeywords) {
             try? await ApplicationMusicPlayer.shared.skipToPreviousEntry()
             try? await SystemMusicPlayer.shared.skipToPreviousEntry()
-            systemPlayer.skipToPreviousItem()
-            appPlayer.skipToPreviousItem()
-            return NativeLocalActionResult(
-                action: "music_control",
-                text: "Going back.",
-                cardText: "Previous track",
-                actionSummary: "Previous track",
-                deepLink: nil
-            )
+            MPMusicPlayerController.systemMusicPlayer.skipToPreviousItem()
+            return NativeLocalActionResult(action: "music_control", text: "Going back.", cardText: "Previous track", actionSummary: "Previous track", deepLink: nil)
         }
 
         guard !lower.hasPrefix("play ") && !lower.hasPrefix("listen to ") else { return nil }
 
-        if lower == "pause" || lower.hasPrefix("pause ") || lower.contains("pause music") || lower.contains("pause playback") {
+        if matchesTransport(lower, keywords: Self.pauseKeywords) {
             ApplicationMusicPlayer.shared.pause()
             SystemMusicPlayer.shared.pause()
-            systemPlayer.pause()
-            appPlayer.pause()
-            return NativeLocalActionResult(
-                action: "music_control",
-                text: "Paused.",
-                cardText: "Playback paused",
-                actionSummary: "Music paused",
-                deepLink: nil
-            )
+            MPMusicPlayerController.systemMusicPlayer.pause()
+            return NativeLocalActionResult(action: "music_control", text: "Paused.", cardText: "Playback paused", actionSummary: "Music paused", deepLink: nil)
         }
 
-        if lower == "resume"
-            || lower == "resume it"
-            || lower == "play"
-            || lower == "unpause"
-            || lower.hasPrefix("resume ")
-            || lower.hasPrefix("unpause ")
-            || lower.contains("resume music")
-            || lower.contains("resume playback")
-            || lower.contains("unpause music")
-            || lower.contains("unpause playback") {
+        if matchesTransport(lower, keywords: Self.resumeKeywords) {
             try? await ApplicationMusicPlayer.shared.play()
             try? await SystemMusicPlayer.shared.play()
-            systemPlayer.play()
-            appPlayer.play()
-            return NativeLocalActionResult(
-                action: "music_control",
-                text: "Resumed.",
-                cardText: "Playback resumed",
-                actionSummary: "Music resumed",
-                deepLink: nil
-            )
+            MPMusicPlayerController.systemMusicPlayer.play()
+            return NativeLocalActionResult(action: "music_control", text: "Resumed.", cardText: "Playback resumed", actionSummary: "Music resumed", deepLink: nil)
         }
 
-        if lower == "next"
-            || lower == "skip"
-            || lower == "skip it"
-            || lower == "skip track"
-            || lower == "skip the track"
-            || lower == "skip song"
-            || lower == "skip the song"
-            || lower.contains("next song")
-            || lower.contains("next track")
-            || lower.contains("skip this")
-            || lower.contains("skip song")
-            || lower.contains("skip track") {
+        if matchesTransport(lower, keywords: Self.skipKeywords) {
             try? await ApplicationMusicPlayer.shared.skipToNextEntry()
             try? await SystemMusicPlayer.shared.skipToNextEntry()
-            systemPlayer.skipToNextItem()
-            appPlayer.skipToNextItem()
-            return NativeLocalActionResult(
-                action: "music_control",
-                text: "Skipped.",
-                cardText: "Next track",
-                actionSummary: "Music skipped",
-                deepLink: nil
-            )
+            MPMusicPlayerController.systemMusicPlayer.skipToNextItem()
+            return NativeLocalActionResult(action: "music_control", text: "Skipped.", cardText: "Next track", actionSummary: "Music skipped", deepLink: nil)
         }
 
         return nil
@@ -1900,7 +1856,9 @@ final class NativeIntegrationManager: NSObject {
         readTypes.insert(workoutType)
         do {
             try await healthStore.requestAuthorization(toShare: [], read: readTypes)
-        } catch {}
+        } catch {
+            print("[Native] Health authorization error: \(error.localizedDescription)")
+        }
     }
 
     private func requestContactsPermission() async {
@@ -2188,7 +2146,9 @@ final class NativeIntegrationManager: NSObject {
             if !hints.isEmpty {
                 return Array(hints.prefix(5))
             }
-        } catch {}
+        } catch {
+            print("[Native] Contact search error: \(error.localizedDescription)")
+        }
 
         let request = CNContactFetchRequest(keysToFetch: keys)
         var matches: [NativeContactHint] = []
