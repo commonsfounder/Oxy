@@ -126,7 +126,11 @@ final class PendantAudioBridge {
 
         resetVAD()
         pendingPCMData = Data()
-        startRecognitionSession()
+        // Don't start a recognition session here — the pendant only streams
+        // audio while its button is held. Starting eagerly causes an immediate
+        // "No speech detected" error loop. handleIncomingAudio starts the
+        // session lazily when the first audio chunk actually arrives.
+        state = .listening
     }
 
     // MARK: - Audio handling
@@ -270,9 +274,14 @@ final class PendantAudioBridge {
                 if let error {
                     print("[PendantBridge] Recognition error: \(error.localizedDescription)")
                     self.isSessionActive = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + self.errorRestartDelay) { [weak self] in
-                        guard let self, self.state != .idle else { return }
-                        self.startRecognitionSession()
+                    self.recognitionRequest = nil
+                    self.recognitionTask = nil
+                    self.pendingPCMData = Data()
+                    self.resetVAD()
+                    // Don't proactively restart — let handleIncomingAudio start
+                    // a fresh session when the user next presses the button.
+                    if self.state != .idle {
+                        self.state = .listening
                     }
                 }
             }
@@ -285,14 +294,16 @@ final class PendantAudioBridge {
     }
 
     private func restartSession() {
-        print("[PendantBridge] Session timeout — restarting")
+        print("[PendantBridge] Session timeout — resetting, will restart on next audio")
         flushAudioBuffer()
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
         isSessionActive = false
-        startRecognitionSession()
+        pendingPCMData = Data()
+        resetVAD()
+        // Session will be lazily restarted by handleIncomingAudio
     }
 
     private func deliverTranscript(_ transcript: String) {
