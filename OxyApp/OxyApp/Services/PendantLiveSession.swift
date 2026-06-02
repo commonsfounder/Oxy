@@ -88,8 +88,13 @@ final class PendantLiveSession {
     // MARK: - Connection lifecycle
 
     private func onPendantConnected() {
-        setupAudioSession()
-        connect()
+        // Run audio session setup on a background thread — AVAudioSession.setActive
+        // can block briefly while the system notifies other audio clients, which
+        // would stall the main thread and freeze the UI during pendant connect.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            self?.setupAudioSession()
+            await self?.connect()
+        }
     }
 
     func connect() {
@@ -305,7 +310,7 @@ final class PendantLiveSession {
 
     // MARK: - Audio playback
 
-    private func setupAudioSession() {
+    private nonisolated func setupAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])

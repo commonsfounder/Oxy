@@ -401,7 +401,7 @@ struct ChatView: View {
             }
 
             // Local fallback bridge: when the live session is down, transcribe
-            // on-device and execute. Routing below guarantees only one of the two
+            // on-device and execute. Routing below guarantees only one consumer
             // ever receives audio, so no extra gating is needed here.
             bridge.onTranscript = { transcript in
                 print("[PendantBridge] Executing silently: \(transcript)")
@@ -412,11 +412,9 @@ struct ChatView: View {
             }
 
             // Single audio router — the pendant's BLE audio stream is delivered to
-            // exactly ONE consumer per chunk. This prevents the dual-processing and
-            // AVAudioSession contention that was locking up the main thread. The
-            // live session is preferred whenever it's up (or coming up); otherwise
-            // the local bridge takes over.
-            NativeIntegrationManager.shared.pendant.onAudioData = { [weak live, weak bridge] data in
+            // exactly ONE consumer per chunk. Prevents dual-processing and
+            // AVAudioSession contention that was locking up the main thread.
+            NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor [weak live, weak bridge] data in
                 if let live, live.isActive {
                     live.ingest(data)
                 } else {
