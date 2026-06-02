@@ -2641,9 +2641,9 @@ final class PendantBLEManager: NSObject {
     private static let pairedPeripheralKey = "oxy_paired_pendant_uuid"
     private static let connectionTimeout: TimeInterval = 10
 
-    /// Direct sink for inbound pendant audio. Invoked on the main actor (the
-    /// central manager runs on the main queue). Exactly one consumer should be
-    /// routed here at a time to avoid duplicate processing of the audio stream.
+    /// Single routed sink for pendant audio. Set by ChatView; exactly one consumer
+    /// at a time. Invoked asynchronously on the main actor so BLE callbacks return
+    /// immediately without blocking the main thread while ingest() runs.
     @ObservationIgnored var onAudioData: (@MainActor (Data) -> Void)?
 
     private enum UART {
@@ -2952,12 +2952,11 @@ extension PendantBLEManager: CBPeripheralDelegate {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
 
-        // The central manager runs on the main queue, so we're already on the
-        // main thread/actor here. Deliver synchronously to the single routed
-        // consumer — no NotificationCenter fan-out, no per-chunk Task hop.
-        MainActor.assumeIsolated {
-            onAudioData?(data)
-        }
+        // Dispatch to main actor asynchronously — returning from this callback
+        // immediately keeps the BLE queue free and prevents the main thread
+        // from stalling while ingest() runs.
+        let sink = onAudioData
+        Task { @MainActor in sink?(data) }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
