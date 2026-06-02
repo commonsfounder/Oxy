@@ -395,7 +395,7 @@ struct ChatView: View {
 
             // Live session handles actions via WebSocket — no silent exec needed
             liveSession.onActionResults = { results in
-                vm.openDeepLinks(results)
+                vm.openPendantActions(results)
             }
 
             // Fallback: if Live session isn't available, use the old bridge.

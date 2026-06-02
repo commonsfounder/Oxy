@@ -57,7 +57,7 @@ struct ConnectorsView: View {
                 }
             }
             .navigationTitle("Connectors")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {

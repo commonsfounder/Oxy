@@ -334,7 +334,8 @@ final class ChatViewModel {
                 let actionResult = ActionResult(native: localResult)
                 print("[ChatVM] Silent local result: \(localResult.text)")
                 await MainActor.run {
-                    if shouldAutoOpen(actionResult, settings: settings) {
+                    let hasLink = actionResult.deepLink != nil || actionResult.webLink != nil
+                    if actionResult.success && hasLink && !shouldHoldForLocalConfirmation(actionResult, settings: settings) {
                         openActionLink(actionResult)
                     }
                 }
@@ -365,8 +366,15 @@ final class ChatViewModel {
                 await MainActor.run {
                     switch event {
                     case .actions(let results):
-                        self.openDeepLinks(results)
-                        // For silent exec, resolve music actions directly
+                        // In silent pendant mode, open any successful action with a link —
+                        // the user spoke the command so no whitelist gating needed.
+                        for result in results where result.success {
+                            let hasLink = result.deepLink != nil || result.webLink != nil
+                            if hasLink && !self.shouldHoldForLocalConfirmation(result, settings: settings) {
+                                self.openActionLink(result)
+                            }
+                        }
+                        // Resolve music play actions natively for gapless playback
                         for result in results where result.action == "play_music" && result.success {
                             let query = (result.cardText ?? result.text ?? "")
                                 .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
@@ -814,6 +822,27 @@ final class ChatViewModel {
         for result in results {
             guard shouldAutoOpen(result, settings: settings) else { continue }
             openActionLink(result)
+        }
+    }
+
+    /// Pendant/silent-exec variant: opens any successful action that has a link,
+    /// bypassing the normal UI-confirmation whitelist. Also triggers native music
+    /// resolution for play_music results.
+    func openPendantActions(_ results: [ActionResult]) {
+        let settings = currentSettings
+        for result in results where result.success {
+            let hasLink = result.deepLink != nil || result.webLink != nil
+            if hasLink && !shouldHoldForLocalConfirmation(result, settings: settings) {
+                openActionLink(result)
+            }
+        }
+        for result in results where result.action == "play_music" && result.success {
+            let query = (result.cardText ?? result.text ?? "")
+                .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !query.isEmpty {
+                Task { _ = await self.executeNativeMusicWithTimeout(query: query) }
+            }
         }
     }
 
