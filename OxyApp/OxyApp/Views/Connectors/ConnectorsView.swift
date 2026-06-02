@@ -65,7 +65,7 @@ struct ConnectorsView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
+                        Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(Color.oxySub)
                             .frame(width: 30, height: 30)
