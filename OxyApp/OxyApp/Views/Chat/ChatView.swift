@@ -398,9 +398,14 @@ struct ChatView: View {
                 vm.openDeepLinks(results)
             }
 
-            // Fallback: if Live session isn't available, use the old bridge
+            // Fallback: if Live session isn't available, use the old bridge.
+            // Allow execution when live session is disconnected or still connecting
+            // (not ready to handle audio yet), to avoid blocking on reconnect loops.
             pendantBridge.onTranscript = { transcript in
-                guard liveSession.state == .disconnected else { return }
+                let liveIsActive = liveSession.state == .ready
+                    || liveSession.state == .listening
+                    || liveSession.state == .speaking
+                guard !liveIsActive else { return }
                 print("[PendantBridge] Executing silently: \(transcript)")
                 vm.executeSilently(transcript, userId: state.userId)
             }

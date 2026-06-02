@@ -5,6 +5,7 @@ import UIKit
 
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
@@ -59,6 +60,20 @@ struct ConnectorsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.oxySub)
+                            .frame(width: 30, height: 30)
+                            .background(Color.oxySurface2)
+                            .clipShape(Circle())
+                    }
+                }
+            }
             .task {
                 await loadConnectors()
             }

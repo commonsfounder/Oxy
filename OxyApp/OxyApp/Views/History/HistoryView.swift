@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HistoryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var sessions: [ChatSessionSummary] = []
     @State private var isLoading = true
 
@@ -54,6 +55,20 @@ struct HistoryView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.oxySub)
+                            .frame(width: 30, height: 30)
+                            .background(Color.oxySurface2)
+                            .clipShape(Circle())
+                    }
+                }
+            }
             .task {
                 await loadSessions()
             }

@@ -4,12 +4,12 @@ import UIKit
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showSignOutConfirm = false
     @State private var showSignOutAllConfirm = false
     @State private var showDeleteAccountConfirm = false
-    @State private var showAccentPicker = false
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     @State private var voicePreview = VoicePreviewPlayer()
@@ -54,9 +54,20 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "Appearance") {
-                            settingRow(label: "Accent", description: selectedAccentLabel) {
-                                Button {
-                                    showAccentPicker = true
+                            settingRow(label: "Accent", description: nil) {
+                                Menu {
+                                    ForEach(OxySettings.accentOptions) { option in
+                                        Button {
+                                            settings.accentColor = option.value
+                                            saveSettings()
+                                        } label: {
+                                            if settings.accentColor == option.value {
+                                                Label(option.label, systemImage: "checkmark")
+                                            } else {
+                                                Text(option.label)
+                                            }
+                                        }
+                                    }
                                 } label: {
                                     HStack(spacing: 8) {
                                         Circle()
@@ -292,6 +303,20 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color.oxySub)
+                            .frame(width: 30, height: 30)
+                            .background(Color.oxySurface2)
+                            .clipShape(Circle())
+                    }
+                }
+            }
             .alert("Sign Out", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}
@@ -309,14 +334,6 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This permanently deletes your Oxy account data, including conversations, memories, connectors, preferences, and action history.")
-            }
-            .sheet(isPresented: $showAccentPicker) {
-                AccentPickerSheet(selection: $settings.accentColor) {
-                    saveSettings()
-                    showAccentPicker = false
-                }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showBackendURLEditor) {
                 BackendURLEditorSheet(currentURL: $customBackendURL) {
@@ -729,71 +746,6 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-private struct AccentPickerSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Binding var selection: String
-    let onSelect: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 8) {
-                        ForEach(OxySettings.accentOptions) { option in
-                            Button {
-                                selection = option.value
-                                onSelect()
-                            } label: {
-                                HStack(spacing: 14) {
-                                    Circle()
-                                        .fill(option.color)
-                                        .frame(width: 22, height: 22)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(Color.oxyLine2, lineWidth: 1)
-                                        )
-
-                                    Text(option.label)
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Color.oxyText)
-
-                                    Spacer()
-
-                                    if selection == option.value {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 15, weight: .bold))
-                                            .foregroundStyle(option.color)
-                                    }
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(selection == option.value ? option.color.opacity(0.12) : Color.oxySurface2)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(selection == option.value ? option.color.opacity(0.45) : Color.oxyLine2, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-            .navigationTitle("Accent")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(Color.oxyStone)
-                }
-            }
-        }
-    }
 }
 
 // MARK: - Voice Preview
