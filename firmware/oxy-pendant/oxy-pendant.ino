@@ -11,26 +11,17 @@
  *   "DONE"  — AI responded (fast triple-blink)
  *   "PING"  — connectivity test (single blink)
  *
- * Board package: Seeed nRF52 mbed-enabled Boards
- *   (NOT the Adafruit nRF52 BSP — the mbed BSP has working PDM)
- * Board: Seeed XIAO nRF52840 Sense
- *
+ * Board package: Adafruit nRF52 (Seeed XIAO nRF52840 Sense)
  * Libraries:
- *   ArduinoBLE (built into mbed BSP)
- *   PDM (built into mbed BSP)
+ *   Bluefruit (built into Adafruit nRF52 BSP)
+ *   PDM (built into BSP)
  */
 
-#include <ArduinoBLE.h>
+#include <bluefruit.h>
 #include <PDM.h>
 
 // ── BLE Nordic UART Service ────────────────────────────────────
-#define NUS_SERVICE_UUID     "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
-#define NUS_RX_CHAR_UUID     "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"  // App writes to pendant
-#define NUS_TX_CHAR_UUID     "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"  // Pendant sends to app
-
-BLEService        nusService(NUS_SERVICE_UUID);
-BLECharacteristic txChar(NUS_TX_CHAR_UUID, BLENotify, 20);
-BLECharacteristic rxChar(NUS_RX_CHAR_UUID, BLEWrite | BLEWriteWithoutResponse, 20);
+BLEUart bleuart;
 
 // ── Audio config ───────────────────────────────────────────────
 static const int SAMPLE_RATE    = 16000;
@@ -41,12 +32,10 @@ volatile bool    pdmReady      = false;
 volatile int     pdmBytesAvail = 0;
 
 // ── State ──────────────────────────────────────────────────────
-bool isStreaming = false;
+bool isStreaming  = false;
+bool isConnected  = false;
 
 // ── BLE device name ────────────────────────────────────────────
-// Keep ≤5 chars so name + 128-bit service UUID fits in the 31-byte
-// BLE advertising packet.  ArduinoBLE silently drops the UUID if
-// the packet overflows, which stops iOS service-based scanning.
 static const char* DEVICE_NAME = "Oxy";
 
 // ── Non-blocking LED blink state machine ──────────────────────
@@ -86,15 +75,14 @@ void updateLED() {
   digitalWrite(LED_BUILTIN, (led.remaining % 2 == 1) ? LOW : HIGH);
 }
 
-// ── RX command handler ─────────────────────────────────────────
-void handleRXCommand() {
-  if (!rxChar.written()) return;
-
-  int           len = rxChar.valueLength();
-  if (len == 0 || len > 20) return;
+// ── RX command handler (called by Bluefruit when app writes) ───
+void bleuart_rx_callback(uint16_t conn_hdl) {
+  (void)conn_hdl;
 
   char buf[21] = {};
-  memcpy(buf, rxChar.value(), len);
+  int len = bleuart.read(buf, sizeof(buf) - 1);
+  if (len <= 0) return;
+
   String cmd = String(buf);
   cmd.trim();
 
@@ -108,6 +96,30 @@ void handleRXCommand() {
   } else if (cmd == "PING") {
     triggerBlink(1, 100);   // single blink: connectivity check
   }
+}
+
+// ── BLE connection callbacks ───────────────────────────────────
+void connect_callback(uint16_t conn_handle) {
+  (void)conn_handle;
+  Serial.println("[Oxy] Connected");
+  isConnected = true;
+
+  // Blink 3× to signal connection
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(LED_BUILTIN, LOW);  delay(100);
+    digitalWrite(LED_BUILTIN, HIGH); delay(100);
+  }
+
+  delay(500);
+  startStreaming();
+}
+
+void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
+  (void)conn_handle;
+  (void)reason;
+  Serial.println("[Oxy] Disconnected");
+  isConnected = false;
+  stopStreaming();
 }
 
 // ── PDM callback ───────────────────────────────────────────────
@@ -156,22 +168,30 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, HIGH);
 
-  if (!BLE.begin()) {
-    Serial.println("[Oxy] ERROR: BLE init failed");
-    while (1) {
-      digitalWrite(LED_BUILTIN, LOW);  delay(200);
-      digitalWrite(LED_BUILTIN, HIGH); delay(200);
-    }
-  }
+  // Initialise Bluefruit with max bandwidth for audio streaming
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);
+  Bluefruit.begin();
+  Bluefruit.setTxPower(4);
+  Bluefruit.setName(DEVICE_NAME);
 
-  BLE.setLocalName(DEVICE_NAME);
-  BLE.setDeviceName(DEVICE_NAME);
+  // Set connection callbacks
+  Bluefruit.Periph.setConnectCallback(connect_callback);
+  Bluefruit.Periph.setDisconnectCallback(disconnect_callback);
 
-  nusService.addCharacteristic(txChar);
-  nusService.addCharacteristic(rxChar);
-  BLE.addService(nusService);
-  BLE.setAdvertisedService(nusService);
-  BLE.advertise();
+  // Start BLE UART service
+  bleuart.begin();
+  bleuart.setRxCallback(bleuart_rx_callback);
+
+  // Start advertising
+  Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+  Bluefruit.Advertising.addTxPower();
+  Bluefruit.Advertising.addService(bleuart);
+  Bluefruit.ScanResponse.addName();
+
+  Bluefruit.Advertising.restartOnDisconnect(true);
+  Bluefruit.Advertising.setInterval(32, 244);  // fast then slow (units of 0.625ms)
+  Bluefruit.Advertising.setFastTimeout(30);
+  Bluefruit.Advertising.start(0);               // 0 = advertise forever
 
   Serial.print("[Oxy] BLE advertising as ");
   Serial.println(DEVICE_NAME);
@@ -181,57 +201,34 @@ void setup() {
 // Main loop
 // ================================================================
 void loop() {
-  BLE.poll();
+  updateLED();
 
-  BLEDevice central = BLE.central();
+  if (isStreaming && pdmReady) {
+    pdmReady = false;
+    int bytesToSend = pdmBytesAvail;
 
-  if (central) {
-    Serial.print("[Oxy] Connected: ");
-    Serial.println(central.address());
-
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(LED_BUILTIN, LOW);  delay(100);
-      digitalWrite(LED_BUILTIN, HIGH); delay(100);
-    }
-
-    delay(500);
-    startStreaming();
-
-    while (central.connected()) {
-      BLE.poll();
-      handleRXCommand();
-      updateLED();
-
-      if (isStreaming && pdmReady) {
-        pdmReady = false;
-        int bytesToSend = pdmBytesAvail;
-
-        static unsigned long lastLog = 0;
-        if (millis() - lastLog > 5000) {
-          lastLog = millis();
-          Serial.print("[Oxy] Audio samples: ");
-          int n = min(5, bytesToSend / 2);
-          for (int i = 0; i < n; i++) {
-            Serial.print(pdmBuffer[i]);
-            Serial.print(" ");
-          }
-          Serial.println();
-        }
-
-        const uint8_t* data = (const uint8_t*)pdmBuffer;
-        int remaining = bytesToSend;
-        while (remaining > 0) {
-          int chunk = min(remaining, 20);
-          txChar.writeValue(data, chunk);
-          data      += chunk;
-          remaining -= chunk;
-          delayMicroseconds(500);
-        }
+    // Periodic diagnostic: print first few samples to Serial
+    static unsigned long lastLog = 0;
+    if (millis() - lastLog > 5000) {
+      lastLog = millis();
+      Serial.print("[Oxy] Audio samples: ");
+      int n = min(5, bytesToSend / 2);
+      for (int i = 0; i < n; i++) {
+        Serial.print(pdmBuffer[i]);
+        Serial.print(" ");
       }
+      Serial.println();
     }
 
-    stopStreaming();
-    Serial.println("[Oxy] Disconnected");
-    BLE.advertise();
+    // Send audio over BLE UART in 20-byte chunks
+    const uint8_t* data = (const uint8_t*)pdmBuffer;
+    int remaining = bytesToSend;
+    while (remaining > 0 && isConnected) {
+      int chunk = min(remaining, 20);
+      bleuart.write(data, chunk);
+      data      += chunk;
+      remaining -= chunk;
+      delayMicroseconds(500);
+    }
   }
 }
