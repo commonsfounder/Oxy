@@ -414,7 +414,7 @@ struct ChatView: View {
             // Single audio router — the pendant's BLE audio stream is delivered to
             // exactly ONE consumer per chunk. Prevents dual-processing and
             // AVAudioSession contention that was locking up the main thread.
-            NativeIntegrationManager.shared.pendant.onAudioData = { [weak live, weak bridge] data in
+            NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor [weak live, weak bridge] data in
                 if let live, live.isActive {
                     live.ingest(data)
                 } else {
