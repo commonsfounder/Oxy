@@ -5,10 +5,9 @@ import Speech
 
 /// Bridges continuous pendant BLE audio to the chat pipeline.
 ///
-/// Audio flow: pendant PDM (16 kHz Int16) → BLE chunks → accumulated buffer →
-/// Float32 conversion → SFSpeechRecognizer. Energy-based VAD signals end-of-
-/// utterance so the recognizer commits a final result promptly rather than
-/// waiting for its own timeout.
+/// Audio flow: pendant PDM (16 kHz Int16) → BLE chunks → VAD → SFSpeechRecognizer.
+/// A recognition session is only opened once the VAD confirms speech onset, so
+/// SFSpeechRecognizer never sits idle receiving silence and firing "No speech detected".
 @Observable
 @MainActor
 final class PendantAudioBridge {
@@ -38,12 +37,14 @@ final class PendantAudioBridge {
     @ObservationIgnored private var pendingPCMData = Data()
     @ObservationIgnored private let minSamplesPerBatch: Int = 4096  // ~256 ms @ 16 kHz
 
+    // Pre-speech ring buffer: keeps ~512 ms of raw Int16 audio so utterance
+    // onset words aren't clipped when we open the session after VAD confirmation.
+    @ObservationIgnored private var preSpeechBuffer = Data()
+    @ObservationIgnored private let preSpeechBufferCapacity = 4096 * 2 * 2 // ~512 ms of Int16
+
     // Session restart guard (Apple caps recognition sessions at ~60 s)
     @ObservationIgnored private var restartTimer: Timer?
     @ObservationIgnored private let sessionTimeout: TimeInterval = 55
-
-    // Error back-off
-    @ObservationIgnored private var errorRestartDelay: TimeInterval = 3.0
 
     // Float32 format for SFSpeechRecognizer
     @ObservationIgnored private lazy var floatFormat: AVAudioFormat = {
@@ -59,13 +60,8 @@ final class PendantAudioBridge {
     @ObservationIgnored private let micGain: Float = 3.0
 
     // ── VAD state machine ──────────────────────────────────────────────────────
-    // RMS threshold below which audio is considered silence (normalized 0–1 scale)
     @ObservationIgnored private let speechRMSThreshold: Float = 0.008
-
-    // How many consecutive silent batches end an utterance (~2 s at 256 ms/batch)
     @ObservationIgnored private let silenceOffsetBatches = 8
-
-    // How many consecutive speech batches confirm onset (avoids false triggers)
     @ObservationIgnored private let speechOnsetBatches = 2
 
     @ObservationIgnored private var consecutiveSpeechBatches = 0
@@ -73,7 +69,6 @@ final class PendantAudioBridge {
     @ObservationIgnored private var hasSpeechInSession = false
     @ObservationIgnored private var utteranceEnded = false
 
-    // Diagnostic counter for periodic logging
     @ObservationIgnored private var diagnosticCounter = 0
 
     var onTranscript: ((String) -> Void)?
@@ -124,19 +119,14 @@ final class PendantAudioBridge {
             print("[PendantBridge] Audio session warning: \(error.localizedDescription)")
         }
 
-        resetVAD()
-        pendingPCMData = Data()
-        // Don't start a recognition session here — the pendant only streams
-        // audio while its button is held. Starting eagerly causes an immediate
-        // "No speech detected" error loop. handleIncomingAudio starts the
-        // session lazily when the first audio chunk actually arrives.
+        fullReset()
         state = .listening
+        print("[PendantBridge] Ready — waiting for speech onset")
     }
 
     // MARK: - Audio handling
 
     private func handleIncomingAudio(_ data: Data) {
-        if !isSessionActive { startRecognitionSession() }
         pendingPCMData.append(data)
         let sampleCount = pendingPCMData.count / MemoryLayout<Int16>.size
         if sampleCount >= minSamplesPerBatch {
@@ -145,13 +135,13 @@ final class PendantAudioBridge {
     }
 
     private func flushAudioBuffer() {
-        guard let request = recognitionRequest else { return }
         let data = pendingPCMData
         pendingPCMData = Data()
 
         let sampleCount = data.count / MemoryLayout<Int16>.size
         guard sampleCount > 0 else { return }
 
+        // Convert Int16 → Float32 and compute RMS for VAD
         guard let pcmBuf = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: UInt32(sampleCount)) else { return }
         pcmBuf.frameLength = UInt32(sampleCount)
 
@@ -162,21 +152,37 @@ final class PendantAudioBridge {
             for i in 0..<sampleCount {
                 let normalized = Float(src[i]) / 32768.0
                 sumSquares += normalized * normalized
-                // Apply gain then clamp to prevent distortion
                 dst[i] = max(-1.0, min(1.0, normalized * micGain))
             }
         }
 
         let rms = sqrt(sumSquares / Float(sampleCount))
-        updateVAD(rms: rms)
 
         diagnosticCounter += 1
         if diagnosticCounter % 20 == 0 {
-            print("[PendantBridge] rms=\(String(format: "%.4f", rms)) speech=\(consecutiveSpeechBatches) silence=\(consecutiveSilenceBatches)")
+            print("[PendantBridge] rms=\(String(format: "%.4f", rms)) speech=\(consecutiveSpeechBatches) silence=\(consecutiveSilenceBatches) active=\(isSessionActive)")
         }
 
-        // Stop feeding audio after utterance ends — let recognizer finalize
-        if !utteranceEnded {
+        // Roll pre-speech buffer (keep last ~512 ms of raw bytes)
+        if !isSessionActive {
+            preSpeechBuffer.append(data)
+            if preSpeechBuffer.count > preSpeechBufferCapacity {
+                preSpeechBuffer = preSpeechBuffer.suffix(preSpeechBufferCapacity)
+            }
+        }
+
+        let wasInSpeech = hasSpeechInSession
+        updateVAD(rms: rms)
+
+        // Speech onset: open recognition session and replay the pre-speech buffer
+        // so the first syllables aren't clipped.
+        if hasSpeechInSession && !wasInSpeech {
+            openRecognitionSession(replayBuffer: preSpeechBuffer)
+            preSpeechBuffer = Data()
+        }
+
+        // Feed current batch to the active session
+        if isSessionActive, let request = recognitionRequest, !utteranceEnded {
             request.append(pcmBuf)
         }
     }
@@ -218,7 +224,7 @@ final class PendantAudioBridge {
 
     // MARK: - Speech recognition
 
-    private func startRecognitionSession() {
+    private func openRecognitionSession(replayBuffer: Data) {
         guard !isSessionActive else { return }
         guard let recognizer, recognizer.isAvailable else {
             errorMessage = "Speech recognition not available"
@@ -228,29 +234,45 @@ final class PendantAudioBridge {
         guard SFSpeechRecognizer.authorizationStatus() == .authorized else {
             Task {
                 let status = await requestSpeechAuthorization()
-                if status == .authorized { startRecognitionSession() }
-                else { errorMessage = "Speech recognition not authorized" }
+                if status == .authorized {
+                    openRecognitionSession(replayBuffer: replayBuffer)
+                } else {
+                    errorMessage = "Speech recognition not authorized"
+                }
             }
             return
         }
 
         recognitionTask?.cancel()
         recognitionRequest = nil
-        pendingPCMData = Data()
-        resetVAD()
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        // Let on-device recognition run when available for lower latency
         if #available(iOS 17, *) {
             request.requiresOnDeviceRecognition = false
         }
         recognitionRequest = request
         isSessionActive = true
-        state = .listening
         errorMessage = nil
 
-        print("[PendantBridge] Recognition session started")
+        print("[PendantBridge] Recognition session opened")
+
+        // Replay pre-speech buffer so onset words aren't clipped
+        if !replayBuffer.isEmpty {
+            let replaySamples = replayBuffer.count / MemoryLayout<Int16>.size
+            if let replayBuf = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: UInt32(replaySamples)) {
+                replayBuf.frameLength = UInt32(replaySamples)
+                replayBuffer.withUnsafeBytes { raw in
+                    guard let src = raw.baseAddress?.assumingMemoryBound(to: Int16.self) else { return }
+                    guard let dst = replayBuf.floatChannelData?[0] else { return }
+                    for i in 0..<replaySamples {
+                        let normalized = Float(src[i]) / 32768.0
+                        dst[i] = max(-1.0, min(1.0, normalized * micGain))
+                    }
+                }
+                request.append(replayBuf)
+            }
+        }
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
@@ -263,11 +285,17 @@ final class PendantAudioBridge {
                     if result.isFinal {
                         print("[PendantBridge] Final: \(transcript)")
                         self.isSessionActive = false
+                        self.recognitionRequest = nil
+                        self.recognitionTask = nil
+                        self.restartTimer?.invalidate()
+                        self.restartTimer = nil
+                        self.resetVAD()
+                        self.preSpeechBuffer = Data()
                         if !transcript.trimmingCharacters(in: .whitespaces).isEmpty {
                             self.deliverTranscript(transcript)
                         }
-                        // Start fresh session for next utterance
-                        self.startRecognitionSession()
+                        // Ready for next utterance — session opens on next speech onset
+                        if self.state != .idle { self.state = .listening }
                     }
                 }
 
@@ -276,46 +304,40 @@ final class PendantAudioBridge {
                     self.isSessionActive = false
                     self.recognitionRequest = nil
                     self.recognitionTask = nil
-                    self.pendingPCMData = Data()
+                    self.restartTimer?.invalidate()
+                    self.restartTimer = nil
                     self.resetVAD()
-                    // Don't proactively restart — let handleIncomingAudio start
-                    // a fresh session when the user next presses the button.
-                    if self.state != .idle {
-                        self.state = .listening
-                    }
+                    self.preSpeechBuffer = Data()
+                    if self.state != .idle { self.state = .listening }
+                    // No proactive restart — next speech onset opens a fresh session
                 }
             }
         }
 
         restartTimer?.invalidate()
         restartTimer = Timer.scheduledTimer(withTimeInterval: sessionTimeout, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.restartSession() }
+            Task { @MainActor in self?.handleSessionTimeout() }
         }
     }
 
-    private func restartSession() {
-        print("[PendantBridge] Session timeout — resetting, will restart on next audio")
-        flushAudioBuffer()
+    private func handleSessionTimeout() {
+        print("[PendantBridge] Session timeout — closing, will reopen on next speech onset")
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
         isSessionActive = false
         pendingPCMData = Data()
+        preSpeechBuffer = Data()
         resetVAD()
-        // Session will be lazily restarted by handleIncomingAudio
     }
 
     private func deliverTranscript(_ transcript: String) {
         print("[PendantBridge] Delivering: \(transcript)")
         lastTranscript = transcript
         state = .transcribing
-
-        // Notify pendant that AI is now processing
         NativeIntegrationManager.shared.pendant.sendCommand("THINK")
-
         onTranscript?(transcript)
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             if self?.state == .transcribing { self?.state = .listening }
         }
@@ -325,15 +347,19 @@ final class PendantAudioBridge {
         print("[PendantBridge] Stopping recognition")
         restartTimer?.invalidate()
         restartTimer = nil
-        isSessionActive = false
-        flushAudioBuffer()
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionTask = nil
         recognitionRequest = nil
-        pendingPCMData = Data()
-        resetVAD()
+        fullReset()
         state = .idle
+    }
+
+    private func fullReset() {
+        isSessionActive = false
+        pendingPCMData = Data()
+        preSpeechBuffer = Data()
+        resetVAD()
     }
 
     private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
