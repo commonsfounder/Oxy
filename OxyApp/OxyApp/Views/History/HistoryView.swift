@@ -52,7 +52,7 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Chats")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {

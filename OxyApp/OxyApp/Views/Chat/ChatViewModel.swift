@@ -825,6 +825,27 @@ final class ChatViewModel {
         }
     }
 
+    /// Pendant/silent-exec variant: opens any successful action that has a link,
+    /// bypassing the normal UI-confirmation whitelist. Also triggers native music
+    /// resolution for play_music results.
+    func openPendantActions(_ results: [ActionResult]) {
+        let settings = currentSettings
+        for result in results where result.success {
+            let hasLink = result.deepLink != nil || result.webLink != nil
+            if hasLink && !shouldHoldForLocalConfirmation(result, settings: settings) {
+                openActionLink(result)
+            }
+        }
+        for result in results where result.action == "play_music" && result.success {
+            let query = (result.cardText ?? result.text ?? "")
+                .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !query.isEmpty {
+                Task { _ = await self.executeNativeMusicWithTimeout(query: query) }
+            }
+        }
+    }
+
     func openActionLink(_ result: ActionResult) {
         if let link = result.deepLink, let url = URL(string: link) {
             if url.scheme == "oxy-open-app" {
