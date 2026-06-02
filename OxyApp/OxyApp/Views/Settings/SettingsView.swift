@@ -1143,6 +1143,7 @@ private struct DesignPreview: View {
 private struct PendantSettingsSection: View {
     var pendant: PendantBLEManager
     @State private var showUnpairConfirm = false
+    @State private var scanPulse = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1161,9 +1162,12 @@ private struct PendantSettingsSection: View {
                         Text(statusDescription)
                             .font(.system(size: 12))
                             .foregroundStyle(statusColor)
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                     }
                     Spacer()
                     statusIndicator
+                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pendant.connectionState)
                 }
                 .padding(.vertical, 4)
 
@@ -1179,6 +1183,7 @@ private struct PendantSettingsSection: View {
                             .foregroundStyle(Color.oxySub)
                     }
                     .padding(.vertical, 4)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if let error = pendant.lastError {
@@ -1188,6 +1193,7 @@ private struct PendantSettingsSection: View {
                         .foregroundStyle(.red.opacity(0.8))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 Divider().overlay(Color.oxyLine)
@@ -1199,31 +1205,40 @@ private struct PendantSettingsSection: View {
                         }
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.red.opacity(0.85))
+                        .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
                         Button("Cancel") {
                             pendant.stopScan()
                         }
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.oxySub)
+                        .transition(.opacity)
                     } else {
                         Button("Scan for Pendant") {
                             pendant.startScan()
                         }
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.oxyStone)
+                        .transition(.opacity)
                     }
                     Spacer()
                 }
                 .padding(.vertical, 4)
+                .animation(.easeInOut(duration: 0.25), value: pendant.connectionState)
             }
             .padding(16)
             .background(Color.oxySurface2)
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
+                    .stroke(
+                        pendant.isConnected ? Color.oxyGreen.opacity(0.3) : Color.oxyLine2,
+                        lineWidth: 1
+                    )
+                    .animation(.easeInOut(duration: 0.4), value: pendant.isConnected)
             )
         }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: pendant.connectionState)
         .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { pendant.unpair() }
             Button("Cancel", role: .cancel) {}
@@ -1255,13 +1270,16 @@ private struct PendantSettingsSection: View {
     private var statusIndicator: some View {
         switch pendant.connectionState {
         case .connected:
-            Circle()
-                .fill(Color.oxyGreen)
-                .frame(width: 10, height: 10)
+            ZStack {
+                Circle()
+                    .fill(Color.oxyGreen.opacity(0.2))
+                    .frame(width: 18, height: 18)
+                Circle()
+                    .fill(Color.oxyGreen)
+                    .frame(width: 10, height: 10)
+            }
         case .scanning, .connecting:
-            ProgressView()
-                .controlSize(.small)
-                .tint(Color.oxyStone)
+            ScanPulseView()
         case .error:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 14))
@@ -1271,6 +1289,24 @@ private struct PendantSettingsSection: View {
                 .fill(Color.oxySub.opacity(0.4))
                 .frame(width: 10, height: 10)
         }
+    }
+}
+
+private struct ScanPulseView: View {
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.oxyStone.opacity(pulse ? 0 : 0.4), lineWidth: 2)
+                .frame(width: pulse ? 24 : 12, height: pulse ? 24 : 12)
+                .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: pulse)
+
+            Circle()
+                .fill(Color.oxyStone)
+                .frame(width: 8, height: 8)
+        }
+        .onAppear { pulse = true }
     }
 }
 

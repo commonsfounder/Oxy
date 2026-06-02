@@ -202,8 +202,16 @@ struct ChatView: View {
                     // Pendant listening indicator — prefer Live session state
                     if liveSession.state != .disconnected {
                         PendantLiveBar(state: liveSession.state, userTranscript: liveSession.userTranscript, assistantTranscript: liveSession.assistantTranscript)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity
+                            ))
                     } else if pendantBridge.state != .idle {
                         PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity
+                            ))
                     }
 
                     // Input bar
@@ -1060,10 +1068,24 @@ struct ChatSessionsResponse: Codable {
 
 private struct WelcomeCard: View {
     let onQuickAction: (String) -> Void
+    @State private var appeared = false
+    @State private var glowPulse = false
 
     var body: some View {
         VStack(spacing: 16) {
             ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.oxyStone.opacity(glowPulse ? 0.18 : 0.08), .clear],
+                            center: .center,
+                            startRadius: 20,
+                            endRadius: glowPulse ? 60 : 50
+                        )
+                    )
+                    .frame(width: 100, height: 100)
+                    .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: glowPulse)
+
                 Circle()
                     .fill(
                         LinearGradient(
@@ -1077,7 +1099,10 @@ private struct WelcomeCard: View {
                 Image(systemName: "sparkles")
                     .font(.system(size: 36))
                     .foregroundStyle(Color.oxyStone)
+                    .symbolEffect(.pulse, isActive: appeared)
             }
+            .scaleEffect(appeared ? 1.0 : 0.6)
+            .opacity(appeared ? 1 : 0)
 
             VStack(spacing: 6) {
                 Text("Hey, I'm Oxy")
@@ -1089,27 +1114,35 @@ private struct WelcomeCard: View {
                     .foregroundStyle(Color.oxySub)
                     .multilineTextAlignment(.center)
             }
+            .opacity(appeared ? 1 : 0)
+            .offset(y: appeared ? 0 : 10)
 
             HStack(spacing: 8) {
-                QuickChip(icon: "envelope.fill", label: "Check emails") {
+                QuickChip(icon: "envelope.fill", label: "Check emails", delay: 0.15) {
                     onQuickAction("Check my emails")
                 }
-                QuickChip(icon: "calendar", label: "My schedule") {
+                QuickChip(icon: "calendar", label: "My schedule", delay: 0.25) {
                     onQuickAction("What's my schedule today?")
                 }
-                QuickChip(icon: "car.fill", label: "Book a ride") {
+                QuickChip(icon: "car.fill", label: "Book a ride", delay: 0.35) {
                     onQuickAction("Book me a ride")
                 }
             }
         }
         .padding(.horizontal, 32)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) { appeared = true }
+            glowPulse = true
+        }
     }
 }
 
 private struct QuickChip: View {
     let icon: String
     let label: String
+    var delay: Double = 0
     let onTap: () -> Void
+    @State private var appeared = false
 
     var body: some View {
         Button(action: onTap) {
@@ -1130,7 +1163,22 @@ private struct QuickChip: View {
                     .stroke(Color.oxyLine2, lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ScaleButtonStyle())
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 8)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75).delay(delay)) {
+                appeared = true
+            }
+        }
+    }
+}
+
+private struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
     }
 }
 
@@ -1246,6 +1294,7 @@ private struct ChatInputBar: View {
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                                 .font(.system(size: 15, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
                         }
                     }
                     .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
@@ -1255,6 +1304,7 @@ private struct ChatInputBar: View {
                     .scaleEffect(isRecording && !canSend && voicePulse ? 1.05 : 1.0)
                 }
                 .disabled(!canAct)
+                .buttonStyle(ScaleButtonStyle())
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: canAct)
                 .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
             }
