@@ -22,7 +22,6 @@ final class PendantAudioBridge {
     private(set) var lastTranscript: String?
     private(set) var errorMessage: String?
 
-    @ObservationIgnored private var observer: NSObjectProtocol?
     @ObservationIgnored private var connectionObserver: NSObjectProtocol?
     @ObservationIgnored private var connectObserver: NSObjectProtocol?
     @ObservationIgnored private let sampleRate: Double = 16000
@@ -76,15 +75,6 @@ final class PendantAudioBridge {
     init() {
         recognizer = SFSpeechRecognizer(locale: Locale.current)
 
-        observer = NotificationCenter.default.addObserver(
-            forName: PendantBLEManager.didReceiveData,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let data = notification.object as? Data else { return }
-            Task { @MainActor in self?.handleIncomingAudio(data) }
-        }
-
         connectObserver = NotificationCenter.default.addObserver(
             forName: PendantBLEManager.didConnect,
             object: nil,
@@ -103,7 +93,6 @@ final class PendantAudioBridge {
     }
 
     deinit {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
         if let connectionObserver { NotificationCenter.default.removeObserver(connectionObserver) }
         if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
     }
@@ -111,14 +100,9 @@ final class PendantAudioBridge {
     // MARK: - Pendant lifecycle
 
     private func onPendantConnected() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth])
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
-        } catch {
-            print("[PendantBridge] Audio session warning: \(error.localizedDescription)")
-        }
-
+        // The live session owns the AVAudioSession. This fallback bridge feeds
+        // PCM buffers directly to SFSpeechRecognizer and does not record from the
+        // mic, so it deliberately does not touch the audio session here.
         fullReset()
         state = .listening
         print("[PendantBridge] Ready — waiting for speech onset")
@@ -126,7 +110,9 @@ final class PendantAudioBridge {
 
     // MARK: - Audio handling
 
-    private func handleIncomingAudio(_ data: Data) {
+    /// Routed audio sink. Called by ChatView's audio router only when the live
+    /// session is unavailable, so this bridge is the sole consumer at that time.
+    func ingest(_ data: Data) {
         pendingPCMData.append(data)
         let sampleCount = pendingPCMData.count / MemoryLayout<Int16>.size
         if sampleCount >= minSamplesPerBatch {

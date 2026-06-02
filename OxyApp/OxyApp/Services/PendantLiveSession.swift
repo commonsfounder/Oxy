@@ -43,10 +43,17 @@ final class PendantLiveSession {
         AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: outputSampleRate, channels: 1, interleaved: true)!
     }()
 
-    // BLE audio → WebSocket forwarding
-    @ObservationIgnored private var bleObserver: NSObjectProtocol?
+    // BLE lifecycle observers (audio itself arrives via ingest(), routed by ChatView)
     @ObservationIgnored private var connectObserver: NSObjectProtocol?
     @ObservationIgnored private var disconnectObserver: NSObjectProtocol?
+
+    /// True only when the live session can actually accept audio right now.
+    /// While connecting/disconnected this is false so the local fallback bridge
+    /// keeps handling audio — the user is never left dead if the live handshake
+    /// stalls or the backend is unreachable. Live "upgrades" once it's ready.
+    var isActive: Bool {
+        state == .ready || state == .listening || state == .speaking
+    }
 
     // Pendant sends 16-bit PCM @ 16kHz; batch ~100ms before forwarding
     @ObservationIgnored private var pendingAudioData = Data()
@@ -56,15 +63,6 @@ final class PendantLiveSession {
     @ObservationIgnored private var isForwardingAudio = false
 
     init() {
-        bleObserver = NotificationCenter.default.addObserver(
-            forName: PendantBLEManager.didReceiveData,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let data = notification.object as? Data else { return }
-            Task { @MainActor in self?.handlePendantAudio(data) }
-        }
-
         connectObserver = NotificationCenter.default.addObserver(
             forName: PendantBLEManager.didConnect,
             object: nil,
@@ -83,7 +81,6 @@ final class PendantLiveSession {
     }
 
     deinit {
-        if let bleObserver { NotificationCenter.default.removeObserver(bleObserver) }
         if let connectObserver { NotificationCenter.default.removeObserver(connectObserver) }
         if let disconnectObserver { NotificationCenter.default.removeObserver(disconnectObserver) }
     }
@@ -276,7 +273,9 @@ final class PendantLiveSession {
 
     // MARK: - Pendant audio forwarding
 
-    private func handlePendantAudio(_ data: Data) {
+    /// Routed audio sink. Called by ChatView's audio router while this session
+    /// owns the audio path. Buffers until ready, then forwards over the socket.
+    func ingest(_ data: Data) {
         guard state == .ready || state == .listening || state == .speaking else { return }
 
         pendingAudioData.append(data)

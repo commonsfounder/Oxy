@@ -392,25 +392,36 @@ struct ChatView: View {
 
             let vm = viewModel
             let state = appState
+            let live = liveSession
+            let bridge = pendantBridge
 
-            // Live session handles actions via WebSocket — no silent exec needed
-            liveSession.onActionResults = { results in
+            // Live session (Gemini Live API over WebSocket) handles actions directly.
+            live.onActionResults = { results in
                 vm.openPendantActions(results)
             }
 
-            // Fallback: if Live session isn't available, use the old bridge.
-            // Allow execution when live session is disconnected or still connecting
-            // (not ready to handle audio yet), to avoid blocking on reconnect loops.
-            pendantBridge.onTranscript = { transcript in
-                let liveIsActive = liveSession.state == .ready
-                    || liveSession.state == .listening
-                    || liveSession.state == .speaking
-                guard !liveIsActive else { return }
+            // Local fallback bridge: when the live session is down, transcribe
+            // on-device and execute. Routing below guarantees only one of the two
+            // ever receives audio, so no extra gating is needed here.
+            bridge.onTranscript = { transcript in
                 print("[PendantBridge] Executing silently: \(transcript)")
                 vm.executeSilently(transcript, userId: state.userId)
             }
             vm.onSilentExecComplete = {
                 NativeIntegrationManager.shared.pendant.sendCommand("DONE")
+            }
+
+            // Single audio router — the pendant's BLE audio stream is delivered to
+            // exactly ONE consumer per chunk. This prevents the dual-processing and
+            // AVAudioSession contention that was locking up the main thread. The
+            // live session is preferred whenever it's up (or coming up); otherwise
+            // the local bridge takes over.
+            NativeIntegrationManager.shared.pendant.onAudioData = { [weak live, weak bridge] data in
+                if let live, live.isActive {
+                    live.ingest(data)
+                } else {
+                    bridge?.ingest(data)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in

@@ -2635,12 +2635,16 @@ enum PendantConnectionState: String {
 
 @Observable
 final class PendantBLEManager: NSObject {
-    static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
     static let didConnect = Notification.Name("PendantBLEManagerDidConnect")
     static let didDisconnect = Notification.Name("PendantBLEManagerDidDisconnect")
     static let namePrefix = "Oxy"
     private static let pairedPeripheralKey = "oxy_paired_pendant_uuid"
     private static let connectionTimeout: TimeInterval = 10
+
+    /// Direct sink for inbound pendant audio. Invoked on the main actor (the
+    /// central manager runs on the main queue). Exactly one consumer should be
+    /// routed here at a time to avoid duplicate processing of the audio stream.
+    @ObservationIgnored var onAudioData: (@MainActor (Data) -> Void)?
 
     private enum UART {
         static let service    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -2948,7 +2952,12 @@ extension PendantBLEManager: CBPeripheralDelegate {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
 
-        NotificationCenter.default.post(name: PendantBLEManager.didReceiveData, object: data)
+        // The central manager runs on the main queue, so we're already on the
+        // main thread/actor here. Deliver synchronously to the single routed
+        // consumer — no NotificationCenter fan-out, no per-chunk Task hop.
+        MainActor.assumeIsolated {
+            onAudioData?(data)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
