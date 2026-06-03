@@ -45,6 +45,7 @@ struct MainTabView: View {
 struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
+    @State private var appeared = false
 
     enum MoreDestination: Identifiable {
         case history, connectors, settings
@@ -67,12 +68,16 @@ struct MoreView: View {
                                 moreRow(icon: "link", title: "Connectors", color: .oxyStone)
                             }
                         }
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 12)
 
                         moreSection {
                             Button { destination = .settings } label: {
                                 moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub)
                             }
                         }
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 12)
                     }
                     .padding(16)
                 }
@@ -86,6 +91,11 @@ struct MoreView: View {
                 case .history: HistoryView()
                 case .connectors: ConnectorsView()
                 case .settings: SettingsView()
+                }
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.1)) {
+                    appeared = true
                 }
             }
         }
