@@ -234,8 +234,10 @@ final class PendantAudioBridge {
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
+        // Prefer on-device recognition: avoids Apple-server round-trips that
+        // silently fail when the Live WebSocket path is also down.
         if #available(iOS 17, *) {
-            request.requiresOnDeviceRecognition = false
+            request.requiresOnDeviceRecognition = true
         }
         recognitionRequest = request
         isSessionActive = true

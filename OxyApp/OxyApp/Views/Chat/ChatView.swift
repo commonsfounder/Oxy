@@ -408,33 +408,34 @@ struct ChatView: View {
                 vm.openPendantActions(results)
             }
 
-            // Local fallback bridge: when the live session is down, transcribe
-            // on-device and execute. Routing below guarantees only one consumer
-            // ever receives audio, so no extra gating is needed here.
+            // Local fallback bridge: when the live session is down, feed the
+            // transcript into the regular chat pipeline so the spoken command
+            // appears in chat and actions fire exactly as they do for typed text.
             bridge.onTranscript = { transcript in
-                print("[PendantBridge] Executing silently: \(transcript)")
-                vm.executeSilently(transcript, userId: state.userId)
-            }
-            vm.onSilentExecComplete = {
-                NativeIntegrationManager.shared.pendant.sendCommand("DONE")
+                print("[PendantBridge] Sending via chat: \(transcript)")
+                NativeIntegrationManager.shared.pendant.sendCommand("THINK")
+                vm.inputText = transcript
+                vm.sendMessage(userId: state.userId)
             }
 
             // Single audio router — the pendant's BLE audio stream is delivered to
             // exactly ONE consumer per chunk. Prevents dual-processing and
             // AVAudioSession contention that was locking up the main thread.
+            // Strong captures (not weak) — @State keeps both objects alive for the
+            // lifetime of the view, and the closure is replaced each task run.
             var routeLogCounter = 0
-            NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor [weak live, weak bridge] data in
+            NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor data in
                 routeLogCounter += 1
-                if let live, live.isActive {
+                if live.isActive {
                     if routeLogCounter % 100 == 1 {
                         print("[AudioRouter] → live (\(live.state.rawValue))")
                     }
                     live.ingest(data)
                 } else {
                     if routeLogCounter % 100 == 1 {
-                        print("[AudioRouter] → bridge (live=\(live?.state.rawValue ?? "nil"))")
+                        print("[AudioRouter] → bridge (live=\(live.state.rawValue))")
                     }
-                    bridge?.ingest(data)
+                    bridge.ingest(data)
                 }
             }
         }
