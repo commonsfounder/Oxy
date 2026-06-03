@@ -198,6 +198,9 @@ async function geocodeWithGoogle(locationString) {
   if (response.data.status !== 'OK') {
     throw new Error(`Geocoding failed: ${response.data.status}`);
   }
+  if (!response.data.results?.length) {
+    throw new Error(`No results found for location`);
+  }
   const result = response.data.results[0];
   return {
     lat: result.geometry.location.lat,

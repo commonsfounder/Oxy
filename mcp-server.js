@@ -145,10 +145,14 @@ app.post("/tools", async (req, res) => {
         if (!contact.match(/^\+/)) {
           return res.json({ success: false, error: "Contact must be E.164 phone number (e.g. +447123456789)" });
         }
+        const twimlUrl = process.env.TWILIO_TWIML_URL;
+        if (!twimlUrl) {
+          return res.json({ success: false, error: "Voice calling is not configured on this server." });
+        }
         await twilioRequest("/Calls.json", {
           From: TWILIO_PHONE_NUMBER,
           To: contact,
-          Url: "https://handler.twilio.com/twiml/EH1b0b1b1b1b1b1b1b1b1b1b1b1b1b1b" // Replace with your TwiML
+          Url: twimlUrl
         });
         return res.json({ success: true, text: `Calling ${contact}...` });
       }

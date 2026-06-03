@@ -73,30 +73,40 @@ async function getAccessToken(userId) {
     throw new Error('Google not authorized. Reconnect Google from Settings.');
   }
 
-  try {
-    const resp = await axios.post('https://oauth2.googleapis.com/token', {
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
-      client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
-      client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
-    }, { timeout: 10000 });
+  const attemptRefresh = () => axios.post('https://oauth2.googleapis.com/token', {
+    grant_type: 'refresh_token',
+    refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
+    client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
+    client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
+  }, { timeout: 10000 });
 
-    const updated = {
-      ...tokens,
-      access_token: resp.data.access_token,
-      expires_at: Date.now() + resp.data.expires_in * 1000
-    };
-    await saveTokens(userId, updated);
-    return updated.access_token;
+  let resp;
+  try {
+    resp = await attemptRefresh();
   } catch (err) {
     const desc = err.response?.data?.error_description || err.message;
     if (typeof desc === 'string' && (desc.includes('expired') || desc.includes('revoked'))) {
-      // Refresh token is dead — clear it so the connector shows as disconnected
-      try { await markGoogleDisconnected(userId, tokens); } catch {}
+      try { await markGoogleDisconnected(userId, tokens); } catch (cleanupErr) {
+        console.warn('[google] disconnect cleanup failed:', cleanupErr.message);
+      }
       throw new Error('Failed to refresh Google token: Token has been expired or revoked. Reconnect Google from Settings.');
     }
-    throw new Error(`Failed to refresh Google token: ${desc}`);
+    // One retry after a short delay for transient network errors
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      resp = await attemptRefresh();
+    } catch (retryErr) {
+      throw new Error(`Failed to refresh Google token: ${retryErr.response?.data?.error_description || retryErr.message}`);
+    }
   }
+
+  const updated = {
+    ...tokens,
+    access_token: resp.data.access_token,
+    expires_at: Date.now() + resp.data.expires_in * 1000
+  };
+  await saveTokens(userId, updated);
+  return updated.access_token;
 }
 
 function buildMime(to, subject, body, options = {}) {

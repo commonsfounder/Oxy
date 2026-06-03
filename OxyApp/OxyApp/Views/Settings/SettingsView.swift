@@ -383,11 +383,10 @@ struct SettingsView: View {
         Task {
             do {
                 let version = try await ChatService().backendVersion()
-                let commit = version.gitCommit?.isEmpty == false && version.gitCommit != "unknown"
-                    ? version.gitCommit!
-                    : (version.deployId?.isEmpty == false ? version.deployId! : "unknown")
-                let branch = version.gitBranch?.isEmpty == false ? version.gitBranch! : "unknown"
-                let environment = version.environment?.isEmpty == false ? version.environment! : "env unknown"
+                let rawCommit = version.gitCommit.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
+                let commit = rawCommit ?? version.deployId.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 } ?? "unknown"
+                let branch = version.gitBranch.flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+                let environment = version.environment.flatMap { $0.isEmpty ? nil : $0 } ?? "env unknown"
                 await MainActor.run {
                     backendVersionText = "\(commit) · \(branch) · \(environment)"
                 }

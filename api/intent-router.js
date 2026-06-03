@@ -149,15 +149,6 @@ function cleanStationPhrase(value) {
     .trim();
 }
 
-function inferLiveRailAction(message) {
-  const text = normalizeText(message);
-  // Live rail data from the old transport connector is not reliable enough for
-  // a deterministic action. Let the model answer with search grounding instead.
-  if (!/\b(train|trains|rail|station|platform|departures?|arrival board|station board)\b/i.test(text)) return null;
-  if (!LIVE_RAIL_TERMS.test(text)) return null;
-  return null;
-}
-
 function inferDeterministicAction(message, options = {}) {
   const text = normalizeText(message);
   const preferredMode = options?.settings?.preferredTransportMode;
@@ -165,8 +156,6 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
-  const liveRail = inferLiveRailAction(text);
-  if (liveRail) return liveRail;
   if (/\b(train|trains|rail|platforms?|departures?|station board|arrival board)\b/i.test(text) &&
       !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text) &&
       (LIVE_RAIL_TERMS.test(text) || RAIL_TRIP_TERMS.test(text) || /\bfrom\b.+\bto\b/i.test(text))) {

@@ -2248,8 +2248,11 @@ final class NativeIntegrationManager: NSObject {
             .compactMap { $0 }
             .joined(separator: ", ")
         let distance = origin.map { CLLocation(latitude: placemark.coordinate.latitude, longitude: placemark.coordinate.longitude).distance(from: $0) }
-        let label = (item.name ?? query).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let url = URL(string: "https://maps.apple.com/?ll=\(placemark.coordinate.latitude),\(placemark.coordinate.longitude)&q=\(label)")!
+        let rawLabel = item.name ?? query
+        let label = rawLabel.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = URL(string: "https://maps.apple.com/?ll=\(placemark.coordinate.latitude),\(placemark.coordinate.longitude)&q=\(label)") else {
+            return nil
+        }
         return NativePlaceResult(
             name: item.name ?? query,
             address: address,
@@ -2832,10 +2835,11 @@ final class PendantBLEManager: NSObject {
             print("[Pendant] Retrying scan (attempt \(retryCount + 1)/\(Self.maxRetries))")
             startScan()
         } else {
+            let message = "Connection timed out after \(Self.maxRetries) attempts"
             connectionState = .error
-            lastError = "Connection timed out after \(Self.maxRetries) attempts"
+            lastError = message
             retryCount = 0
-            print("[Pendant] \(lastError!)")
+            print("[Pendant] \(message)")
         }
     }
 }
