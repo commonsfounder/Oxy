@@ -57,7 +57,10 @@ final class PendantAudioBridge {
         )!
     }()
 
-    @ObservationIgnored private let micGain: Float = 3.0
+    // Firmware PDM gain (80) already delivers ideal recognition levels
+    // (RMS ~0.16–0.27). Apply NO extra gain here — multiplying then clamping
+    // clips the waveform into a buzz that the recognizer maps to garbage.
+    @ObservationIgnored private let micGain: Float = 1.0
 
     // ── VAD ───────────────────────────────────────────────────────────────────
     // Onset: RMS must exceed threshold for N consecutive batches before opening
@@ -158,7 +161,8 @@ final class PendantAudioBridge {
         }
 
         let wasInSpeech = hasSpeechInSession
-        updateVAD(rms: rms)
+        let isSpeech = rms > speechRMSThreshold
+        updateVAD(isSpeech: isSpeech, rms: rms)
 
         if hasSpeechInSession && !wasInSpeech {
             openRecognitionSession(replayBuffer: preSpeechBuffer)
@@ -167,8 +171,9 @@ final class PendantAudioBridge {
 
         if isSessionActive, let request = recognitionRequest, !utteranceEnded {
             request.append(pcmBuf)
-            // Each speech batch resets the silence debounce
-            if hasSpeechInSession {
+            // Only an actual speech batch pushes the silence deadline forward.
+            // Silence batches leave the timer running so it fires after the gap.
+            if isSpeech {
                 rescheduleSilenceEnd()
             }
         }
@@ -176,9 +181,7 @@ final class PendantAudioBridge {
 
     // MARK: - VAD
 
-    private func updateVAD(rms: Float) {
-        let isSpeech = rms > speechRMSThreshold
-
+    private func updateVAD(isSpeech: Bool, rms: Float) {
         if isSpeech {
             consecutiveSpeechBatches += 1
             if consecutiveSpeechBatches >= speechOnsetBatches && !hasSpeechInSession {
@@ -281,9 +284,11 @@ final class PendantAudioBridge {
                         print("[PendantBridge] Final: \(transcript)")
                         self.teardownSession()
                         if !transcript.trimmingCharacters(in: .whitespaces).isEmpty {
+                            // deliverTranscript manages state (.transcribing → .listening)
                             self.deliverTranscript(transcript)
+                        } else if self.state != .idle {
+                            self.state = .listening
                         }
-                        if self.state != .idle { self.state = .listening }
                     }
                 }
 

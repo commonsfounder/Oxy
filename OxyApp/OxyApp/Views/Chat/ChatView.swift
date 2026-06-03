@@ -398,6 +398,7 @@ struct ChatView: View {
             // Pendant audio goes straight into the text chat pipeline:
             // spoken command appears in chat and actions fire exactly as typed text.
             bridge.onTranscript = { transcript in
+                HapticManager.shared.impact(.medium)
                 NativeIntegrationManager.shared.pendant.sendCommand("THINK")
                 vm.inputText = transcript
                 vm.sendMessage(userId: state.userId)
@@ -417,6 +418,7 @@ struct ChatView: View {
     }
 
     private func sendCurrentDraft() {
+        HapticManager.shared.impact(.light)
         if let pendingImageData {
             let defaultName = pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg"
             viewModel.sendImageMessage(
@@ -1324,107 +1326,59 @@ private struct PendantListeningBar: View {
     let state: PendantAudioBridge.BridgeState
     let transcript: String?
     @State private var pulse = false
+    @State private var sonar = false
+
+    private var dotColor: Color { state == .listening ? Color.oxyGreen : Color.oxyStone }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(state == .listening ? Color.oxyGreen : Color.oxyStone)
-                .frame(width: 10, height: 10)
-                .scaleEffect(pulse ? 1.3 : 1.0)
-                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+        HStack(spacing: 12) {
+            ZStack {
+                // Expanding "sonar" ring while actively listening
+                if state == .listening {
+                    Circle()
+                        .stroke(Color.oxyGreen.opacity(0.45), lineWidth: 1.5)
+                        .frame(width: 11, height: 11)
+                        .scaleEffect(sonar ? 2.6 : 1.0)
+                        .opacity(sonar ? 0 : 0.7)
+                        .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false), value: sonar)
+                }
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 11, height: 11)
+                    .scaleEffect(pulse ? 1.28 : 1.0)
+                    .animation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true), value: pulse)
+            }
+            .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(state == .listening ? "Pendant listening…" : "Transcribing…")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
+                    .contentTransition(.opacity)
                 if let transcript, !transcript.isEmpty {
                     Text(transcript)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.oxySub)
                         .lineLimit(1)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
             }
             Spacer()
             if state == .transcribing {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.oxyStone)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.oxySurface2)
-        .onAppear { pulse = true }
-    }
-}
-
-// MARK: - Pendant Live Session Bar
-
-private struct PendantLiveBar: View {
-    let state: PendantLiveSession.SessionState
-    let userTranscript: String?
-    let assistantTranscript: String?
-    @State private var pulse = false
-
-    private var statusText: String {
-        switch state {
-        case .disconnected: return "Pendant offline"
-        case .connecting: return "Connecting…"
-        case .ready, .listening: return "Pendant listening…"
-        case .speaking: return "Oxy speaking…"
-        }
-    }
-
-    private var dotColor: Color {
-        switch state {
-        case .disconnected: return .oxyDim
-        case .connecting: return .oxyStone
-        case .ready, .listening: return .oxyGreen
-        case .speaking: return .oxyStone
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 10, height: 10)
-                .scaleEffect(pulse ? 1.3 : 1.0)
-                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(statusText)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                if let userTranscript, !userTranscript.isEmpty {
-                    Text(userTranscript)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
-                        .lineLimit(1)
-                }
-                if let assistantTranscript, !assistantTranscript.isEmpty {
-                    Text(assistantTranscript)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.oxyStone)
-                        .lineLimit(2)
-                }
-            }
-            Spacer()
-            if state == .speaking {
                 Image(systemName: "waveform")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Color.oxyStone)
                     .symbolEffect(.variableColor.iterative, isActive: true)
-            } else if state == .connecting {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(Color.oxyStone)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color.oxySurface2)
-        .onAppear { pulse = true }
+        .animation(.easeInOut(duration: 0.25), value: state)
+        .onAppear {
+            pulse = true
+            sonar = true
+        }
     }
 }
 
