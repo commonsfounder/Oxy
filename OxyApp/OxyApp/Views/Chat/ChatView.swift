@@ -389,11 +389,12 @@ struct ChatView: View {
                 }
             }
             .onChange(of: voiceInput.isTranscribing) { _, nowTranscribing in
-                if !nowTranscribing, !voiceInput.transcript.isEmpty {
-                    viewModel.inputText = voiceInput.transcript
-                    viewModel.sendMessage(userId: appState.userId)
-                    voiceInput.transcript = ""
-                }
+                guard !nowTranscribing else { return }
+                let text = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                voiceInput.transcript = ""
+                guard !text.isEmpty else { return }
+                viewModel.inputText = text
+                viewModel.sendMessage(userId: appState.userId)
             }
         }
         .task {

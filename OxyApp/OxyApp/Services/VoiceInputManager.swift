@@ -12,6 +12,7 @@ final class VoiceInputManager {
     private var recorder: AVAudioRecorder?
     private var tempURL: URL?
     private var currentUserId = ""
+    private var transcribeTask: Task<Void, Never>?
 
     var micAuthStatus: AVAudioSession.RecordPermission {
         AVAudioSession.sharedInstance().recordPermission
@@ -28,6 +29,8 @@ final class VoiceInputManager {
     func startRecording(userId: String) {
         guard !isRecording, !isTranscribing else { return }
         currentUserId = userId
+        transcript = ""
+        errorMessage = nil
         Task { await beginRecording() }
     }
 
@@ -78,12 +81,13 @@ final class VoiceInputManager {
         isTranscribing = true
 
         let uid = currentUserId
-        Task {
+        transcribeTask = Task {
             defer {
                 try? FileManager.default.removeItem(at: url)
                 try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-                isTranscribing = false
+                if !Task.isCancelled { isTranscribing = false }
             }
+            guard !Task.isCancelled else { return }
             do {
                 let audioData = try Data(contentsOf: url)
                 let responseData = try await APIClient.shared.multipartRequest(
@@ -94,16 +98,21 @@ final class VoiceInputManager {
                     mimeType: "audio/wav",
                     fileData: audioData
                 )
+                guard !Task.isCancelled else { return }
                 struct TranscriptResponse: Decodable { let transcript: String }
                 let result = try JSONDecoder().decode(TranscriptResponse.self, from: responseData)
-                transcript = result.transcript
+                transcript = result.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
             } catch {
-                errorMessage = "Transcription failed. Please try again."
+                if !Task.isCancelled {
+                    errorMessage = "Transcription failed. Please try again."
+                }
             }
         }
     }
 
     func cancel() {
+        transcribeTask?.cancel()
+        transcribeTask = nil
         recorder?.stop()
         recorder = nil
         if let url = tempURL {
@@ -113,6 +122,7 @@ final class VoiceInputManager {
         isRecording = false
         isTranscribing = false
         transcript = ""
+        errorMessage = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
