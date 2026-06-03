@@ -3,6 +3,9 @@ import SwiftUI
 import UIKit
 #endif
 
+// Connector IDs that are not yet meaningfully integrated
+private let hiddenConnectorIDs: Set<String> = ["netflix", "deliveroo", "trainline", "ubereats", "uber_eats"]
+
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -12,6 +15,7 @@ struct ConnectorsView: View {
     @State private var googleStatus: GoogleStatus = .idle
     @State private var errorMessage: String?
     @State private var cardsVisible = false
+    @State private var capabilities: NativeCapabilities?
 
     enum GoogleStatus: String {
         case idle, connecting, connected, needsReconnect, error
@@ -36,15 +40,23 @@ struct ConnectorsView: View {
                                 ErrorBanner(message: errorMessage)
                             }
 
+                            // On This Device — native OS permissions
+                            if let caps = capabilities {
+                                nativeSection(caps)
+                                    .opacity(cardsVisible ? 1 : 0)
+                                    .offset(y: cardsVisible ? 0 : 18)
+                                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.0), value: cardsVisible)
+                            }
+
                             // Google section
                             googleSection
                                 .opacity(cardsVisible ? 1 : 0)
                                 .offset(y: cardsVisible ? 0 : 18)
-                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.02), value: cardsVisible)
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.06), value: cardsVisible)
 
-                            // Grouped connectors
-                            let nonGoogle = connectors.filter { $0.id != "google" && $0.implemented }
-                            let grouped = Dictionary(grouping: nonGoogle) { $0.category }
+                            // Grouped connectors (filtering out unimplemented/hidden)
+                            let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
+                            let grouped = Dictionary(grouping: visible.filter { $0.id != "google" }) { $0.category }
 
                             ForEach(grouped.keys.sorted(), id: \.self) { category in
                                 if let items = grouped[category] {
@@ -53,6 +65,7 @@ struct ConnectorsView: View {
                             }
                         }
                         .padding(16)
+                        .padding(.bottom, 24)
                     }
                 }
             }
@@ -75,15 +88,74 @@ struct ConnectorsView: View {
                 }
             }
             .task {
-                await loadConnectors()
+                await loadAll()
             }
             .refreshable {
-                await loadConnectors()
+                await loadAll()
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active && googleStatus == .connecting {
-                    Task { await loadConnectors() }
+                if phase == .active {
+                    Task {
+                        if googleStatus == .connecting { await loadConnectors() }
+                        capabilities = await NativeIntegrationManager.shared.currentCapabilities()
+                    }
                 }
+            }
+        }
+    }
+
+    // MARK: - Native Section
+
+    private func nativeSection(_ caps: NativeCapabilities) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("On This Device")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxySub)
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            VStack(spacing: 0) {
+                ForEach(NativeCapabilityItem.all(from: caps), id: \.id) { item in
+                    NativeCapabilityRow(item: item) {
+                        await handleNativeAction(item)
+                    }
+                    if item.id != NativeCapabilityItem.all(from: caps).last?.id {
+                        Divider()
+                            .overlay(Color.oxyLine)
+                            .padding(.leading, 56)
+                    }
+                }
+            }
+            .background(Color.oxySurface2)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.oxyLine2, lineWidth: 1)
+            )
+        }
+    }
+
+    private func handleNativeAction(_ item: NativeCapabilityItem) async {
+        let nim = NativeIntegrationManager.shared
+        switch item.status {
+        case .denied:
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                await UIApplication.shared.open(url)
+            }
+        case .notDetermined:
+            switch item.id {
+            case "contacts":       await nim.requestContactsAccess()
+            case "location":       LocationManager.shared.requestAlwaysPermission()
+            case "health":         await nim.requestHealthAccess()
+            case "reminders":      await nim.requestRemindersAccess()
+            case "music":          await nim.requestMusicAccess()
+            case "notifications":  await nim.requestNotificationPermission(userId: appState.userId)
+            default: break
+            }
+            capabilities = await nim.currentCapabilities()
+        case .granted:
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                await UIApplication.shared.open(url)
             }
         }
     }
@@ -186,6 +258,13 @@ struct ConnectorsView: View {
     }
 
     // MARK: - Actions
+
+    private func loadAll() async {
+        async let connTask: Void = loadConnectors()
+        async let capsTask = NativeIntegrationManager.shared.currentCapabilities()
+        await connTask
+        capabilities = await capsTask
+    }
 
     private func loadConnectors() async {
         do {
@@ -302,6 +381,134 @@ struct ConnectorsView: View {
     }
 }
 
+// MARK: - Native Capability Model
+
+struct NativeCapabilityItem {
+    enum Status { case granted, denied, notDetermined }
+
+    let id: String
+    let icon: String
+    let iconTint: Color
+    let title: String
+    let subtitle: String
+    let status: Status
+
+    static func all(from caps: NativeCapabilities) -> [NativeCapabilityItem] {
+        let locStatus = LocationManager.shared.authorizationStatus
+        let locCapStatus: Status = locStatus == .authorizedAlways || locStatus == .authorizedWhenInUse
+            ? .granted : (locStatus == .denied || locStatus == .restricted ? .denied : .notDetermined)
+
+        return [
+            NativeCapabilityItem(
+                id: "contacts",
+                icon: "person.2.fill",
+                iconTint: Color(red: 0.27, green: 0.53, blue: 0.99),
+                title: "Contacts",
+                subtitle: "Message and call people by name",
+                status: caps.contacts ? .granted : .notDetermined
+            ),
+            NativeCapabilityItem(
+                id: "location",
+                icon: "location.fill",
+                iconTint: Color(red: 0.0, green: 0.68, blue: 0.36),
+                title: "Location",
+                subtitle: "Rides, directions, local context",
+                status: locCapStatus
+            ),
+            NativeCapabilityItem(
+                id: "health",
+                icon: "heart.fill",
+                iconTint: Color(red: 0.99, green: 0.25, blue: 0.33),
+                title: "Health",
+                subtitle: "Activity, heart rate, sleep",
+                status: caps.healthKit ? .granted : .notDetermined
+            ),
+            NativeCapabilityItem(
+                id: "reminders",
+                icon: "checklist",
+                iconTint: Color(red: 1.0, green: 0.58, blue: 0.0),
+                title: "Reminders",
+                subtitle: "Create and manage tasks",
+                status: caps.reminders ? .granted : .notDetermined
+            ),
+            NativeCapabilityItem(
+                id: "music",
+                icon: "music.note",
+                iconTint: Color(red: 0.99, green: 0.23, blue: 0.41),
+                title: "Music",
+                subtitle: "Control Apple Music playback",
+                status: caps.musicKit ? .granted : .notDetermined
+            ),
+            NativeCapabilityItem(
+                id: "notifications",
+                icon: "bell.fill",
+                iconTint: Color(red: 0.99, green: 0.65, blue: 0.0),
+                title: "Notifications",
+                subtitle: "Briefings and action alerts",
+                status: caps.notifications ? .granted : .notDetermined
+            ),
+        ]
+    }
+}
+
+// MARK: - Native Capability Row
+
+private struct NativeCapabilityRow: View {
+    let item: NativeCapabilityItem
+    let onAction: () async -> Void
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(item.iconTint.opacity(0.15))
+                    .frame(width: 36, height: 36)
+                Image(systemName: item.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(item.iconTint)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.title)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.oxyText)
+                Text(item.subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.oxySub)
+            }
+
+            Spacer()
+
+            Button {
+                Task { await onAction() }
+            } label: {
+                nativePill
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var nativePill: some View {
+        let (label, color): (String, Color) = {
+            switch item.status {
+            case .granted:      return ("Active", Color.oxyGreen)
+            case .denied:       return ("Settings", Color.oxySub)
+            case .notDetermined: return ("Enable", Color.oxyStone)
+            }
+        }()
+        return Text(label)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 1))
+    }
+}
+
 // MARK: - Connector Card
 
 private struct ConnectorCard: View {
@@ -315,16 +522,12 @@ private struct ConnectorCard: View {
         case "whatsapp":  return "phone.fill"
         case "spotify":   return "music.note"
         case "reminders": return "checklist"
-        case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
-        case "uber":      return "car.fill"
         case "telegram":  return "paperplane.fill"
         case "monzo":     return "banknote.fill"
         case "homekit":   return "house.fill"
-        case "trainline": return "tram.fill"
         case "maps":      return "map.fill"
         case "notion":    return "doc.text.fill"
         case "betfair":   return "chart.line.uptrend.xyaxis"
-        case "netflix":   return "play.tv.fill"
         default:          return "puzzlepiece.fill"
         }
     }
@@ -361,7 +564,6 @@ private struct ConnectorCard: View {
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
         .background(Color.oxySurface2)
-        .opacity(connector.implemented ? 1.0 : 0.45)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
@@ -483,13 +685,9 @@ private struct AppIconView: View {
     private var brandStyle: (text: String?, background: Color, foreground: Color, fontSize: CGFloat) {
         let names = candidates.map { $0.lowercased() }
         if names.contains("uber") { return ("Uber", .black, .white, 12) }
-        if names.contains("ubereats") { return ("Eats", .black, Color(red: 6/255, green: 193/255, blue: 103/255), 11) }
         if names.contains("google") { return ("G", .white, Color(red: 66/255, green: 133/255, blue: 244/255), 21) }
         if names.contains("maps") { return (nil, Color(red: 66/255, green: 133/255, blue: 244/255), .white, 17) }
         if names.contains("telegram") { return (nil, Color(red: 42/255, green: 171/255, blue: 238/255), .white, 17) }
-        if names.contains("trainline") { return ("TL", Color(red: 0/255, green: 169/255, blue: 126/255), .white, 15) }
-        if names.contains("deliveroo") { return ("D", Color(red: 0/255, green: 204/255, blue: 188/255), .white, 19) }
-        if names.contains("netflix") { return ("N", .black, Color(red: 229/255, green: 9/255, blue: 20/255), 21) }
         return (nil, Color.oxySurface3, Color.oxySub, 17)
     }
 

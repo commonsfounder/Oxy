@@ -784,10 +784,7 @@ final class NativeIntegrationManager: NSObject {
             NativeAppShortcut(displayName: "Spotify", aliases: ["spotify"], universalLinks: ["https://open.spotify.com/"], schemes: ["spotify://"], fallbackURL: "https://open.spotify.com/"),
             NativeAppShortcut(displayName: "Apple Music", aliases: ["apple music", "music"], universalLinks: ["https://music.apple.com/"], schemes: ["music://"], fallbackURL: "https://music.apple.com/"),
             NativeAppShortcut(displayName: "Uber", aliases: ["uber"], schemes: ["uber://"], fallbackURL: "https://m.uber.com/ul/"),
-            NativeAppShortcut(displayName: "Netflix", aliases: ["netflix"], universalLinks: ["https://www.netflix.com/"], schemes: ["nflx://"], fallbackURL: "https://www.netflix.com/"),
             NativeAppShortcut(displayName: "Telegram", aliases: ["telegram"], universalLinks: ["https://t.me/"], schemes: ["tg://"], fallbackURL: "https://t.me/"),
-            NativeAppShortcut(displayName: "Deliveroo", aliases: ["deliveroo"], universalLinks: ["https://deliveroo.co.uk/"], schemes: ["deliveroo://"], fallbackURL: "https://deliveroo.co.uk/"),
-            NativeAppShortcut(displayName: "Trainline", aliases: ["trainline", "the trainline"], universalLinks: ["https://www.thetrainline.com/"], schemes: ["thetrainline://"], fallbackURL: "https://www.thetrainline.com/"),
             NativeAppShortcut(displayName: "Monzo", aliases: ["monzo"], universalLinks: ["https://monzo.com/"], schemes: ["monzo://"], fallbackURL: "https://apps.apple.com/search?term=Monzo", sensitive: true),
             NativeAppShortcut(displayName: "Revolut", aliases: ["revolut"], universalLinks: ["https://www.revolut.com/"], schemes: ["revolut://"], fallbackURL: "https://apps.apple.com/search?term=Revolut", sensitive: true),
             NativeAppShortcut(displayName: "Starling", aliases: ["starling", "starling bank"], universalLinks: ["https://www.starlingbank.com/"], schemes: ["starlingbank://"], fallbackURL: "https://apps.apple.com/search?term=Starling%20Bank", sensitive: true),
@@ -1879,6 +1876,26 @@ final class NativeIntegrationManager: NSObject {
         } else {
             _ = try? await eventStore.requestAccess(to: .event)
         }
+    }
+
+    func currentCapabilities() async -> NativeCapabilities {
+        await nativeCapabilities()
+    }
+
+    func requestContactsAccess() async {
+        await requestContactsPermission()
+    }
+
+    func requestHealthAccess() async {
+        await requestHealthPermission()
+    }
+
+    func requestRemindersAccess() async {
+        await requestReminderPermission()
+    }
+
+    func requestMusicAccess() async {
+        _ = await requestMusicPermission()
     }
 
     private func nativeCapabilities() async -> NativeCapabilities {
