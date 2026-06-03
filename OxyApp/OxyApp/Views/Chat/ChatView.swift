@@ -108,7 +108,7 @@ struct ChatView: View {
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVStack(spacing: 2) {
+                            LazyVStack(spacing: 0) {
                                 if viewModel.messages.isEmpty && !viewModel.isSending {
                                     WelcomeCard(onQuickAction: { action in
                                         viewModel.inputText = action
@@ -118,10 +118,17 @@ struct ChatView: View {
                                     .padding(.bottom, 20)
                                 }
 
-                                ForEach(viewModel.messages) { message in
+                                ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
+                                    let msgs = viewModel.messages
+                                    let prevRole = idx > 0 ? msgs[idx - 1].role : nil
+                                    let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
+                                    let isGroupStart = prevRole != message.role
+                                    let isGroupEnd = nextRole != message.role
                                     MessageBubble(
                                         message: message,
                                         showsTypingIndicator: viewModel.statusLabel == nil,
+                                        isGroupStart: isGroupStart,
+                                        isGroupEnd: isGroupEnd,
                                         onActionCommand: { command in
                                             viewModel.sendCommand(command, userId: appState.userId)
                                         },
@@ -129,8 +136,9 @@ struct ChatView: View {
                                             handleActionOpen(action)
                                         }
                                     )
-                                        .id(message.id)
-                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                    .id(message.id)
+                                    .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                                 }
 
                                 if let status = viewModel.statusLabel {
@@ -198,17 +206,23 @@ struct ChatView: View {
                         )
                     }
 
-                    // Pendant listening indicator
+                    // Pendant floating overlay
                     if pendantBridge.state != .idle {
-                        PendantListeningBar(
-                            state: pendantBridge.state,
-                            transcript: pendantBridge.lastTranscript,
-                            notice: pendantBridge.notice
-                        )
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .opacity
-                            ))
+                        HStack {
+                            Spacer()
+                            PendantOverlay(
+                                state: pendantBridge.state,
+                                transcript: pendantBridge.lastTranscript,
+                                notice: pendantBridge.notice
+                            )
+                            Spacer()
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 6)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .scale(scale: 0.88)).combined(with: .opacity),
+                            removal: .scale(scale: 0.88).combined(with: .opacity)
+                        ))
                     }
 
                     // Input bar
@@ -1325,73 +1339,96 @@ private struct StatusIndicator: View {
     }
 }
 
-// MARK: - Pendant Listening Bar
+// MARK: - Pendant Floating Overlay
 
-private struct PendantListeningBar: View {
+private struct PendantOverlay: View {
     let state: PendantAudioBridge.BridgeState
     let transcript: String?
     var notice: String? = nil
-    @State private var pulse = false
-    @State private var sonar = false
-
-    private var dotColor: Color {
-        if notice != nil { return Color(red: 0.85, green: 0.62, blue: 0.22) }
-        return state == .listening ? Color.oxyGreen : Color.oxyStone
-    }
-
-    private var titleText: String {
-        if let notice { return notice }
-        return state == .listening ? "Pendant listening…" : "Transcribing…"
-    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                // Expanding "sonar" ring while actively listening
-                if state == .listening {
-                    Circle()
-                        .stroke(Color.oxyGreen.opacity(0.45), lineWidth: 1.5)
-                        .frame(width: 11, height: 11)
-                        .scaleEffect(sonar ? 2.6 : 1.0)
-                        .opacity(sonar ? 0 : 0.7)
-                        .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false), value: sonar)
-                }
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 11, height: 11)
-                    .scaleEffect(pulse ? 1.28 : 1.0)
-                    .animation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true), value: pulse)
-            }
-            .frame(width: 30, height: 30)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(titleText)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                    .contentTransition(.opacity)
-                if notice == nil, let transcript, !transcript.isEmpty {
-                    Text(transcript)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+        HStack(spacing: 11) {
+            if let notice {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color(red: 0.85, green: 0.62, blue: 0.22))
+                Text(notice)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            } else if state == .listening {
+                PendantWaveform(active: true)
+                Text("Listening")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                if let t = transcript, !t.isEmpty {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(t)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                        .truncationMode(.middle)
+                        .animation(.easeInOut(duration: 0.2), value: t)
                 }
-            }
-            Spacer()
-            if state == .transcribing {
+            } else {
                 Image(systemName: "waveform")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
                     .symbolEffect(.variableColor.iterative, isActive: true)
+                if let t = transcript, !t.isEmpty {
+                    Text(t)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                } else {
+                    Text("Transcribing…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.oxySurface2)
-        .animation(.easeInOut(duration: 0.25), value: state)
-        .onAppear {
-            pulse = true
-            sonar = true
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.13), radius: 18, x: 0, y: 6)
+        .animation(.easeInOut(duration: 0.2), value: state)
+    }
+}
+
+private struct PendantWaveform: View {
+    let active: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
+            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
+            WaveBar(maxH: 19, dur: 0.50, delay: 0.24, active: active)
+            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
+            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
+        }
+        .frame(height: 22)
+    }
+
+    private struct WaveBar: View {
+        let maxH: CGFloat
+        let dur: Double
+        let delay: Double
+        let active: Bool
+        @State private var on = false
+
+        var body: some View {
+            Capsule()
+                .fill(Color.oxyStone)
+                .frame(width: 3, height: on ? maxH : 3)
+                .animation(
+                    active
+                        ? .easeInOut(duration: dur).repeatForever(autoreverses: true).delay(delay)
+                        : .easeInOut(duration: 0.2),
+                    value: on
+                )
+                .onAppear { if active { on = true } }
+                .onChange(of: active) { _, a in on = a }
         }
     }
 }

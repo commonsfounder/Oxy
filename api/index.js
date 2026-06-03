@@ -1166,8 +1166,8 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
 
   if (isContextualReference(text)) {
     const [history, recentActions, memory] = await Promise.all([
-      getHistory(userId, trace, 12, historyOptions),
-      getRecentLoggedActions(userId, trace, 10, historyOptions),
+      getHistory(userId, trace, 24, historyOptions),
+      getRecentLoggedActions(userId, trace, 12, historyOptions),
       getMemory(userId, trace)
     ]);
     const resolvedTurn = resolveContextualTurn({
@@ -3660,12 +3660,12 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const historyOptions = { since: requestContext.chatStartedAt };
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
-    getHistory(userId, trace, 12, historyOptions),
+    getHistory(userId, trace, 24, historyOptions),
     getPreferences(userId, trace),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
     getPromptCacheName(trace, modelName),
-    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions)
+    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 12, historyOptions)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   const statedContext = extractAlreadyStatedContext(history);
