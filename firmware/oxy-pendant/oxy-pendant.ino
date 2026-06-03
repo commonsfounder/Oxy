@@ -31,12 +31,24 @@ static const int BUFFER_SAMPLES = 256;
 // The XIAO Sense onboard mic is very quiet, so run near the top of the range.
 static const int MIC_GAIN       = 80;
 static int16_t   pdmBuffer[BUFFER_SAMPLES];
-volatile bool    pdmReady      = false;
-volatile int     pdmBytesAvail = 0;
+
+// ── Audio ring buffer ──────────────────────────────────────────
+// Decouples the PDM capture interrupt from BLE transmission so the
+// two never touch the same memory at the same time. Without this the
+// loop reads pdmBuffer while a new PDM interrupt overwrites it, splicing
+// corrupted samples into the stream (healthy level, unusable waveform).
+// 8192 samples = 16 KB ≈ 0.5 s of headroom. Must stay a power of two so
+// the index wrap is a cheap mask.
+#define RING_SAMPLES 8192
+#define RING_MASK    (RING_SAMPLES - 1)
+static int16_t          ring[RING_SAMPLES];
+static volatile uint32_t ringHead = 0;   // written by PDM ISR
+static volatile uint32_t ringTail = 0;   // read by loop()
 
 // ── State ──────────────────────────────────────────────────────
-bool isStreaming  = false;
-bool isConnected  = false;
+bool     isStreaming  = false;
+bool     isConnected  = false;
+uint16_t connHandle   = BLE_CONN_HANDLE_INVALID;
 
 // ── BLE device name ────────────────────────────────────────────
 static const char* DEVICE_NAME = "Oxy";
@@ -103,9 +115,18 @@ void bleuart_rx_callback(uint16_t conn_hdl) {
 
 // ── BLE connection callbacks ───────────────────────────────────
 void connect_callback(uint16_t conn_handle) {
-  (void)conn_handle;
   Serial.println("[Oxy] Connected");
   isConnected = true;
+  connHandle  = conn_handle;
+
+  // Request a larger MTU + data length so each BLE notification carries
+  // many audio samples instead of 20 bytes. This is what lets the link
+  // sustain the 256 kbps the 16 kHz/16-bit stream needs.
+  BLEConnection* conn = Bluefruit.Connection(conn_handle);
+  if (conn) {
+    conn->requestMtuExchange(247);
+    conn->requestDataLengthUpdate();
+  }
 
   // Blink 3× to signal connection
   for (int i = 0; i < 3; i++) {
@@ -122,18 +143,30 @@ void disconnect_callback(uint16_t conn_handle, uint8_t reason) {
   (void)reason;
   Serial.println("[Oxy] Disconnected");
   isConnected = false;
+  connHandle  = BLE_CONN_HANDLE_INVALID;
   stopStreaming();
 }
 
-// ── PDM callback ───────────────────────────────────────────────
+// ── PDM callback (interrupt context) ───────────────────────────
+// Reads captured samples and enqueues them into the ring buffer. It
+// never touches the BLE transmit path, so capture and send can't collide.
 void onPDMData() {
   int bytes = PDM.available();
-  if (bytes > 0) {
-    int toRead = min(bytes, (int)sizeof(pdmBuffer));
-    PDM.read(pdmBuffer, toRead);
-    pdmBytesAvail = toRead;
-    pdmReady = true;
+  if (bytes <= 0) return;
+
+  int toRead  = min(bytes, (int)sizeof(pdmBuffer));
+  PDM.read(pdmBuffer, toRead);
+  int samples = toRead / 2;
+
+  uint32_t head = ringHead;
+  uint32_t tail = ringTail;
+  for (int i = 0; i < samples; i++) {
+    uint32_t next = (head + 1) & RING_MASK;
+    if (next == tail) break;   // ring full — drop rather than corrupt
+    ring[head] = pdmBuffer[i];
+    head = next;
   }
+  ringHead = head;
 }
 
 // ── Streaming control ──────────────────────────────────────────
@@ -210,33 +243,58 @@ void setup() {
 // ================================================================
 void loop() {
   updateLED();
+  drainAudio();
+}
 
-  if (isStreaming && pdmReady) {
-    pdmReady = false;
-    int bytesToSend = pdmBytesAvail;
+// Drain the audio ring buffer into BLE UART. Writes the largest
+// contiguous span the negotiated MTU allows, and advances the tail only
+// by the bytes the BLE stack actually accepted — so a full TX FIFO causes
+// backpressure (we retry next loop) instead of silently dropping samples.
+void drainAudio() {
+  if (!isStreaming || !isConnected) return;
 
-    // Periodic diagnostic: print first few samples to Serial
-    static unsigned long lastLog = 0;
-    if (millis() - lastLog > 5000) {
-      lastLog = millis();
-      Serial.print("[Oxy] Audio samples: ");
-      int n = min(5, bytesToSend / 2);
-      for (int i = 0; i < n; i++) {
-        Serial.print(pdmBuffer[i]);
-        Serial.print(" ");
-      }
-      Serial.println();
+  // Payload per notification = MTU - 3 (ATT header), capped to a sane size.
+  uint16_t payload = 20;
+  BLEConnection* conn = Bluefruit.Connection(connHandle);
+  if (conn) {
+    uint16_t mtu = conn->getMtu();
+    if (mtu > 3) payload = mtu - 3;
+  }
+  if (payload > 244) payload = 244;
+  payload &= ~1u;  // keep an even byte count so Int16 samples never split
+
+  // Periodic diagnostic: depth + first samples
+  static unsigned long lastLog = 0;
+  if (millis() - lastLog > 5000) {
+    lastLog = millis();
+    uint32_t depth = (ringHead - ringTail) & RING_MASK;
+    Serial.print("[Oxy] ring depth=");
+    Serial.print(depth);
+    Serial.print(" payload=");
+    Serial.print(payload);
+    Serial.print(" samples: ");
+    for (uint32_t i = 0; i < 5 && i < depth; i++) {
+      Serial.print(ring[(ringTail + i) & RING_MASK]);
+      Serial.print(" ");
     }
+    Serial.println();
+  }
 
-    // Send audio over BLE UART in 20-byte chunks
-    const uint8_t* data = (const uint8_t*)pdmBuffer;
-    int remaining = bytesToSend;
-    while (remaining > 0 && isConnected) {
-      int chunk = min(remaining, 20);
-      bleuart.write(data, chunk);
-      data      += chunk;
-      remaining -= chunk;
-      delayMicroseconds(500);
-    }
+  // Bound the work per loop so the LED/BLE housekeeping still runs.
+  for (int guard = 0; guard < 64; guard++) {
+    uint32_t head = ringHead;          // snapshot (ISR may advance it)
+    if (ringTail == head) break;       // nothing to send
+
+    // Contiguous span from tail up to either head or the end of the ring.
+    uint32_t spanEnd     = (head > ringTail) ? head : RING_SAMPLES;
+    uint32_t spanSamples = spanEnd - ringTail;
+    uint32_t spanBytes   = spanSamples * 2;
+    if (spanBytes > payload) spanBytes = payload;
+
+    int sent = bleuart.write((const uint8_t*)&ring[ringTail], spanBytes);
+    if (sent <= 0) break;              // TX FIFO full — retry next loop
+
+    ringTail = (ringTail + (sent / 2)) & RING_MASK;
+    if ((uint32_t)sent < spanBytes) break;  // partial write → FIFO full
   }
 }

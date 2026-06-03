@@ -23,6 +23,10 @@ final class PendantAudioBridge {
     private(set) var lastTranscript: String?
     private(set) var errorMessage: String?
 
+    /// Transient, user-facing note shown in the listening bar (e.g. "Didn't
+    /// catch that"). Auto-clears so the bar returns to its normal prompt.
+    private(set) var notice: String?
+
     /// Set this before the first utterance so the bridge can authenticate API calls.
     var userId: String = ""
 
@@ -200,6 +204,7 @@ final class PendantAudioBridge {
     private func openAudioSession(preSpeech: Data) {
         guard !isSessionActive else { return }
         isSessionActive = true
+        notice = nil
         rawAudioBuffer = preSpeech  // Replay pre-speech so first syllables aren't lost
         print("[PendantBridge] Audio session opened (+\(preSpeech.count)B pre-speech)")
 
@@ -250,12 +255,23 @@ final class PendantAudioBridge {
                 deliverTranscript(transcript)
             } else {
                 print("[PendantBridge] Empty transcript — skipping")
+                showNotice("Didn't catch that — try again")
                 state = .listening
             }
         } catch {
             print("[PendantBridge] Transcription error: \(error.localizedDescription)")
             errorMessage = "Transcription failed"
+            showNotice("Couldn't reach Oxy — check connection")
             state = .listening
+        }
+    }
+
+    /// Show a brief note in the listening bar, then clear it.
+    private func showNotice(_ text: String) {
+        notice = text
+        let token = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            if self?.notice == token { self?.notice = nil }
         }
     }
 
