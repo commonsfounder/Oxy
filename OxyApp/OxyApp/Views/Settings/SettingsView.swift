@@ -61,10 +61,15 @@ struct SettingsView: View {
                                             settings.accentColor = option.value
                                             saveSettings()
                                         } label: {
-                                            if settings.accentColor == option.value {
-                                                Label(option.label, systemImage: "checkmark")
-                                            } else {
+                                            HStack {
+                                                Circle()
+                                                    .fill(option.color)
+                                                    .frame(width: 10, height: 10)
                                                 Text(option.label)
+                                                if settings.accentColor == option.value {
+                                                    Spacer()
+                                                    Image(systemName: "checkmark")
+                                                }
                                             }
                                         }
                                     }

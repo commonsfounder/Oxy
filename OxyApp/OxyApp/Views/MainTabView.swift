@@ -3,6 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
+    @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var selectedTab = Tab.chat
 
     enum Tab: String {
@@ -33,7 +34,7 @@ struct MainTabView: View {
                 .tag(Tab.more)
         }
         .tint(Color.oxyStone)
-        .id(accentColor)
+        .id(accentColor + appTheme)
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }
