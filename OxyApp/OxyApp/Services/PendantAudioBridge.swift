@@ -5,9 +5,11 @@ import Speech
 
 /// Bridges continuous pendant BLE audio to the chat pipeline.
 ///
-/// Audio flow: pendant PDM (16 kHz Int16) → BLE chunks → VAD → SFSpeechRecognizer.
-/// A recognition session is only opened once the VAD confirms speech onset, so
-/// SFSpeechRecognizer never sits idle receiving silence and firing "No speech detected".
+/// Audio flow: pendant PDM (16 kHz Int16) → BLE chunks → onset VAD →
+/// SFSpeechRecognizer → onTranscript callback → sendMessage().
+///
+/// Silence detection uses a debounce timer rather than batch counting so
+/// endAudio() is guaranteed to fire regardless of background noise level.
 @Observable
 @MainActor
 final class PendantAudioBridge {
@@ -39,9 +41,9 @@ final class PendantAudioBridge {
     // Pre-speech ring buffer: keeps ~512 ms of raw Int16 audio so utterance
     // onset words aren't clipped when we open the session after VAD confirmation.
     @ObservationIgnored private var preSpeechBuffer = Data()
-    @ObservationIgnored private let preSpeechBufferCapacity = 4096 * 2 * 2 // ~512 ms of Int16
+    @ObservationIgnored private let preSpeechBufferCapacity = 4096 * 2 * 2
 
-    // Session restart guard (Apple caps recognition sessions at ~60 s)
+    // Session hard-cap guard (Apple caps recognition sessions at ~60 s)
     @ObservationIgnored private var restartTimer: Timer?
     @ObservationIgnored private let sessionTimeout: TimeInterval = 55
 
@@ -55,23 +57,23 @@ final class PendantAudioBridge {
         )!
     }()
 
-    // Moderate gain — PDM gain-40 firmware output is quiet; 3× avoids clipping
     @ObservationIgnored private let micGain: Float = 3.0
 
-    // ── VAD state machine ──────────────────────────────────────────────────────
-    // Hysteresis: high onset threshold avoids phantom triggers from background
-    // noise; low offset threshold ensures endAudio() fires even when the noise
-    // floor is elevated (prevents recognition session from hanging open forever).
-    @ObservationIgnored private let speechRMSThreshold: Float = 0.04   // must exceed to open session
-    @ObservationIgnored private let silenceRMSThreshold: Float = 0.015 // must drop below to close
-    @ObservationIgnored private let silenceOffsetBatches = 8
-    // 3 consecutive speech batches (~768 ms) avoids triggering on transient noise.
+    // ── VAD ───────────────────────────────────────────────────────────────────
+    // Onset: RMS must exceed threshold for N consecutive batches before opening
+    // a recognition session (avoids phantom triggers from transient noise).
+    @ObservationIgnored private let speechRMSThreshold: Float = 0.04
     @ObservationIgnored private let speechOnsetBatches = 3
 
     @ObservationIgnored private var consecutiveSpeechBatches = 0
-    @ObservationIgnored private var consecutiveSilenceBatches = 0
     @ObservationIgnored private var hasSpeechInSession = false
     @ObservationIgnored private var utteranceEnded = false
+
+    // Silence offset: a debounce timer fires endAudio() 1.5 s after the last
+    // speech batch. This is decoupled from the noise floor entirely — no
+    // threshold-based silence counting that can get stuck.
+    @ObservationIgnored private var silenceEndTimer: DispatchWorkItem?
+    @ObservationIgnored private let silenceDebounce: TimeInterval = 1.5
 
     @ObservationIgnored private var diagnosticCounter = 0
 
@@ -105,9 +107,6 @@ final class PendantAudioBridge {
     // MARK: - Pendant lifecycle
 
     private func onPendantConnected() {
-        // The live session owns the AVAudioSession. This fallback bridge feeds
-        // PCM buffers directly to SFSpeechRecognizer and does not record from the
-        // mic, so it deliberately does not touch the audio session here.
         fullReset()
         state = .listening
         print("[PendantBridge] Ready — waiting for speech onset")
@@ -115,8 +114,6 @@ final class PendantAudioBridge {
 
     // MARK: - Audio handling
 
-    /// Routed audio sink. Called by ChatView's audio router only when the live
-    /// session is unavailable, so this bridge is the sole consumer at that time.
     func ingest(_ data: Data) {
         pendingPCMData.append(data)
         let sampleCount = pendingPCMData.count / MemoryLayout<Int16>.size
@@ -132,7 +129,6 @@ final class PendantAudioBridge {
         let sampleCount = data.count / MemoryLayout<Int16>.size
         guard sampleCount > 0 else { return }
 
-        // Convert Int16 → Float32 and compute RMS for VAD
         guard let pcmBuf = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: UInt32(sampleCount)) else { return }
         pcmBuf.frameLength = UInt32(sampleCount)
 
@@ -151,10 +147,9 @@ final class PendantAudioBridge {
 
         diagnosticCounter += 1
         if diagnosticCounter % 20 == 0 {
-            print("[PendantBridge] rms=\(String(format: "%.4f", rms)) speech=\(consecutiveSpeechBatches) silence=\(consecutiveSilenceBatches) active=\(isSessionActive)")
+            print("[PendantBridge] rms=\(String(format: "%.4f", rms)) speech=\(consecutiveSpeechBatches) active=\(isSessionActive)")
         }
 
-        // Roll pre-speech buffer (keep last ~512 ms of raw bytes)
         if !isSessionActive {
             preSpeechBuffer.append(data)
             if preSpeechBuffer.count > preSpeechBufferCapacity {
@@ -165,57 +160,59 @@ final class PendantAudioBridge {
         let wasInSpeech = hasSpeechInSession
         updateVAD(rms: rms)
 
-        // Speech onset: open recognition session and replay the pre-speech buffer
-        // so the first syllables aren't clipped.
         if hasSpeechInSession && !wasInSpeech {
             openRecognitionSession(replayBuffer: preSpeechBuffer)
             preSpeechBuffer = Data()
         }
 
-        // Feed current batch to the active session
         if isSessionActive, let request = recognitionRequest, !utteranceEnded {
             request.append(pcmBuf)
+            // Each speech batch resets the silence debounce
+            if hasSpeechInSession {
+                rescheduleSilenceEnd()
+            }
         }
     }
 
     // MARK: - VAD
 
     private func updateVAD(rms: Float) {
-        // Separate onset/offset thresholds (hysteresis) so that:
-        // - noise below the onset threshold never opens a session (no phantoms)
-        // - once open, silence is detected at a lower bar so endAudio() fires
-        //   even when the noise floor is elevated
         let isSpeech = rms > speechRMSThreshold
-        let isSilence = rms < silenceRMSThreshold
 
         if isSpeech {
-            consecutiveSilenceBatches = 0
             consecutiveSpeechBatches += 1
             if consecutiveSpeechBatches >= speechOnsetBatches && !hasSpeechInSession {
                 hasSpeechInSession = true
                 utteranceEnded = false
                 print("[PendantBridge] Speech onset (rms=\(String(format: "%.4f", rms)))")
             }
-        } else if isSilence {
+        } else {
             consecutiveSpeechBatches = 0
-            if hasSpeechInSession && !utteranceEnded {
-                consecutiveSilenceBatches += 1
-                if consecutiveSilenceBatches >= silenceOffsetBatches {
-                    utteranceEnded = true
-                    consecutiveSilenceBatches = 0
-                    print("[PendantBridge] Speech offset — signalling end of audio")
-                    recognitionRequest?.endAudio()
-                }
+        }
+    }
+
+    // Debounce: endAudio() fires 1.5 s after the last speech batch, regardless
+    // of whether the noise floor is above or below any threshold.
+    private func rescheduleSilenceEnd() {
+        silenceEndTimer?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self, self.isSessionActive, !self.utteranceEnded else { return }
+                self.utteranceEnded = true
+                print("[PendantBridge] Speech offset (silence timeout) — signalling end of audio")
+                self.recognitionRequest?.endAudio()
             }
         }
-        // RMS in the hysteresis zone (0.015–0.04): ambiguous, advance no counters
+        silenceEndTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + silenceDebounce, execute: item)
     }
 
     private func resetVAD() {
         consecutiveSpeechBatches = 0
-        consecutiveSilenceBatches = 0
         hasSpeechInSession = false
         utteranceEnded = false
+        silenceEndTimer?.cancel()
+        silenceEndTimer = nil
     }
 
     // MARK: - Speech recognition
@@ -253,7 +250,6 @@ final class PendantAudioBridge {
 
         print("[PendantBridge] Recognition session opened")
 
-        // Replay pre-speech buffer so onset words aren't clipped
         if !replayBuffer.isEmpty {
             let replaySamples = replayBuffer.count / MemoryLayout<Int16>.size
             if let replayBuf = AVAudioPCMBuffer(pcmFormat: floatFormat, frameCapacity: UInt32(replaySamples)) {
@@ -270,6 +266,9 @@ final class PendantAudioBridge {
             }
         }
 
+        // Schedule the initial silence timeout from session open
+        rescheduleSilenceEnd()
+
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             Task { @MainActor in
                 guard let self else { return }
@@ -280,32 +279,18 @@ final class PendantAudioBridge {
 
                     if result.isFinal {
                         print("[PendantBridge] Final: \(transcript)")
-                        self.isSessionActive = false
-                        self.recognitionRequest = nil
-                        self.recognitionTask = nil
-                        self.restartTimer?.invalidate()
-                        self.restartTimer = nil
-                        self.resetVAD()
-                        self.preSpeechBuffer = Data()
+                        self.teardownSession()
                         if !transcript.trimmingCharacters(in: .whitespaces).isEmpty {
                             self.deliverTranscript(transcript)
                         }
-                        // Ready for next utterance — session opens on next speech onset
                         if self.state != .idle { self.state = .listening }
                     }
                 }
 
                 if let error {
                     print("[PendantBridge] Recognition error: \(error.localizedDescription)")
-                    self.isSessionActive = false
-                    self.recognitionRequest = nil
-                    self.recognitionTask = nil
-                    self.restartTimer?.invalidate()
-                    self.restartTimer = nil
-                    self.resetVAD()
-                    self.preSpeechBuffer = Data()
+                    self.teardownSession()
                     if self.state != .idle { self.state = .listening }
-                    // No proactive restart — next speech onset opens a fresh session
                 }
             }
         }
@@ -316,23 +301,28 @@ final class PendantAudioBridge {
         }
     }
 
+    private func teardownSession() {
+        isSessionActive = false
+        recognitionRequest = nil
+        recognitionTask = nil
+        restartTimer?.invalidate()
+        restartTimer = nil
+        resetVAD()
+        preSpeechBuffer = Data()
+    }
+
     private func handleSessionTimeout() {
-        print("[PendantBridge] Session timeout — closing, will reopen on next speech onset")
+        print("[PendantBridge] Session timeout — closing")
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-        isSessionActive = false
         pendingPCMData = Data()
-        preSpeechBuffer = Data()
-        resetVAD()
+        teardownSession()
     }
 
     private func deliverTranscript(_ transcript: String) {
-        print("[PendantBridge] Delivering: \(transcript)")
+        print("[PendantBridge] Sending via chat: \(transcript)")
         lastTranscript = transcript
         state = .transcribing
-        NativeIntegrationManager.shared.pendant.sendCommand("THINK")
         onTranscript?(transcript)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             if self?.state == .transcribing { self?.state = .listening }
