@@ -59,9 +59,12 @@ final class PendantAudioBridge {
     @ObservationIgnored private let micGain: Float = 3.0
 
     // ── VAD state machine ──────────────────────────────────────────────────────
-    @ObservationIgnored private let speechRMSThreshold: Float = 0.008
+    // Threshold tuned for firmware gain=80. Noise floor sits around 0.01–0.02;
+    // 0.04 gives a comfortable margin without clipping quiet speech.
+    @ObservationIgnored private let speechRMSThreshold: Float = 0.04
     @ObservationIgnored private let silenceOffsetBatches = 8
-    @ObservationIgnored private let speechOnsetBatches = 2
+    // 3 consecutive speech batches (~768 ms) avoids triggering on transient noise.
+    @ObservationIgnored private let speechOnsetBatches = 3
 
     @ObservationIgnored private var consecutiveSpeechBatches = 0
     @ObservationIgnored private var consecutiveSilenceBatches = 0
