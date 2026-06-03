@@ -248,6 +248,11 @@ final class ChatViewModel {
                     case .actions(let results):
                         guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
+                        if results.contains(where: { $0.success }) {
+                            HapticManager.shared.success()
+                        } else if results.contains(where: { !$0.success }) {
+                            HapticManager.shared.warning()
+                        }
                         Task {
                             await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
                         }
@@ -275,10 +280,12 @@ final class ChatViewModel {
                         lastFailedText = nil
                         isSending = false
                         currentSendTask = nil
+                        HapticManager.shared.impact(.soft)
 
                     case .error(let error):
                         lastFailedText = text
                         networkError = friendlyNetworkError(error)
+                        HapticManager.shared.error()
                         if fullText.isEmpty {
                             _ = updateAssistantMessage(id: assistantID, { $0.content = "Something went wrong: \(error)" })
                         }

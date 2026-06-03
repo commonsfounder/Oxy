@@ -35,6 +35,10 @@ struct MainTabView: View {
         }
         .tint(Color.oxyStone)
         .id(accentColor + appTheme)
+        .onChange(of: selectedTab) { _, _ in
+            HapticManager.shared.select()
+        }
+        .onAppear { HapticManager.shared.prepare() }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }
@@ -61,11 +65,11 @@ struct MoreView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         moreSection {
-                            Button { destination = .history } label: {
+                            Button { HapticManager.shared.impact(.light); destination = .history } label: {
                                 moreRow(icon: "clock.fill", title: "Chats", color: .oxySub)
                             }
 
-                            Button { destination = .connectors } label: {
+                            Button { HapticManager.shared.impact(.light); destination = .connectors } label: {
                                 moreRow(icon: "link", title: "Connectors", color: .oxyStone)
                             }
                         }
@@ -73,7 +77,7 @@ struct MoreView: View {
                         .offset(y: appeared ? 0 : 12)
 
                         moreSection {
-                            Button { destination = .settings } label: {
+                            Button { HapticManager.shared.impact(.light); destination = .settings } label: {
                                 moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub)
                             }
                         }
