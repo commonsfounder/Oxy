@@ -2689,16 +2689,42 @@ final class PendantBLEManager: NSObject {
                   let savedUUID = self.pairedPeripheralUUID else { return }
 
             let known = self.central.retrievePeripherals(withIdentifiers: [savedUUID])
-            if let cached = known.first, cached.state == .disconnected {
+            guard let cached = known.first else {
+                // Pendant not in CoreBluetooth's cache (e.g. it was off at app launch) —
+                // scan to rediscover it by name rather than discarding the saved UUID.
+                print("[Pendant] Saved peripheral not cached — scanning to rediscover it")
+                DispatchQueue.main.async {
+                    self.connectionState = .scanning
+                    self.lastError = nil
+                    self.startScanTimer()
+                }
+                self.central.scanForPeripherals(
+                    withServices: nil,
+                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+                )
+                return
+            }
+
+            switch cached.state {
+            case .disconnected:
                 print("[Pendant] Reconnecting to saved peripheral \(cached.name ?? savedUUID.uuidString)")
                 DispatchQueue.main.async { self.connectionState = .connecting }
                 self.peripheral = cached
                 cached.delegate = self
                 DispatchQueue.main.async { self.startConnectionTimer() }
                 self.central.connect(cached, options: nil)
-            } else {
-                print("[Pendant] Saved peripheral \(savedUUID.uuidString) no longer available — clearing")
-                self.clearPairedPeripheralUUID()
+            case .connected:
+                // Already connected at BLE level from a previous session — re-adopt it.
+                print("[Pendant] Peripheral already connected — re-adopting and rediscovering services")
+                self.peripheral = cached
+                cached.delegate = self
+                DispatchQueue.main.async { self.connectionState = .connecting }
+                cached.discoverServices([UART.service])
+            default:
+                // .connecting or unknown — iOS BLE stack is already working on it.
+                print("[Pendant] Peripheral in state \(cached.state.rawValue) — registering as delegate")
+                self.peripheral = cached
+                cached.delegate = self
             }
         }
     }
