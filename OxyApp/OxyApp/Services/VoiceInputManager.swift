@@ -1,141 +1,122 @@
 import AVFoundation
-import Speech
 import Observation
 
 @Observable
 @MainActor
 final class VoiceInputManager {
     var isRecording = false
-    var isPreparing = false
+    var isTranscribing = false
     var transcript = ""
     var errorMessage: String?
 
-    private var audioEngine: AVAudioEngine?
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var startTask: Task<Void, Never>?
-
-    var speechAuthStatus: SFSpeechRecognizerAuthorizationStatus {
-        SFSpeechRecognizer.authorizationStatus()
-    }
+    private var recorder: AVAudioRecorder?
+    private var tempURL: URL?
+    private var currentUserId = ""
 
     var micAuthStatus: AVAudioSession.RecordPermission {
         AVAudioSession.sharedInstance().recordPermission
     }
 
     var isAuthorized: Bool {
-        speechAuthStatus == .authorized && micAuthStatus == .granted
+        micAuthStatus == .granted
     }
 
     func requestPermissions() {
-        SFSpeechRecognizer.requestAuthorization { _ in }
         AVAudioSession.sharedInstance().requestRecordPermission { _ in }
     }
 
-    func startRecording() {
-        guard !isRecording, !isPreparing else { return }
-
-        startTask?.cancel()
-        startTask = Task { [weak self] in
-            await self?.beginRecording()
-        }
+    func startRecording(userId: String) {
+        guard !isRecording, !isTranscribing else { return }
+        currentUserId = userId
+        Task { await beginRecording() }
     }
 
     private func beginRecording() async {
-        isPreparing = true
         errorMessage = nil
         transcript = ""
 
-        guard await ensurePermissions() else {
-            isPreparing = false
-            errorMessage = "Enable microphone and speech access to use voice."
+        guard await requestMicrophoneIfNeeded() == .granted else {
+            errorMessage = "Enable microphone access to use voice."
             return
         }
 
-        let recognizer = SFSpeechRecognizer(locale: Locale.current)
-        guard let recognizer, recognizer.isAvailable else {
-            isPreparing = false
-            errorMessage = "Speech recognition not available"
-            return
-        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("oxy_voice_\(UUID().uuidString).wav")
 
-        let request = SFSpeechAudioBufferRecognitionRequest()
-        request.shouldReportPartialResults = true
-
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let recordingFormat = inputNode.outputFormat(forBus: 0)
-
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-            request.append(buffer)
-        }
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
+            AVSampleRateKey: 16000.0,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
 
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
-
-            engine.prepare()
-            try engine.start()
+            let rec = try AVAudioRecorder(url: url, settings: settings)
+            rec.record()
+            recorder = rec
+            tempURL = url
+            isRecording = true
         } catch {
-            inputNode.removeTap(onBus: 0)
-            isPreparing = false
             errorMessage = "Audio setup failed: \(error.localizedDescription)"
-            return
         }
-
-        recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let result {
-                    self.transcript = result.bestTranscription.formattedString
-                }
-                if error != nil || (result?.isFinal == true) {
-                    self.stopRecording()
-                }
-            }
-        }
-
-        audioEngine = engine
-        recognitionRequest = request
-        isPreparing = false
-        isRecording = true
     }
 
     func stopRecording() {
-        startTask?.cancel()
-        startTask = nil
-        audioEngine?.stop()
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-
-        audioEngine = nil
-        recognitionRequest = nil
-        recognitionTask = nil
-        isPreparing = false
+        guard isRecording, let rec = recorder, let url = tempURL else {
+            cancel()
+            return
+        }
+        rec.stop()
+        recorder = nil
+        tempURL = nil
         isRecording = false
+        isTranscribing = true
 
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
-    private func ensurePermissions() async -> Bool {
-        let speech = await requestSpeechAuthorizationIfNeeded()
-        let mic = await requestMicrophoneAuthorizationIfNeeded()
-        return speech == .authorized && mic == .granted
-    }
-
-    private func requestSpeechAuthorizationIfNeeded() async -> SFSpeechRecognizerAuthorizationStatus {
-        let current = SFSpeechRecognizer.authorizationStatus()
-        guard current == .notDetermined else { return current }
-        return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
+        let uid = currentUserId
+        Task {
+            defer {
+                try? FileManager.default.removeItem(at: url)
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                isTranscribing = false
+            }
+            do {
+                let audioData = try Data(contentsOf: url)
+                let responseData = try await APIClient.shared.multipartRequest(
+                    path: "/pendant/transcribe",
+                    fields: ["userId": uid],
+                    fileField: "audio",
+                    fileName: "voice.wav",
+                    mimeType: "audio/wav",
+                    fileData: audioData
+                )
+                struct TranscriptResponse: Decodable { let transcript: String }
+                let result = try JSONDecoder().decode(TranscriptResponse.self, from: responseData)
+                transcript = result.transcript
+            } catch {
+                errorMessage = "Transcription failed. Please try again."
             }
         }
     }
 
-    private func requestMicrophoneAuthorizationIfNeeded() async -> AVAudioSession.RecordPermission {
+    func cancel() {
+        recorder?.stop()
+        recorder = nil
+        if let url = tempURL {
+            try? FileManager.default.removeItem(at: url)
+            tempURL = nil
+        }
+        isRecording = false
+        isTranscribing = false
+        transcript = ""
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func requestMicrophoneIfNeeded() async -> AVAudioSession.RecordPermission {
         let session = AVAudioSession.sharedInstance()
         let current = session.recordPermission
         guard current == .undetermined else { return current }

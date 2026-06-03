@@ -703,31 +703,66 @@ function isImplausibleTranscript(text, durationMs) {
   return wordsPerSecond > 4.8;
 }
 
-async function transcribeAudio(buffer) {
+async function transcribeAudio(buffer, contextHint = '') {
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
   const transcribeModel = genAI.getGenerativeModel({ model: FAST_MODEL });
   const durationMs = getWavDurationMs(buffer);
 
-  const prompts = [
-    'Transcribe this audio exactly. Return only the spoken words. If any part is unclear, omit it rather than guessing. If there is no clear speech, return an empty string.',
-    'Verbatim transcription only. Do not answer the user. Do not infer intent. Do not add any words that are not clearly audible. If unclear, return an empty string.'
-  ];
+  const contextLine = contextHint
+    ? `Context — names/topics the speaker may reference: ${contextHint}\n\n`
+    : '';
 
-  let lastTranscript = '';
-  for (const prompt of prompts) {
-    const response = await transcribeModel.generateContent({
-      contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
-      generationConfig: { temperature: 0, topP: 0.1, topK: 1 }
+  const prompt = `${contextLine}Transcribe this audio accurately. The speaker may have a non-native accent — prioritise capturing their intended meaning over strict phonetic matching. If a word is unclear, make a reasonable inference from context rather than omitting it. Return only the spoken words, with correct capitalisation and punctuation. If there is genuinely no speech, return an empty string.`;
+
+  const response = await transcribeModel.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
+    generationConfig: { temperature: 0.1, topP: 0.95, topK: 40, maxOutputTokens: 512 }
+  });
+
+  const transcript = normalizeTranscript(response.response.text());
+  return isImplausibleTranscript(transcript, durationMs) ? '' : transcript;
+}
+
+async function buildTranscriptionHint(userId) {
+  try {
+    const { data } = await supabase
+      .from('memories')
+      .select('content')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    if (!data?.length) return '';
+    const words = data.map(r => r.content).join(' ').match(/\b[A-Z][a-z]{2,}\b/g) || [];
+    return [...new Set(words)].slice(0, 20).join(', ');
+  } catch { return ''; }
+}
+
+function buildPolishPrompt(transcript) {
+  return `You are a speech-to-text post-processor. Your job is to clean up raw voice transcriptions into clear, polished text while preserving the speaker's exact intent.
+
+Rules:
+- Remove filler words (um, uh, like, you know, basically, so, well, I mean)
+- Fix grammar, punctuation, and capitalisation
+- Remove false starts and repetitions
+- Keep the meaning and tone identical — do NOT add, remove, or change any intent
+- If the input is a command or request (e.g. "play music", "send a message", "set a timer"), keep it as a direct command
+- If the input is already clean, return it unchanged
+- Return ONLY the polished text, nothing else — no quotes, no explanation
+
+Raw transcription: ${transcript}`;
+}
+
+async function polishTranscriptText(transcript) {
+  if (!transcript?.trim()) return transcript;
+  try {
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: buildPolishPrompt(transcript) }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 512 }
     });
-    const transcript = normalizeTranscript(response.response.text());
-    lastTranscript = transcript;
-    if (transcript && !isImplausibleTranscript(transcript, durationMs)) {
-      return transcript;
-    }
-  }
-
-  return isImplausibleTranscript(lastTranscript, durationMs) ? '' : lastTranscript;
+    return (result.response?.text?.() || transcript).trim() || transcript;
+  } catch { return transcript; }
 }
 
 function firstSentences(text, max = 2) {
@@ -2959,8 +2994,10 @@ app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
   audioRateLimit.set(userId, [...recentHits, now]);
 
   try {
-    const transcript = await transcribeAudio(req.file.buffer);
-    console.log(`[pendant/transcribe] userId=${userId} transcript="${transcript}"`);
+    const hint = await buildTranscriptionHint(userId);
+    const raw = await transcribeAudio(req.file.buffer, hint);
+    const transcript = raw ? await polishTranscriptText(raw) : '';
+    console.log(`[pendant/transcribe] userId=${userId} raw="${raw}" polished="${transcript}"`);
     res.json({ transcript: transcript || '' });
   } catch (err) {
     console.error('/pendant/transcribe error:', err.message);
@@ -3376,29 +3413,7 @@ app.post('/polish-transcript', chatRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'transcript is required.' });
     }
 
-    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: `You are a speech-to-text post-processor. Your job is to clean up raw voice transcriptions into clear, polished text while preserving the speaker's exact intent.
-
-Rules:
-- Remove filler words (um, uh, like, you know, basically, so, well, I mean)
-- Fix grammar, punctuation, and capitalisation
-- Remove false starts and repetitions
-- Keep the meaning and tone identical — do NOT add, remove, or change any intent
-- If the input is a command or request (e.g. "play music", "send a message", "set a timer"), keep it as a direct command
-- If the input is already clean, return it unchanged
-- Return ONLY the polished text, nothing else — no quotes, no explanation
-
-Raw transcription: ${transcript}`
-        }]
-      }],
-      generationConfig: { temperature: 0, maxOutputTokens: 1024 }
-    });
-
-    const polished = (result.response?.text?.() || transcript).trim();
+    const polished = await polishTranscriptText(transcript);
     res.json({ polished });
   } catch (err) {
     // If polishing fails, return the original transcript — never block execution

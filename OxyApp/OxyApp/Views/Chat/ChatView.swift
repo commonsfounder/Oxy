@@ -190,18 +190,15 @@ struct ChatView: View {
                     }
 
                     // Voice recording overlay
-                    if voiceInput.isRecording {
+                    if voiceInput.isRecording || voiceInput.isTranscribing {
                         VoiceRecordingBar(
-                            transcript: voiceInput.transcript,
+                            transcript: voiceInput.isTranscribing ? nil : voiceInput.transcript,
+                            isTranscribing: voiceInput.isTranscribing,
                             onStop: {
-                                voiceInput.stopRecording()
-                                if !voiceInput.transcript.isEmpty {
-                                    viewModel.inputText = voiceInput.transcript
-                                    viewModel.sendMessage(userId: appState.userId)
-                                }
+                                if !voiceInput.isTranscribing { voiceInput.stopRecording() }
                             },
                             onCancel: {
-                                voiceInput.stopRecording()
+                                voiceInput.cancel()
                             }
                         )
                     }
@@ -230,7 +227,7 @@ struct ChatView: View {
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending || isOffline,
                         isRecording: voiceInput.isRecording,
-                        isPreparingVoice: voiceInput.isPreparing,
+                        isPreparingVoice: voiceInput.isTranscribing,
                         attachmentLabel: pendingImageName,
                         attachmentData: pendingImageData,
                         attachmentIsImage: pendingIsImage,
@@ -239,14 +236,11 @@ struct ChatView: View {
                             sendCurrentDraft()
                         },
                         onVoice: {
+                            guard !voiceInput.isTranscribing else { return }
                             if voiceInput.isRecording {
                                 voiceInput.stopRecording()
-                                if !voiceInput.transcript.isEmpty {
-                                    viewModel.inputText = voiceInput.transcript
-                                    viewModel.sendMessage(userId: appState.userId)
-                                }
                             } else {
-                                voiceInput.startRecording()
+                                voiceInput.startRecording(userId: appState.userId)
                             }
                         },
                         onAttach: {
@@ -392,6 +386,13 @@ struct ChatView: View {
             .onChange(of: pendingReviewAction) { oldValue, newValue in
                 if let oldValue, newValue == nil {
                     handledReviewActionIDs.insert(oldValue.id)
+                }
+            }
+            .onChange(of: voiceInput.isTranscribing) { _, nowTranscribing in
+                if !nowTranscribing, !voiceInput.transcript.isEmpty {
+                    viewModel.inputText = voiceInput.transcript
+                    viewModel.sendMessage(userId: appState.userId)
+                    voiceInput.transcript = ""
                 }
             }
         }
@@ -717,7 +718,8 @@ private struct ActionReviewSheet: View {
 // MARK: - Voice Recording Bar
 
 private struct VoiceRecordingBar: View {
-    let transcript: String
+    let transcript: String?
+    let isTranscribing: Bool
     let onStop: () -> Void
     let onCancel: () -> Void
 
@@ -737,16 +739,16 @@ private struct VoiceRecordingBar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(Color.oxyRed)
+                            .fill(isTranscribing ? Color.oxyStone : Color.oxyRed)
                             .frame(width: 8, height: 8)
                             .scaleEffect(pulse ? 1.2 : 0.8)
                             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
-                        Text("Listening...")
+                        Text(isTranscribing ? "Transcribing…" : "Listening...")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Color.oxyText)
                     }
-                    if !transcript.isEmpty {
-                        Text(transcript)
+                    if let t = transcript, !t.isEmpty {
+                        Text(t)
                             .font(.system(size: 13))
                             .foregroundStyle(Color.oxySub)
                             .lineLimit(2)
@@ -755,13 +757,15 @@ private struct VoiceRecordingBar: View {
 
                 Spacer()
 
-                Button(action: onStop) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.oxyOnAccent)
-                        .frame(width: 36, height: 36)
-                        .background(Color.oxyStone)
-                        .clipShape(Circle())
+                if !isTranscribing {
+                    Button(action: onStop) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.oxyOnAccent)
+                            .frame(width: 36, height: 36)
+                            .background(Color.oxyStone)
+                            .clipShape(Circle())
+                    }
                 }
             }
             .padding(.horizontal, 12)
