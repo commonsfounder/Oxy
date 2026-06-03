@@ -200,7 +200,11 @@ struct ChatView: View {
 
                     // Pendant listening indicator
                     if pendantBridge.state != .idle {
-                        PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
+                        PendantListeningBar(
+                            state: pendantBridge.state,
+                            transcript: pendantBridge.lastTranscript,
+                            notice: pendantBridge.notice
+                        )
                             .transition(.asymmetric(
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
                                 removal: .opacity
@@ -1326,10 +1330,19 @@ private struct StatusIndicator: View {
 private struct PendantListeningBar: View {
     let state: PendantAudioBridge.BridgeState
     let transcript: String?
+    var notice: String? = nil
     @State private var pulse = false
     @State private var sonar = false
 
-    private var dotColor: Color { state == .listening ? Color.oxyGreen : Color.oxyStone }
+    private var dotColor: Color {
+        if notice != nil { return Color(red: 0.85, green: 0.62, blue: 0.22) }
+        return state == .listening ? Color.oxyGreen : Color.oxyStone
+    }
+
+    private var titleText: String {
+        if let notice { return notice }
+        return state == .listening ? "Pendant listening…" : "Transcribing…"
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1352,11 +1365,11 @@ private struct PendantListeningBar: View {
             .frame(width: 30, height: 30)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(state == .listening ? "Pendant listening…" : "Transcribing…")
+                Text(titleText)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
                     .contentTransition(.opacity)
-                if let transcript, !transcript.isEmpty {
+                if notice == nil, let transcript, !transcript.isEmpty {
                     Text(transcript)
                         .font(.system(size: 12))
                         .foregroundStyle(Color.oxySub)
