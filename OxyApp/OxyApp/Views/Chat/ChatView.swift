@@ -27,7 +27,6 @@ struct ChatView: View {
     @State private var pendingIsImage = true
     @State private var isOffline = false
     @State private var pendantBridge = PendantAudioBridge()
-    @State private var liveSession = PendantLiveSession()
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
@@ -199,14 +198,8 @@ struct ChatView: View {
                         )
                     }
 
-                    // Pendant listening indicator — prefer Live session state
-                    if liveSession.state != .disconnected {
-                        PendantLiveBar(state: liveSession.state, userTranscript: liveSession.userTranscript, assistantTranscript: liveSession.assistantTranscript)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .bottom).combined(with: .opacity),
-                                removal: .opacity
-                            ))
-                    } else if pendantBridge.state != .idle {
+                    // Pendant listening indicator
+                    if pendantBridge.state != .idle {
                         PendantListeningBar(state: pendantBridge.state, transcript: pendantBridge.lastTranscript)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -400,43 +393,18 @@ struct ChatView: View {
 
             let vm = viewModel
             let state = appState
-            let live = liveSession
             let bridge = pendantBridge
 
-            // Live session (Gemini Live API over WebSocket) handles actions directly.
-            live.onActionResults = { results in
-                vm.openPendantActions(results)
-            }
-
-            // Local fallback bridge: when the live session is down, feed the
-            // transcript into the regular chat pipeline so the spoken command
-            // appears in chat and actions fire exactly as they do for typed text.
+            // Pendant audio goes straight into the text chat pipeline:
+            // spoken command appears in chat and actions fire exactly as typed text.
             bridge.onTranscript = { transcript in
-                print("[PendantBridge] Sending via chat: \(transcript)")
                 NativeIntegrationManager.shared.pendant.sendCommand("THINK")
                 vm.inputText = transcript
                 vm.sendMessage(userId: state.userId)
             }
 
-            // Single audio router — the pendant's BLE audio stream is delivered to
-            // exactly ONE consumer per chunk. Prevents dual-processing and
-            // AVAudioSession contention that was locking up the main thread.
-            // Strong captures (not weak) — @State keeps both objects alive for the
-            // lifetime of the view, and the closure is replaced each task run.
-            var routeLogCounter = 0
             NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor data in
-                routeLogCounter += 1
-                if live.isActive {
-                    if routeLogCounter % 100 == 1 {
-                        print("[AudioRouter] → live (\(live.state.rawValue))")
-                    }
-                    live.ingest(data)
-                } else {
-                    if routeLogCounter % 100 == 1 {
-                        print("[AudioRouter] → bridge (live=\(live.state.rawValue))")
-                    }
-                    bridge.ingest(data)
-                }
+                bridge.ingest(data)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
