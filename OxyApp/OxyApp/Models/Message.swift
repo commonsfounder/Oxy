@@ -141,7 +141,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             text: result.text,
             error: result.error,
             deepLink: result.deepLink,
-            webLink: result.deepLink,
+            webLink: nil,
             cardText: result.cardText,
             actionSummary: result.actionSummary,
             risk: result.risk,

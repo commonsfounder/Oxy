@@ -261,6 +261,10 @@ const loginRateLimiter = createRateLimiter(10, 60 * 1000);
 const chatRateLimiter = createRateLimiter(30, 60 * 1000, userOrIpRateKey);
 const imageRateLimiter = createRateLimiter(10, 60 * 1000, userOrIpRateKey);
 const forgotPasswordRateLimiter = createRateLimiter(3, 60 * 60 * 1000);
+const resetPasswordRateLimiter = createRateLimiter(10, 60 * 60 * 1000);
+const verifyEmailRateLimiter = createRateLimiter(10, 60 * 60 * 1000);
+function sendServerError(res, err, label) { log('error', label, { error: err.message }); res.status(500).json({ error: 'Something went wrong. Please try again.' }); }
+function sha256Token(token) { return require('crypto').createHash('sha256').update(token).digest('hex'); }
 const GEMINI_TTS_VOICES = new Set([
   'Zephyr', 'Puck', 'Charon', 'Kore', 'Fenrir', 'Leda', 'Orus', 'Aoede',
   'Callirrhoe', 'Autonoe', 'Enceladus', 'Iapetus', 'Umbriel', 'Algieba',
@@ -2608,7 +2612,7 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
     res.json({ success: true, token: createSessionToken(userId, 1), userId });
   } catch (err) {
     log('error', 'auth.register.error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2643,7 +2647,7 @@ app.post('/auth/login', loginRateLimiter, async (req, res) => {
     res.json({ success: true, token: createSessionToken(account.user_id, tokenVersion), userId: account.user_id });
   } catch (err) {
     log('error', 'auth.login.error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2663,7 +2667,7 @@ app.post('/auth/logout-all', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     log('error', 'auth.logout_all.error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2673,7 +2677,7 @@ app.get('/auth/sessions', async (req, res) => {
     const { data: userRow } = await supabase.from('users').select('token_version, created_at').eq('user_id', userId).maybeSingle();
     res.json({ tokenVersion: userRow?.token_version || 1, note: 'Use POST /auth/logout-all to revoke all sessions' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2701,7 +2705,7 @@ app.post('/auth/change-password', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     log('error', 'auth.change_password.error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2716,7 +2720,7 @@ app.post('/auth/forgot-password', forgotPasswordRateLimiter, async (req, res) =>
 
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await supabase.from('password_reset_tokens').insert({ user_id: account.user_id, token, expires_at: expiresAt });
+    await supabase.from('password_reset_tokens').insert({ user_id: account.user_id, token: sha256Token(token), expires_at: expiresAt });
 
     const resetUrl = `${process.env.APP_URL || ''}/auth/reset-password?token=${token}`;
     log('info', 'password_reset.token_created', { event: '[password-reset]', url: resetUrl });
@@ -2753,7 +2757,7 @@ app.get('/auth/reset-password', (req, res) => {
   </body></html>`);
 });
 
-app.post('/auth/reset-password', express.urlencoded({ extended: false }), async (req, res) => {
+app.post('/auth/reset-password', resetPasswordRateLimiter, express.urlencoded({ extended: false }), async (req, res) => {
   try {
     const { token, newPassword } = req.body || {};
     // Browser form submissions get an HTML page; API clients (JSON) get JSON.
@@ -2769,7 +2773,7 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
     if (typeof newPassword !== 'string' || newPassword.length < 8) {
       return fail(400, 'Password must be at least 8 characters.');
     }
-    const { data: tokenRow } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', token).maybeSingle();
+    const { data: tokenRow } = await supabase.from('password_reset_tokens').select('id, user_id, expires_at, used').eq('token', sha256Token(token)).maybeSingle();
     if (!tokenRow || tokenRow.used || new Date(tokenRow.expires_at) < new Date()) {
       return fail(400, 'Invalid or expired reset token.');
     }
@@ -2788,18 +2792,18 @@ app.post('/auth/reset-password', express.urlencoded({ extended: false }), async 
     res.json({ success: true });
   } catch (err) {
     log('error', 'auth.reset_password.error', { error: err.message });
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
-app.post('/auth/verify-email', async (req, res) => {
+app.post('/auth/verify-email', verifyEmailRateLimiter, async (req, res) => {
   try {
     const userId = getAuthenticatedUserId(req);
     const account = await getUserAccount(userId);
     if (!account || !account.email) return res.status(400).json({ error: 'No email address on this account.' });
     const token = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    await supabase.from('password_reset_tokens').insert({ user_id: userId, token, expires_at: expiresAt });
+    await supabase.from('password_reset_tokens').insert({ user_id: userId, token: sha256Token(token), expires_at: expiresAt });
     const verifyUrl = `${process.env.APP_URL || ''}/auth/verify-email/confirm?token=${token}`;
     try {
       const { sendVerificationEmail } = require('./services/email');
@@ -2809,7 +2813,7 @@ app.post('/auth/verify-email', async (req, res) => {
     }
     res.json({ success: true, message: 'Verification email sent.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -2932,7 +2936,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     postResponseTasks(userId, userText);
   } catch (err) {
     console.error('/process-audio error:', err.message);
-    try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+    try { sse({ type: 'error', error: 'Processing failed. Please try again.' }); res.end(); } catch {}
   }
 });
 
@@ -2978,7 +2982,7 @@ app.post('/images/generate', imageRateLimiter, upload.single('image'), async (re
     res.json({ success: true, ...result, text: '' });
   } catch (err) {
     console.error('/images/generate error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3088,7 +3092,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     res.json(result);
   } catch (err) {
     console.error('/chat-with-image error:', err.response?.data || err.message);
-    res.status(500).json({ error: err.response?.data?.error?.message || err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3101,7 +3105,7 @@ app.post('/memory', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3110,7 +3114,7 @@ app.get('/memory/:userId', async (req, res) => {
   try {
     res.json({ summary: await getMemorySummary(req.params.userId) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3120,7 +3124,7 @@ app.delete('/memory/:userId', async (req, res) => {
     const result = await forgetMemory(req.params.userId, req.body || { scope: 'all' });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3168,7 +3172,7 @@ app.post('/action-log', async (req, res) => {
     });
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3189,7 +3193,7 @@ app.get('/action-log/:userId', async (req, res) => {
     }));
     res.json({ actions: parsed });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3259,7 +3263,7 @@ app.get('/connectors/:userId', async (req, res) => {
     
     res.json({ connectors: result });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3286,7 +3290,7 @@ app.post('/connectors', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3311,7 +3315,7 @@ app.post('/devices/register', async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3331,7 +3335,7 @@ app.post('/native/context', async (req, res) => {
     invalidateUserContextCache(userId);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3356,7 +3360,7 @@ app.post('/native/local-action', async (req, res) => {
     invalidateUserContextCache(userId);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3417,7 +3421,7 @@ app.get('/briefings/:userId', async (req, res) => {
     const visible = (data || []).filter(briefing => briefing.kind !== 'failed_action_followup');
     res.json({ briefings: visible });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3433,7 +3437,7 @@ app.post('/briefings/:id/read', async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3444,7 +3448,7 @@ app.post('/proactive/:userId/run', async (req, res) => {
     const summary = await runProactiveForUser(userId);
     res.json({ ok: true, summary });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3456,7 +3460,7 @@ app.all('/proactive/sweep', async (req, res) => {
     const summary = await runProactiveSweep(console);
     res.json({ ok: true, summary });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3472,7 +3476,7 @@ app.post('/tts-preview', async (req, res) => {
     res.json({ audio, audioFormat: 'wav', audioMimeType: 'audio/wav' });
   } catch (err) {
     console.error('[audio][backend:tts-preview] error', err.message);
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3497,7 +3501,7 @@ app.get('/briefing-legacy/:userId', async (req, res) => {
     res.json({ text: spoken, actions });
   } catch (err) {
     console.error('/briefing error:', err.message);
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3526,7 +3530,7 @@ app.get('/briefing/:userId', async (req, res) => {
     });
   } catch (err) {
     console.error('/briefing error:', err.message);
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3538,7 +3542,7 @@ app.get('/history/:userId', async (req, res) => {
     });
     res.json({ history });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3555,7 +3559,7 @@ app.get('/history/:userId/sessions', async (req, res) => {
     if (error) throw error;
     res.json({ sessions: buildConversationSessions(data || []) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3579,7 +3583,7 @@ app.get('/history/:userId/search', async (req, res) => {
       .map(entry => ({ ...entry, content: conversationFallbackText(entry) }));
     res.json({ results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3627,7 +3631,7 @@ app.get('/history/:userId/around', async (req, res) => {
     });
     res.json({ history: [...rowsByKey.values()].map(normalizeConversationRow) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -3650,7 +3654,7 @@ app.get('/history/:userId/date', async (req, res) => {
     if (error) throw error;
     res.json({ history: (data || []).map(normalizeConversationRow) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4628,7 +4632,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       } catch (err) {
         trace.log('request.error', err.message);
         console.error('/chat stream error:', err.message);
-        try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+        try { sse({ type: 'error', error: 'Processing failed. Please try again.' }); res.end(); } catch {}
       }
       return;
     }
@@ -4717,7 +4721,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
   } catch (err) {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
     console.error('/chat error:', err.message);
-    res.status(500).json({ error: err.message, text: `Error: ${err.message}` });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4732,7 +4736,7 @@ app.get('/preferences/:userId', async (req, res) => {
     if (error || !data) return res.json({ preferences: [] });
     res.json({ preferences: data });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4742,7 +4746,7 @@ app.delete('/preferences/:userId', async (req, res) => {
     await supabase.from('preferences').delete().eq('user_id', req.params.userId);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4756,7 +4760,7 @@ app.post('/auth/telegram/start', async (req, res) => {
     const result = await telegram.startAuth(userId, phone);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4768,7 +4772,7 @@ app.post('/auth/telegram/verify', async (req, res) => {
     const result = await telegram.verifyCode(userId, code);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4780,7 +4784,7 @@ app.post('/auth/telegram/2fa', async (req, res) => {
     const result = await telegram.verify2FA(userId, password);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
@@ -4907,7 +4911,7 @@ app.get('/debug/:userId', async (req, res) => {
       envHasGeminiKey: !!process.env.GEMINI_API_KEY
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return sendServerError(res, err, 'server.error');
   }
 });
 
