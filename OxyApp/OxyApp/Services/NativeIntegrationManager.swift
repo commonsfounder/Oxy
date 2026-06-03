@@ -2653,37 +2653,53 @@ final class PendantBLEManager: NSObject {
 
     func startScan() {
         bleQueue.async { [weak self] in
-            guard let self, self.central.state == .poweredOn else { return }
-
-            if let savedUUID = self.pairedPeripheralUUID {
-                let known = self.central.retrievePeripherals(withIdentifiers: [savedUUID])
-                if let cached = known.first, cached.state == .disconnected {
-                    print("[Pendant] Reconnecting to saved peripheral \(cached.name ?? savedUUID.uuidString)")
-                    DispatchQueue.main.async { self.connectionState = .connecting }
-                    self.peripheral = cached
-                    cached.delegate = self
-                    DispatchQueue.main.async { self.startConnectionTimer() }
-                    self.central.connect(cached, options: nil)
-                    return
-                } else {
-                    print("[Pendant] Saved peripheral \(savedUUID.uuidString) no longer available — clearing")
-                    self.clearPairedPeripheralUUID()
+            guard let self else { return }
+            guard self.central.state == .poweredOn else {
+                DispatchQueue.main.async {
+                    self.connectionState = .error
+                    self.lastError = self.central.state == .poweredOff
+                        ? "Bluetooth is turned off. Enable it in Settings."
+                        : self.central.state == .unauthorized
+                            ? "Bluetooth permission denied. Allow in Settings."
+                            : "Bluetooth unavailable (state: \(self.central.state.rawValue))"
                 }
+                return
             }
 
-            print("[Pendant] Scanning for peripherals (service: NUS)")
+            print("[Pendant] Scanning for peripherals (name prefix: \(Self.namePrefix))")
             DispatchQueue.main.async {
                 self.connectionState = .scanning
                 self.lastError = nil
                 self.startScanTimer()
             }
-            // Scan for devices advertising the Nordic UART Service UUID.
-            // Bluefruit firmware puts the UUID in the advertising packet and
-            // the name in the scan response, so both are discoverable.
+            // Scan WITHOUT service filter — Bluefruit advertising packets
+            // may not include the 128-bit UUID in the format iOS expects.
+            // Name-based filtering in didDiscover keeps this safe.
             self.central.scanForPeripherals(
-                withServices: [UART.service],
+                withServices: nil,
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
             )
+        }
+    }
+
+    /// Auto-reconnect to a previously paired pendant (called from centralManagerDidUpdateState).
+    private func autoReconnect() {
+        bleQueue.async { [weak self] in
+            guard let self, self.central.state == .poweredOn,
+                  let savedUUID = self.pairedPeripheralUUID else { return }
+
+            let known = self.central.retrievePeripherals(withIdentifiers: [savedUUID])
+            if let cached = known.first, cached.state == .disconnected {
+                print("[Pendant] Reconnecting to saved peripheral \(cached.name ?? savedUUID.uuidString)")
+                DispatchQueue.main.async { self.connectionState = .connecting }
+                self.peripheral = cached
+                cached.delegate = self
+                DispatchQueue.main.async { self.startConnectionTimer() }
+                self.central.connect(cached, options: nil)
+            } else {
+                print("[Pendant] Saved peripheral \(savedUUID.uuidString) no longer available — clearing")
+                self.clearPairedPeripheralUUID()
+            }
         }
     }
 
@@ -2806,7 +2822,7 @@ extension PendantBLEManager: CBCentralManagerDelegate {
         centralReady = central.state == .poweredOn
         if central.state == .poweredOn {
             if pairedPeripheralUUID != nil {
-                startScan()
+                autoReconnect()
             }
         } else {
             DispatchQueue.main.async { self.connectionState = .disconnected }
@@ -2818,10 +2834,10 @@ extension PendantBLEManager: CBCentralManagerDelegate {
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        print("[Pendant] Discovered: \(name ?? "<nil>"), RSSI: \(RSSI)")
 
-        // Service-filtered scan already limits results, but double-check name
-        if let name, !name.hasPrefix(Self.namePrefix) { return }
+        // Scan runs without service filter, so filter by name prefix here
+        guard let name, name.hasPrefix(Self.namePrefix) else { return }
+        print("[Pendant] Discovered: \(name), RSSI: \(RSSI)")
 
         central.stopScan()
         self.peripheral = peripheral
@@ -2865,7 +2881,7 @@ extension PendantBLEManager: CBCentralManagerDelegate {
         if pairedPeripheralUUID != nil {
             print("[Pendant] Will attempt reconnection in 1s")
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.startScan()
+                self?.autoReconnect()
             }
         }
     }
