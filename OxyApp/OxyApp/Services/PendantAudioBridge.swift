@@ -59,9 +59,11 @@ final class PendantAudioBridge {
     @ObservationIgnored private let micGain: Float = 3.0
 
     // ── VAD state machine ──────────────────────────────────────────────────────
-    // Threshold tuned for firmware gain=80. Noise floor sits around 0.01–0.02;
-    // 0.04 gives a comfortable margin without clipping quiet speech.
-    @ObservationIgnored private let speechRMSThreshold: Float = 0.04
+    // Hysteresis: high onset threshold avoids phantom triggers from background
+    // noise; low offset threshold ensures endAudio() fires even when the noise
+    // floor is elevated (prevents recognition session from hanging open forever).
+    @ObservationIgnored private let speechRMSThreshold: Float = 0.04   // must exceed to open session
+    @ObservationIgnored private let silenceRMSThreshold: Float = 0.015 // must drop below to close
     @ObservationIgnored private let silenceOffsetBatches = 8
     // 3 consecutive speech batches (~768 ms) avoids triggering on transient noise.
     @ObservationIgnored private let speechOnsetBatches = 3
@@ -179,18 +181,22 @@ final class PendantAudioBridge {
     // MARK: - VAD
 
     private func updateVAD(rms: Float) {
+        // Separate onset/offset thresholds (hysteresis) so that:
+        // - noise below the onset threshold never opens a session (no phantoms)
+        // - once open, silence is detected at a lower bar so endAudio() fires
+        //   even when the noise floor is elevated
         let isSpeech = rms > speechRMSThreshold
+        let isSilence = rms < silenceRMSThreshold
 
         if isSpeech {
             consecutiveSilenceBatches = 0
             consecutiveSpeechBatches += 1
-
             if consecutiveSpeechBatches >= speechOnsetBatches && !hasSpeechInSession {
                 hasSpeechInSession = true
                 utteranceEnded = false
                 print("[PendantBridge] Speech onset (rms=\(String(format: "%.4f", rms)))")
             }
-        } else {
+        } else if isSilence {
             consecutiveSpeechBatches = 0
             if hasSpeechInSession && !utteranceEnded {
                 consecutiveSilenceBatches += 1
@@ -202,6 +208,7 @@ final class PendantAudioBridge {
                 }
             }
         }
+        // RMS in the hysteresis zone (0.015–0.04): ambiguous, advance no counters
     }
 
     private func resetVAD() {
