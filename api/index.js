@@ -2936,6 +2936,34 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   }
 });
 
+// Pendant-only transcription: receives raw WAV from the iOS bridge, runs
+// Gemini transcription, and returns just the text. The iOS app then calls
+// sendMessage() so the transcript goes through the full chat pipeline with
+// full UI visibility (same as typed text). Reuses audioRateLimit (10/min).
+app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ transcript: '' });
+  }
+  const userId = req.body.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+
+  const now = Date.now();
+  const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
+  if (recentHits.length >= 10) {
+    return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+  }
+  audioRateLimit.set(userId, [...recentHits, now]);
+
+  try {
+    const transcript = await transcribeAudio(req.file.buffer);
+    console.log(`[pendant/transcribe] userId=${userId} transcript="${transcript}"`);
+    res.json({ transcript: transcript || '' });
+  } catch (err) {
+    console.error('/pendant/transcribe error:', err.message);
+    res.status(500).json({ transcript: '' });
+  }
+});
+
 app.post('/images/generate', imageRateLimiter, upload.single('image'), async (req, res) => {
   try {
     const { userId, prompt } = req.body;

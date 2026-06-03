@@ -395,8 +395,9 @@ struct ChatView: View {
             let state = appState
             let bridge = pendantBridge
 
-            // Pendant audio goes straight into the text chat pipeline:
-            // spoken command appears in chat and actions fire exactly as typed text.
+            // Pendant audio → Gemini transcription → text chat pipeline.
+            // Spoken commands appear in chat and execute exactly as typed text.
+            bridge.userId = state.userId
             bridge.onTranscript = { transcript in
                 HapticManager.shared.impact(.medium)
                 NativeIntegrationManager.shared.pendant.sendCommand("THINK")
