@@ -45,8 +45,6 @@
 	<string>Oxy lets you attach photos and images for multimodal chat when you choose them.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Oxy uses reminders to help create native Apple Reminders when you ask.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Oxy uses speech recognition to convert your voice into text messages.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
