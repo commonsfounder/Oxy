@@ -3,6 +3,10 @@ import SwiftUI
 struct MessageBubble: View {
     let message: Message
     var showsTypingIndicator: Bool = true
+    /// True when this message is the first in a run from the same sender.
+    var isGroupStart: Bool = true
+    /// True when this message is the last in a run from the same sender.
+    var isGroupEnd: Bool = true
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
 
@@ -22,50 +26,59 @@ struct MessageBubble: View {
         }
     }
 
+    // Corner radii that "connect" consecutive same-sender bubbles.
+    // The joined corners (inner corners of a run) get a tighter radius.
+    private var topLeadingR: CGFloat {
+        isUser ? 20 : (isGroupStart ? 6 : 14)
+    }
+    private var topTrailingR: CGFloat {
+        isUser ? (isGroupStart ? 20 : 14) : 20
+    }
+    private var bottomLeadingR: CGFloat {
+        isUser ? 20 : (isGroupEnd ? 20 : 14)
+    }
+    private var bottomTrailingR: CGFloat {
+        isUser ? (isGroupEnd ? 6 : 14) : 20
+    }
+
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
             // Message content
             if !message.content.isEmpty {
-                HStack {
-                    if isUser { Spacer(minLength: 60) }
+                HStack(alignment: .bottom, spacing: 0) {
+                    if isUser { Spacer(minLength: 52) }
 
                     VStack(alignment: .leading, spacing: 0) {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
                                 fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 2 : 4
+                                lineSpacing: isCompact ? 2 : 5
                             )
                         } else {
                             Text(message.content)
                                 .font(.system(size: isCompact ? 14 : 15))
                                 .foregroundStyle(isUser ? .white : Color.oxyText)
-                                .lineSpacing(isCompact ? 2 : 4)
+                                .lineSpacing(isCompact ? 2 : 5)
                         }
                     }
-                    .padding(.horizontal, isCompact ? 13 : 16)
-                    .padding(.vertical, isCompact ? 8 : 11)
+                    .padding(.horizontal, isCompact ? 13 : 15)
+                    .padding(.vertical, isCompact ? 8 : 10)
                     .background(
                         isUser
-                            ? AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+                            ? AnyShapeStyle(Color.oxyStone)
                             : AnyShapeStyle(Color.oxySurface2)
                     )
                     .clipShape(
                         UnevenRoundedRectangle(
-                            topLeadingRadius: isUser ? 20 : 6,
-                            bottomLeadingRadius: isCompact ? 16 : 20,
-                            bottomTrailingRadius: isUser ? 6 : (isCompact ? 16 : 20),
-                            topTrailingRadius: isCompact ? 16 : 20
+                            topLeadingRadius: topLeadingR,
+                            bottomLeadingRadius: bottomLeadingR,
+                            bottomTrailingRadius: bottomTrailingR,
+                            topTrailingRadius: topTrailingR
                         )
                     )
 
-                    if !isUser { Spacer(minLength: 60) }
+                    if !isUser { Spacer(minLength: 52) }
                 }
             }
 
@@ -75,7 +88,7 @@ struct MessageBubble: View {
                     OxyThinkingIndicator()
                         .padding(.horizontal, 13)
                         .padding(.vertical, 9)
-                        .background(Color.oxySurface2.opacity(0.72))
+                        .background(Color.oxySurface2)
                         .clipShape(
                             UnevenRoundedRectangle(
                                 topLeadingRadius: 6,
@@ -84,38 +97,40 @@ struct MessageBubble: View {
                                 topTrailingRadius: 18
                             )
                         )
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 52)
                 }
             }
 
             // Action cards
             if !visibleActions.isEmpty {
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     ForEach(visibleActions) { action in
                         ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                     }
                 }
             }
 
-            // Timestamp
-            HStack(spacing: 4) {
-                if isUser {
-                    Spacer()
-                    if !message.isStreaming {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.oxyDim)
+            // Timestamp — only shown on the last message in each group run.
+            if isGroupEnd {
+                HStack(spacing: 4) {
+                    if isUser {
+                        Spacer()
+                        if !message.isStreaming {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(Color.oxyDim)
+                        }
                     }
+                    Text(message.timestamp, style: .time)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Color.oxyDim)
+                    if !isUser { Spacer() }
                 }
-                Text(message.timestamp, style: .time)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.oxyDim)
-                if !isUser { Spacer() }
+                .padding(.horizontal, 4)
             }
-            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, isCompact ? 2 : 4)
+        .padding(.horizontal, 14)
+        .padding(.vertical, isCompact ? 1 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: message.content)
     }
