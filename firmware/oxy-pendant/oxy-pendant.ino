@@ -27,6 +27,9 @@ BLEUart bleuart;
 static const int SAMPLE_RATE    = 16000;
 static const int AUDIO_CHANNELS = 1;
 static const int BUFFER_SAMPLES = 256;
+// PDM hardware gain (nRF52 PDM GAIN register: 0=-20dB, 40=0dB, 80=+20dB).
+// The XIAO Sense onboard mic is very quiet, so run near the top of the range.
+static const int MIC_GAIN       = 80;
 static int16_t   pdmBuffer[BUFFER_SAMPLES];
 volatile bool    pdmReady      = false;
 volatile int     pdmBytesAvail = 0;
@@ -141,13 +144,17 @@ void startStreaming() {
 
   PDM.onReceive(onPDMData);
   PDM.setBufferSize(BUFFER_SAMPLES * sizeof(int16_t));
-  PDM.setGain(40);
   if (!PDM.begin(AUDIO_CHANNELS, SAMPLE_RATE)) {
     Serial.println("[Oxy] ERROR: PDM start failed");
     isStreaming = false;
     digitalWrite(LED_BUILTIN, HIGH);
   } else {
-    Serial.println("[Oxy] PDM started OK");
+    // Gain MUST be set after begin(): begin() reinitialises the PDM
+    // peripheral at its default gain, so any setGain() before it is lost.
+    // The XIAO Sense onboard mic is quiet — use max gain (80 = +20 dB).
+    PDM.setGain(MIC_GAIN);
+    Serial.print("[Oxy] PDM started OK, gain=");
+    Serial.println(MIC_GAIN);
   }
 }
 
