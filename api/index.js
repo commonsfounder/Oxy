@@ -688,8 +688,11 @@ function getWavDurationMs(buffer) {
   }
 }
 
+const TRANSCRIPT_NOISE_PATTERN = /^(empty string|no speech|silence|no audio|inaudible|nothing|n\/a|none|\[.*\]|\(.*\))\.?$/i;
+
 function normalizeTranscript(text) {
-  return String(text || '').trim().replace(/^["'\s]+|["'\s]+$/g, '');
+  const cleaned = String(text || '').trim().replace(/^["'\s]+|["'\s]+$/g, '');
+  return TRANSCRIPT_NOISE_PATTERN.test(cleaned) ? '' : cleaned;
 }
 
 function isImplausibleTranscript(text, durationMs) {
@@ -713,7 +716,7 @@ async function transcribeAudio(buffer, contextHint = '') {
     ? `Context — names/topics the speaker may reference: ${contextHint}\n\n`
     : '';
 
-  const prompt = `${contextLine}Transcribe this audio accurately. The speaker may have a non-native accent — prioritise capturing their intended meaning over strict phonetic matching. If a word is unclear, make a reasonable inference from context rather than omitting it. Return only the spoken words, with correct capitalisation and punctuation. If there is genuinely no speech, return an empty string.`;
+  const prompt = `${contextLine}Transcribe this audio. The speaker may have a non-native accent — prioritise capturing their intended meaning over strict phonetic matching. If a word is unclear, infer from context rather than omitting it. Output only the spoken words with correct capitalisation and punctuation. If there is no speech at all, output absolutely nothing — do not write any word or symbol.`;
 
   const response = await transcribeModel.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
