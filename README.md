@@ -5,7 +5,7 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 ## What It Does
 
 - **Conversational AI** — Chat via text or voice. Oxy responds naturally, remembers personal context across conversations, and adapts its tone to your preferences over time.
-- **Voice I/O** — Record audio from your browser, get it transcribed (Gemini), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
+- **Voice I/O** — Record audio from the iOS app or the hardware pendant, get it transcribed (Gemini), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
 - **Real Actions** — Oxy doesn't just talk. When you say "text Sarah I'm running late" or "book an Uber to the station", it actually does it through connected services.
 - **Memory** — Oxy automatically extracts and stores personal facts from conversations ("Works at KPMG", "Has a dog named Biscuit") and uses them to personalise future replies.
 - **Connectors** — A pluggable connector system lets Oxy interface with external services. Each connector handles auth, token refresh, and API calls independently.
@@ -15,9 +15,9 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     Frontend (PWA)                       │
-│  React 18 · Babel (in-browser) · Single index.html      │
-│  Voice recording · SSE streaming · Service Worker        │
+│                  Native iOS App (SwiftUI)                │
+│  Chat · voice · memory · connectors · proactive briefs   │
+│  Pendant BLE audio · SSE streaming · local native actions│
 └───────────────────┬─────────────────────────────────────┘
                     │  HTTPS
 ┌───────────────────▼─────────────────────────────────────┐
@@ -51,16 +51,16 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 
 ### Frontend
 
-The entire UI lives in a single `index.html` file — React 18 loaded from CDN, compiled in-browser by Babel. No build step required. It's a Progressive Web App with a service worker (`sw.js`) for offline caching and push notifications.
+The frontend is a native SwiftUI iOS app in `OxyApp/`. It talks to the backend over HTTPS (REST + Server-Sent Events for streaming chat/audio), handles BLE audio from the Oxy hardware pendant, and performs on-device native actions (Messages, Reminders, HealthKit, Music, Maps) that don't need the server.
 
-**Pages:**
-| Page | Description |
-|------|-------------|
-| Chat | Main conversation view with text input and voice recording (hold-to-talk) |
+**Screens:**
+| Screen | Description |
+|--------|-------------|
+| Chat | Main conversation view with text input, voice, and pendant audio |
 | Connectors | Toggle connected services on/off, OAuth flows for Google & Telegram |
 | Memory | View and manage what Oxy remembers about you |
-| Action History | Log of every action Oxy has executed |
-| Settings | Voice toggle, autonomy level, data management |
+| Today | Proactive briefings and surfaced suggestions |
+| Settings | Voice, autonomy level, pendant pairing, data management |
 
 ### Backend
 
@@ -267,32 +267,30 @@ Notes:
 
 ```
 Oxy/
-├── index.html              # Full frontend (React PWA, CSS, all pages)
 ├── server.js               # Express entry point
-├── sw.js                   # Service worker (offline + push notifications)
-├── manifest.json           # PWA manifest
 ├── package.json            # Dependencies and scripts
 ├── .env.example            # Environment variable template
 ├── supabase-migration.sql  # Database schema
 ├── mcp-server.js           # Standalone MCP tool server
 ├── create-shortcut.js      # Apple Shortcuts generator
 ├── Oxy.shortcut            # Pre-built Apple Shortcut file
+├── OxyApp/                 # Native SwiftUI iOS app (the frontend)
+├── firmware/               # Oxy pendant firmware (streaming PCM audio over BLE)
 ├── api/
 │   ├── index.js            # Main API (chat, audio, memory, connectors, auth)
 │   ├── proxy.js            # Action dispatch helper
 │   └── geocoding.js        # Google Maps geocoding helper
-├── connectors/
-│   ├── index.js            # Connector registry and dispatcher
-│   ├── google.js           # Gmail + Google Calendar connector
-│   ├── telegram.js         # Telegram User API connector
-│   ├── uber.js             # Uber deep-link connector
-│   └── trainline.js        # UK train search connector
-└── icons/                  # PWA icons (192px, 512px, SVG)
+└── connectors/
+    ├── index.js            # Connector registry and dispatcher
+    ├── google.js           # Gmail + Google Calendar connector
+    ├── telegram.js         # Telegram User API connector
+    ├── uber.js             # Uber deep-link connector
+    └── trainline.js        # UK train search connector
 ```
 
 ## How It Works — End to End
 
-1. **You speak or type** → The frontend captures audio via `MediaRecorder` or takes text input
+1. **You speak or type** → The iOS app captures audio (mic or pendant) or takes text input
 2. **Audio is transcribed** → Sent to `/process-audio`, transcribed by Gemini
 3. **Context is assembled** → Your memories, conversation history, preferences, connected apps, and messaging patterns are loaded from Supabase
 4. **Gemini thinks** → The AI generates a response using all available context, with Google Search grounding for real-world facts

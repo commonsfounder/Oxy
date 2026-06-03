@@ -5123,9 +5123,15 @@ app.get('/install-shortcut', (_req, res) => {
   }
 });
 
+// Oxy is now an iOS-only product; the PWA root was removed. Keep / as a
+// truthful service identity endpoint instead of serving a missing file.
 app.get('/', (_req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.resolve(__dirname, '..', 'index.html'));
+  res.json({
+    service: 'Oxy API',
+    status: 'ok',
+    docs: '/health for diagnostics, /version for build info',
+    ...getRuntimeVersion()
+  });
 });
 
 // Sentry error handler must be last
