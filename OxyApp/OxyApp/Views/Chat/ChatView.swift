@@ -6,11 +6,14 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct ChatView: View {
+    var initialSession: ChatSessionSummary? = nil
+    var autoSendTranscript: String? = nil
+
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
     @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
-    @State private var showSearch = false
     @State private var isIncognito = false
     @State private var pendingReviewAction: ActionResult?
     @State private var messageDraft: MessageDraft?
@@ -26,7 +29,6 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
-    @State private var pendantBridge = PendantAudioBridge()
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
@@ -203,25 +205,6 @@ struct ChatView: View {
                         )
                     }
 
-                    // Pendant floating overlay
-                    if pendantBridge.state != .idle {
-                        HStack {
-                            Spacer()
-                            PendantOverlay(
-                                state: pendantBridge.state,
-                                transcript: pendantBridge.lastTranscript,
-                                notice: pendantBridge.notice
-                            )
-                            Spacer()
-                        }
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 6)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .scale(scale: 0.88)).combined(with: .opacity),
-                            removal: .scale(scale: 0.88).combined(with: .opacity)
-                        ))
-                    }
-
                     // Input bar
                     ChatInputBar(
                         text: $viewModel.inputText,
@@ -258,18 +241,19 @@ struct ChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { showSearch = true }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 17))
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Color.oxySub)
                     }
                 }
 
                 ToolbarItem(placement: .principal) {
-                    Text("Oxy")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                    Text(initialSession?.title ?? "Oxy")
+                        .font(.system(size: initialSession != nil ? 15 : 18, weight: .bold, design: .rounded))
                         .foregroundStyle(Color.oxyText)
                         .tracking(0.3)
+                        .lineLimit(1)
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -310,15 +294,6 @@ struct ChatView: View {
             }
             .toolbarBackground(Color.oxySurface1, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $showSearch) {
-                ChatSearchView(userId: appState.userId) { result in
-                    guard let createdAt = result.createdAt else { return }
-                    showSearch = false
-                    Task {
-                        await viewModel.loadHistoryAround(userId: appState.userId, createdAt: createdAt, messageId: result.messageId)
-                    }
-                }
-            }
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,
@@ -398,7 +373,18 @@ struct ChatView: View {
             }
         }
         .task {
-            await viewModel.prepareChat(userId: appState.userId)
+            if let session = initialSession {
+                await viewModel.loadHistoryAround(
+                    userId: appState.userId,
+                    createdAt: session.lastAt ?? session.startedAt ?? ""
+                )
+            } else {
+                await viewModel.prepareChat(userId: appState.userId)
+            }
+            if let transcript = autoSendTranscript, !transcript.isEmpty {
+                viewModel.inputText = transcript
+                viewModel.sendMessage(userId: appState.userId)
+            }
         }
         .onAppear {
             viewModel.requestLocationAccess()
@@ -410,31 +396,6 @@ struct ChatView: View {
                 }
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
-
-            let vm = viewModel
-            let state = appState
-            let bridge = pendantBridge
-
-            // Pendant audio → Gemini transcription → text chat pipeline.
-            // Spoken commands appear in chat and execute exactly as typed text.
-            bridge.userId = state.userId
-            bridge.onTranscript = { transcript in
-                HapticManager.shared.impact(.medium)
-                NativeIntegrationManager.shared.pendant.sendCommand("THINK")
-                vm.inputText = transcript
-                vm.sendMessage(userId: state.userId)
-            }
-
-            NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor data in
-                bridge.ingest(data)
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
-            guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
-            let messageId = notification.userInfo?["messageId"] as? String
-            Task {
-                await viewModel.loadHistoryAround(userId: appState.userId, createdAt: lastAt, messageId: messageId)
-            }
         }
     }
 
@@ -1053,6 +1014,18 @@ struct ChatSessionSummary: Codable, Identifiable {
         fmt.dateFormat = "d MMM · HH:mm"
         return fmt.string(from: date)
     }
+
+    var relativeTime: String {
+        guard let date = Date.oxyParse(lastAt ?? startedAt) else { return "" }
+        let diff = Date().timeIntervalSince(date)
+        if diff < 60 { return "just now" }
+        if diff < 3600 { return "\(Int(diff / 60))m ago" }
+        if diff < 86400 { return "\(Int(diff / 3600))h ago" }
+        if diff < 7 * 86400 { return "\(Int(diff / 86400))d ago" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "d MMM"
+        return fmt.string(from: date)
+    }
 }
 
 struct ChatSessionsResponse: Codable {
@@ -1346,7 +1319,7 @@ private struct StatusIndicator: View {
 
 // MARK: - Pendant Floating Overlay
 
-private struct PendantOverlay: View {
+struct PendantOverlay: View {
     let state: PendantAudioBridge.BridgeState
     let transcript: String?
     var notice: String? = nil
@@ -1401,7 +1374,7 @@ private struct PendantOverlay: View {
     }
 }
 
-private struct PendantWaveform: View {
+struct PendantWaveform: View {
     let active: Bool
 
     var body: some View {

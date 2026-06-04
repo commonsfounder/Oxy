@@ -184,22 +184,6 @@ private struct SessionRow: View {
     }
 }
 
-// MARK: - ChatSessionSummary extension
-
-private extension ChatSessionSummary {
-    var relativeTime: String {
-        guard let date = Date.oxyParse(lastAt ?? startedAt) else { return "" }
-        let diff = Date().timeIntervalSince(date)
-        if diff < 60 { return "just now" }
-        if diff < 3600 { return "\(Int(diff / 60))m ago" }
-        if diff < 86400 { return "\(Int(diff / 3600))h ago" }
-        if diff < 7 * 86400 { return "\(Int(diff / 86400))d ago" }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "d MMM"
-        return fmt.string(from: date)
-    }
-}
-
 #Preview {
     HistoryView()
         .environment(AppState())

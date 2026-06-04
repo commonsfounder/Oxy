@@ -4,27 +4,27 @@ struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
-    @State private var selectedTab = Tab.chat
+    @State private var selectedTab = Tab.today
 
     enum Tab: String {
-        case chat, today, more
+        case today, chat, more
     }
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            ChatView()
-                .tabItem {
-                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
-                    Text("Chat")
-                }
-                .tag(Tab.chat)
-
             ProactiveView()
                 .tabItem {
                     Image(systemName: selectedTab == .today ? "sun.max.fill" : "sun.max")
                     Text("Today")
                 }
                 .tag(Tab.today)
+
+            ConversationsView()
+                .tabItem {
+                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
+                    Text("Chat")
+                }
+                .tag(Tab.chat)
 
             MoreView()
                 .tabItem {
@@ -53,7 +53,7 @@ struct MoreView: View {
     @State private var appeared = false
 
     enum MoreDestination: Identifiable {
-        case history, connectors, settings
+        case connectors, settings
         var id: String { "\(self)" }
     }
 
@@ -65,10 +65,6 @@ struct MoreView: View {
                 ScrollView {
                     VStack(spacing: 8) {
                         moreSection {
-                            Button { HapticManager.shared.impact(.light); destination = .history } label: {
-                                moreRow(icon: "clock.fill", title: "Chats", color: .oxySub)
-                            }
-
                             Button { HapticManager.shared.impact(.light); destination = .connectors } label: {
                                 moreRow(icon: "link", title: "Connectors", color: .oxyStone)
                             }
@@ -93,7 +89,6 @@ struct MoreView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in
                 switch dest {
-                case .history: HistoryView()
                 case .connectors: ConnectorsView()
                 case .settings: SettingsView()
                 }
