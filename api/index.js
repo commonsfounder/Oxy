@@ -527,10 +527,11 @@ ABSOLUTE RULES:
 5. Never say you "can't" do something that's in the actions list above
 6. Always include a spoken sentence alongside every action block — never return the action block alone
 7. For train/rail questions, prefer a grounded text answer from search over the old transport connector. Do not use plan_trip, search_trains, or station_board just to answer live train times, platforms, or journey options.
-7a. Only use get_directions/plan_trip for travel when the user explicitly asks you to open a route, navigation, Maps, or a ride handoff. Otherwise answer with the actual information you can ground.
+7a. Use get_directions/plan_trip when: (a) the user explicitly asks to open a route, navigation, or Maps; OR (b) the user asks "when should I leave", "how long to get to X", "what time should I head off", or any question that requires real-time travel time from their current location. You cannot accurately calculate travel time from training data — always call the tool for these questions.
 7b. Use get_directions for generic local directions, walking, driving, and bus questions when a route summary is useful. Never pretend a route opened if all you have is a text answer.
 7c. If train or route data is unavailable, say why plainly and give the best grounded alternative. Do not paraphrase failures into "there are no trains".
 7d. For follow-ups like "yeah but what train is it", "what platform", or "what about tomorrow", use the recent route/action context instead of treating the whole sentence as a new destination.
+7e. arrival_time vs departure_time: When the user says they need to BE somewhere at a time ("I need to be there at 8am", "I have a meeting at 9", "need to arrive by 7pm", "when should I leave to make it for 8"), pass that time as arrival_time — Maps will work backwards and tell them when to depart. Only use departure_time when the user specifies when they are LEAVING ("I'm leaving at 6", "I'll set off at 8"). Getting this wrong produces the wrong answer — "leave at 8am to arrive at 8am" is never correct.
 8. If you are unsure, ask a brief clarifying question instead of guessing
 9. Separate observed facts from suggestions: suggestions are fine, fabricated facts are not
 10. When a workflow would benefit from a visual, deck, preview, diagram, or study aid, use the visual actions above instead of only describing them in text
@@ -699,11 +700,14 @@ function isImplausibleTranscript(text, durationMs) {
   const normalized = normalizeTranscript(text);
   if (!normalized) return false;
   const words = normalized.split(/\s+/).filter(Boolean);
-  if (!durationMs || durationMs < 400) return words.length > 4;
+  // Only reject if word count is physically impossible for the audio duration.
+  // Raised thresholds to avoid rejecting accented/slower speech that Gemini
+  // correctly infers but expresses in more words than average.
+  if (!durationMs || durationMs < 400) return words.length > 6;
   const wordsPerSecond = words.length / Math.max(durationMs / 1000, 0.5);
-  if (durationMs < 1500 && words.length > 7) return true;
-  if (durationMs < 2500 && words.length > 12) return true;
-  return wordsPerSecond > 4.8;
+  if (durationMs < 1500 && words.length > 10) return true;
+  if (durationMs < 2500 && words.length > 18) return true;
+  return wordsPerSecond > 6.0;
 }
 
 async function transcribeAudio(buffer, contextHint = '') {
@@ -3354,6 +3358,43 @@ app.post('/devices/register', async (req, res) => {
     }, { onConflict: 'user_id,push_token' });
     if (error) throw error;
     res.json({ ok: true });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+// Test push: verifies APNS credentials + token registration end-to-end.
+// Usage: POST /push/test { userId } with valid auth header.
+app.post('/push/test', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+
+    const bundleId = process.env.APNS_BUNDLE_ID;
+    const token = apnsAuthToken();
+    if (!bundleId || !token) {
+      return res.status(503).json({
+        ok: false,
+        error: 'APNS credentials not configured. Set APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY, and APNS_BUNDLE_ID env vars.'
+      });
+    }
+
+    const { data: devices } = await supabase
+      .from('devices')
+      .select('push_token, platform')
+      .eq('user_id', userId)
+      .eq('platform', 'ios');
+
+    if (!devices?.length) {
+      return res.status(404).json({ ok: false, error: 'No iOS device tokens registered for this user. Make sure the app has notification permission enabled and has posted to /devices/register.' });
+    }
+
+    const result = await sendPushToUser(userId, {
+      title: 'Oxy',
+      body: 'Push notifications are working.'
+    });
+
+    res.json({ ok: true, devices: devices.length, sent: result.sent });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }

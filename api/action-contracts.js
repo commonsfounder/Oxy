@@ -119,7 +119,8 @@ const ACTION_CONTRACTS = {
     required: ['destination'],
     optional: ['origin', 'mode', 'arrival_time', 'departure_time'],
     aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
-    inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time', departure_time: 'optional leave-at/around time' },
+    inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time e.g. "8am"', departure_time: 'optional leave-at time e.g. "9:30am"' },
+    guidance: 'CRITICAL: Use arrival_time when the user needs to ARRIVE by a certain time ("I need to be there at 8am", "meeting at 9", "when should I leave for X at Y"). Maps uses arrival_time to calculate when to depart — this directly answers "when should I leave". Use departure_time only when the user says when they are LEAVING. Never use departure_time when the user specifies an arrival deadline.',
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none'
@@ -129,7 +130,8 @@ const ACTION_CONTRACTS = {
     required: ['destination'],
     optional: ['origin', 'departure_time', 'arrival_time', 'preference'],
     aliases: { destination: ['query', 'place', 'address', 'to'], origin: ['from'] },
-    inputExample: { destination: 'London Euston', origin: 'optional start place or station', departure_time: 'optional leave-at/around time', arrival_time: 'optional arrive-by time', preference: 'balanced|fastest|fewest_changes' },
+    inputExample: { destination: 'London Euston', origin: 'optional start place or station', departure_time: 'optional leave-at time e.g. "9:30am"', arrival_time: 'optional arrive-by time e.g. "8am"', preference: 'balanced|fastest|fewest_changes' },
+    guidance: 'CRITICAL: Use arrival_time when the user needs to ARRIVE by a certain time ("I need to be there at 8am", "meeting at 9", "when should I leave for X at Y"). Maps uses arrival_time to calculate when to depart. Use departure_time only when the user says when they are LEAVING.',
     successSummary: 'Trip planned',
     failureSummary: 'Trip failed',
     confirmation: 'none'
