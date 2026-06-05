@@ -138,13 +138,15 @@ struct ConversationsView: View {
 
     // MARK: - Search content
 
-    @ViewBuilder
-    private var searchContent: some View {
-        let localFiltered = sessions.filter {
+    private var localFiltered: [ChatSessionSummary] {
+        sessions.filter {
             $0.title.localizedCaseInsensitiveContains(searchQuery) ||
             $0.preview.localizedCaseInsensitiveContains(searchQuery)
         }
+    }
 
+    @ViewBuilder
+    private var searchContent: some View {
         if isSearching {
             ProgressView().tint(Color.oxyStone)
         } else if !searchResults.isEmpty {
@@ -316,9 +318,11 @@ struct ConversationsView: View {
         bridge.userId = appState.userId
 
         bridge.onTranscript = { transcript in
-            HapticManager.shared.impact(.medium)
-            NativeIntegrationManager.shared.pendant.sendCommand("THINK")
-            self.destination = .pendantChat(transcript)
+            Task { @MainActor in
+                HapticManager.shared.impact(.medium)
+                NativeIntegrationManager.shared.pendant.sendCommand("THINK")
+                self.destination = .pendantChat(transcript)
+            }
         }
 
         NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor data in

@@ -34,6 +34,7 @@
 		A10000010000000000000025 /* ProactiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000027 /* ProactiveView.swift */; };
 		A10000010000000000000026 /* PendantAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000028 /* PendantAudioBridge.swift */; };
 		A10000010000000000000028 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000030 /* HapticManager.swift */; };
+		A10000010000000000000029 /* ConversationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000031 /* ConversationsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -66,6 +67,7 @@
 		A20000010000000000000027 /* ProactiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveView.swift; sourceTree = "<group>"; };
 		A20000010000000000000028 /* PendantAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantAudioBridge.swift; sourceTree = "<group>"; };
 		A20000010000000000000030 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
+		A20000010000000000000031 /* ConversationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationsView.swift; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -159,6 +161,7 @@
 				A20000010000000000000009 /* ChatView.swift */,
 				A20000010000000000000010 /* ChatViewModel.swift */,
 				A20000010000000000000011 /* MessageBubble.swift */,
+				A20000010000000000000031 /* ConversationsView.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -331,6 +334,7 @@
 				A10000010000000000000025 /* ProactiveView.swift in Sources */,
 				A10000010000000000000026 /* PendantAudioBridge.swift in Sources */,
 				A10000010000000000000028 /* HapticManager.swift in Sources */,
+				A10000010000000000000029 /* ConversationsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
