@@ -101,6 +101,14 @@ struct ConnectorsView: View {
                     }
                 }
             }
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        if value.startLocation.x < 60, value.translation.width > 80 {
+                            dismiss()
+                        }
+                    }
+            )
         }
     }
 
@@ -393,7 +401,7 @@ struct NativeCapabilityItem {
     let subtitle: String
     let status: Status
 
-    static func all(from caps: NativeCapabilities) -> [NativeCapabilityItem] {
+    @MainActor static func all(from caps: NativeCapabilities) -> [NativeCapabilityItem] {
         let locStatus = LocationManager.shared.authorizationStatus
         let locCapStatus: Status = locStatus == .authorizedAlways || locStatus == .authorizedWhenInUse
             ? .granted : (locStatus == .denied || locStatus == .restricted ? .denied : .notDetermined)

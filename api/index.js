@@ -546,6 +546,7 @@ ABSOLUTE RULES:
 17. Match requested tone. If the user says casual, friendly, firm, apologetic, confident, less desperate, short, or professional, make the draft visibly follow that. Do not ignore tone instructions.
 18. Emails to unknown or professional contacts should be polished, structured, and appropriate to the business context, but not padded. Emails to known contacts should match the established tone of that relationship.
 19. Messages on conversational channels like iMessage, WhatsApp, or Telegram should be brief, natural, and text-like.
+19a. When composing a message to a specific contact, convert third-person references to that contact into second-person so it reads as if written directly to them. Examples: "text Sam I miss her" → message body is "I miss you"; "tell him I'm running late" → "I'm running late"; "say she looks great in that photo" → "you look great in that photo". The sent message must address the recipient as "you", not refer to them as "he/she/they".
 20. Do not send placeholder emails. If the user only says "say hello", "introduce myself", "make it professional", or otherwise gives no real message/content, ask for the actual substance before using send_email. If they provide actual substance, do not ask for a subject; infer a short subject.
 20a. Never send an email body that is just a generic template. The body must contain specific content from the user, current conversation, memory, or tool results.
 20b. If the user asks you to rewrite, improve, make more professional, or lengthen a just-sent email, do not send another email unless they explicitly say to resend. Draft the improved version in chat and ask for approval.
@@ -2288,6 +2289,15 @@ function normalizeConversationRow(row) {
   };
 }
 
+function cleanSessionTitle(raw) {
+  if (!raw) return 'New conversation';
+  let text = raw
+    .replace(/^(hey oxy[,.]?\s*)/i, '')
+    .replace(/^(oxy[,.]?\s*)/i, '');
+  text = text.replace(/\b\w/g, c => c.toUpperCase());
+  return text.length > 52 ? text.slice(0, 49) + '…' : text;
+}
+
 function buildConversationSessions(rows = []) {
   const sorted = rows
     .map(normalizeConversationRow)
@@ -2324,10 +2334,43 @@ function buildConversationSessions(rows = []) {
   return sessions
     .map(session => ({
       ...session,
-      title: session.title || session.preview || 'Untitled chat'
+      title: cleanSessionTitle(session.title || session.preview)
     }))
     .reverse()
     .slice(0, 30);
+}
+
+async function maybeGenerateSessionTitle(userId, userMessageText) {
+  (async () => {
+    try {
+      const since = new Date(Date.now() - 50 * 60 * 1000).toISOString();
+      const { data: recent } = await supabase
+        .from('conversations')
+        .select('id, role')
+        .eq('user_id', userId)
+        .gte('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(6);
+      if (!recent) return;
+      const userMsgs = recent.filter(m => m.role === 'user');
+      const asstMsgs = recent.filter(m => m.role === 'assistant');
+      if (userMsgs.length !== 1 || asstMsgs.length !== 1) return;
+      const firstMsgId = userMsgs[0].id;
+      const titleKey = `_stitle_${firstMsgId}`;
+      const { data: existing } = await supabase
+        .from('preferences').select('value')
+        .eq('user_id', userId).eq('key', titleKey).maybeSingle();
+      if (existing) return;
+      const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+      const result = await model.generateContent(
+        `Create a concise chat title (3-6 words, no quotes, no punctuation at end) for a conversation that starts with: "${userMessageText.slice(0, 200)}"\nReply with ONLY the title.`
+      );
+      const title = result.response.text().trim().replace(/^["'“”]|["'“”]$/g, '').slice(0, 60);
+      if (title) {
+        await supabase.from('preferences').upsert({ user_id: userId, key: titleKey, value: title }, { onConflict: 'user_id,key' });
+      }
+    } catch (_) {}
+  })();
 }
 
 async function saveMessage(userId, role, content, trace = null) {
@@ -3608,15 +3651,30 @@ app.get('/history/:userId', async (req, res) => {
 app.get('/history/:userId/sessions', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const { data, error } = await supabase
-      .from('conversations')
-      .select('id, role, content, created_at')
-      .eq('user_id', req.params.userId)
-      .neq('role', 'system')
-      .order('created_at', { ascending: false })
-      .limit(250);
-    if (error) throw error;
-    res.json({ sessions: buildConversationSessions(data || []) });
+    const [convResult, prefResult] = await Promise.all([
+      supabase
+        .from('conversations')
+        .select('id, role, content, created_at')
+        .eq('user_id', req.params.userId)
+        .neq('role', 'system')
+        .order('created_at', { ascending: false })
+        .limit(250),
+      supabase
+        .from('preferences')
+        .select('key, value')
+        .eq('user_id', req.params.userId)
+        .like('key', '_stitle_%')
+    ]);
+    if (convResult.error) throw convResult.error;
+    const sessions = buildConversationSessions(convResult.data || []);
+    const storedTitles = Object.fromEntries(
+      (prefResult.data || []).map(p => [p.key.replace('_stitle_', ''), p.value])
+    );
+    const sessionsWithTitles = sessions.map(s => ({
+      ...s,
+      title: storedTitles[s.id] || s.title
+    }));
+    res.json({ sessions: sessionsWithTitles });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }
@@ -4252,6 +4310,7 @@ function postResponseTasks(userId, message) {
 async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
   saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
     .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
+  if (message) maybeGenerateSessionTitle(userId, message);
   postResponseTasks(userId, message);
 
   if (streaming) {

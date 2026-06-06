@@ -355,6 +355,14 @@ struct SettingsView: View {
                 loadSettings()
                 loadBackendVersion()
             }
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        if value.startLocation.x < 60, value.translation.width > 80 {
+                            dismiss()
+                        }
+                    }
+            )
         }
     }
 

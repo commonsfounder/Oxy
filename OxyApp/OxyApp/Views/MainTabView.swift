@@ -45,12 +45,11 @@ struct MainTabView: View {
     }
 }
 
-// MARK: - More View (consolidates History, Connectors, Settings)
+// MARK: - More View
 
 struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
-    @State private var appeared = false
 
     enum MoreDestination: Identifiable {
         case connectors, settings
@@ -61,25 +60,18 @@ struct MoreView: View {
         NavigationStack {
             ZStack {
                 Color.oxyBg.ignoresSafeArea()
-
                 ScrollView {
-                    VStack(spacing: 8) {
-                        moreSection {
-                            Button { HapticManager.shared.impact(.light); destination = .connectors } label: {
-                                moreRow(icon: "link", title: "Connectors", color: .oxyStone)
-                            }
+                    VStack(spacing: 0) {
+                        moreRow(icon: "link", title: "Connectors", color: .oxyStone, isFirst: true, isLast: false) {
+                            destination = .connectors
                         }
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 12)
-
-                        moreSection {
-                            Button { HapticManager.shared.impact(.light); destination = .settings } label: {
-                                moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub)
-                            }
+                        Divider().overlay(Color.oxyLine).padding(.leading, 58)
+                        moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub, isFirst: false, isLast: true) {
+                            destination = .settings
                         }
-                        .opacity(appeared ? 1 : 0)
-                        .offset(y: appeared ? 0 : 12)
                     }
+                    .background(Color.oxySurface2)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
                     .padding(16)
                 }
             }
@@ -93,43 +85,33 @@ struct MoreView: View {
                 case .settings: SettingsView()
                 }
             }
-            .onAppear {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.1)) {
-                    appeared = true
-                }
+        }
+    }
+
+    private func moreRow(icon: String, title: String, color: Color, isFirst: Bool, isLast: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.oxyText)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyDim)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
-    }
-
-    private func moreSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-        }
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func moreRow(icon: String, title: String, color: Color) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(color)
-                .frame(width: 28, height: 28)
-                .background(color.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-
-            Text(title)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxyDim)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .buttonStyle(.plain)
     }
 }
 

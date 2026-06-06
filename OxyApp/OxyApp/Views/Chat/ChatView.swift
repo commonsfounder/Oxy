@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     var initialSession: ChatSessionSummary? = nil
     var autoSendTranscript: String? = nil
+    var startIncognito: Bool = false
 
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -32,14 +33,13 @@ struct ChatView: View {
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
+        ZStack {
+            Color.oxyBg.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // Offline banner
-                    if isOffline {
-                        HStack(spacing: 8) {
+            VStack(spacing: 0) {
+                // Offline banner
+                if isOffline {
+                    HStack(spacing: 8) {
                             Image(systemName: "wifi.slash")
                                 .font(.system(size: 12, weight: .semibold))
                             Text("No internet connection")
@@ -248,12 +248,13 @@ struct ChatView: View {
                     }
                 }
 
-                ToolbarItem(placement: .principal) {
-                    Text(initialSession?.title ?? "Oxy")
-                        .font(.system(size: initialSession != nil ? 15 : 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color.oxyText)
-                        .tracking(0.3)
-                        .lineLimit(1)
+                if let session = initialSession {
+                    ToolbarItem(placement: .principal) {
+                        Text(session.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.oxyText)
+                            .lineLimit(1)
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -371,7 +372,6 @@ struct ChatView: View {
                 viewModel.inputText = text
                 viewModel.sendMessage(userId: appState.userId)
             }
-        }
         .task {
             if let session = initialSession {
                 await viewModel.loadHistoryAround(
@@ -387,6 +387,7 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            if startIncognito { isIncognito = true }
             viewModel.requestLocationAccess()
             networkMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
@@ -992,7 +993,9 @@ private struct ChatSessionRow: View {
     }
 }
 
-struct ChatSessionSummary: Codable, Identifiable {
+struct ChatSessionSummary: Codable, Identifiable, Hashable {
+    static func == (lhs: ChatSessionSummary, rhs: ChatSessionSummary) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
     let id: String
     let title: String
     let preview: String

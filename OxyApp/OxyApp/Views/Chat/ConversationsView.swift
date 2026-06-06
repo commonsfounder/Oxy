@@ -8,21 +8,16 @@ struct ConversationsView: View {
     @State private var searchResults: [SearchResult] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var destination: ConversationDestination?
+    @State private var selectedSession: ChatSessionSummary?
+    @State private var showNewChat = false
+    @State private var showIncognitoChat = false
+    @State private var pendantItem: PendantTranscriptItem?
+    @State private var showMenuSheet = false
     @State private var pendantBridge = PendantAudioBridge()
 
-    private enum ConversationDestination: Identifiable {
-        case session(ChatSessionSummary)
-        case newChat
-        case pendantChat(String)
-
-        var id: String {
-            switch self {
-            case .session(let s): return "s-\(s.id)"
-            case .newChat: return "new"
-            case .pendantChat(let t): return "p-\(t.prefix(20))"
-            }
-        }
+    private struct PendantTranscriptItem: Identifiable {
+        let id = UUID().uuidString
+        let transcript: String
     }
 
     var body: some View {
@@ -59,30 +54,49 @@ struct ConversationsView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .searchable(
                 text: $searchQuery,
-                placement: .navigationBarDrawer(displayMode: .always),
+                placement: .navigationBarDrawer(displayMode: .automatic),
                 prompt: "Search messages..."
             )
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        showMenuSheet = true
+                    } label: {
+                        Image(systemName: "line.3.horizontal")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(Color.oxySub)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         HapticManager.shared.impact(.light)
-                        destination = .newChat
+                        showIncognitoChat = true
                     } label: {
-                        Image(systemName: "square.and.pencil")
+                        Image(systemName: "theatermask.and.paintbrush")
                             .font(.system(size: 17))
                             .foregroundStyle(Color.oxySub)
                     }
                 }
             }
-            .fullScreenCover(item: $destination) { dest in
-                switch dest {
-                case .session(let session):
-                    ChatView(initialSession: session)
-                case .newChat:
-                    ChatView()
-                case .pendantChat(let transcript):
-                    ChatView(autoSendTranscript: transcript)
+            .navigationDestination(item: $selectedSession) { session in
+                ChatView(initialSession: session)
+            }
+            .navigationDestination(isPresented: $showNewChat) {
+                ChatView()
+            }
+            .navigationDestination(isPresented: $showIncognitoChat) {
+                ChatView(startIncognito: true)
+            }
+            .fullScreenCover(item: $pendantItem) { item in
+                NavigationStack {
+                    ChatView(autoSendTranscript: item.transcript)
                 }
+            }
+            .sheet(isPresented: $showMenuSheet) {
+                MenuSheet()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
             .task { await loadSessions() }
             .refreshable { await loadSessions() }
@@ -116,7 +130,7 @@ struct ConversationsView: View {
                         ForEach(group.sessions) { session in
                             Button {
                                 HapticManager.shared.impact(.light)
-                                destination = .session(session)
+                                selectedSession = session
                             } label: {
                                 ConversationRow(session: session)
                             }
@@ -175,7 +189,7 @@ struct ConversationsView: View {
                     ForEach(localFiltered) { session in
                         Button {
                             HapticManager.shared.impact(.light)
-                            destination = .session(session)
+                            selectedSession = session
                         } label: {
                             ConversationRow(session: session)
                         }
@@ -226,7 +240,8 @@ struct ConversationsView: View {
         let now = Date()
         var today: [ChatSessionSummary] = []
         var yesterday: [ChatSessionSummary] = []
-        var thisWeek: [ChatSessionSummary] = []
+        var prev7Days: [ChatSessionSummary] = []
+        var prev30Days: [ChatSessionSummary] = []
         var earlier: [ChatSessionSummary] = []
 
         for session in sessions {
@@ -237,18 +252,21 @@ struct ConversationsView: View {
                 today.append(session)
             } else if calendar.isDateInYesterday(date) {
                 yesterday.append(session)
-            } else if let weekAgo = calendar.date(byAdding: .day, value: -7, to: now), date >= weekAgo {
-                thisWeek.append(session)
+            } else if let ago7 = calendar.date(byAdding: .day, value: -7, to: now), date >= ago7 {
+                prev7Days.append(session)
+            } else if let ago30 = calendar.date(byAdding: .day, value: -30, to: now), date >= ago30 {
+                prev30Days.append(session)
             } else {
                 earlier.append(session)
             }
         }
 
         var groups: [SessionGroup] = []
-        if !today.isEmpty    { groups.append(.init(label: "Today",     sessions: today)) }
-        if !yesterday.isEmpty { groups.append(.init(label: "Yesterday", sessions: yesterday)) }
-        if !thisWeek.isEmpty  { groups.append(.init(label: "This Week", sessions: thisWeek)) }
-        if !earlier.isEmpty   { groups.append(.init(label: "Earlier",   sessions: earlier)) }
+        if !today.isEmpty     { groups.append(.init(label: "Today",            sessions: today)) }
+        if !yesterday.isEmpty { groups.append(.init(label: "Yesterday",        sessions: yesterday)) }
+        if !prev7Days.isEmpty { groups.append(.init(label: "Previous 7 Days",  sessions: prev7Days)) }
+        if !prev30Days.isEmpty{ groups.append(.init(label: "Previous 30 Days", sessions: prev30Days)) }
+        if !earlier.isEmpty   { groups.append(.init(label: "Earlier",          sessions: earlier)) }
         return groups
     }
 
@@ -293,7 +311,6 @@ struct ConversationsView: View {
 
     private func openSearchResult(_ result: SearchResult) {
         guard let createdAt = result.createdAt, let resultDate = Date.oxyParse(createdAt) else { return }
-        // Find the session whose window most likely contains this message
         let match = sessions
             .filter { session in
                 guard let startDate = Date.oxyParse(session.startedAt ?? session.lastAt) else { return false }
@@ -307,7 +324,7 @@ struct ConversationsView: View {
             .first
         if let session = match {
             HapticManager.shared.impact(.light)
-            destination = .session(session)
+            selectedSession = session
         }
     }
 
@@ -321,7 +338,7 @@ struct ConversationsView: View {
             Task { @MainActor in
                 HapticManager.shared.impact(.medium)
                 NativeIntegrationManager.shared.pendant.sendCommand("THINK")
-                self.destination = .pendantChat(transcript)
+                self.pendantItem = PendantTranscriptItem(transcript: transcript)
             }
         }
 
@@ -331,36 +348,107 @@ struct ConversationsView: View {
     }
 }
 
+// MARK: - Menu Sheet (hamburger)
+
+private struct MenuSheet: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
+    @State private var destination: MenuDestination?
+
+    enum MenuDestination: Identifiable {
+        case connectors, settings
+        var id: String { "\(self)" }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.oxyBg.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 12) {
+                        menuSection {
+                            menuButton(icon: "link", title: "Connectors", color: .oxyStone) {
+                                destination = .connectors
+                            }
+                            Divider().overlay(Color.oxyLine).padding(.leading, 58)
+                            menuButton(icon: "gearshape.fill", title: "Settings", color: .oxySub) {
+                                destination = .settings
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Menu")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(Color.oxyText)
+                }
+            }
+            .fullScreenCover(item: $destination) { dest in
+                switch dest {
+                case .connectors: ConnectorsView()
+                case .settings: SettingsView()
+                }
+            }
+        }
+    }
+
+    private func menuSection<C: View>(@ViewBuilder content: () -> C) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(Color.oxySurface2)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func menuButton(icon: String, title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: { HapticManager.shared.impact(.light); action() }) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                Text(title)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Color.oxyText)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.oxyDim)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Conversation Row
 
 private struct ConversationRow: View {
     let session: ChatSessionSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 0) {
-                Text(session.title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                    .lineLimit(1)
+        HStack(spacing: 0) {
+            Text(session.title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Color.oxyText)
+                .lineLimit(1)
 
-                Spacer(minLength: 12)
+            Spacer(minLength: 12)
 
-                Text(session.relativeTime)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxyDim)
-                    .fixedSize()
-            }
-
-            if !session.preview.isEmpty {
-                Text(session.preview)
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color.oxySub)
-                    .lineLimit(2)
-            }
+            Text(session.relativeTime)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.oxyDim)
+                .fixedSize()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

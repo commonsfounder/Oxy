@@ -128,6 +128,7 @@ final class ChatViewModel {
         }
         let pendingDecision = localActionDecision(for: text)
 
+        audioPlayback.stop()
         inputText = ""
         isSending = true
         statusLabel = nil
@@ -895,6 +896,13 @@ private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
         playNextAudioIfNeeded()
     }
 
+    func stop() {
+        audioPlayer?.stop()
+        audioPlayer = nil
+        pendingAudio.removeAll()
+        sessionConfigured = false
+    }
+
     // Configure the audio session once. Reconfiguring on every chunk added latency
     // and audible gaps between streamed sentence clips.
     private func ensureSessionActive() {
@@ -904,6 +912,18 @@ private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
             try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try session.setActive(true)
             sessionConfigured = true
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification,
+                object: nil, queue: .main
+            ) { [weak self] note in
+                guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
+                if t == .began {
+                    self?.stop()
+                } else {
+                    self?.sessionConfigured = false
+                }
+            }
         } catch {
             // Non-fatal: playback may still work with the default session.
         }
