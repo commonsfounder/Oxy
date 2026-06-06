@@ -42,6 +42,9 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
+            withAnimation { selectedTab = .more }
+        }
     }
 }
 

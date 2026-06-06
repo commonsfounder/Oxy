@@ -378,6 +378,8 @@ struct ChatView: View {
                     userId: appState.userId,
                     createdAt: session.lastAt ?? session.startedAt ?? ""
                 )
+            } else if startIncognito {
+                viewModel.startNewChat(userId: appState.userId)
             } else {
                 await viewModel.prepareChat(userId: appState.userId)
             }

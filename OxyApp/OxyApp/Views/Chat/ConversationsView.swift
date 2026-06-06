@@ -12,7 +12,6 @@ struct ConversationsView: View {
     @State private var showNewChat = false
     @State private var showIncognitoChat = false
     @State private var pendantItem: PendantTranscriptItem?
-    @State private var showMenuSheet = false
     @State private var pendantBridge = PendantAudioBridge()
 
     private struct PendantTranscriptItem: Identifiable {
@@ -61,7 +60,7 @@ struct ConversationsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         HapticManager.shared.impact(.light)
-                        showMenuSheet = true
+                        NotificationCenter.default.post(name: .oxyJumpToMore, object: nil)
                     } label: {
                         Image(systemName: "line.3.horizontal")
                             .font(.system(size: 17, weight: .medium))
@@ -73,7 +72,7 @@ struct ConversationsView: View {
                         HapticManager.shared.impact(.light)
                         showIncognitoChat = true
                     } label: {
-                        Image(systemName: "theatermask.and.paintbrush")
+                        Image(systemName: "eye.slash")
                             .font(.system(size: 17))
                             .foregroundStyle(Color.oxySub)
                     }
@@ -92,11 +91,6 @@ struct ConversationsView: View {
                 NavigationStack {
                     ChatView(autoSendTranscript: item.transcript)
                 }
-            }
-            .sheet(isPresented: $showMenuSheet) {
-                MenuSheet()
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
             }
             .task { await loadSessions() }
             .refreshable { await loadSessions() }
@@ -345,86 +339,6 @@ struct ConversationsView: View {
         NativeIntegrationManager.shared.pendant.onAudioData = { @MainActor data in
             bridge.ingest(data)
         }
-    }
-}
-
-// MARK: - Menu Sheet (hamburger)
-
-private struct MenuSheet: View {
-    @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
-    @State private var destination: MenuDestination?
-
-    enum MenuDestination: Identifiable {
-        case connectors, settings
-        var id: String { "\(self)" }
-    }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 12) {
-                        menuSection {
-                            menuButton(icon: "link", title: "Connectors", color: .oxyStone) {
-                                destination = .connectors
-                            }
-                            Divider().overlay(Color.oxyLine).padding(.leading, 58)
-                            menuButton(icon: "gearshape.fill", title: "Settings", color: .oxySub) {
-                                destination = .settings
-                            }
-                        }
-                    }
-                    .padding(16)
-                }
-            }
-            .navigationTitle("Menu")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(Color.oxyText)
-                }
-            }
-            .fullScreenCover(item: $destination) { dest in
-                switch dest {
-                case .connectors: ConnectorsView()
-                case .settings: SettingsView()
-                }
-            }
-        }
-    }
-
-    private func menuSection<C: View>(@ViewBuilder content: () -> C) -> some View {
-        VStack(spacing: 0) { content() }
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func menuButton(icon: String, title: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: { HapticManager.shared.impact(.light); action() }) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(color)
-                    .frame(width: 28, height: 28)
-                    .background(color.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                Text(title)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyDim)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-        }
-        .buttonStyle(.plain)
     }
 }
 
