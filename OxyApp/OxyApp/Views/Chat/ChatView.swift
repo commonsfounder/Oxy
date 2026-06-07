@@ -9,6 +9,10 @@ struct ChatView: View {
     var initialSession: ChatSessionSummary? = nil
     var autoSendTranscript: String? = nil
     var startIncognito: Bool = false
+    /// Start a brand-new empty chat instead of resuming the current one.
+    var startFresh: Bool = false
+    /// When set, the top-left toolbar shows a sidebar/menu button instead of a back chevron.
+    var onMenu: (() -> Void)? = nil
 
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +37,7 @@ struct ChatView: View {
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
+        NavigationStack {
         ZStack {
             Color.oxyBg.ignoresSafeArea()
 
@@ -241,10 +246,21 @@ struct ChatView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { dismiss() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Color.oxySub)
+                    if let onMenu {
+                        Button {
+                            HapticManager.shared.impact(.light)
+                            onMenu()
+                        } label: {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(Color.oxySub)
+                        }
+                    } else {
+                        Button(action: { dismiss() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.oxySub)
+                        }
                     }
                 }
 
@@ -378,7 +394,7 @@ struct ChatView: View {
                     userId: appState.userId,
                     createdAt: session.lastAt ?? session.startedAt ?? ""
                 )
-            } else if startIncognito {
+            } else if startIncognito || startFresh {
                 viewModel.startNewChat(userId: appState.userId)
             } else {
                 await viewModel.prepareChat(userId: appState.userId)
@@ -399,6 +415,7 @@ struct ChatView: View {
                 }
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
+        }
         }
     }
 
@@ -741,205 +758,6 @@ private struct VoiceRecordingBar: View {
     }
 }
 
-// MARK: - Chat Search View
-
-struct ChatSearchView: View {
-    let userId: String
-    let onSelect: (SearchResult) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    @State private var results: [SearchResult] = []
-    @State private var sessions: [ChatSessionSummary] = []
-    @State private var isSearching = false
-    @State private var isLoadingSessions = true
-    @State private var searchTask: Task<Void, Never>?
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
-
-                if query.isEmpty {
-                    if isLoadingSessions {
-                        ProgressView()
-                            .tint(Color.oxyStone)
-                    } else if sessions.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 36))
-                                .foregroundStyle(Color.oxyDim)
-                            Text("Search conversations")
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxySub)
-                            Text("Find messages from your chat history")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color.oxyDim)
-                        }
-                    } else {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                Text("Recent chats")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.oxyDim)
-                                    .textCase(.uppercase)
-                                    .tracking(0.4)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-
-                                ForEach(sessions) { session in
-                                    Button {
-                                        onSelect(SearchResult(
-                                            role: "user",
-                                            content: session.title,
-                                            createdAt: session.lastAt
-                                        ))
-                                        dismiss()
-                                    } label: {
-                                        ChatSessionRow(session: session)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-
-                                    if session.id != sessions.last?.id {
-                                        Divider()
-                                            .overlay(Color.oxyLine)
-                                            .padding(.horizontal, 16)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-                    }
-                } else if results.isEmpty && !isSearching && !query.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 36))
-                            .foregroundStyle(Color.oxyDim)
-                        Text("No results found")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.oxySub)
-                    }
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(results) { result in
-                                Button {
-                                    onSelect(result)
-                                    dismiss()
-                                } label: {
-                                    SearchResultRow(result: result)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-
-                                if result.id != results.last?.id {
-                                    Divider()
-                                        .overlay(Color.oxyLine)
-                                        .padding(.horizontal, 16)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                }
-
-                if isSearching {
-                    ProgressView()
-                        .tint(Color.oxyStone)
-                }
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(Color.oxyStone)
-                }
-            }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search messages...")
-            .task {
-                await loadSessions()
-            }
-            .onChange(of: query) { _, newValue in
-                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                searchTask?.cancel()
-                guard !trimmed.isEmpty else {
-                    results = []
-                    isSearching = false
-                    return
-                }
-                searchTask = Task {
-                    try? await Task.sleep(for: .milliseconds(300))
-                    if Task.isCancelled { return }
-                    await search(trimmed)
-                }
-            }
-            .onDisappear { searchTask?.cancel() }
-        }
-    }
-
-    private func search(_ q: String) async {
-        isSearching = true
-        defer { if !Task.isCancelled { isSearching = false } }
-        do {
-            let data = try await APIClient.shared.request(
-                path: "/history/\(userId)/search",
-                queryItems: [URLQueryItem(name: "q", value: q)]
-            )
-            // Drop stale results: a newer keystroke cancelled this task while in flight.
-            if Task.isCancelled { return }
-            let response = try JSONDecoder().decode(SearchResponse.self, from: data)
-            results = response.results
-        } catch {
-            if !Task.isCancelled { results = [] }
-        }
-    }
-
-    private func loadSessions() async {
-        isLoadingSessions = true
-        do {
-            let data = try await APIClient.shared.request(path: "/history/\(userId)/sessions")
-            let response = try JSONDecoder().decode(ChatSessionsResponse.self, from: data)
-            sessions = response.sessions
-        } catch {
-            sessions = []
-        }
-        isLoadingSessions = false
-    }
-}
-
-private struct SearchResultRow: View {
-    let result: SearchResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(result.role == "user" ? "YOU" : "OXY")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.oxySub)
-                    .tracking(0.5)
-
-                Spacer()
-
-                if let date = result.formattedDate {
-                    Text(date)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.oxyDim)
-                }
-            }
-
-            Text(result.content)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(3)
-        }
-    }
-}
-
 struct SearchResult: Codable, Identifiable {
     let messageId: String?
     let role: String
@@ -972,27 +790,6 @@ struct SearchResult: Codable, Identifiable {
 
 struct SearchResponse: Codable {
     let results: [SearchResult]
-}
-
-private struct ChatSessionRow: View {
-    let session: ChatSessionSummary
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Text(session.title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(1)
-
-            Spacer(minLength: 12)
-
-            if let date = session.formattedDate {
-                Text(date)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxyDim)
-            }
-        }
-    }
 }
 
 struct ChatSessionSummary: Codable, Identifiable, Hashable {

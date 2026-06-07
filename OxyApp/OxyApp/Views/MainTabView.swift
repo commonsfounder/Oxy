@@ -12,19 +12,19 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            ChatHomeView()
+                .tabItem {
+                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
+                    Text("Chat")
+                }
+                .tag(Tab.chat)
+
             ProactiveView()
                 .tabItem {
                     Image(systemName: selectedTab == .today ? "sun.max.fill" : "sun.max")
                     Text("Today")
                 }
                 .tag(Tab.today)
-
-            ConversationsView()
-                .tabItem {
-                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
-                    Text("Chat")
-                }
-                .tag(Tab.chat)
 
             MoreView()
                 .tabItem {

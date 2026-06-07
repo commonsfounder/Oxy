@@ -2373,6 +2373,46 @@ async function maybeGenerateSessionTitle(userId, userMessageText) {
   })();
 }
 
+// Generate a descriptive AI title for one session from its opening text.
+// Returns the title (and persists it) or null on failure.
+async function generateSessionTitleFromText(userId, sessionId, sourceText) {
+  const text = (sourceText || '').trim();
+  if (!text) return null;
+  try {
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const result = await model.generateContent(
+      `Write a short descriptive title (3-6 words) summarizing what this conversation is about. ` +
+      `Describe the topic, do NOT echo the message verbatim. No quotes, no trailing punctuation. ` +
+      `For example "how can i get to john lewis" becomes "Directions to John Lewis".\n\n` +
+      `Conversation opening: "${text.slice(0, 240)}"\nReply with ONLY the title.`
+    );
+    const title = result.response.text().trim().replace(/^["'“”]|["'“”]$/g, '').slice(0, 60);
+    if (!title) return null;
+    await supabase.from('preferences').upsert(
+      { user_id: userId, key: `_stitle_${sessionId}`, value: title },
+      { onConflict: 'user_id,key' }
+    );
+    return title;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Backfill descriptive titles for older sessions that still show a verbatim
+// excerpt. Fire-and-forget so the listing stays fast; titles improve on the
+// next load. Capped per request to avoid hammering the model.
+function backfillSessionTitles(userId, sessions, storedTitles) {
+  const missing = sessions
+    .filter(s => !storedTitles[s.id] && (s.preview || s.title))
+    .slice(0, 12);
+  if (!missing.length) return;
+  (async () => {
+    for (const s of missing) {
+      await generateSessionTitleFromText(userId, s.id, s.preview || s.title);
+    }
+  })();
+}
+
 async function saveMessage(userId, role, content, trace = null) {
   const insertMessage = () => supabase
     .from('conversations')
@@ -3674,6 +3714,7 @@ app.get('/history/:userId/sessions', async (req, res) => {
       ...s,
       title: storedTitles[s.id] || s.title
     }));
+    backfillSessionTitles(req.params.userId, sessions, storedTitles);
     res.json({ sessions: sessionsWithTitles });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
