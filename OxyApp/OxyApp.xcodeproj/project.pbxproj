@@ -22,6 +22,9 @@
 		A10000010000000000000032 /* NamelessTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000032 /* NamelessTheme.swift */; };
 		A10000010000000000000033 /* PendantTelemetryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000033 /* PendantTelemetryMonitor.swift */; };
 		A10000010000000000000034 /* DeviceStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000034 /* DeviceStatusCard.swift */; };
+		A10000010000000000000035 /* LegalConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000035 /* LegalConsentView.swift */; };
+		A10000010000000000000036 /* SetupPendantView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000036 /* SetupPendantView.swift */; };
+		A10000010000000000000037 /* ConnectionTroubleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000037 /* ConnectionTroubleView.swift */; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* LoadingIndicator.swift */; };
 		A10000010000000000000014 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000014 /* ErrorBanner.swift */; };
 		A10000010000000000000015 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* MainTabView.swift */; };
@@ -55,6 +58,9 @@
 		A20000010000000000000032 /* NamelessTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NamelessTheme.swift"; sourceTree = "<group>"; };
 		A20000010000000000000033 /* PendantTelemetryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PendantTelemetryMonitor.swift"; sourceTree = "<group>"; };
 		A20000010000000000000034 /* DeviceStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DeviceStatusCard.swift"; sourceTree = "<group>"; };
+		A20000010000000000000035 /* LegalConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LegalConsentView.swift"; sourceTree = "<group>"; };
+		A20000010000000000000036 /* SetupPendantView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SetupPendantView.swift"; sourceTree = "<group>"; };
+		A20000010000000000000037 /* ConnectionTroubleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConnectionTroubleView.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		A20000010000000000000014 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		A20000010000000000000015 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
@@ -146,9 +152,20 @@
 				A50000010000000000000012 /* Memory */,
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
+				A50000010000000000000016 /* Onboarding */,
 				A50000010000000000000008 /* Components */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000016 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000035 /* LegalConsentView.swift */,
+				A20000010000000000000036 /* SetupPendantView.swift */,
+				A20000010000000000000037 /* ConnectionTroubleView.swift */,
+			);
+			path = Onboarding;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000006 /* Auth */ = {
@@ -335,6 +352,9 @@
 				A10000010000000000000028 /* HapticManager.swift in Sources */,
 				A10000010000000000000029 /* ChatHomeView.swift in Sources */,
 				A10000010000000000000034 /* DeviceStatusCard.swift in Sources */,
+				A10000010000000000000035 /* LegalConsentView.swift in Sources */,
+				A10000010000000000000036 /* SetupPendantView.swift in Sources */,
+				A10000010000000000000037 /* ConnectionTroubleView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -164,3 +164,43 @@ struct NamelessLineField: View {
         }
     }
 }
+
+/// The one loud gesture this language permits: a thick, full-width pill in stark
+/// solid white with black text. Labels are bracketed and tracked-out.
+struct NamelessPrimaryButton: View {
+    let title: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("[ \(title) ]")
+                .font(.system(size: 14, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(Color.black)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .background(Color.white)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The quiet counterpart: border-only, muted titanium text, no fill.
+struct NamelessOutlineButton: View {
+    let title: String
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("[ \(title) ]")
+                .font(.system(size: 14, weight: .medium))
+                .tracking(2)
+                .foregroundStyle(Color.nmlMuted)
+                .frame(maxWidth: .infinity)
+                .frame(height: 58)
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+}
