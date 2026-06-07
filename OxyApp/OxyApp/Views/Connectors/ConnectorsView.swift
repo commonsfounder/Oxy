@@ -183,7 +183,7 @@ struct ConnectorsView: View {
                 .tracking(0.5)
 
             HStack(spacing: 14) {
-                AppIconView(candidates: [googleConnector?.icon ?? "", "google"], fallbackSystemName: "envelope.fill")
+                AppIconView(symbolName: "envelope.fill", tint: Color(red: 66/255, green: 133/255, blue: 244/255))
                     .frame(width: 44, height: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -536,13 +536,31 @@ private struct ConnectorCard: View {
         case "maps":      return "map.fill"
         case "notion":    return "doc.text.fill"
         case "betfair":   return "chart.line.uptrend.xyaxis"
+        case "uber":      return "car.fill"
         default:          return "puzzlepiece.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch connector.id {
+        case "google":    return Color(red: 66/255, green: 133/255, blue: 244/255)
+        case "imessage":  return Color.oxyGreen
+        case "whatsapp":  return Color(red: 76/255, green: 217/255, blue: 100/255)
+        case "spotify":   return Color(red: 30/255, green: 215/255, blue: 96/255)
+        case "telegram":  return Color(red: 42/255, green: 171/255, blue: 238/255)
+        case "monzo":     return Color(red: 255/255, green: 82/255, blue: 105/255)
+        case "homekit":   return Color(red: 255/255, green: 159/255, blue: 10/255)
+        case "maps":      return Color(red: 66/255, green: 133/255, blue: 244/255)
+        case "notion":    return Color.oxyText
+        case "betfair":   return Color(red: 255/255, green: 178/255, blue: 0/255)
+        case "uber":      return Color.oxyText
+        default:          return Color.oxyStone
         }
     }
 
     var body: some View {
         VStack(spacing: 12) {
-            AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol)
+            AppIconView(symbolName: sfSymbol, tint: tint)
                 .frame(width: 44, height: 44)
 
             VStack(spacing: 2) {
@@ -637,90 +655,25 @@ private struct ConnectorPill: View {
     }
 }
 
+/// Renders connector icons as real SF Symbols on a brand-tinted background, instead of
+/// emoji or remote logo images, so they read as native iOS icons everywhere.
 private struct AppIconView: View {
-    let candidates: [String]
-    let fallbackSystemName: String
+    let symbolName: String
+    let tint: Color
 
     var body: some View {
-        Group {
-            if let img = firstAssetImage(from: candidates) {
-                Image(uiImage: img)
-                    .resizable()
-                    .scaledToFill()
-            } else if let url = firstURL(from: candidates) {
-                AsyncImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        brandFallback
-                    }
-                }
-            } else if let emoji = firstEmoji(from: candidates) {
-                Text(emoji)
-                    .font(.system(size: 20))
-            } else {
-                brandFallback
-            }
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(tint.opacity(0.15))
+            Image(systemName: symbolName)
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(tint)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.oxyLine2, lineWidth: 1)
         )
-    }
-
-    private var brandFallback: some View {
-        let brand = brandStyle
-        return ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(brand.background)
-            if let text = brand.text {
-                Text(text)
-                    .font(.system(size: brand.fontSize, weight: .bold))
-                    .foregroundStyle(brand.foreground)
-                    .minimumScaleFactor(0.55)
-                    .lineLimit(1)
-                    .padding(.horizontal, 4)
-            } else {
-                Image(systemName: fallbackSystemName)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(brand.foreground)
-            }
-        }
-    }
-
-    private var brandStyle: (text: String?, background: Color, foreground: Color, fontSize: CGFloat) {
-        let names = candidates.map { $0.lowercased() }
-        if names.contains("uber") { return ("Uber", .black, .white, 12) }
-        if names.contains("google") { return ("G", .white, Color(red: 66/255, green: 133/255, blue: 244/255), 21) }
-        if names.contains("maps") { return (nil, Color(red: 66/255, green: 133/255, blue: 244/255), .white, 17) }
-        if names.contains("telegram") { return (nil, Color(red: 42/255, green: 171/255, blue: 238/255), .white, 17) }
-        return (nil, Color.oxySurface3, Color.oxySub, 17)
-    }
-
-    private func firstURL(from candidates: [String]) -> URL? {
-        for name in candidates {
-            if name.lowercased().hasPrefix("http"), let url = URL(string: name) {
-                return url
-            }
-        }
-        return nil
-    }
-
-    private func firstAssetImage(from candidates: [String]) -> UIImage? {
-        #if canImport(UIKit)
-        for name in candidates where !name.isEmpty {
-            if let img = UIImage(named: name) { return img }
-        }
-        #endif
-        return nil
-    }
-
-    private func firstEmoji(from candidates: [String]) -> String? {
-        candidates.first { candidate in
-            candidate.unicodeScalars.contains { $0.properties.isEmojiPresentation }
-        }
     }
 }
 

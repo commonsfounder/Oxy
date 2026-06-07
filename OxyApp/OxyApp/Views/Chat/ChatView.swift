@@ -1071,11 +1071,10 @@ private struct ChatInputBar: View {
                     .frame(width: 36, height: 36)
                     .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
                     .clipShape(Circle())
-                    .scaleEffect(isRecording && !canSend && voicePulse ? 1.05 : 1.0)
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: canAct)
+                .animation(.easeInOut(duration: 0.15), value: canAct)
                 .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
             }
             .padding(.horizontal, 12)

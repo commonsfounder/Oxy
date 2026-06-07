@@ -6,8 +6,8 @@ struct MainTabView: View {
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var selectedTab = Tab.today
 
-    enum Tab: String {
-        case today, chat, more
+    enum Tab: String, CaseIterable {
+        case chat, today, more
     }
 
     var body: some View {
@@ -35,6 +35,10 @@ struct MainTabView: View {
         }
         .tint(Color.oxyStone)
         .id(accentColor + appTheme)
+        .gesture(
+            DragGesture(minimumDistance: 32)
+                .onEnded(handleSwipe)
+        )
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
         }
@@ -46,6 +50,18 @@ struct MainTabView: View {
             withAnimation { selectedTab = .more }
         }
     }
+
+    private func handleSwipe(_ value: DragGesture.Value) {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        guard abs(horizontal) > 64, abs(horizontal) > abs(vertical) * 1.8 else { return }
+        guard let index = Tab.allCases.firstIndex(of: selectedTab) else { return }
+        let nextIndex = horizontal < 0 ? index + 1 : index - 1
+        guard Tab.allCases.indices.contains(nextIndex) else { return }
+        withAnimation(.easeOut(duration: 0.25)) {
+            selectedTab = Tab.allCases[nextIndex]
+        }
+    }
 }
 
 // MARK: - More View
@@ -55,7 +71,7 @@ struct MoreView: View {
     @State private var destination: MoreDestination?
 
     enum MoreDestination: Identifiable {
-        case connectors, settings
+        case connectors, memory, settings
         var id: String { "\(self)" }
     }
 
@@ -64,17 +80,23 @@ struct MoreView: View {
             ZStack {
                 Color.oxyBg.ignoresSafeArea()
                 ScrollView {
-                    VStack(spacing: 0) {
-                        moreRow(icon: "link", title: "Connectors", color: .oxyStone, isFirst: true, isLast: false) {
-                            destination = .connectors
+                    VStack(alignment: .leading, spacing: 22) {
+                        moreSection(title: "Workspace") {
+                            moreRow(icon: "app.connected.to.app.below.fill", title: "Connectors", subtitle: "Link your accounts and devices", color: .oxyStone) {
+                                destination = .connectors
+                            }
+                            Divider().overlay(Color.oxyLine).padding(.leading, 58)
+                            moreRow(icon: "brain.head.profile", title: "Memory", subtitle: "What Oxy remembers about you", color: .purple) {
+                                destination = .memory
+                            }
                         }
-                        Divider().overlay(Color.oxyLine).padding(.leading, 58)
-                        moreRow(icon: "gearshape.fill", title: "Settings", color: .oxySub, isFirst: false, isLast: true) {
-                            destination = .settings
+
+                        moreSection(title: "App") {
+                            moreRow(icon: "gearshape.fill", title: "Settings", subtitle: "Appearance, voice, account", color: .oxySub) {
+                                destination = .settings
+                            }
                         }
                     }
-                    .background(Color.oxySurface2)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
                     .padding(16)
                 }
             }
@@ -85,13 +107,29 @@ struct MoreView: View {
             .fullScreenCover(item: $destination) { dest in
                 switch dest {
                 case .connectors: ConnectorsView()
+                case .memory: MemoryView()
                 case .settings: SettingsView()
                 }
             }
         }
     }
 
-    private func moreRow(icon: String, title: String, color: Color, isFirst: Bool, isLast: Bool, action: @escaping () -> Void) -> some View {
+    private func moreSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.oxySub)
+                .textCase(.uppercase)
+                .tracking(0.5)
+                .padding(.leading, 4)
+
+            VStack(spacing: 0, content: content)
+                .background(Color.oxySurface2)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func moreRow(icon: String, title: String, subtitle: String, color: Color, action: @escaping () -> Void) -> some View {
         Button {
             HapticManager.shared.impact(.light)
             action()
@@ -100,19 +138,25 @@ struct MoreView: View {
                 Image(systemName: icon)
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(color)
-                    .frame(width: 28, height: 28)
+                    .frame(width: 32, height: 32)
                     .background(color.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
-                Text(title)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.oxyText)
+                    Text(subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.oxyDim)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.oxyDim)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
         }
         .buttonStyle(.plain)
     }
