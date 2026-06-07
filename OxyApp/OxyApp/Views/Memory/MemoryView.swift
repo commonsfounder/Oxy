@@ -25,65 +25,71 @@ struct MemoryView: View {
 
     private var memoryContent: some View {
         ZStack {
-            Color.oxyBg.ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    MemoryDropBox(
-                        draft: $draft,
-                        isSaving: isSaving,
-                        message: saveMessage,
-                        onSave: { Task { await saveMemory() } }
-                    )
-                    .scrollTransition(axis: .vertical) { content, phase in
-                        content
-                            .opacity(phase.isIdentity ? 1 : 0)
-                            .offset(y: phase.isIdentity ? 0 : 24)
+                VStack(alignment: .leading, spacing: 36) {
+                    // Capture
+                    VStack(alignment: .leading, spacing: 20) {
+                        NamelessSectionHeader(title: "Remember")
+                        MemoryDropBox(
+                            draft: $draft,
+                            isSaving: isSaving,
+                            message: saveMessage,
+                            onSave: { Task { await saveMemory() } }
+                        )
                     }
 
-                    if isLoading {
-                        HStack(spacing: 10) {
-                            OxySkeletonCard(height: 68, cornerRadius: 14)
-                            OxySkeletonCard(height: 68, cornerRadius: 14)
-                            OxySkeletonCard(height: 68, cornerRadius: 14)
-                        }
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    } else {
-                        HStack(spacing: 10) {
-                            MemoryStat(title: "Saved", value: "\(summary.total)")
-                            MemoryStat(title: "Learned", value: "\(summary.learned)")
-                            MemoryStat(title: "Profile", value: summary.profile ? "On" : "Off")
-                        }
-                        .scrollTransition(axis: .vertical) { content, phase in
-                            content
-                                .opacity(phase.isIdentity ? 1 : 0)
-                                .offset(y: phase.isIdentity ? 0 : 22)
-                        }
-                    }
+                    // Ledger
+                    VStack(alignment: .leading, spacing: 4) {
+                        NamelessSectionHeader(title: "Ledger")
+                            .padding(.bottom, 12)
 
-                    if let lastUpdated = summary.lastUpdated {
-                        Text("Updated \(formattedDate(lastUpdated))")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Color.oxyDim)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.top, 6)
-                            .scrollTransition(axis: .vertical) { content, phase in
-                                content
-                                    .opacity(phase.isIdentity ? 1 : 0)
-                                    .offset(y: phase.isIdentity ? 0 : 16)
+                        if isLoading {
+                            ForEach(0..<3, id: \.self) { _ in
+                                OxySkeletonCard(height: 52, cornerRadius: 0)
+                                NamelessDivider()
                             }
+                        } else {
+                            statRow(title: "Saved", value: "\(summary.total)")
+                            NamelessDivider()
+                            statRow(title: "Learned", value: "\(summary.learned)")
+                            NamelessDivider()
+                            statRow(title: "Profile", value: summary.profile ? "Enabled" : "Disabled")
+
+                            if let lastUpdated = summary.lastUpdated {
+                                NamelessDivider()
+                                statRow(title: "Updated", value: formattedDate(lastUpdated))
+                            }
+                        }
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 24)
+                .padding(.top, 12)
+                .padding(.bottom, 40)
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
             }
         }
         .navigationTitle("Memory")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+        .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task { await loadMemory() }
         .refreshable { await loadMemory() }
+    }
+
+    /// A flat row: clean white title on the left, muted right-aligned detail.
+    private func statRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(Color.nmlInk)
+            Spacer()
+            Text(value)
+                .font(.nmlMono(13))
+                .foregroundStyle(Color.nmlMuted)
+        }
+        .padding(.vertical, 16)
     }
 
     private func loadMemory() async {
@@ -151,101 +157,47 @@ private struct MemoryDropBox: View {
     let message: String?
     let onSave: () -> Void
 
+    private var canSave: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.oxyStone.opacity(0.14))
-                        .frame(width: 46, height: 46)
-                    Image(systemName: "lock.open.fill")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Color.oxyStone)
-                }
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Add it once. Nameless keeps it for later.")
+                .font(.system(size: 19, weight: .light))
+                .foregroundStyle(Color.nmlInk)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Drop a memory")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-                    Text("Add it once. Oxy keeps it for later.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.oxySub)
-                }
-                Spacer()
-            }
-
-            TextField("Remember that...", text: $draft, axis: .vertical)
-                .font(.system(size: 15))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(2...4)
-                .padding(12)
-                .background(Color.oxySurface1)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color.oxyLine2, lineWidth: 1)
-                )
+            NamelessLineField(
+                placeholder: "Remember that…",
+                text: $draft,
+                axis: .vertical,
+                lineLimit: 1...4
+            )
 
             HStack {
                 if let message {
                     Text(message)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(message == "Saved." ? Color.oxyGreen : Color.oxyRed)
+                        .font(.nmlMono(11, weight: .medium))
+                        .foregroundStyle(message == "Saved." ? Color.nmlTitanium : Color.nmlDanger)
                 }
                 Spacer()
                 Button(action: onSave) {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         if isSaving {
                             ProgressView()
-                                .scaleEffect(0.7)
-                                .tint(Color.oxyOnAccent)
-                        } else {
-                            Image(systemName: "arrow.down.to.line.compact")
-                                .font(.system(size: 12, weight: .bold))
+                                .scaleEffect(0.6)
+                                .tint(Color.nmlMuted)
                         }
-                        Text(isSaving ? "Saving" : "Drop in")
-                            .font(.system(size: 13, weight: .semibold))
+                        Text(isSaving ? "SAVING" : "SAVE")
+                            .font(.system(size: 11, weight: .semibold))
+                            .tracking(1.6)
                     }
-                    .foregroundStyle(Color.oxyOnAccent)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .background(Color.oxyStone)
-                    .clipShape(Capsule())
+                    .foregroundStyle(canSave ? Color.nmlTitanium : Color.nmlMuted)
                 }
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                .buttonStyle(.plain)
+                .disabled(!canSave)
             }
         }
-        .padding(16)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
-    }
-}
-
-private struct MemoryStat: View {
-    let title: String
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(value)
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(Color.oxyText)
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.oxySub)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
     }
 }
 

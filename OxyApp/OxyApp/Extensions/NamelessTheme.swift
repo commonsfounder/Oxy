@@ -70,3 +70,97 @@ struct NamelessStatusDot: View {
         .frame(width: diameter * 2.4, height: diameter * 2.4)
     }
 }
+
+// MARK: - Unified "Nameless" list primitives
+//
+// Stock `List`/`Form` rows, grouped insets and the green system `Toggle` are
+// banned across Settings, Connectors and Memory. These primitives replace them:
+// flat rows on pure black, separated by ultra-thin titanium dividers, with raw
+// typography instead of colourful SF-symbol tiles.
+
+extension Color {
+    /// Muted clay red for destructive actions — desaturated so it never reads neon.
+    static let nmlDanger = Color(red: 196 / 255, green: 104 / 255, blue: 92 / 255)
+}
+
+/// An ultra-thin, low-opacity horizontal divider — the only separator the
+/// language allows between rows.
+struct NamelessDivider: View {
+    var inset: CGFloat = 0
+    var body: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.08))
+            .frame(height: 0.5)
+            .padding(.leading, inset)
+    }
+}
+
+/// Small, uppercase, wide-tracked monospaced section header in muted gray.
+struct NamelessSectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .tracking(2)
+            .textCase(.uppercase)
+            .foregroundStyle(Color.gray)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Minimalist custom toggle: a 30×16 capsule that slides between muted gray
+/// (off) and soft silver (on). Replaces the stock green `Toggle`.
+struct NamelessToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
+        } label: {
+            Capsule()
+                .fill(isOn ? Color.nmlInk : Color.white.opacity(0.12))
+                .frame(width: 30, height: 16)
+                .overlay(
+                    Circle()
+                        .fill(isOn ? Color.nmlObsidian : Color.nmlMuted)
+                        .frame(width: 12, height: 12)
+                        .padding(2)
+                        .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
+/// A single-line text field with no box — just a thin bottom rule that brightens
+/// softly while editing. Used for every text input in this language.
+struct NamelessLineField: View {
+    let placeholder: String
+    @Binding var text: String
+    var axis: Axis = .horizontal
+    var lineLimit: ClosedRange<Int> = 1...1
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 9) {
+            Group {
+                if axis == .vertical {
+                    TextField(placeholder, text: $text, axis: .vertical)
+                        .lineLimit(lineLimit)
+                } else {
+                    TextField(placeholder, text: $text)
+                }
+            }
+            .font(.system(size: 15, weight: .light))
+            .foregroundStyle(Color.nmlInk)
+            .tint(Color.nmlTitanium)
+            .focused($isFocused)
+
+            Rectangle()
+                .fill(isFocused ? Color.nmlInk.opacity(0.55) : Color.white.opacity(0.08))
+                .frame(height: isFocused ? 1 : 0.5)
+                .animation(.easeInOut(duration: 0.2), value: isFocused)
+        }
+    }
+}

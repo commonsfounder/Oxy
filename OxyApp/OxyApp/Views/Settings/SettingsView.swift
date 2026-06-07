@@ -24,18 +24,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(spacing: 18) {
+                    VStack(spacing: 36) {
                         // Identity
                         settingsSection(title: "Profile") {
                             settingRow(label: "Assistant Name", description: nil) {
-                                TextField("Oxy", text: $settings.name)
-                                    .font(.system(size: 15))
-                                    .foregroundStyle(Color.oxyText)
+                                TextField("Nameless", text: $settings.name)
+                                    .font(.system(size: 15, weight: .light))
+                                    .foregroundStyle(Color.nmlInk)
+                                    .tint(Color.nmlTitanium)
                                     .multilineTextAlignment(.trailing)
-                                    .frame(width: 120)
+                                    .frame(width: 140)
                                     .onChange(of: settings.name) { _, _ in saveSettings() }
                             }
                         }
@@ -46,8 +47,7 @@ struct SettingsView: View {
                             } label: {
                                 settingsNavigationRow(
                                     label: "Memory",
-                                    description: "Saved facts and preferences",
-                                    icon: "brain.head.profile"
+                                    description: "Saved facts and preferences"
                                 )
                             }
                             .buttonStyle(.plain)
@@ -74,25 +74,22 @@ struct SettingsView: View {
                                         }
                                     }
                                 } label: {
-                                    HStack(spacing: 8) {
+                                    HStack(spacing: 9) {
                                         Circle()
                                             .fill(selectedAccentColor)
-                                            .frame(width: 14, height: 14)
-                                        Text(selectedAccentLabel)
-                                            .font(.system(size: 13, weight: .semibold))
-                                        Image(systemName: "chevron.down")
-                                            .font(.system(size: 10, weight: .bold))
+                                            .frame(width: 9, height: 9)
+                                        Text(selectedAccentLabel.uppercased())
+                                            .font(.nmlMono(12, weight: .medium))
+                                            .tracking(1.2)
+                                        Text("›")
+                                            .font(.system(size: 15, weight: .light))
                                     }
-                                    .foregroundStyle(Color.oxyText)
-                                    .padding(.horizontal, 11)
-                                    .padding(.vertical, 7)
-                                    .background(Color.oxySurface1)
-                                    .clipShape(Capsule())
+                                    .foregroundStyle(Color.nmlTitanium)
                                 }
                                 .buttonStyle(.plain)
                             }
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             settingRow(label: "Theme", description: nil) {
                                 Picker("Theme", selection: $settings.appTheme) {
@@ -102,11 +99,11 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.oxyStone)
+                                .tint(Color.nmlTitanium)
                                 .onChange(of: settings.appTheme) { _, _ in saveSettings() }
                             }
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             settingRow(label: "Bubbles", description: nil) {
                                 Picker("Bubbles", selection: $settings.bubbleStyle) {
@@ -115,7 +112,7 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.oxyStone)
+                                .tint(Color.nmlTitanium)
                                 .onChange(of: settings.bubbleStyle) { _, _ in saveSettings() }
                             }
                         }
@@ -123,13 +120,11 @@ struct SettingsView: View {
                         // Voice
                         settingsSection(title: "Voice") {
                             settingRow(label: "Voice Replies", description: nil) {
-                                Toggle("", isOn: $settings.voiceOn)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
+                                NamelessToggle(isOn: $settings.voiceOn)
                                     .onChange(of: settings.voiceOn) { _, _ in saveSettings() }
                             }
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             voicePickerRow
                         }
@@ -138,12 +133,10 @@ struct SettingsView: View {
                         settingsSection(title: "Assistant") {
                             InitiativeScroller(selection: $settings.autonomy, onChange: saveSettings)
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             settingRow(label: "Briefings", description: nil) {
-                                Toggle("", isOn: $settings.proactiveBriefings)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
+                                NamelessToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
                         }
@@ -156,11 +149,11 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.oxyStone)
+                                .tint(Color.nmlTitanium)
                                 .onChange(of: settings.preferredMapsApp) { _, _ in saveSettings() }
                             }
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             settingRow(label: "Transport", description: nil) {
                                 Picker("Transport", selection: $settings.preferredTransportMode) {
@@ -170,16 +163,14 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.oxyStone)
+                                .tint(Color.nmlTitanium)
                                 .onChange(of: settings.preferredTransportMode) { _, _ in saveSettings() }
                             }
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
                             settingRow(label: "Confirm Sensitive Apps", description: nil) {
-                                Toggle("", isOn: $settings.confirmSensitiveAppOpens)
-                                    .labelsHidden()
-                                    .tint(Color.oxyGreen)
+                                NamelessToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
                         }
@@ -188,137 +179,94 @@ struct SettingsView: View {
                         PendantSettingsSection(pendant: NativeIntegrationManager.shared.pendant)
 
                         settingsSection(title: "Account") {
-                            Button(action: exportMyData) {
-                                HStack {
-                                    Image(systemName: isExportingData ? "hourglass" : "square.and.arrow.up")
-                                        .font(.system(size: 14))
-                                    Text(isExportingData ? "Preparing Export" : "Export My Data")
-                                        .font(.system(size: 15, weight: .medium))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color.oxyDim)
-                                }
-                                .foregroundStyle(Color.oxyText)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
+                            accountRow(
+                                label: isExportingData ? "Preparing Export" : "Export My Data",
+                                action: exportMyData
+                            )
                             .disabled(isExportingData || isDeletingAccount)
                             .accessibilityLabel("Export my data")
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
-                            Button(action: { showDeleteAccountConfirm = true }) {
-                                HStack {
-                                    Image(systemName: isDeletingAccount ? "hourglass" : "trash.fill")
-                                        .font(.system(size: 14))
-                                    Text(isDeletingAccount ? "Deleting Account" : "Delete Account")
-                                        .font(.system(size: 15, weight: .medium))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color.oxyDim)
-                                }
-                                .foregroundStyle(Color.oxyRed)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
+                            accountRow(
+                                label: isDeletingAccount ? "Deleting Account" : "Delete Account",
+                                destructive: true,
+                                action: { showDeleteAccountConfirm = true }
+                            )
                             .disabled(isExportingData || isDeletingAccount)
                             .accessibilityLabel("Delete account")
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
-                            Button(action: { showSignOutConfirm = true }) {
-                                HStack {
-                                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                                        .font(.system(size: 14))
-                                    Text("Sign Out")
-                                        .font(.system(size: 15, weight: .medium))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color.oxyDim)
-                                }
-                                .foregroundStyle(Color.oxyRed)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
+                            accountRow(
+                                label: "Sign Out",
+                                destructive: true,
+                                action: { showSignOutConfirm = true }
+                            )
                             .accessibilityLabel("Sign out")
 
-                            Divider().overlay(Color.oxyLine)
+                            NamelessDivider()
 
-                            Button(action: { showSignOutAllConfirm = true }) {
-                                HStack {
-                                    Image(systemName: isSigningOutAll ? "hourglass" : "rectangle.portrait.and.arrow.right.fill")
-                                        .font(.system(size: 14))
-                                    Text(isSigningOutAll ? "Signing Out…" : "Sign Out All Devices")
-                                        .font(.system(size: 15, weight: .medium))
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(Color.oxyDim)
-                                }
-                                .foregroundStyle(Color.oxyRed)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
+                            accountRow(
+                                label: isSigningOutAll ? "Signing Out…" : "Sign Out All Devices",
+                                destructive: true,
+                                action: { showSignOutAllConfirm = true }
+                            )
                             .disabled(isSigningOutAll)
                             .accessibilityLabel("Sign out all devices")
 
                             if let accountStatusText {
-                                Divider().overlay(Color.oxyLine)
+                                NamelessDivider()
                                 Text(accountStatusText)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.oxySub)
+                                    .font(.system(size: 12, weight: .light))
+                                    .foregroundStyle(Color.nmlMuted)
                                     .lineSpacing(3)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.top, 4)
+                                    .padding(.vertical, 14)
                             }
                         }
 
                         settingsSection(title: "Support & Legal") {
-                            legalLink(label: "Support", path: "/support", icon: "questionmark.circle.fill")
-                            Divider().overlay(Color.oxyLine)
-                            legalLink(label: "Privacy Policy", path: "/privacy", icon: "hand.raised.fill")
-                            Divider().overlay(Color.oxyLine)
-                            legalLink(label: "Terms of Use", path: "/terms", icon: "doc.text.fill")
-                            Divider().overlay(Color.oxyLine)
+                            legalLink(label: "Support", path: "/support")
+                            NamelessDivider()
+                            legalLink(label: "Privacy Policy", path: "/privacy")
+                            NamelessDivider()
+                            legalLink(label: "Terms of Use", path: "/terms")
+                            NamelessDivider()
                             Button(action: handleVersionTap) {
                                 HStack {
                                     Text("Version")
-                                        .font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(Color.oxyText)
+                                        .font(.system(size: 15, weight: .regular))
+                                        .foregroundStyle(Color.nmlInk)
                                     Spacer()
                                     Text(backendVersionText)
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(Color.oxyDim)
+                                        .font(.nmlMono(11))
+                                        .foregroundStyle(Color.nmlMuted)
                                         .lineLimit(1)
                                 }
-                                .padding(.vertical, 4)
+                                .padding(.vertical, 16)
                             }
                             .buttonStyle(.plain)
                         }
 
                         Spacer().frame(height: 32)
                     }
-                    .padding(16)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
                 }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.oxySub)
-                            .frame(width: 30, height: 30)
-                            .background(Color.oxySurface2)
-                            .clipShape(Circle())
+                        Text("Back")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
             }
@@ -471,31 +419,13 @@ struct SettingsView: View {
     }
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-                .scrollTransition(axis: .vertical) { content, phase in
-                    content
-                        .opacity(phase.isIdentity ? 1 : 0)
-                        .offset(y: phase.isIdentity ? 0 : 12)
-                }
-
+        VStack(alignment: .leading, spacing: 4) {
+            NamelessSectionHeader(title: title)
+                .padding(.bottom, 10)
             VStack(spacing: 0) {
                 content()
             }
-            .padding(16)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
-            .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: title)
     }
 
     private func settingRow<Accessory: View>(
@@ -504,74 +434,67 @@ struct SettingsView: View {
         @ViewBuilder accessory: () -> Accessory
     ) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
                 }
             }
             Spacer()
             accessory()
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 16)
     }
 
-    private func settingsNavigationRow(label: String, description: String?, icon: String) -> some View {
+    private func settingsNavigationRow(label: String, description: String?) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.oxyStone)
-                .frame(width: 24)
-
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
                 }
             }
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.oxyDim)
+            Text("›")
+                .font(.system(size: 18, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 16)
     }
 
     private var voicePickerRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Voice")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.oxyText)
-                    Text(selectedVoiceLabel)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
-                }
-                Spacer()
-                Button {
-                    previewVoice(settings.voice)
-                } label: {
-                    Image(systemName: voicePreview.isLoading ? "hourglass" : (voicePreview.isPlaying ? "speaker.wave.2.fill" : "play.fill"))
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.oxyOnAccent)
-                        .frame(width: 32, height: 32)
-                        .background(Color.oxyStone)
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(voicePreview.isLoading)
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Voice")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
+                Text(voicePreview.isPlaying ? "Playing preview" : "Tap preview to hear")
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
             }
+
+            Spacer(minLength: 12)
+
+            Button {
+                previewVoice(settings.voice)
+            } label: {
+                Text(voicePreview.isLoading ? "…" : (voicePreview.isPlaying ? "PLAYING" : "PREVIEW"))
+                    .font(.nmlMono(11, weight: .medium))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.nmlMuted)
+            }
+            .buttonStyle(.plain)
+            .disabled(voicePreview.isLoading)
 
             Menu {
                 ForEach(OxySettings.voiceOptions, id: \.value) { voice in
@@ -587,47 +510,32 @@ struct SettingsView: View {
                     }
                 }
             } label: {
-                HStack {
-                    Text(selectedVoiceLabel)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color.oxySub)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 11)
-                .background(Color.oxySurface1)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.oxyLine2, lineWidth: 1)
-                )
+                Text(selectedVoiceLabel.uppercased())
+                    .font(.nmlMono(12, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.nmlTitanium)
             }
             .buttonStyle(.plain)
+            .padding(.leading, 18)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 16)
     }
 
-    private func legalLink(label: String, path: String, icon: String) -> some View {
+    private func legalLink(label: String, path: String) -> some View {
         Button {
             guard let url = URL(string: "\(APIClient.shared.baseURL)\(path)") else { return }
             UIApplication.shared.open(url)
         } label: {
             HStack {
-                Image(systemName: icon)
-                    .font(.system(size: 14, weight: .semibold))
                 Text(label)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: 15, weight: .regular))
                 Spacer()
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.oxyDim)
+                Text("↗")
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
             }
-            .foregroundStyle(Color.oxyText)
-            .padding(.vertical, 4)
+            .foregroundStyle(Color.nmlInk)
+            .padding(.vertical, 16)
         }
         .buttonStyle(.plain)
     }
@@ -652,6 +560,28 @@ struct SettingsView: View {
         Task {
             await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
         }
+    }
+
+    /// A flat, icon-free account action row — raw text, optional muted-red
+    /// destructive tint, and a quiet "›" affordance instead of an SF chevron.
+    private func accountRow(
+        label: String,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 15, weight: .regular))
+                Spacer()
+                Text("›")
+                    .font(.system(size: 18, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
+            }
+            .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.plain)
     }
 
     private func handleVersionTap() {
@@ -688,31 +618,21 @@ private struct BackendURLEditorSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Custom backend URL")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.oxySub)
-                        .textCase(.uppercase)
-                        .tracking(0.4)
+                    NamelessSectionHeader(title: "Custom backend URL")
 
-                    TextField("https://your-backend.run.app", text: $draft)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.oxyText)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-                        .padding(14)
-                        .background(Color.oxySurface2)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.oxyLine2, lineWidth: 1)
-                        )
+                    NamelessLineField(
+                        placeholder: "https://your-backend.run.app",
+                        text: $draft
+                    )
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
 
                     Text("Leave blank to use the default Cloud Run backend.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
 
                     if !currentURL.isEmpty {
                         Button(role: .destructive) {
@@ -734,7 +654,7 @@ private struct BackendURLEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onDone() }
-                        .foregroundStyle(Color.oxyStone)
+                        .foregroundStyle(Color.nmlTitanium)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -742,7 +662,7 @@ private struct BackendURLEditorSheet: View {
                         onDone()
                     }
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                    .foregroundStyle(Color.nmlTitanium)
                 }
             }
         }
@@ -846,35 +766,38 @@ private struct InitiativeScroller: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text("Initiative")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.oxyText)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Color.nmlInk)
                     Text(description)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
                 }
                 Spacer()
-                Text(selection)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                Text(selection.uppercased())
+                    .font(.nmlMono(12, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.nmlTitanium)
             }
 
             Slider(value: value, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
-                .tint(Color.oxyStone)
+                .tint(Color.nmlTitanium)
 
             HStack {
-                Text("Quiet")
+                Text("QUIET")
                 Spacer()
-                Text("Steady")
+                Text("STEADY")
                 Spacer()
-                Text("Active")
+                Text("ACTIVE")
             }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Color.oxySub)
+            .font(.nmlMono(9, weight: .medium))
+            .tracking(1.0)
+            .foregroundStyle(Color.nmlMuted)
         }
+        .padding(.vertical, 16)
     }
 
     private var description: String {
@@ -1010,146 +933,6 @@ struct OxySettings: Codable {
     ]
 }
 
-// MARK: - Appearance Lab
-
-private struct DesignChoiceGroup: View {
-    let title: String
-    @Binding var selection: String
-    let options: [String]
-    let onChange: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxyText)
-
-            HStack(spacing: 8) {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        withAnimation(animation) {
-                            selection = option
-                            onChange()
-                        }
-                    } label: {
-                        Text(option.capitalized)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(selection == option ? Color.oxyOnAccent : Color.oxySub)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .background(selection == option ? Color.oxyStone : Color.oxySurface3)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(selection == option ? Color.clear : Color.oxyLine2, lineWidth: 1)
-                            )
-                    }
-                }
-            }
-        }
-    }
-
-    private var animation: Animation? {
-        selection == "none" ? nil : .easeInOut(duration: 0.18)
-    }
-}
-
-private struct DesignPreview: View {
-    let template: String
-    let palette: String
-    let motion: String
-
-    private var accent: Color {
-        switch palette {
-        case "mint": return Color.oxyGreen
-        case "blue": return Color(red: 92/255, green: 154/255, blue: 245/255)
-        case "violet": return Color(red: 162/255, green: 132/255, blue: 245/255)
-        default: return Color.oxyStone
-        }
-    }
-
-    private var cornerRadius: CGFloat {
-        switch template {
-        case "dense": return 8
-        case "glass": return 18
-        default: return 12
-        }
-    }
-
-    private var rowSpacing: CGFloat {
-        template == "dense" ? 8 : 12
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: rowSpacing) {
-            HStack {
-                Circle()
-                    .fill(accent.opacity(0.18))
-                    .frame(width: 34, height: 34)
-                    .overlay(
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(accent)
-                    )
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Oxy")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-                    Text("Online")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.oxySub)
-                }
-
-                Spacer()
-
-                Text(motion.capitalized)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(accent.opacity(0.12))
-                    .clipShape(Capsule())
-            }
-
-            Text("I found the nearest McDonald's and opened Uber. Confirm in Uber.")
-                .font(.system(size: template == "dense" ? 13 : 14, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-                .padding(template == "dense" ? 10 : 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(template == "glass" ? Color.oxySurface3.opacity(0.72) : Color.oxySurface3)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-
-            HStack(spacing: 8) {
-                previewChip("Connectors", selected: true)
-                previewChip("Memory", selected: false)
-                previewChip("Settings", selected: false)
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: cornerRadius + 4)
-                .fill(template == "glass" ? Color.oxySurface2.opacity(0.72) : Color.oxySurface2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius + 4)
-                .stroke(accent.opacity(template == "mono" ? 0.18 : 0.32), lineWidth: 1)
-        )
-        .animation(motion == "none" ? nil : .easeInOut(duration: motion == "snappy" ? 0.12 : 0.28), value: template)
-        .animation(motion == "none" ? nil : .easeInOut(duration: motion == "snappy" ? 0.12 : 0.28), value: palette)
-    }
-
-    private func previewChip(_ label: String, selected: Bool) -> some View {
-        Text(label)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(selected ? Color.oxyOnAccent : Color.oxySub)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(selected ? accent : Color.oxySurface3)
-            .clipShape(Capsule())
-    }
-}
-
 // MARK: - PendantSettingsSection
 
 private struct PendantSettingsSection: View {
@@ -1158,97 +941,86 @@ private struct PendantSettingsSection: View {
     @State private var scanPulse = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("PENDANT")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
+        VStack(alignment: .leading, spacing: 4) {
+            NamelessSectionHeader(title: "Pendant")
+                .padding(.bottom, 10)
 
             VStack(spacing: 0) {
                 HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Status")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                    Text("Status")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Color.nmlInk)
+                    Spacer()
+                    HStack(spacing: 10) {
                         Text(statusDescription)
-                            .font(.system(size: 12))
+                            .font(.nmlMono(12))
                             .foregroundStyle(statusColor)
                             .contentTransition(.numericText())
                             .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
+                        statusIndicator
+                            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pendant.connectionState)
                     }
-                    Spacer()
-                    statusIndicator
-                        .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pendant.connectionState)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 16)
 
                 if let name = pendant.peripheralName, pendant.isConnected {
-                    Divider().overlay(Color.oxyLine)
+                    NamelessDivider()
                     HStack {
                         Text("Device")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(Color.nmlInk)
                         Spacer()
                         Text(name)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.oxySub)
+                            .font(.nmlMono(12))
+                            .foregroundStyle(Color.nmlMuted)
                     }
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if let error = pendant.lastError {
-                    Divider().overlay(Color.oxyLine)
+                    NamelessDivider()
                     Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red.opacity(0.8))
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                Divider().overlay(Color.oxyLine)
+                NamelessDivider()
 
                 HStack(spacing: 12) {
                     if pendant.isConnected {
-                        Button("Unpair") {
+                        Button("UNPAIR") {
                             showUnpairConfirm = true
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.red.opacity(0.85))
+                        .font(.nmlMono(11, weight: .medium))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.nmlDanger)
                         .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
-                        Button("Cancel") {
+                        Button("CANCEL") {
                             pendant.stopScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.nmlMono(11, weight: .medium))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.nmlMuted)
                         .transition(.opacity)
                     } else {
-                        Button("Scan for Pendant") {
+                        Button("SCAN FOR PENDANT") {
                             pendant.startScan()
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.oxyStone)
+                        .font(.nmlMono(11, weight: .medium))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.nmlTitanium)
                         .transition(.opacity)
                     }
                     Spacer()
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 16)
                 .animation(.easeInOut(duration: 0.25), value: pendant.connectionState)
             }
-            .padding(16)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(
-                        pendant.isConnected ? Color.oxyGreen.opacity(0.3) : Color.oxyLine2,
-                        lineWidth: 1
-                    )
-                    .animation(.easeInOut(duration: 0.4), value: pendant.isConnected)
-            )
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: pendant.connectionState)
         .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
@@ -1271,10 +1043,10 @@ private struct PendantSettingsSection: View {
 
     private var statusColor: Color {
         switch pendant.connectionState {
-        case .connected: return Color.oxyGreen
-        case .error: return .red.opacity(0.8)
-        case .scanning, .connecting: return Color.oxyStone
-        default: return Color.oxySub
+        case .connected: return Color.nmlTitanium
+        case .error: return Color.nmlDanger
+        case .scanning, .connecting: return Color.nmlMuted
+        default: return Color.nmlMuted
         }
     }
 
@@ -1282,24 +1054,13 @@ private struct PendantSettingsSection: View {
     private var statusIndicator: some View {
         switch pendant.connectionState {
         case .connected:
-            ZStack {
-                Circle()
-                    .fill(Color.oxyGreen.opacity(0.2))
-                    .frame(width: 18, height: 18)
-                Circle()
-                    .fill(Color.oxyGreen)
-                    .frame(width: 10, height: 10)
-            }
+            NamelessStatusDot(isLive: true, diameter: 6)
         case .scanning, .connecting:
             ScanPulseView()
         case .error:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(.red.opacity(0.8))
+            NamelessStatusDot(isLive: false, diameter: 6)
         case .disconnected:
-            Circle()
-                .fill(Color.oxySub.opacity(0.4))
-                .frame(width: 10, height: 10)
+            NamelessStatusDot(isLive: false, diameter: 6)
         }
     }
 }
@@ -1310,12 +1071,12 @@ private struct ScanPulseView: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.oxyStone.opacity(pulse ? 0 : 0.4), lineWidth: 2)
+                .stroke(Color.nmlTitanium.opacity(pulse ? 0 : 0.4), lineWidth: 2)
                 .frame(width: pulse ? 24 : 12, height: pulse ? 24 : 12)
                 .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: pulse)
 
             Circle()
-                .fill(Color.oxyStone)
+                .fill(Color.nmlTitanium)
                 .frame(width: 8, height: 8)
         }
         .onAppear { pulse = true }

@@ -24,18 +24,20 @@ struct ConnectorsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
                 if isLoading {
-                    VStack(spacing: 14) {
-                        OxySkeletonCard(height: 120)
-                        OxySkeletonCard(height: 180)
-                        OxySkeletonCard(height: 180)
+                    VStack(spacing: 0) {
+                        ForEach(0..<6, id: \.self) { _ in
+                            OxySkeletonCard(height: 56, cornerRadius: 0)
+                            NamelessDivider()
+                        }
                     }
-                    .padding(20)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 40) {
+                        VStack(alignment: .leading, spacing: 44) {
                             if let errorMessage {
                                 ErrorBanner(message: errorMessage)
                             }
@@ -44,53 +46,54 @@ struct ConnectorsView: View {
                             // third-party services since they govern what the
                             // pendant itself is allowed to sense and use.
                             if let caps = capabilities {
-                                sectionHeader("On This Device", caption: "Permissions the device itself relies on")
-                                deviceSection(caps)
-                                    .opacity(cardsVisible ? 1 : 0)
-                                    .offset(y: cardsVisible ? 0 : 18)
-                                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.0), value: cardsVisible)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    NamelessSectionHeader(title: "On This Device")
+                                        .padding(.bottom, 12)
+                                    deviceSection(caps)
+                                }
+                                .opacity(cardsVisible ? 1 : 0)
+                                .offset(y: cardsVisible ? 0 : 18)
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.0), value: cardsVisible)
                             }
 
                             // Third-party integrations
-                            VStack(alignment: .leading, spacing: 28) {
-                                sectionHeader("Integrations", caption: "Services connected to your account")
-
-                                googleSection
-                                    .opacity(cardsVisible ? 1 : 0)
-                                    .offset(y: cardsVisible ? 0 : 18)
-                                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.06), value: cardsVisible)
+                            VStack(alignment: .leading, spacing: 4) {
+                                NamelessSectionHeader(title: "Integrations")
+                                    .padding(.bottom, 12)
 
                                 let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
                                 let others = visible.filter { $0.id != "google" }
 
+                                googleSection
                                 if !others.isEmpty {
-                                    integrationList(others)
-                                        .opacity(cardsVisible ? 1 : 0)
-                                        .offset(y: cardsVisible ? 0 : 18)
-                                        .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.12), value: cardsVisible)
+                                    ForEach(others) { connector in
+                                        NamelessDivider()
+                                        integrationRow(connector)
+                                    }
                                 }
                             }
+                            .opacity(cardsVisible ? 1 : 0)
+                            .offset(y: cardsVisible ? 0 : 18)
+                            .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.08), value: cardsVisible)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
-                        .padding(.bottom, 40)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .padding(.bottom, 44)
                     }
                 }
             }
             .navigationTitle("Connectors")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 13, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(Color.nmlMuted)
-                            .frame(width: 30, height: 30)
-                            .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
                     }
                 }
             }
@@ -119,42 +122,18 @@ struct ConnectorsView: View {
         }
     }
 
-    // MARK: - Section header
-
-    /// An eyebrow + quiet caption pairing — replaces the old all-caps section
-    /// label with something that reads like a masthead, not a settings group.
-    private func sectionHeader(_ title: String, caption: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .nmlEyebrow()
-            Text(caption)
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
-        }
-    }
-
     // MARK: - Device Section
 
     private func deviceSection(_ caps: NativeCapabilities) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(NativeCapabilityItem.all(from: caps).enumerated()), id: \.element.id) { index, item in
+        let items = NativeCapabilityItem.all(from: caps)
+        return VStack(spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                if index != 0 { NamelessDivider() }
                 NativeCapabilityRow(item: item) {
                     await handleNativeAction(item)
                 }
-                if index != NativeCapabilityItem.all(from: caps).count - 1 {
-                    Rectangle()
-                        .fill(Color.nmlHairline)
-                        .frame(height: 0.5)
-                        .padding(.leading, 64)
-                }
             }
         }
-        .background(Color.nmlSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
-        )
     }
 
     private func handleNativeAction(_ item: NativeCapabilityItem) async {
@@ -190,8 +169,6 @@ struct ConnectorsView: View {
 
     private var googleSection: some View {
         IntegrationRow(
-            symbolName: "envelope.fill",
-            tint: Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255),
             name: "Google",
             detail: googleDetail,
             isConnected: googleStatus == .connected,
@@ -224,25 +201,17 @@ struct ConnectorsView: View {
         }
     }
 
-    // MARK: - Integrations List
+    // MARK: - Integration Row
 
-    /// A single spacious, hairline-bordered list — replaces the old card grid.
-    /// Each row carries its own quiet glowing-dot indicator and monospace detail.
-    private func integrationList(_ items: [Connector]) -> some View {
-        VStack(spacing: 12) {
-            ForEach(items) { connector in
-                IntegrationRow(
-                    symbolName: IntegrationRow.symbol(for: connector.id),
-                    tint: IntegrationRow.tint(for: connector.id),
-                    name: connector.name,
-                    detail: connector.statusText.uppercased(),
-                    isConnected: connector.connectionState == "connected",
-                    actionLabel: connector.actionLabel,
-                    isBusy: false,
-                    action: { handleConnectorAction(connector) }
-                )
-            }
-        }
+    private func integrationRow(_ connector: Connector) -> some View {
+        IntegrationRow(
+            name: connector.name,
+            detail: connector.statusText.uppercased(),
+            isConnected: connector.connectionState == "connected",
+            actionLabel: connector.actionLabel,
+            isBusy: false,
+            action: { handleConnectorAction(connector) }
+        )
     }
 
     // MARK: - Actions
@@ -456,7 +425,6 @@ private struct NativeCapabilityRow: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 20)
         .padding(.vertical, 18)
     }
 
@@ -471,13 +439,10 @@ private struct NativeCapabilityRow: View {
 
 // MARK: - Integration Row
 
-/// A single spacious, hairline-bordered row for a connected service: real SF
-/// Symbol on a brand-tinted ground, name, monospace status detail, a quiet
-/// glowing dot in place of a loud "Active" badge, and a plain-text action —
-/// no filled pill buttons, nothing that shouts.
+/// A flat row for a connected service — no icon tile, no card. Just raw
+/// typography: the name in clean white, monospace status detail beneath, a
+/// quiet glowing dot for connection, and a plain tracked-out text action.
 private struct IntegrationRow: View {
-    let symbolName: String
-    let tint: Color
     let name: String
     let detail: String
     let isConnected: Bool
@@ -486,20 +451,10 @@ private struct IntegrationRow: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(tint.opacity(0.14))
-                Image(systemName: symbolName)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(tint)
-            }
-            .frame(width: 46, height: 46)
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
-
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(name)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                 Text(detail)
                     .font(.nmlMono(10, weight: .medium))
@@ -526,43 +481,7 @@ private struct IntegrationRow: View {
             .buttonStyle(.plain)
             .disabled(isBusy)
         }
-        .padding(20)
-        .background(Color.nmlSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
-    }
-
-    static func symbol(for connectorID: String) -> String {
-        switch connectorID {
-        case "google":    return "envelope.fill"
-        case "imessage":  return "message.fill"
-        case "whatsapp":  return "phone.fill"
-        case "spotify":   return "music.note"
-        case "reminders": return "checklist"
-        case "telegram":  return "paperplane.fill"
-        case "monzo":     return "banknote.fill"
-        case "homekit":   return "house.fill"
-        case "maps":      return "map.fill"
-        case "notion":    return "doc.text.fill"
-        case "betfair":   return "chart.line.uptrend.xyaxis"
-        case "uber":      return "car.fill"
-        default:          return "puzzlepiece.fill"
-        }
-    }
-
-    static func tint(for connectorID: String) -> Color {
-        switch connectorID {
-        case "google":    return Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)
-        case "imessage":  return Color(red: 76 / 255, green: 175 / 255, blue: 130 / 255)
-        case "whatsapp":  return Color(red: 76 / 255, green: 217 / 255, blue: 100 / 255)
-        case "spotify":   return Color(red: 30 / 255, green: 215 / 255, blue: 96 / 255)
-        case "telegram":  return Color(red: 42 / 255, green: 171 / 255, blue: 238 / 255)
-        case "monzo":     return Color(red: 255 / 255, green: 82 / 255, blue: 105 / 255)
-        case "homekit":   return Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255)
-        case "maps":      return Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)
-        case "betfair":   return Color(red: 255 / 255, green: 178 / 255, blue: 0 / 255)
-        default:          return Color.nmlTitanium
-        }
+        .padding(.vertical, 18)
     }
 }
 
