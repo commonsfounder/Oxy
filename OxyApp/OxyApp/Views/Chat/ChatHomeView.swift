@@ -13,7 +13,6 @@ struct ChatHomeView: View {
     // Which conversation the embedded ChatView is showing
     @State private var selectedSession: ChatSessionSummary?
     @State private var startFresh = false
-    @State private var startIncognito = false
     @State private var chatReloadToken = UUID()
 
     // Sidebar data
@@ -27,6 +26,7 @@ struct ChatHomeView: View {
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
     @State private var pendantItem: PendantTranscriptItem?
+    @State private var telemetry = PendantTelemetryMonitor()
 
     private struct PendantTranscriptItem: Identifiable {
         let id = UUID().uuidString
@@ -41,7 +41,6 @@ struct ChatHomeView: View {
             // Live chat
             ChatView(
                 initialSession: selectedSession,
-                startIncognito: startIncognito,
                 startFresh: startFresh,
                 onMenu: { openSidebar() }
             )
@@ -84,14 +83,18 @@ struct ChatHomeView: View {
             sidebar
                 .frame(width: sidebarWidth)
                 .frame(maxHeight: .infinity)
-                .background(Color.oxySurface1.ignoresSafeArea())
+                .background(Color.nmlObsidian.ignoresSafeArea())
                 .offset(x: sidebarOpen ? dragOffset : -sidebarWidth)
                 .gesture(drawerCloseGesture)
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: sidebarOpen)
         .task { await loadSessions() }
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
-        .onAppear { setupPendantBridge() }
+        .onAppear {
+            setupPendantBridge()
+            telemetry.start()
+        }
+        .onDisappear { telemetry.stop() }
         .fullScreenCover(item: $pendantItem) { item in
             ChatView(autoSendTranscript: item.transcript)
         }
@@ -103,22 +106,20 @@ struct ChatHomeView: View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("Chats")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color.oxyText)
+                Text("CONVERSATIONS")
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(3)
+                    .foregroundStyle(Color.nmlMuted)
                 Spacer()
-                Button {
-                    HapticManager.shared.impact(.light)
-                    startIncognitoChat()
-                } label: {
-                    Image(systemName: "eye.slash")
-                        .font(.system(size: 17))
-                        .foregroundStyle(Color.oxySub)
-                }
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
+
+            // Device status
+            DeviceStatusCard(telemetry: telemetry)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 18)
 
             // New Chat
             Button {
@@ -127,28 +128,27 @@ struct ChatHomeView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.pencil")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("New Chat")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14, weight: .medium))
+                    Text("New conversation")
+                        .font(.system(size: 14, weight: .medium))
                     Spacer()
                 }
-                .foregroundStyle(Color.oxyStone)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
-                .background(Color.oxyStone.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .foregroundStyle(Color.nmlInk)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
 
             // Search
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.nmlMuted)
+                TextField("Search", text: $searchQuery)
                     .font(.system(size: 14))
-                    .foregroundStyle(Color.oxyDim)
-                TextField("Search messages", text: $searchQuery)
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.oxyText)
+                    .foregroundStyle(Color.nmlInk)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 if !searchQuery.isEmpty {
@@ -156,21 +156,22 @@ struct ChatHomeView: View {
                         searchQuery = ""
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Color.oxyDim)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color.nmlMuted)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.vertical, 11)
+            .background(Color.nmlSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
 
-            Divider().overlay(Color.oxyLine)
+            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
 
             // List
             sidebarList
@@ -181,7 +182,7 @@ struct ChatHomeView: View {
     private var sidebarList: some View {
         if isLoadingSessions {
             Spacer()
-            ProgressView().tint(Color.oxyStone)
+            ProgressView().tint(Color.nmlTitanium)
             Spacer()
         } else if !searchQuery.isEmpty {
             searchList
@@ -215,7 +216,7 @@ struct ChatHomeView: View {
     private var searchList: some View {
         if isSearching {
             Spacer()
-            ProgressView().tint(Color.oxyStone)
+            ProgressView().tint(Color.nmlTitanium)
             Spacer()
         } else if searchResults.isEmpty {
             emptyState(icon: "doc.text.magnifyingglass", text: "No results")
@@ -229,7 +230,7 @@ struct ChatHomeView: View {
                             SidebarSearchResultRow(result: result)
                         }
                         .buttonStyle(.plain)
-                        Divider().overlay(Color.oxyLine).padding(.leading, 16)
+                        Divider().overlay(Color.nmlHairline).padding(.leading, 16)
                     }
                 }
                 .padding(.bottom, 24)
@@ -246,10 +247,10 @@ struct ChatHomeView: View {
             Spacer()
             Image(systemName: icon)
                 .font(.system(size: 34))
-                .foregroundStyle(Color.oxyDim)
+                .foregroundStyle(Color.nmlMuted)
             Text(text)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.oxySub)
+                .foregroundStyle(Color.nmlMuted)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -295,16 +296,7 @@ struct ChatHomeView: View {
 
     private func startNewChat() {
         selectedSession = nil
-        startIncognito = false
         startFresh = true
-        chatReloadToken = UUID()
-        closeSidebar()
-    }
-
-    private func startIncognitoChat() {
-        selectedSession = nil
-        startFresh = false
-        startIncognito = true
         chatReloadToken = UUID()
         closeSidebar()
     }
@@ -312,7 +304,6 @@ struct ChatHomeView: View {
     private func open(_ session: ChatSessionSummary) {
         selectedSession = session
         startFresh = false
-        startIncognito = false
         chatReloadToken = UUID()
         closeSidebar()
     }
@@ -324,13 +315,12 @@ struct ChatHomeView: View {
         let sessions: [ChatSessionSummary]
     }
 
+    /// Every conversation, always — grouped only by the natural Today / Yesterday /
+    /// Earlier rhythm. No rolling 7- or 30-day cutoff: nothing is ever hidden by age.
     private var groupedSessions: [SessionGroup] {
         let calendar = Calendar.current
-        let now = Date()
         var today: [ChatSessionSummary] = []
         var yesterday: [ChatSessionSummary] = []
-        var prev7Days: [ChatSessionSummary] = []
-        var prev30Days: [ChatSessionSummary] = []
         var earlier: [ChatSessionSummary] = []
 
         for session in sessions {
@@ -341,21 +331,15 @@ struct ChatHomeView: View {
                 today.append(session)
             } else if calendar.isDateInYesterday(date) {
                 yesterday.append(session)
-            } else if let ago7 = calendar.date(byAdding: .day, value: -7, to: now), date >= ago7 {
-                prev7Days.append(session)
-            } else if let ago30 = calendar.date(byAdding: .day, value: -30, to: now), date >= ago30 {
-                prev30Days.append(session)
             } else {
                 earlier.append(session)
             }
         }
 
         var groups: [SessionGroup] = []
-        if !today.isEmpty     { groups.append(.init(label: "Today",            sessions: today)) }
-        if !yesterday.isEmpty { groups.append(.init(label: "Yesterday",        sessions: yesterday)) }
-        if !prev7Days.isEmpty { groups.append(.init(label: "Previous 7 Days",  sessions: prev7Days)) }
-        if !prev30Days.isEmpty{ groups.append(.init(label: "Previous 30 Days", sessions: prev30Days)) }
-        if !earlier.isEmpty   { groups.append(.init(label: "Earlier",          sessions: earlier)) }
+        if !today.isEmpty     { groups.append(.init(label: "Today",     sessions: today)) }
+        if !yesterday.isEmpty { groups.append(.init(label: "Yesterday", sessions: yesterday)) }
+        if !earlier.isEmpty   { groups.append(.init(label: "Earlier",   sessions: earlier)) }
         return groups
     }
 
@@ -446,12 +430,12 @@ private struct SidebarRow: View {
         HStack(spacing: 0) {
             Text(title)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.oxyText)
+                .foregroundStyle(Color.nmlInk)
                 .lineLimit(1)
             Spacer(minLength: 12)
             Text(trailing)
                 .font(.system(size: 12))
-                .foregroundStyle(Color.oxyDim)
+                .foregroundStyle(Color.nmlMuted)
                 .fixedSize()
         }
         .padding(.horizontal, 16)
@@ -468,14 +452,14 @@ private struct SidebarSectionHeader: View {
         HStack {
             Text(label)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
+                .foregroundStyle(Color.nmlMuted)
                 .textCase(.uppercase)
                 .tracking(0.5)
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.oxySurface1)
+        .background(Color.nmlObsidian)
     }
 }
 
@@ -485,19 +469,19 @@ private struct SidebarSearchResultRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(result.role == "user" ? "You" : "Oxy")
+                Text(result.role == "user" ? "You" : "Nameless")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.oxySub)
+                    .foregroundStyle(Color.nmlMuted)
                 Spacer()
                 if let date = result.formattedDate {
                     Text(date)
                         .font(.system(size: 11))
-                        .foregroundStyle(Color.oxyDim)
+                        .foregroundStyle(Color.nmlMuted)
                 }
             }
             Text(result.content)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.oxyText)
+                .foregroundStyle(Color.nmlInk)
                 .lineLimit(2)
         }
         .padding(.horizontal, 16)

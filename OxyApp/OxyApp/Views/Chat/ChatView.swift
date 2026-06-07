@@ -8,7 +8,6 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     var initialSession: ChatSessionSummary? = nil
     var autoSendTranscript: String? = nil
-    var startIncognito: Bool = false
     /// Start a brand-new empty chat instead of resuming the current one.
     var startFresh: Bool = false
     /// When set, the top-left toolbar shows a sidebar/menu button instead of a back chevron.
@@ -19,7 +18,6 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
-    @State private var isIncognito = false
     @State private var pendingReviewAction: ActionResult?
     @State private var messageDraft: MessageDraft?
     @State private var messageComposerAlert: String?
@@ -39,7 +37,7 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            Color.oxyBg.ignoresSafeArea()
+            Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Offline banner
@@ -55,20 +53,6 @@ struct ChatView: View {
                         .padding(.vertical, 7)
                         .background(Color(red: 0.85, green: 0.62, blue: 0.22))
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    // Incognito banner
-                    if isIncognito {
-                        HStack(spacing: 8) {
-                            Image(systemName: "eye.slash.fill")
-                                .font(.system(size: 12))
-                            Text("Vanish mode — messages won't be saved")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(Color.oxyStone)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(Color.oxyStone.opacity(0.1))
                     }
 
                     if viewModel.isViewingHistorySnapshot {
@@ -91,10 +75,10 @@ struct ChatView: View {
                             }
                             .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(Color.oxyStone)
+                        .foregroundStyle(Color.nmlTitanium)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.oxyStone.opacity(0.1))
+                        .background(Color.nmlTitanium.opacity(0.1))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -117,12 +101,9 @@ struct ChatView: View {
                         ScrollView {
                             LazyVStack(spacing: 0) {
                                 if viewModel.messages.isEmpty && !viewModel.isSending {
-                                    WelcomeCard(onQuickAction: { action in
-                                        viewModel.inputText = action
-                                        viewModel.sendMessage(userId: appState.userId)
-                                    })
-                                    .padding(.top, 40)
-                                    .padding(.bottom, 20)
+                                    WelcomeCard()
+                                        .padding(.top, 88)
+                                        .padding(.bottom, 20)
                                 }
 
                                 ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
@@ -253,13 +234,13 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "line.3.horizontal")
                                 .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(Color.oxySub)
+                                .foregroundStyle(Color.nmlMuted)
                         }
                     } else {
                         Button(action: { dismiss() }) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.oxySub)
+                                .foregroundStyle(Color.nmlMuted)
                         }
                     }
                 }
@@ -268,7 +249,7 @@ struct ChatView: View {
                     ToolbarItem(placement: .principal) {
                         Text(session.title)
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.oxyText)
+                            .foregroundStyle(Color.nmlInk)
                             .lineLimit(1)
                     }
                 }
@@ -284,16 +265,6 @@ struct ChatView: View {
                         }
                         Divider()
                         Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isIncognito.toggle()
-                            }
-                        }) {
-                            Label(
-                                isIncognito ? "Turn Off Vanish Mode" : "Vanish Mode",
-                                systemImage: isIncognito ? "eye.fill" : "eye.slash.fill"
-                            )
-                        }
-                        Button(action: {
                             viewModel.requestLocationAccess()
                         }) {
                             Label("Share Location", systemImage: "location.fill")
@@ -305,11 +276,11 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 18))
-                            .foregroundStyle(Color.oxySub)
+                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
             }
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
@@ -394,7 +365,7 @@ struct ChatView: View {
                     userId: appState.userId,
                     createdAt: session.lastAt ?? session.startedAt ?? ""
                 )
-            } else if startIncognito || startFresh {
+            } else if startFresh {
                 viewModel.startNewChat(userId: appState.userId)
             } else {
                 await viewModel.prepareChat(userId: appState.userId)
@@ -405,7 +376,6 @@ struct ChatView: View {
             }
         }
         .onAppear {
-            if startIncognito { isIncognito = true }
             viewModel.requestLocationAccess()
             networkMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
@@ -621,40 +591,40 @@ private struct ActionReviewSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Capsule()
-                .fill(Color.oxyLine2)
+                .fill(Color.nmlHairline)
                 .frame(width: 36, height: 4)
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 12) {
                 Image(systemName: iconName)
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.oxyStone)
+                    .foregroundStyle(Color.nmlTitanium)
                     .frame(width: 34, height: 34)
-                    .background(Color.oxyStone.opacity(0.12))
+                    .background(Color.nmlTitanium.opacity(0.12))
                     .clipShape(Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
+                        .foregroundStyle(Color.nmlInk)
                     Text("One tap when it looks right.")
                         .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .foregroundStyle(Color.nmlMuted)
                 }
                 Spacer()
             }
 
             Text(detail)
                 .font(.system(size: 15))
-                .foregroundStyle(Color.oxyText)
+                .foregroundStyle(Color.nmlInk)
                 .lineSpacing(5)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(Color.oxySurface2.opacity(0.72))
+                .background(Color.nmlSurface.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.oxyLine, lineWidth: 1)
+                        .stroke(Color.nmlHairline, lineWidth: 0.5)
                 )
 
             HStack(spacing: 10) {
@@ -665,8 +635,8 @@ private struct ActionReviewSheet: View {
                         .padding(.vertical, 13)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.oxySub)
-                .background(Color.oxySurface3)
+                .foregroundStyle(Color.nmlMuted)
+                .background(Color.nmlSurface2)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 Button(action: onConfirm) {
@@ -676,14 +646,14 @@ private struct ActionReviewSheet: View {
                         .padding(.vertical, 13)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(Color.oxyOnAccent)
-                .background(Color.oxyStone)
+                .foregroundStyle(Color.nmlObsidian)
+                .background(Color.nmlTitanium)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.oxySurface1)
+        .background(Color.nmlObsidian)
     }
 
     private var iconName: String {
@@ -709,30 +679,30 @@ private struct VoiceRecordingBar: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Divider().overlay(Color.oxyLine2)
+            Divider().overlay(Color.nmlHairline)
 
             HStack(spacing: 12) {
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundStyle(Color.oxyDim)
+                        .foregroundStyle(Color.nmlMuted)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(isTranscribing ? Color.oxyStone : Color.oxyRed)
+                            .fill(isTranscribing ? Color.nmlTitanium : Color.oxyRed)
                             .frame(width: 8, height: 8)
                             .scaleEffect(pulse ? 1.2 : 0.8)
                             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
                         Text(isTranscribing ? "Transcribing…" : "Listening...")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                            .foregroundStyle(Color.nmlInk)
                     }
                     if let t = transcript, !t.isEmpty {
                         Text(t)
                             .font(.system(size: 13))
-                            .foregroundStyle(Color.oxySub)
+                            .foregroundStyle(Color.nmlMuted)
                             .lineLimit(2)
                     }
                 }
@@ -743,9 +713,9 @@ private struct VoiceRecordingBar: View {
                     Button(action: onStop) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.oxyOnAccent)
+                            .foregroundStyle(Color.nmlObsidian)
                             .frame(width: 36, height: 36)
-                            .background(Color.oxyStone)
+                            .background(Color.nmlTitanium)
                             .clipShape(Circle())
                     }
                 }
@@ -753,7 +723,7 @@ private struct VoiceRecordingBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(Color.oxySurface1)
+        .background(Color.nmlObsidian)
         .onAppear { pulse = true }
     }
 }
@@ -836,110 +806,32 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
+/// The empty-conversation state. No orb, no glow, no quick-action chips —
+/// just the name and an invitation, set the way an editorial masthead would.
 private struct WelcomeCard: View {
-    let onQuickAction: (String) -> Void
-    @State private var appeared = false
-    @State private var glowPulse = false
-
-    var body: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [Color.oxyStone.opacity(glowPulse ? 0.18 : 0.08), .clear],
-                            center: .center,
-                            startRadius: 20,
-                            endRadius: glowPulse ? 60 : 50
-                        )
-                    )
-                    .frame(width: 100, height: 100)
-                    .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: glowPulse)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.oxyStone.opacity(0.2), Color.oxyStone.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 72, height: 72)
-
-                Image(systemName: "sparkles")
-                    .font(.system(size: 36))
-                    .foregroundStyle(Color.oxyStone)
-                    .symbolEffect(.pulse, isActive: appeared)
-            }
-            .scaleEffect(appeared ? 1.0 : 0.6)
-            .opacity(appeared ? 1 : 0)
-
-            VStack(spacing: 6) {
-                Text("Hey, I'm Oxy")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-
-                Text("What can I help with?")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxySub)
-                    .multilineTextAlignment(.center)
-            }
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 10)
-
-            HStack(spacing: 8) {
-                QuickChip(icon: "envelope.fill", label: "Check emails", delay: 0.15) {
-                    onQuickAction("Check my emails")
-                }
-                QuickChip(icon: "calendar", label: "My schedule", delay: 0.25) {
-                    onQuickAction("What's my schedule today?")
-                }
-                QuickChip(icon: "car.fill", label: "Book a ride", delay: 0.35) {
-                    onQuickAction("Book me a ride")
-                }
-            }
-        }
-        .padding(.horizontal, 32)
-        .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) { appeared = true }
-            glowPulse = true
-        }
-    }
-}
-
-private struct QuickChip: View {
-    let icon: String
-    let label: String
-    var delay: Double = 0
-    let onTap: () -> Void
     @State private var appeared = false
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color.oxyStone)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.oxySub)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
+        VStack(spacing: 18) {
+            Text("NAMELESS")
+                .font(.system(size: 12, weight: .medium))
+                .tracking(7)
+                .foregroundStyle(Color.nmlMuted)
+
+            Text("Where should we begin?")
+                .font(.system(size: 21, weight: .light))
+                .foregroundStyle(Color.nmlInk)
+                .multilineTextAlignment(.center)
+
+            Rectangle()
+                .fill(Color.nmlHairline)
+                .frame(width: 28, height: 0.5)
         }
-        .buttonStyle(ScaleButtonStyle())
+        .padding(.horizontal, 40)
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)
         .onAppear {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.75).delay(delay)) {
-                appeared = true
-            }
+            withAnimation(.easeOut(duration: 0.6)) { appeared = true }
         }
     }
 }
@@ -972,7 +864,7 @@ private struct ChatInputBar: View {
     var body: some View {
         VStack(spacing: 0) {
             Divider()
-                .overlay(Color.oxyLine2)
+                .overlay(Color.nmlHairline)
 
             if let attachmentLabel {
                 HStack(spacing: 10) {
@@ -985,31 +877,31 @@ private struct ChatInputBar: View {
                     } else {
                         Image(systemName: attachmentIsImage ? "photo.fill" : "doc.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.oxyStone)
+                            .foregroundStyle(Color.nmlTitanium)
                             .frame(width: 38, height: 38)
-                            .background(Color.oxySurface3)
+                            .background(Color.nmlSurface2)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                            .foregroundStyle(Color.nmlInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
                             .font(.system(size: 11))
-                            .foregroundStyle(Color.oxyDim)
+                            .foregroundStyle(Color.nmlMuted)
                     }
                     Spacer()
                     Button(action: onRemoveAttachment) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(Color.oxyDim)
+                            .foregroundStyle(Color.nmlMuted)
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(Color.oxySurface2)
+                .background(Color.nmlSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
@@ -1019,40 +911,36 @@ private struct ChatInputBar: View {
                 Button(action: onAttach) {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(Color.oxySub)
+                        .foregroundStyle(Color.nmlMuted)
                         .frame(width: 36, height: 36)
                 }
                 .disabled(isSending)
 
-                HStack(spacing: 8) {
-                    TextField("Message Oxy...", text: $text, axis: .vertical)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.oxyText)
+                VStack(spacing: 8) {
+                    TextField("Speak to Nameless", text: $text, axis: .vertical)
+                        .font(.system(size: 15, weight: .light))
+                        .foregroundStyle(Color.nmlInk)
                         .lineLimit(1...5)
                         .focused(isFocused)
                         .onSubmit {
                             if canSend { onSend() }
                         }
+                    Rectangle()
+                        .fill(Color.nmlHairline)
+                        .frame(height: 0.5)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.oxySurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 22))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22)
-                        .stroke(Color.oxyLine2, lineWidth: 1)
-                )
+                .padding(.horizontal, 2)
 
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
                         if isRecording && !canSend {
                             Circle()
-                                .stroke(Color.oxyGreen.opacity(0.30), lineWidth: 2)
+                                .stroke(Color.nmlGlow.opacity(0.30), lineWidth: 2)
                                 .frame(width: 50, height: 50)
                                 .scaleEffect(voicePulse ? 1.32 : 0.78)
                                 .opacity(voicePulse ? 0 : 0.85)
                             Circle()
-                                .stroke(Color.oxyGreen.opacity(0.20), lineWidth: 1.5)
+                                .stroke(Color.nmlGlow.opacity(0.20), lineWidth: 1.5)
                                 .frame(width: 62, height: 62)
                                 .scaleEffect(voicePulse ? 1.18 : 0.72)
                                 .opacity(voicePulse ? 0 : 0.65)
@@ -1060,16 +948,16 @@ private struct ChatInputBar: View {
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(Color.oxyOnAccent)
+                                .tint(Color.nmlObsidian)
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                                 .font(.system(size: 15, weight: .semibold))
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
+                    .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
                     .frame(width: 36, height: 36)
-                    .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
+                    .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.nmlTitanium) : Color.nmlSurface2)
                     .clipShape(Circle())
                 }
                 .disabled(!canAct)
@@ -1079,7 +967,7 @@ private struct ChatInputBar: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.oxySurface1)
+            .background(Color.nmlObsidian)
         }
         .onAppear { voicePulse = true }
         .onChange(of: isRecording) { _, recording in
@@ -1109,7 +997,7 @@ private struct StatusIndicator: View {
             OxyThinkingIndicator(label: label, compact: true)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
-                .background(Color.oxyStone.opacity(0.08))
+                .background(Color.nmlTitanium.opacity(0.08))
                 .clipShape(Capsule())
             Spacer(minLength: 60)
         }
@@ -1198,7 +1086,7 @@ struct PendantWaveform: View {
 
         var body: some View {
             Capsule()
-                .fill(Color.oxyStone)
+                .fill(Color.nmlTitanium)
                 .frame(width: 3, height: on ? maxH : 3)
                 .animation(
                     active

@@ -24,54 +24,62 @@ struct ConnectorsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
 
                 if isLoading {
-                    VStack(spacing: 12) {
-                        OxySkeletonCard(height: 92)
-                        OxySkeletonCard(height: 148)
-                        OxySkeletonCard(height: 148)
+                    VStack(spacing: 14) {
+                        OxySkeletonCard(height: 120)
+                        OxySkeletonCard(height: 180)
+                        OxySkeletonCard(height: 180)
                     }
-                    .padding(16)
+                    .padding(20)
                 } else {
                     ScrollView {
-                        VStack(spacing: 24) {
+                        VStack(alignment: .leading, spacing: 40) {
                             if let errorMessage {
                                 ErrorBanner(message: errorMessage)
                             }
 
-                            // On This Device — native OS permissions
+                            // Device — native OS permissions, kept distinct from
+                            // third-party services since they govern what the
+                            // pendant itself is allowed to sense and use.
                             if let caps = capabilities {
-                                nativeSection(caps)
+                                sectionHeader("On This Device", caption: "Permissions the device itself relies on")
+                                deviceSection(caps)
                                     .opacity(cardsVisible ? 1 : 0)
                                     .offset(y: cardsVisible ? 0 : 18)
                                     .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.0), value: cardsVisible)
                             }
 
-                            // Google section
-                            googleSection
-                                .opacity(cardsVisible ? 1 : 0)
-                                .offset(y: cardsVisible ? 0 : 18)
-                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.06), value: cardsVisible)
+                            // Third-party integrations
+                            VStack(alignment: .leading, spacing: 28) {
+                                sectionHeader("Integrations", caption: "Services connected to your account")
 
-                            // Grouped connectors (filtering out unimplemented/hidden)
-                            let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
-                            let grouped = Dictionary(grouping: visible.filter { $0.id != "google" }) { $0.category }
+                                googleSection
+                                    .opacity(cardsVisible ? 1 : 0)
+                                    .offset(y: cardsVisible ? 0 : 18)
+                                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.06), value: cardsVisible)
 
-                            ForEach(grouped.keys.sorted(), id: \.self) { category in
-                                if let items = grouped[category] {
-                                    connectorSection(title: category, connectors: items)
+                                let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
+                                let others = visible.filter { $0.id != "google" }
+
+                                if !others.isEmpty {
+                                    integrationList(others)
+                                        .opacity(cardsVisible ? 1 : 0)
+                                        .offset(y: cardsVisible ? 0 : 18)
+                                        .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.12), value: cardsVisible)
                                 }
                             }
                         }
-                        .padding(16)
-                        .padding(.bottom, 24)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .padding(.bottom, 40)
                     }
                 }
             }
             .navigationTitle("Connectors")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -80,10 +88,9 @@ struct ConnectorsView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Color.oxySub)
+                            .foregroundStyle(Color.nmlMuted)
                             .frame(width: 30, height: 30)
-                            .background(Color.oxySurface2)
-                            .clipShape(Circle())
+                            .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
                     }
                 }
             }
@@ -112,35 +119,42 @@ struct ConnectorsView: View {
         }
     }
 
-    // MARK: - Native Section
+    // MARK: - Section header
 
-    private func nativeSection(_ caps: NativeCapabilities) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("On This Device")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
+    /// An eyebrow + quiet caption pairing — replaces the old all-caps section
+    /// label with something that reads like a masthead, not a settings group.
+    private func sectionHeader(_ title: String, caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .nmlEyebrow()
+            Text(caption)
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
+        }
+    }
 
-            VStack(spacing: 0) {
-                ForEach(NativeCapabilityItem.all(from: caps), id: \.id) { item in
-                    NativeCapabilityRow(item: item) {
-                        await handleNativeAction(item)
-                    }
-                    if item.id != NativeCapabilityItem.all(from: caps).last?.id {
-                        Divider()
-                            .overlay(Color.oxyLine)
-                            .padding(.leading, 56)
-                    }
+    // MARK: - Device Section
+
+    private func deviceSection(_ caps: NativeCapabilities) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(NativeCapabilityItem.all(from: caps).enumerated()), id: \.element.id) { index, item in
+                NativeCapabilityRow(item: item) {
+                    await handleNativeAction(item)
+                }
+                if index != NativeCapabilityItem.all(from: caps).count - 1 {
+                    Rectangle()
+                        .fill(Color.nmlHairline)
+                        .frame(height: 0.5)
+                        .padding(.leading, 64)
                 }
             }
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
         }
+        .background(Color.nmlSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+        )
     }
 
     private func handleNativeAction(_ item: NativeCapabilityItem) async {
@@ -175,92 +189,58 @@ struct ConnectorsView: View {
     }
 
     private var googleSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Google")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-
-            HStack(spacing: 14) {
-                AppIconView(symbolName: "envelope.fill", tint: Color(red: 66/255, green: 133/255, blue: 244/255))
-                    .frame(width: 44, height: 44)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Google")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-
-                    Text(googleSubtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.oxySub)
-                }
-
-                Spacer()
-
-                Button(action: handleGoogleAction) {
-                    ConnectorPill(
-                        label: googleButtonLabel,
-                        tint: googleStatus == .connected ? Color.oxySub : Color.oxyStone,
-                        isBusy: googleStatus == .connecting
-                    )
-                }
-                .disabled(googleStatus == .connecting)
-            }
-            .padding(14)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
-        }
+        IntegrationRow(
+            symbolName: "envelope.fill",
+            tint: Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255),
+            name: "Google",
+            detail: googleDetail,
+            isConnected: googleStatus == .connected,
+            actionLabel: googleButtonLabel,
+            isBusy: googleStatus == .connecting,
+            action: handleGoogleAction
+        )
     }
 
     private var googleButtonLabel: String {
         switch googleStatus {
         case .idle: return "Connect"
-        case .connecting: return "Connecting…"
+        case .connecting: return "Connecting"
         case .connected: return "Disable"
         case .needsReconnect: return "Reconnect"
         case .error: return "Retry"
         }
     }
 
-    private var googleSubtitle: String {
+    private var googleDetail: String {
         switch googleStatus {
         case .connected:
-            return "Gmail · Calendar · Connected"
+            return "GMAIL · CALENDAR · LINKED"
         case .needsReconnect:
-            return "Gmail · Calendar · Reconnect needed"
+            return "GMAIL · CALENDAR · NEEDS RECONNECT"
+        case .connecting:
+            return "GMAIL · CALENDAR · LINKING"
         default:
-            return "Gmail · Calendar"
+            return "GMAIL · CALENDAR"
         }
     }
 
-    // MARK: - Connector Section
+    // MARK: - Integrations List
 
-    private func connectorSection(title: String, connectors: [Connector]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 12) {
-                ForEach(Array(connectors.enumerated()), id: \.element.id) { index, connector in
-                    ConnectorCard(
-                        connector: connector,
-                        onAction: { handleConnectorAction(connector) }
-                    )
-                    .opacity(cardsVisible ? 1 : 0)
-                    .offset(y: cardsVisible ? 0 : 22)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(Double(index) * 0.08), value: cardsVisible)
-                }
+    /// A single spacious, hairline-bordered list — replaces the old card grid.
+    /// Each row carries its own quiet glowing-dot indicator and monospace detail.
+    private func integrationList(_ items: [Connector]) -> some View {
+        VStack(spacing: 12) {
+            ForEach(items) { connector in
+                IntegrationRow(
+                    symbolName: IntegrationRow.symbol(for: connector.id),
+                    tint: IntegrationRow.tint(for: connector.id),
+                    name: connector.name,
+                    detail: connector.statusText.uppercased(),
+                    isConnected: connector.connectionState == "connected",
+                    actionLabel: connector.actionLabel,
+                    isBusy: false,
+                    action: { handleConnectorAction(connector) }
+                )
             }
         }
     }
@@ -395,8 +375,6 @@ struct NativeCapabilityItem {
     enum Status { case granted, denied, notDetermined }
 
     let id: String
-    let icon: String
-    let iconTint: Color
     let title: String
     let subtitle: String
     let status: Status
@@ -409,48 +387,36 @@ struct NativeCapabilityItem {
         return [
             NativeCapabilityItem(
                 id: "contacts",
-                icon: "person.2.fill",
-                iconTint: Color(red: 0.27, green: 0.53, blue: 0.99),
                 title: "Contacts",
                 subtitle: "Message and call people by name",
                 status: caps.contacts ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "location",
-                icon: "location.fill",
-                iconTint: Color(red: 0.0, green: 0.68, blue: 0.36),
                 title: "Location",
                 subtitle: "Rides, directions, local context",
                 status: locCapStatus
             ),
             NativeCapabilityItem(
                 id: "health",
-                icon: "heart.fill",
-                iconTint: Color(red: 0.99, green: 0.25, blue: 0.33),
                 title: "Health",
                 subtitle: "Activity, heart rate, sleep",
                 status: caps.healthKit ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "reminders",
-                icon: "checklist",
-                iconTint: Color(red: 1.0, green: 0.58, blue: 0.0),
                 title: "Reminders",
                 subtitle: "Create and manage tasks",
                 status: caps.reminders ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "music",
-                icon: "music.note",
-                iconTint: Color(red: 0.99, green: 0.23, blue: 0.41),
                 title: "Music",
                 subtitle: "Control Apple Music playback",
                 status: caps.musicKit ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "notifications",
-                icon: "bell.fill",
-                iconTint: Color(red: 0.99, green: 0.65, blue: 0.0),
                 title: "Notifications",
                 subtitle: "Briefings and action alerts",
                 status: caps.notifications ? .granted : .notDetermined
@@ -466,23 +432,16 @@ private struct NativeCapabilityRow: View {
     let onAction: () async -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(item.iconTint.opacity(0.15))
-                    .frame(width: 36, height: 36)
-                Image(systemName: item.icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(item.iconTint)
-            }
+        HStack(spacing: 16) {
+            NamelessStatusDot(isLive: item.status == .granted)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
                 Text(item.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.oxySub)
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
             }
 
             Spacer()
@@ -490,41 +449,91 @@ private struct NativeCapabilityRow: View {
             Button {
                 Task { await onAction() }
             } label: {
-                nativePill
+                Text(statusLabel)
+                    .font(.nmlMono(11, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.nmlTitanium)
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 18)
     }
 
-    private var nativePill: some View {
-        let (label, color): (String, Color) = {
-            switch item.status {
-            case .granted:      return ("Active", Color.oxyGreen)
-            case .denied:       return ("Settings", Color.oxySub)
-            case .notDetermined: return ("Enable", Color.oxyStone)
-            }
-        }()
-        return Text(label)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(color.opacity(0.12))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(color.opacity(0.25), lineWidth: 1))
+    private var statusLabel: String {
+        switch item.status {
+        case .granted:       return "ENABLED"
+        case .denied:        return "SETTINGS"
+        case .notDetermined: return "ENABLE"
+        }
     }
 }
 
-// MARK: - Connector Card
+// MARK: - Integration Row
 
-private struct ConnectorCard: View {
-    let connector: Connector
-    let onAction: () -> Void
+/// A single spacious, hairline-bordered row for a connected service: real SF
+/// Symbol on a brand-tinted ground, name, monospace status detail, a quiet
+/// glowing dot in place of a loud "Active" badge, and a plain-text action —
+/// no filled pill buttons, nothing that shouts.
+private struct IntegrationRow: View {
+    let symbolName: String
+    let tint: Color
+    let name: String
+    let detail: String
+    let isConnected: Bool
+    let actionLabel: String
+    let isBusy: Bool
+    let action: () -> Void
 
-    private var sfSymbol: String {
-        switch connector.id {
+    var body: some View {
+        HStack(spacing: 16) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(tint.opacity(0.14))
+                Image(systemName: symbolName)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(tint)
+            }
+            .frame(width: 46, height: 46)
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
+                Text(detail)
+                    .font(.nmlMono(10, weight: .medium))
+                    .tracking(1.0)
+                    .foregroundStyle(Color.nmlMuted)
+            }
+
+            Spacer()
+
+            NamelessStatusDot(isLive: isConnected, diameter: 5)
+
+            Button(action: action) {
+                if isBusy {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .tint(Color.nmlMuted)
+                } else {
+                    Text(actionLabel.uppercased())
+                        .font(.system(size: 11, weight: .medium))
+                        .tracking(1.2)
+                        .foregroundStyle(Color.nmlTitanium)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy)
+        }
+        .padding(20)
+        .background(Color.nmlSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+    }
+
+    static func symbol(for connectorID: String) -> String {
+        switch connectorID {
         case "google":    return "envelope.fill"
         case "imessage":  return "message.fill"
         case "whatsapp":  return "phone.fill"
@@ -541,139 +550,19 @@ private struct ConnectorCard: View {
         }
     }
 
-    private var tint: Color {
-        switch connector.id {
-        case "google":    return Color(red: 66/255, green: 133/255, blue: 244/255)
-        case "imessage":  return Color.oxyGreen
-        case "whatsapp":  return Color(red: 76/255, green: 217/255, blue: 100/255)
-        case "spotify":   return Color(red: 30/255, green: 215/255, blue: 96/255)
-        case "telegram":  return Color(red: 42/255, green: 171/255, blue: 238/255)
-        case "monzo":     return Color(red: 255/255, green: 82/255, blue: 105/255)
-        case "homekit":   return Color(red: 255/255, green: 159/255, blue: 10/255)
-        case "maps":      return Color(red: 66/255, green: 133/255, blue: 244/255)
-        case "notion":    return Color.oxyText
-        case "betfair":   return Color(red: 255/255, green: 178/255, blue: 0/255)
-        case "uber":      return Color.oxyText
-        default:          return Color.oxyStone
+    static func tint(for connectorID: String) -> Color {
+        switch connectorID {
+        case "google":    return Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)
+        case "imessage":  return Color(red: 76 / 255, green: 175 / 255, blue: 130 / 255)
+        case "whatsapp":  return Color(red: 76 / 255, green: 217 / 255, blue: 100 / 255)
+        case "spotify":   return Color(red: 30 / 255, green: 215 / 255, blue: 96 / 255)
+        case "telegram":  return Color(red: 42 / 255, green: 171 / 255, blue: 238 / 255)
+        case "monzo":     return Color(red: 255 / 255, green: 82 / 255, blue: 105 / 255)
+        case "homekit":   return Color(red: 255 / 255, green: 159 / 255, blue: 10 / 255)
+        case "maps":      return Color(red: 66 / 255, green: 133 / 255, blue: 244 / 255)
+        case "betfair":   return Color(red: 255 / 255, green: 178 / 255, blue: 0 / 255)
+        default:          return Color.nmlTitanium
         }
-    }
-
-    var body: some View {
-        VStack(spacing: 12) {
-            AppIconView(symbolName: sfSymbol, tint: tint)
-                .frame(width: 44, height: 44)
-
-            VStack(spacing: 2) {
-                Text(connector.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
-                    .lineLimit(1)
-
-                Text(connector.statusText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(connector.statusColor)
-            }
-
-            Button(action: onAction) {
-                ConnectorPill(label: connector.actionLabel, tint: connector.actionTint, isBusy: false)
-            }
-            .disabled(!connector.implemented)
-        }
-        .overlay(alignment: .topTrailing) {
-            if connector.enabled {
-                ConnectorCheckmark()
-                    .padding(10)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .padding(.horizontal, 8)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
-    }
-}
-
-private struct ConnectorCheckmark: View {
-    @State private var isDrawn = false
-
-    var body: some View {
-        Circle()
-            .fill(Color.oxyGreen)
-            .frame(width: 18, height: 18)
-            .overlay {
-                CheckmarkShape()
-                    .trim(from: 0, to: isDrawn ? 1 : 0)
-                    .stroke(Color.oxyOnAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .frame(width: 8, height: 7)
-            }
-            .scaleEffect(isDrawn ? 1 : 0.72)
-            .onAppear { isDrawn = true }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isDrawn)
-    }
-}
-
-private struct CheckmarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.midX * 0.82, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        return path
-    }
-}
-
-private struct ConnectorPill: View {
-    let label: String
-    let tint: Color
-    let isBusy: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if isBusy {
-                ProgressView()
-                    .scaleEffect(0.65)
-                    .tint(tint)
-            }
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-        }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .background(tint.opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(tint.opacity(0.28), lineWidth: 1)
-        )
-    }
-}
-
-/// Renders connector icons as real SF Symbols on a brand-tinted background, instead of
-/// emoji or remote logo images, so they read as native iOS icons everywhere.
-private struct AppIconView: View {
-    let symbolName: String
-    let tint: Color
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(tint.opacity(0.15))
-            Image(systemName: symbolName)
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(tint)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
     }
 }
 
@@ -710,20 +599,6 @@ struct Connector: Codable, Identifiable {
         if connectionState == "needs_setup" { return "Setup" }
         if connectionState == "degraded" { return enabled ? "Enabled" : "Enable" }
         return enabled ? "Disconnect" : "Connect"
-    }
-
-    var actionTint: Color {
-        if !implemented { return Color.oxyDim }
-        if connectionState == "needs_reconnect" || connectionState == "needs_setup" || connectionState == "degraded" { return Color.oxyStone }
-        return enabled ? Color.oxySub : Color.oxyGreen
-    }
-
-    var statusColor: Color {
-        switch connectionState {
-        case "connected": return Color.oxyGreen
-        case "needs_reconnect", "needs_setup", "degraded": return Color.oxyStone
-        default: return Color.oxySub
-        }
     }
 }
 
