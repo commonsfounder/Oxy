@@ -2298,6 +2298,31 @@ function cleanSessionTitle(raw) {
   return text.length > 52 ? text.slice(0, 49) + '…' : text;
 }
 
+// Pull a user's full conversation history in pages. Supabase caps a single
+// request at ~1000 rows, so a flat `.limit(250)` only reached back a few days
+// for heavy users and hid older sessions. We page until exhausted (with a
+// generous safety cap) so the session list spans back to the first ever chat.
+async function fetchAllConversationRows(userId) {
+  const pageSize = 1000;
+  const maxPages = 50; // safety stop (~50k messages)
+  let all = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('id, role, content, created_at')
+      .eq('user_id', userId)
+      .neq('role', 'system')
+      .order('created_at', { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+  }
+  return all;
+}
+
 function buildConversationSessions(rows = []) {
   const sorted = rows
     .map(normalizeConversationRow)
@@ -3691,22 +3716,15 @@ app.get('/history/:userId', async (req, res) => {
 app.get('/history/:userId/sessions', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    const [convResult, prefResult] = await Promise.all([
-      supabase
-        .from('conversations')
-        .select('id, role, content, created_at')
-        .eq('user_id', req.params.userId)
-        .neq('role', 'system')
-        .order('created_at', { ascending: false })
-        .limit(250),
+    const [convRows, prefResult] = await Promise.all([
+      fetchAllConversationRows(req.params.userId),
       supabase
         .from('preferences')
         .select('key, value')
         .eq('user_id', req.params.userId)
         .like('key', '_stitle_%')
     ]);
-    if (convResult.error) throw convResult.error;
-    const sessions = buildConversationSessions(convResult.data || []);
+    const sessions = buildConversationSessions(convRows);
     const storedTitles = Object.fromEntries(
       (prefResult.data || []).map(p => [p.key.replace('_stitle_', ''), p.value])
     );

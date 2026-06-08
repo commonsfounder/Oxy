@@ -105,7 +105,7 @@ private struct ProactiveHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Nameless: Today")
+                Text("Today")
                     .font(.system(size: 30, weight: .regular, design: .serif))
                     .foregroundStyle(Color.nmlInk)
                 Spacer()
@@ -124,9 +124,6 @@ private struct ProactiveHeader: View {
                 .buttonStyle(.plain)
                 .disabled(isChecking)
             }
-            Text("Only useful nudges. No noise.")
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
         }
     }
 }

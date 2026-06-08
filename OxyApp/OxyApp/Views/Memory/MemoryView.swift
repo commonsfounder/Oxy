@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MemoryView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var summary = MemorySummary()
     @State private var isLoading = true
     @State private var isSaving = false
@@ -19,6 +20,16 @@ struct MemoryView: View {
         } else {
             NavigationStack {
                 memoryContent
+                    // Edge-swipe to dismiss, matching Connectors/Settings, so the
+                    // modally-presented Memory screen is never a dead end.
+                    .gesture(
+                        DragGesture(minimumDistance: 20)
+                            .onEnded { value in
+                                if value.startLocation.x < 60, value.translation.width > 80 {
+                                    dismiss()
+                                }
+                            }
+                    )
             }
         }
     }
@@ -74,6 +85,17 @@ struct MemoryView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar {
+            if !embedded {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Text("Back")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Color.nmlMuted)
+                    }
+                }
+            }
+        }
         .task { await loadMemory() }
         .refreshable { await loadMemory() }
     }

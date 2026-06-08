@@ -1,14 +1,22 @@
 import SwiftUI
 
-/// Standalone pendant / device-status screen pulled to the root of More. Shows
-/// the live telemetry ribbon plus flat connection rows and a single text action
-/// (scan / cancel / unpair), all in the Nameless language.
+/// High-end hardware integration screen: a central device visual flanked by the
+/// CORE and SHELL battery gauges, a flat HARDWARE CONFIG module, and a quiet
+/// footer of utility links — all in the Nameless language on pitch black.
 struct PendantStatusView: View {
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var telemetry = PendantTelemetryMonitor()
-    @State private var showUnpairConfirm = false
+    @Environment(\.openURL) private var openURL
 
-    private let pendant = NativeIntegrationManager.shared.pendant
+    @State private var telemetry = PendantTelemetryMonitor()
+
+    // Persisted hardware configuration.
+    @AppStorage("nml_pendant_finish") private var finishRaw = PendantFinish.obsidian.rawValue
+    @AppStorage("nml_hw_wakeword") private var wakeword = "CHIN TILT"
+    @AppStorage("nml_hw_audio") private var audioOutput = "BLE BUDS"
+    @AppStorage("nml_hw_haptic") private var hapticForce = "MID"
+
+    private var finish: PendantFinish { PendantFinish(rawValue: finishRaw) ?? .obsidian }
 
     var body: some View {
         NavigationStack {
@@ -17,42 +25,36 @@ struct PendantStatusView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
-                        DeviceStatusCard(telemetry: telemetry)
-                            .padding(.bottom, 4)
+                        // Device + dual battery gauges
+                        HStack(alignment: .center, spacing: 22) {
+                            VerticalBatteryGauge(label: "CORE", percent: telemetry.coreBatteryPercent)
 
-                        statusRow(label: "Status", value: statusDescription)
+                            DeviceVisual(finish: finish)
+                                .onTapGesture {
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        finishRaw = finish.next.rawValue
+                                    }
+                                }
 
-                        if let name = pendant.peripheralName, pendant.isConnected {
-                            NamelessDivider()
-                            statusRow(label: "Device", value: name)
+                            VerticalBatteryGauge(label: "SHELL", percent: telemetry.claspBatteryPercent)
                         }
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 16)
+                        .padding(.bottom, 36)
 
-                        if let error = pendant.lastError {
-                            NamelessDivider()
-                            HStack {
-                                Text("Last Error")
-                                    .font(.system(size: 15, weight: .regular))
-                                    .foregroundStyle(Color.nmlInk)
-                                Spacer(minLength: 16)
-                                Text(error)
-                                    .font(.nmlMono(11))
-                                    .foregroundStyle(Color.nmlDanger)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            .padding(.vertical, 22)
-                        }
+                        // Hardware config
+                        hardwareConfig
 
-                        NamelessDivider()
-
-                        actionRow
+                        // Footer utility
+                        footer
+                            .padding(.top, 48)
                     }
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 24)
-                    .animation(.easeInOut(duration: 0.25), value: pendant.connectionState)
+                    .padding(.bottom, 28)
+                    .animation(.easeInOut(duration: 0.2), value: telemetry.coreBatteryPercent)
                 }
             }
-            .navigationTitle("Pendant")
+            .navigationTitle("Device")
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
@@ -65,71 +67,211 @@ struct PendantStatusView: View {
                     }
                 }
             }
-            .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
-                Button("Unpair", role: .destructive) { pendant.unpair() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will disconnect and forget the paired pendant. You can pair again later.")
-            }
         }
         .onAppear { telemetry.start() }
         .onDisappear { telemetry.stop() }
     }
 
-    private func statusRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
-            Spacer(minLength: 16)
-            Text(value)
-                .font(.nmlMono(12))
-                .foregroundStyle(Color.nmlMuted)
-        }
-        .padding(.vertical, 22)
-    }
+    // MARK: - Hardware config
 
-    @ViewBuilder
-    private var actionRow: some View {
-        Button {
-            if pendant.isConnected {
-                showUnpairConfirm = true
-            } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
-                pendant.stopScan()
-            } else {
-                pendant.startScan()
-            }
-        } label: {
+    private var hardwareConfig: some View {
+        VStack(spacing: 0) {
             HStack {
-                Text(actionLabel)
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(1.4)
-                    .foregroundStyle(pendant.isConnected ? Color.nmlDanger : Color.nmlTitanium)
+                Text("HARDWARE CONFIG")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .tracking(2)
+                    .foregroundStyle(Color.gray)
                 Spacer()
             }
-            .padding(.vertical, 22)
-            .contentShape(Rectangle())
+            .padding(.bottom, 6)
+
+            NamelessDivider()
+
+            configRow(label: "WAKEWORD", options: ["CHIN TILT", "TAP"], selection: $wakeword)
+            NamelessDivider()
+            configRow(label: "AUDIO OUTPUT", options: ["BLE BUDS", "WHISPER HAPTICS"], selection: $audioOutput)
+            NamelessDivider()
+            configRow(label: "HAPTIC FORCE", options: ["LOW", "MID", "HIGH"], selection: $hapticForce)
+        }
+    }
+
+    private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
+        HStack(alignment: .center) {
+            Text(label)
+                .font(.nmlMono(11, weight: .medium))
+                .tracking(1.0)
+                .foregroundStyle(Color.nmlMuted)
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 12) {
+                ForEach(options, id: \.self) { option in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { selection.wrappedValue = option }
+                    } label: {
+                        Text("[ \(option) ]")
+                            .font(.nmlMono(11, weight: .medium))
+                            .foregroundStyle(selection.wrappedValue == option ? Color.nmlInk : Color(white: 0.27))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, 18)
+    }
+
+    // MARK: - Footer
+
+    private var footer: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+
+            HStack {
+                footerButton("Sign Out Of All Devices") { signOutAllDevices() }
+                Spacer(minLength: 8)
+                footerButton("Privacy Policy") { open("/privacy") }
+                Spacer(minLength: 8)
+                footerButton("Get Support") { open("/support") }
+            }
+            .padding(.top, 18)
+        }
+    }
+
+    private func footerButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 10, weight: .regular))
+                .foregroundStyle(Color(white: 0.27)) // ~#444, melts into black
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .buttonStyle(.plain)
     }
 
-    private var actionLabel: String {
-        if pendant.isConnected { return "UNPAIR" }
-        if pendant.connectionState == .scanning || pendant.connectionState == .connecting { return "CANCEL" }
-        return "SCAN FOR PENDANT"
+    private func open(_ path: String) {
+        guard let url = URL(string: "\(APIClient.shared.baseURL)\(path)") else { return }
+        openURL(url)
     }
 
-    private var statusDescription: String {
-        switch pendant.connectionState {
-        case .disconnected: return "Not connected"
-        case .scanning: return "Scanning…"
-        case .connecting: return "Connecting…"
-        case .connected: return "Connected"
-        case .error: return "Error"
+    private func signOutAllDevices() {
+        Task {
+            _ = try? await APIClient.shared.request(path: "/auth/logout-all", method: "POST")
+            await MainActor.run { appState.logout() }
         }
+    }
+}
+
+// MARK: - Vertical battery gauge
+
+private struct VerticalBatteryGauge: View {
+    let label: String
+    let percent: Int
+
+    private let trackHeight: CGFloat = 120
+    private let width: CGFloat = 12
+
+    private var fillColor: Color {
+        percent <= 15 ? Color.nmlDanger : Color.nmlTitanium
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(label)
+                .font(.nmlMono(9, weight: .medium))
+                .tracking(1.4)
+                .foregroundStyle(Color.nmlMuted)
+
+            ZStack(alignment: .bottom) {
+                Capsule()
+                    .fill(fillColor)
+                    .frame(width: width, height: max(4, trackHeight * CGFloat(min(max(percent, 0), 100)) / 100))
+                Capsule()
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                    .frame(width: width, height: trackHeight)
+            }
+            .frame(width: width, height: trackHeight)
+
+            Text("\(percent)%")
+                .font(.nmlMono(11, weight: .medium))
+                .foregroundStyle(Color.nmlInk)
+        }
+    }
+}
+
+// MARK: - Device visual
+
+/// Placeholder for the eventual high-end 3D model / vector render of the pendant.
+/// Tinted to the selected finish; tap to cycle. Swap the silhouette below for a
+/// real model view (e.g. SceneKit/RealityKit or a layered vector) when ready.
+private struct DeviceVisual: View {
+    let finish: PendantFinish
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ZStack {
+                VStack(spacing: -10) {
+                    // Bail loop
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.3), lineWidth: 1.5)
+                        .frame(width: 22, height: 22)
+                        .zIndex(1)
+
+                    // Core body — placeholder for the 3D render
+                    RoundedRectangle(cornerRadius: 44, style: .continuous)
+                        .fill(finish.gradient)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 44, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                        )
+                        .frame(width: 92, height: 132)
+                }
+            }
+            .frame(width: 130, height: 168)
+
+            Text(finish.label)
+                .font(.nmlMono(9, weight: .medium))
+                .tracking(2)
+                .foregroundStyle(Color.nmlMuted)
+        }
+    }
+}
+
+// MARK: - Finish
+
+enum PendantFinish: String, CaseIterable {
+    case obsidian, silver, titanium
+
+    var label: String {
+        switch self {
+        case .obsidian: return "OBSIDIAN"
+        case .silver: return "STERLING SILVER"
+        case .titanium: return "TITANIUM"
+        }
+    }
+
+    var next: PendantFinish {
+        let all = PendantFinish.allCases
+        let idx = all.firstIndex(of: self) ?? 0
+        return all[(idx + 1) % all.count]
+    }
+
+    var gradient: LinearGradient {
+        let colors: [Color]
+        switch self {
+        case .obsidian:
+            colors = [Color(white: 0.10), Color(white: 0.04)]
+        case .silver:
+            colors = [Color(red: 0.86, green: 0.87, blue: 0.89), Color(red: 0.62, green: 0.64, blue: 0.67)]
+        case .titanium:
+            colors = [Color(red: 0.64, green: 0.66, blue: 0.69), Color(red: 0.40, green: 0.42, blue: 0.45)]
+        }
+        return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 }
 
 #Preview {
     PendantStatusView()
+        .environment(AppState())
 }
