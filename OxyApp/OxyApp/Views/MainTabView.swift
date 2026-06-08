@@ -78,31 +78,33 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 36) {
                         moreSection(title: "Workspace") {
-                            moreRow(icon: "app.connected.to.app.below.fill", title: "Connectors", subtitle: "Link your accounts and devices", color: .oxyStone) {
+                            moreRow(title: "Connectors", subtitle: "Link your accounts and devices") {
                                 destination = .connectors
                             }
-                            Divider().overlay(Color.oxyLine).padding(.leading, 58)
-                            moreRow(icon: "brain.head.profile", title: "Memory", subtitle: "What Oxy remembers about you", color: .purple) {
+                            NamelessDivider()
+                            moreRow(title: "Memory", subtitle: "What Nameless remembers about you") {
                                 destination = .memory
                             }
                         }
 
                         moreSection(title: "App") {
-                            moreRow(icon: "gearshape.fill", title: "Settings", subtitle: "Appearance, voice, account", color: .oxySub) {
+                            moreRow(title: "Settings", subtitle: "Appearance, voice, account") {
                                 destination = .settings
                             }
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 32)
                 }
             }
             .navigationTitle("More")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in
                 switch dest {
@@ -115,48 +117,34 @@ struct MoreView: View {
     }
 
     private func moreSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-                .padding(.leading, 4)
-
+        VStack(alignment: .leading, spacing: 4) {
+            NamelessSectionHeader(title: title)
+                .padding(.bottom, 10)
             VStack(spacing: 0, content: content)
-                .background(Color.oxySurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
 
-    private func moreRow(icon: String, title: String, subtitle: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func moreRow(title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         Button {
             HapticManager.shared.impact(.light)
             action()
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(color)
-                    .frame(width: 32, height: 32)
-                    .background(color.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(Color.oxyText)
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Color.nmlInk)
                     Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxyDim)
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
                         .lineLimit(1)
                 }
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyDim)
+                Text("›")
+                    .font(.system(size: 18, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 16)
         }
         .buttonStyle(.plain)
     }

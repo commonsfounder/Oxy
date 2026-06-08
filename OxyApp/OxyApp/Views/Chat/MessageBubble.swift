@@ -26,59 +26,38 @@ struct MessageBubble: View {
         }
     }
 
-    // Corner radii that "connect" consecutive same-sender bubbles.
-    // The joined corners (inner corners of a run) get a tighter radius.
-    private var topLeadingR: CGFloat {
-        isUser ? 20 : (isGroupStart ? 6 : 14)
-    }
-    private var topTrailingR: CGFloat {
-        isUser ? (isGroupStart ? 20 : 14) : 20
-    }
-    private var bottomLeadingR: CGFloat {
-        isUser ? 20 : (isGroupEnd ? 20 : 14)
-    }
-    private var bottomTrailingR: CGFloat {
-        isUser ? (isGroupEnd ? 6 : 14) : 20
-    }
-
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 3) {
             // Message content
             if !message.content.isEmpty {
                 HStack(alignment: .bottom, spacing: 0) {
-                    if isUser { Spacer(minLength: 52) }
+                    if isUser { Spacer(minLength: 56) }
 
                     VStack(alignment: .leading, spacing: 0) {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
                                 fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 2 : 5
+                                lineSpacing: isCompact ? 3 : 5
                             )
                         } else {
                             Text(message.content)
                                 .font(.system(size: isCompact ? 14 : 15))
-                                .foregroundStyle(isUser ? .white : Color.oxyText)
-                                .lineSpacing(isCompact ? 2 : 5)
+                                .foregroundStyle(Color.nmlInk)
+                                .lineSpacing(isCompact ? 3 : 5)
                         }
                     }
-                    .padding(.horizontal, isCompact ? 13 : 15)
-                    .padding(.vertical, isCompact ? 8 : 10)
+                    // User messages get an ultra-subtle fill in a small-radius
+                    // container; assistant replies stay transparent and flush so
+                    // the conversation reads as one continuous column of text.
+                    .padding(.horizontal, isUser ? 14 : 0)
+                    .padding(.vertical, isUser ? 9 : 0)
                     .background(
-                        isUser
-                            ? AnyShapeStyle(Color.oxyStone)
-                            : AnyShapeStyle(Color.oxySurface2)
+                        isUser ? AnyShapeStyle(Color.white.opacity(0.06)) : AnyShapeStyle(Color.clear)
                     )
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: topLeadingR,
-                            bottomLeadingRadius: bottomLeadingR,
-                            bottomTrailingRadius: bottomTrailingR,
-                            topTrailingRadius: topTrailingR
-                        )
-                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                    if !isUser { Spacer(minLength: 52) }
+                    if !isUser { Spacer(minLength: 56) }
                 }
             }
 
@@ -86,18 +65,8 @@ struct MessageBubble: View {
             if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
                     OxyThinkingIndicator()
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 9)
-                        .background(Color.oxySurface2)
-                        .clipShape(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 6,
-                                bottomLeadingRadius: 18,
-                                bottomTrailingRadius: 18,
-                                topTrailingRadius: 18
-                            )
-                        )
-                    Spacer(minLength: 52)
+                        .padding(.vertical, 4)
+                    Spacer(minLength: 56)
                 }
             }
 
@@ -108,28 +77,21 @@ struct MessageBubble: View {
                         ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                     }
                 }
+                .padding(.top, 2)
             }
 
             // Timestamp — only shown on the last message in each group run.
             if isGroupEnd {
                 HStack(spacing: 4) {
-                    if isUser {
-                        Spacer()
-                        if !message.isStreaming {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(Color.oxyDim)
-                        }
-                    }
+                    if isUser { Spacer() }
                     Text(message.timestamp, style: .time)
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.oxyDim)
+                        .font(.nmlMono(9))
+                        .foregroundStyle(Color.nmlMuted)
                     if !isUser { Spacer() }
                 }
-                .padding(.horizontal, 4)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, isCompact ? 1 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
         .animation(.spring(response: 0.4, dampingFraction: 0.8), value: message.content)
@@ -148,7 +110,7 @@ private struct StreamingWordText: View {
     var body: some View {
         Text(attributedText)
             .font(.system(size: fontSize))
-            .foregroundStyle(Color.oxyText)
+            .foregroundStyle(Color.nmlInk)
             .lineSpacing(lineSpacing)
             .animation(.easeOut(duration: 0.28), value: words.count)
     }
@@ -158,7 +120,7 @@ private struct StreamingWordText: View {
         for (index, word) in words.enumerated() {
             var part = AttributedString(index == words.count - 1 ? word : "\(word) ")
             let distanceFromEnd = words.count - index
-            part.foregroundColor = Color.oxyText.opacity(distanceFromEnd <= 4 ? 1 : 0.78)
+            part.foregroundColor = Color.nmlInk.opacity(distanceFromEnd <= 4 ? 1 : 0.7)
             output += part
         }
         return output
@@ -215,24 +177,19 @@ struct ActionCard: View {
     }
 
     private var cardContent: some View {
-        VStack(alignment: .leading, spacing: action.pending ? 10 : 0) {
-                HStack(spacing: 9) {
-                Image(systemName: action.success ? "checkmark" : "exclamationmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
-                    .frame(width: 22, height: 22)
-                    .background((action.success ? Color.oxyGreen : Color.oxyRed).opacity(0.12))
-                    .clipShape(Circle())
+        VStack(alignment: .leading, spacing: action.pending ? 12 : 0) {
+            HStack(spacing: 10) {
+                NamelessStatusDot(isLive: action.success, diameter: 5)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(actionSummary)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.nmlInk)
 
                     if let text = detailText {
                         Text(text)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.oxySub)
+                            .font(.system(size: 11, weight: .light))
+                            .foregroundStyle(Color.nmlMuted)
                             .lineLimit(action.action == "plan_trip" ? 2 : 1)
                             .multilineTextAlignment(.leading)
                     }
@@ -241,55 +198,52 @@ struct ActionCard: View {
                 Spacer()
 
                 if hasLink {
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.oxyStone)
-                } else {
-                    Image(systemName: iconForAction(action.action))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.oxyDim)
+                    Text("OPEN")
+                        .font(.nmlMono(10, weight: .medium))
+                        .tracking(1.2)
+                        .foregroundStyle(Color.nmlTitanium)
                 }
             }
 
             if action.pending, let onCommand {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Button {
                         onCommand("confirm")
                     } label: {
-                        Label("Confirm", systemImage: "checkmark")
-                            .font(.system(size: 12, weight: .semibold))
+                        Text("CONFIRM")
+                            .font(.nmlMono(11, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.black)
                             .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(Color.white)
+                            .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.oxyOnAccent)
-                    .padding(.vertical, 8)
-                    .background(Color.oxyStone)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
 
                     Button {
                         onCommand("cancel")
                     } label: {
-                        Label("Cancel", systemImage: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
+                        Text("CANCEL")
+                            .font(.nmlMono(11, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.nmlMuted)
                             .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.oxySub)
-                    .padding(.vertical, 8)
-                    .background(Color.oxySurface3)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
                 }
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(Color.oxySurface2.opacity(0.58))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(action.success ? Color.oxyLine.opacity(0.8) : Color.oxyRed.opacity(0.2), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
         )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
     }
 
     private func openLink() {
@@ -330,23 +284,6 @@ struct ActionCard: View {
         }
     }
 
-    private func iconForAction(_ type: String) -> String {
-        switch type {
-        case "send_email", "get_emails", "search_emails": return "envelope.fill"
-        case "create_calendar_event", "get_calendar_events": return "calendar"
-        case "book_uber": return "car.fill"
-        case "find_place", "get_directions": return "map.fill"
-        case "plan_trip": return "tram.fill"
-        case "send_telegram", "get_telegram_contacts": return "paperplane.fill"
-        case "station_board": return "tram.fill"
-        case "create_reminder": return "bell.fill"
-        case "send_message": return "message.fill"
-        case "open_app": return "app.fill"
-        case "play_music", "add_to_music_playlist": return "music.note"
-        case "check_health": return "heart.fill"
-        default: return "bolt.fill"
-        }
-    }
 }
 
 #Preview {
@@ -367,5 +304,5 @@ struct ActionCard: View {
             MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
         }
     }
-    .background(Color.oxyBg)
+    .background(Color.black)
 }

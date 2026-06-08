@@ -15,48 +15,49 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         if let errorMessage {
                             ErrorBanner(message: errorMessage)
-                                .padding(.horizontal, 16)
+                                .padding(.bottom, 20)
                         }
 
                         ProactiveHeader(
                             isChecking: isChecking,
                             onCheckNow: { Task { await checkNow() } }
                         )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        .padding(.top, 8)
+                        .padding(.bottom, 28)
 
                         if isLoading && briefings.isEmpty {
                             ProgressView()
-                                .tint(Color.oxyStone)
-                                .padding(.top, 28)
+                                .tint(Color.nmlTitanium)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 40)
                         } else if visibleBriefings.isEmpty {
                             EmptyProactiveState()
-                                .padding(.horizontal, 16)
                                 .padding(.top, 24)
                         } else {
-                            ForEach(visibleBriefings) { briefing in
-                                BriefingCard(briefing: briefing) {
+                            ForEach(Array(visibleBriefings.enumerated()), id: \.element.id) { index, briefing in
+                                if index != 0 { NamelessDivider() }
+                                BriefingRow(briefing: briefing) {
                                     Task { await markRead(briefing) }
                                 }
-                                .padding(.horizontal, 16)
                             }
                         }
                     }
-                    .padding(.bottom, 24)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 32)
                 }
                 .refreshable {
                     await loadBriefings()
                 }
             }
-            .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
@@ -102,104 +103,77 @@ private struct ProactiveHeader: View {
     let onCheckNow: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(Color.oxyStone)
-                .frame(width: 34, height: 34)
-                .background(Color.oxyStone.opacity(0.12))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Oxy's read on today")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                Text("Only useful nudges. No noise.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.oxySub)
-            }
-
-            Spacer()
-
-            Button(action: onCheckNow) {
-                if isChecking {
-                    ProgressView()
-                        .tint(Color.oxyOnAccent)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 14, weight: .semibold))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Nameless: Today")
+                    .font(.system(size: 30, weight: .regular, design: .serif))
+                    .foregroundStyle(Color.nmlInk)
+                Spacer()
+                Button(action: onCheckNow) {
+                    if isChecking {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(Color.nmlMuted)
+                    } else {
+                        Text("REFRESH")
+                            .font(.nmlMono(11, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.nmlTitanium)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(isChecking)
             }
-            .frame(width: 38, height: 34)
-            .foregroundStyle(Color.oxyOnAccent)
-            .background(Color.oxyStone)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .disabled(isChecking)
+            Text("Only useful nudges. No noise.")
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
         }
-        .padding(14)
-        .background(Color.oxySurface2.opacity(0.7))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.oxyLine, lineWidth: 1)
-        )
     }
 }
 
-private struct BriefingCard: View {
+private struct BriefingRow: View {
     let briefing: Briefing
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: iconName)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(briefing.title ?? title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
-                Spacer()
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
+                Spacer(minLength: 12)
                 Text(timeLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.oxyDim)
+                    .font(.nmlMono(10))
+                    .foregroundStyle(Color.nmlMuted)
             }
 
             Text(cleanBody)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyText)
+                .font(.system(size: 14, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
-                Text(sourceLabel)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.oxySub)
+                Text(sourceLabel.uppercased())
+                    .font(.nmlMono(10, weight: .medium))
+                    .tracking(1.0)
+                    .foregroundStyle(Color.nmlMuted)
                 Spacer()
-                Button("Done", action: onDismiss)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                Button("DISMISS", action: onDismiss)
+                    .font(.nmlMono(10, weight: .medium))
+                    .tracking(1.0)
+                    .foregroundStyle(Color.nmlTitanium)
+                    .buttonStyle(.plain)
             }
+            .padding(.top, 2)
         }
-        .padding(14)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
+        .padding(.vertical, 20)
     }
 
     private var title: String {
         briefing.kind
             .replacingOccurrences(of: "_", with: " ")
             .capitalized
-    }
-
-    private var iconName: String {
-        if briefing.kind.contains("health") { return "heart.fill" }
-        if briefing.kind.contains("location") { return "location.fill" }
-        if briefing.kind.contains("failed") { return "exclamationmark.arrow.triangle.2.circlepath" }
-        return "sparkles"
     }
 
     private var cleanBody: String {
@@ -230,23 +204,18 @@ private struct BriefingCard: View {
 
 private struct EmptyProactiveState: View {
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "moon.zzz.fill")
-                .font(.system(size: 26))
-                .foregroundStyle(Color.oxyStone)
+        VStack(alignment: .leading, spacing: 10) {
             Text("Nothing needs you right now.")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color.oxyText)
-            Text("Oxy will only interrupt when there’s something actually useful.")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.oxySub)
-                .multilineTextAlignment(.center)
+                .font(.system(size: 17, weight: .regular, design: .serif))
+                .foregroundStyle(Color.nmlInk)
+            Text("Nameless will only interrupt when there's something actually useful.")
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 34)
-        .padding(.horizontal, 18)
-        .background(Color.oxySurface2)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 24)
     }
 }
 

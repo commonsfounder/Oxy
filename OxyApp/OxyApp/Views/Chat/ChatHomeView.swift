@@ -116,10 +116,9 @@ struct ChatHomeView: View {
             .padding(.top, 20)
             .padding(.bottom, 16)
 
-            // Device status
+            // Device status — full-width flat ribbon with its own bottom rule
             DeviceStatusCard(telemetry: telemetry)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
+                .padding(.bottom, 16)
 
             // New Chat
             Button {

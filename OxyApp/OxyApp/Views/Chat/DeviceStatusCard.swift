@@ -1,67 +1,59 @@
 import SwiftUI
 
-/// The pendant's vitals, rendered the way a well-made object's status should
-/// read — quiet, exact, no dashboards. A single hairline-bordered card showing
-/// the BLE link, the <10ms semantic-routing latency, and battery for both
-/// modules: Core (the chest unit) and Clasp (the weighted nape-of-neck module).
+/// The pendant's vitals as a single flat, full-width status ribbon — no pills,
+/// no battery icons, no card. Purely typographic monospace metrics with a micro
+/// green dot for the live BLE link, closed by a 0.5px titanium rule beneath.
 /// Backed by `PendantTelemetryMonitor`, currently fed by mock telemetry.
 struct DeviceStatusCard: View {
     var telemetry: PendantTelemetryMonitor
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 10) {
-                NamelessStatusDot(isLive: telemetry.isStreaming)
-                Text(telemetry.isStreaming ? "BLE streaming" : "BLE idle")
-                    .nmlEyebrow()
-                Spacer()
-                Text("ROUTING")
-                    .nmlEyebrow()
-                Text(String(format: "%.1fms", telemetry.routingLatencyMillis))
-                    .font(.nmlMono(12, weight: .medium))
-                    .foregroundStyle(Color.nmlTitanium)
-            }
+    /// The one permitted spot of colour: a micro indicator for a live link.
+    private let liveGreen = Color(red: 0.30, green: 0.80, blue: 0.46)
 
-            HStack(spacing: 0) {
-                moduleReadout(label: "Core", percent: telemetry.coreBatteryPercent)
-                Rectangle()
-                    .fill(Color.nmlHairline)
-                    .frame(width: 0.5)
-                moduleReadout(label: "Clasp", percent: telemetry.claspBatteryPercent)
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 14) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(telemetry.isStreaming ? liveGreen : Color.nmlMuted.opacity(0.5))
+                        .frame(width: 6, height: 6)
+                    Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
+                        .font(.nmlMono(10, weight: .medium))
+                        .tracking(0.6)
+                        .foregroundStyle(telemetry.isStreaming ? Color.nmlInk : Color.nmlMuted)
+                }
+
+                Spacer(minLength: 8)
+
+                metric(String(format: "%.1fMS", telemetry.routingLatencyMillis))
+                metric("CORE \(telemetry.coreBatteryPercent)%")
+                metric("CLASP \(telemetry.claspBatteryPercent)%")
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 11)
+
+            Rectangle()
+                .fill(Color.nmlHairline)
+                .frame(height: 0.5)
         }
-        .padding(24)
-        .background(Color.nmlSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .nmlHairline(radius: 18)
     }
 
-    private func moduleReadout(label: String, percent: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .nmlEyebrow()
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(percent)")
-                    .font(.nmlMono(24, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
-                Text("%")
-                    .font(.nmlMono(13))
-                    .foregroundStyle(Color.nmlMuted)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 4)
+    private func metric(_ text: String) -> some View {
+        Text(text)
+            .font(.nmlMono(10, weight: .medium))
+            .tracking(0.4)
+            .foregroundStyle(Color.nmlTitanium)
+            .fixedSize()
     }
 }
 
 #Preview {
-    ZStack {
-        Color.nmlObsidian.ignoresSafeArea()
+    ZStack(alignment: .top) {
+        Color.black.ignoresSafeArea()
         DeviceStatusCard(telemetry: {
             let monitor = PendantTelemetryMonitor()
             monitor.start()
             return monitor
         }())
-        .padding(24)
     }
 }

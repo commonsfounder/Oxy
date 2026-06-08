@@ -26,6 +26,7 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showAttachMenu = false
+    @State private var showChatMenu = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var pendingImageName: String?
@@ -213,7 +214,8 @@ struct ChatView: View {
                             }
                         },
                         onAttach: {
-                            showAttachMenu = true
+                            isInputFocused = false
+                            withAnimation(.easeOut(duration: 0.2)) { showAttachMenu = true }
                         },
                         onRemoveAttachment: {
                             pendingImageData = nil
@@ -223,6 +225,9 @@ struct ChatView: View {
                         }
                     )
                 }
+
+                attachmentSheetOverlay
+                chatMenuOverlay
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -255,27 +260,11 @@ struct ChatView: View {
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                viewModel.startNewChat(userId: appState.userId)
-                            }
-                        }) {
-                            Label("New Chat", systemImage: "square.and.pencil")
-                        }
-                        Divider()
-                        Button(action: {
-                            viewModel.requestLocationAccess()
-                        }) {
-                            Label("Share Location", systemImage: "location.fill")
-                        }
-                        Divider()
-                        Button(role: .destructive, action: { appState.logout() }) {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
+                    Button {
+                        withAnimation(.easeOut(duration: 0.16)) { showChatMenu.toggle() }
                     } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 18))
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 18, weight: .medium))
                             .foregroundStyle(Color.nmlMuted)
                     }
                 }
@@ -312,11 +301,6 @@ struct ChatView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(messageComposerAlert ?? "")
-            }
-            .confirmationDialog("Add attachment", isPresented: $showAttachMenu, titleVisibility: .visible) {
-                Button("Photo Library") { showPhotoPicker = true }
-                Button("Files") { showFileImporter = true }
-                Button("Cancel", role: .cancel) {}
             }
             .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
             .fileImporter(
@@ -387,6 +371,119 @@ struct ChatView: View {
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
         }
+    }
+
+    // MARK: - Attachment sheet (custom, flat obsidian)
+
+    @ViewBuilder
+    private var attachmentSheetOverlay: some View {
+        if showAttachMenu {
+            ZStack(alignment: .bottom) {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .onTapGesture { dismissAttachMenu() }
+
+                VStack(spacing: 0) {
+                    attachSheetRow("Photo Library") {
+                        dismissAttachMenu()
+                        showPhotoPicker = true
+                    }
+                    NamelessDivider()
+                    attachSheetRow("Files") {
+                        dismissAttachMenu()
+                        showFileImporter = true
+                    }
+                }
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            .zIndex(20)
+        }
+    }
+
+    private func attachSheetRow(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(Color.nmlInk)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 17)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissAttachMenu() {
+        withAnimation(.easeOut(duration: 0.18)) { showAttachMenu = false }
+    }
+
+    // MARK: - Chat menu (custom, flat obsidian popover)
+
+    @ViewBuilder
+    private var chatMenuOverlay: some View {
+        if showChatMenu {
+            ZStack(alignment: .topTrailing) {
+                Color.clear
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissChatMenu() }
+
+                VStack(spacing: 0) {
+                    chatMenuRow("New Chat") {
+                        dismissChatMenu()
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            viewModel.startNewChat(userId: appState.userId)
+                        }
+                    }
+                    NamelessDivider()
+                    chatMenuRow("Share Location") {
+                        dismissChatMenu()
+                        viewModel.requestLocationAccess()
+                    }
+                    NamelessDivider()
+                    chatMenuRow("Sign Out", destructive: true) {
+                        dismissChatMenu()
+                        appState.logout()
+                    }
+                }
+                .frame(width: 196)
+                .background(Color(white: 9.0 / 255.0))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                )
+                .padding(.trailing, 12)
+                .padding(.top, 6)
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
+            }
+            .zIndex(20)
+        }
+    }
+
+    private func chatMenuRow(_ title: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func dismissChatMenu() {
+        withAnimation(.easeOut(duration: 0.16)) { showChatMenu = false }
     }
 
     private func sendCurrentDraft() {
