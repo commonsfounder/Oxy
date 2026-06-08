@@ -50,12 +50,16 @@ struct MessageBubble: View {
                     // User messages get an ultra-subtle fill in a small-radius
                     // container; assistant replies stay transparent and flush so
                     // the conversation reads as one continuous column of text.
+                    // The rounded shape is drawn as a *background* (never a
+                    // clipShape) so the assistant's text is never sliced at (0,0).
                     .padding(.horizontal, isUser ? 14 : 0)
                     .padding(.vertical, isUser ? 9 : 0)
-                    .background(
-                        isUser ? AnyShapeStyle(Color.white.opacity(0.06)) : AnyShapeStyle(Color.clear)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background {
+                        if isUser {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.white.opacity(0.06))
+                        }
+                    }
 
                     if !isUser { Spacer(minLength: 56) }
                 }
