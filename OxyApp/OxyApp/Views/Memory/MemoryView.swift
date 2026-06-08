@@ -62,7 +62,10 @@ struct MemoryView: View {
                                 NamelessDivider()
                             }
                         } else {
-                            statRow(title: "Saved", value: "\(summary.total)")
+                            // "Saved" = what you added by hand; "Learned" = what
+                            // Nameless picked up on its own. Disjoint, so they add
+                            // up to your total memories instead of overlapping.
+                            statRow(title: "Saved", value: "\(max(0, summary.total - summary.learned))")
                             NamelessDivider()
                             statRow(title: "Learned", value: "\(summary.learned)")
                             NamelessDivider()

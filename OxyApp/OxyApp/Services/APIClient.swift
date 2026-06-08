@@ -47,6 +47,12 @@ final class APIClient: @unchecked Sendable {
         }
         if let queryItems {
             components.queryItems = (components.queryItems ?? []) + queryItems
+            // URLComponents leaves "+" unescaped in query values, and many servers
+            // decode it as a space — which corrupts ISO timestamps like
+            // "...789+00:00" into "...789 00:00" and 400s. Force it to %2B so
+            // values (e.g. session createdAt anchors) round-trip intact.
+            components.percentEncodedQuery = components.percentEncodedQuery?
+                .replacingOccurrences(of: "+", with: "%2B")
         }
         guard let url = components.url else {
             throw APIError.invalidURL
@@ -102,6 +108,12 @@ final class APIClient: @unchecked Sendable {
         }
         if let queryItems {
             components.queryItems = (components.queryItems ?? []) + queryItems
+            // URLComponents leaves "+" unescaped in query values, and many servers
+            // decode it as a space — which corrupts ISO timestamps like
+            // "...789+00:00" into "...789 00:00" and 400s. Force it to %2B so
+            // values (e.g. session createdAt anchors) round-trip intact.
+            components.percentEncodedQuery = components.percentEncodedQuery?
+                .replacingOccurrences(of: "+", with: "%2B")
         }
         guard let url = components.url else {
             throw APIError.invalidURL
@@ -167,6 +179,8 @@ final class APIClient: @unchecked Sendable {
                     }
                     if let queryItems {
                         components.queryItems = (components.queryItems ?? []) + queryItems
+                        components.percentEncodedQuery = components.percentEncodedQuery?
+                            .replacingOccurrences(of: "+", with: "%2B")
                     }
                     guard let url = components.url else {
                         continuation.yield(.error("Invalid URL"))

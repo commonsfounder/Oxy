@@ -6,7 +6,6 @@ struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var selectedTab = Tab.today
-    @State private var todaySunPulse = 0
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -60,8 +59,7 @@ struct MainTabView: View {
 
             ProactiveView()
                 .tabItem {
-                    Image(systemName: selectedTab == .today ? "sunrise.fill" : "sunrise")
-                        .symbolEffect(.bounce, value: todaySunPulse)
+                    Image(systemName: selectedTab == .today ? "sun.max.fill" : "sun.max")
                     Text("Today")
                 }
                 .tag(Tab.today)
@@ -79,9 +77,8 @@ struct MainTabView: View {
             DragGesture(minimumDistance: 32)
                 .onEnded(handleSwipe)
         )
-        .onChange(of: selectedTab) { _, newValue in
+        .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
-            if newValue == .today { todaySunPulse += 1 }
         }
         .onAppear { HapticManager.shared.prepare() }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
