@@ -130,6 +130,8 @@ struct NamelessToggle: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
+        // A precise, mechanical-switch pulse on every state change.
+        .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
     }
 }
 

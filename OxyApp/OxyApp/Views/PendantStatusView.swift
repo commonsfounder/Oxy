@@ -9,6 +9,7 @@ struct PendantStatusView: View {
     @Environment(\.openURL) private var openURL
 
     @State private var telemetry = PendantTelemetryMonitor()
+    @State private var footerTap = 0
 
     // Persisted hardware configuration.
     @AppStorage("nml_pendant_finish") private var finishRaw = PendantFinish.obsidian.rawValue
@@ -53,6 +54,14 @@ struct PendantStatusView: View {
                     .padding(.bottom, 28)
                     .animation(.easeInOut(duration: 0.2), value: telemetry.coreBatteryPercent)
                 }
+                // Mechanical-switch pulse for each config change.
+                .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: wakeword)
+                .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: audioOutput)
+                .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: hapticForce)
+                // Crisp mechanical click when the hardware finish is changed.
+                .sensoryFeedback(.impact(weight: .medium, intensity: 0.8), trigger: finishRaw)
+                // Soft, quiet selection feedback for footer utility taps.
+                .sensoryFeedback(.selection, trigger: footerTap)
             }
             .navigationTitle("Device")
             .navigationBarTitleDisplayMode(.large)
@@ -129,11 +138,20 @@ struct PendantStatusView: View {
                 .frame(height: 0.5)
 
             HStack {
-                footerButton("Sign Out Of All Devices") { signOutAllDevices() }
+                footerButton("Sign Out Of All Devices") {
+                    footerTap += 1
+                    signOutAllDevices()
+                }
                 Spacer(minLength: 8)
-                footerButton("Privacy Policy") { open("/privacy") }
+                footerButton("Privacy Policy") {
+                    footerTap += 1
+                    open("/privacy")
+                }
                 Spacer(minLength: 8)
-                footerButton("Get Support") { open("/support") }
+                footerButton("Get Support") {
+                    footerTap += 1
+                    open("/support")
+                }
             }
             .padding(.top, 18)
         }
