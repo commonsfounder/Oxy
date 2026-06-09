@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LoginView: View {
     @Environment(AppState.self) private var appState
-    @State private var page = 0
     @State private var userId = ""
     @State private var password = ""
     @State private var isRegistering = false
@@ -15,67 +14,15 @@ struct LoginView: View {
         ZStack {
             Color.oxyBg.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                TabView(selection: $page) {
-                    OnboardingSlide(
-                        icon: "mic.fill",
-                        subIcon: "waveform",
-                        title: "Ask Oxy",
-                        content: "Messages, bookings, reminders\n— just say it."
-                    )
-                    .tag(0)
-
-                    OnboardingSlide(
-                        icon: "arrow.triangle.branch",
-                        subIcon: nil,
-                        title: "Connected",
-                        content: "Gmail, Telegram, Uber and more\n— one request, done."
-                    )
-                    .tag(1)
-
-                    OnboardingSlide(
-                        icon: "brain.head.profile",
-                        subIcon: nil,
-                        title: "Remembers you",
-                        content: "Gets better\nthe more you use it."
-                    )
-                    .tag(2)
-
-                    LoginFormPage(
-                        userId: $userId,
-                        password: $password,
-                        isRegistering: $isRegistering,
-                        isLoading: $isLoading,
-                        errorMessage: $errorMessage,
-                        onSubmit: submit
-                    )
-                    .tag(3)
-                }
-                .tabViewStyle(.page(indexDisplayMode: page < 3 ? .always : .never))
-                .animation(.easeInOut, value: page)
-
-                if page < 3 {
-                    Button(action: { withAnimation { page = min(page + 1, 3) } }) {
-                        Text(page == 2 ? "Get Started" : "Next")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(
-                                LinearGradient(
-                                    colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .foregroundStyle(Color.oxyOnAccent)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                            .shadow(color: Color.oxyStone.opacity(0.25), radius: 12, y: 6)
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 48)
-                    .transition(.opacity)
-                }
-            }
+            // Straight to the sign-in form — no intro carousel, no mic slide.
+            LoginFormPage(
+                userId: $userId,
+                password: $password,
+                isRegistering: $isRegistering,
+                isLoading: $isLoading,
+                errorMessage: $errorMessage,
+                onSubmit: submit
+            )
         }
     }
 
@@ -113,76 +60,6 @@ struct LoginView: View {
     }
 }
 
-// MARK: - Onboarding Slide
-
-private struct OnboardingSlide: View {
-    let icon: String
-    let subIcon: String?
-    let title: String
-    let content: String
-    @State private var appeared = false
-
-    var body: some View {
-        VStack(spacing: 44) {
-            Spacer()
-
-            ZStack {
-                // Outer glow ring
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [Color.oxyStone.opacity(0.12), Color.oxyStone.opacity(0.03), .clear],
-                            center: .center,
-                            startRadius: 40,
-                            endRadius: 110
-                        )
-                    )
-                    .frame(width: 180, height: 180)
-                    .scaleEffect(appeared ? 1.0 : 0.8)
-
-                // Inner circle
-                Circle()
-                    .fill(Color.oxyStone.opacity(0.1))
-                    .frame(width: 120, height: 120)
-
-                VStack(spacing: 6) {
-                    Image(systemName: icon)
-                        .font(.system(size: 44, weight: .medium))
-                        .foregroundStyle(Color.oxyStone)
-                        .symbolEffect(.pulse, isActive: appeared)
-
-                    if let subIcon {
-                        Image(systemName: subIcon)
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(Color.oxyStone.opacity(0.5))
-                    }
-                }
-            }
-
-            VStack(spacing: 14) {
-                Text(title)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.oxyText)
-
-                Text(content)
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color.oxySub)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-            }
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 12)
-
-            Spacer()
-            Spacer()
-        }
-        .padding(.horizontal, 36)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.5)) { appeared = true }
-        }
-        .onDisappear { appeared = false }
-    }
-}
 
 // MARK: - Login Form Page
 

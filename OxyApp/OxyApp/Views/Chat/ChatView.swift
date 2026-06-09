@@ -101,12 +101,6 @@ struct ChatView: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             LazyVStack(spacing: 0) {
-                                if viewModel.messages.isEmpty && !viewModel.isSending {
-                                    WelcomeCard()
-                                        .padding(.top, 88)
-                                        .padding(.bottom, 20)
-                                }
-
                                 ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
                                     let msgs = viewModel.messages
                                     let prevRole = idx > 0 ? msgs[idx - 1].role : nil
@@ -139,6 +133,17 @@ struct ChatView: View {
                             }
                             .padding(.vertical, 12)
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.messages.count)
+                        }
+                        .overlay(alignment: .bottomLeading) {
+                            if viewModel.messages.isEmpty && !viewModel.isSending {
+                                WelcomeCard { prompt in
+                                    viewModel.inputText = prompt
+                                    sendCurrentDraft()
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 12)
+                                .transition(.opacity)
+                            }
                         }
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: viewModel.messages.count) {
@@ -903,32 +908,55 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
-/// The empty-conversation state. No orb, no glow, no quick-action chips —
-/// just the name and an invitation, set the way an editorial masthead would.
+/// The empty-conversation state, anchored bottom-left just above the input: a
+/// quiet prompt over three high-leverage starter actions. Naked ultra-light
+/// icons, muted grey type, 0.5px rules — nothing filled or coloured.
 private struct WelcomeCard: View {
+    var onAction: (String) -> Void
     @State private var appeared = false
 
+    private let actions: [(icon: String, label: String)] = [
+        ("envelope", "Send an email"),
+        ("music.note", "Play some music"),
+        ("car", "Book a ride")
+    ]
+
     var body: some View {
-        VStack(spacing: 18) {
-            Text("NAMELESS")
-                .font(.system(size: 12, weight: .medium))
-                .tracking(7)
-                .foregroundStyle(Color.nmlMuted)
-
+        VStack(alignment: .leading, spacing: 0) {
             Text("Where should we begin?")
-                .font(.system(size: 21, weight: .light))
-                .foregroundStyle(Color.nmlInk)
-                .multilineTextAlignment(.center)
+                .font(.system(size: 18, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
+                .padding(.bottom, 16)
 
-            Rectangle()
-                .fill(Color.nmlHairline)
-                .frame(width: 28, height: 0.5)
+            ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(height: 0.5)
+
+                Button {
+                    onAction(action.label)
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: action.icon)
+                            .font(.system(size: 18, weight: .ultraLight))
+                            .foregroundStyle(Color.nmlMuted)
+                            .frame(width: 22, alignment: .leading)
+                        Text(action.label)
+                            .font(.system(size: 16, weight: .regular))
+                            .foregroundStyle(Color.nmlMuted)
+                        Spacer()
+                    }
+                    .padding(.vertical, 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(.horizontal, 40)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 8)
         .onAppear {
-            withAnimation(.easeOut(duration: 0.6)) { appeared = true }
+            withAnimation(.easeOut(duration: 0.5)) { appeared = true }
         }
     }
 }

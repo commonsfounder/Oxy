@@ -29,10 +29,16 @@ struct OxyApp: App {
 
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    @State private var didRestoreSession = false
 
     var body: some View {
         Group {
-            if appState.isAuthenticated {
+            if !didRestoreSession {
+                // Hold on a plain black screen until the keychain session check
+                // finishes, so a returning user never sees a flash of the login
+                // screen on cold launch.
+                Color.black.ignoresSafeArea()
+            } else if appState.isAuthenticated {
                 MainTabView()
             } else {
                 LoginView()
@@ -41,6 +47,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.35), value: appState.isAuthenticated)
         .task {
             appState.restoreSession()
+            didRestoreSession = true
         }
     }
 }
