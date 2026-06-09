@@ -7,6 +7,8 @@ struct PendantStatusView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
+    @State private var telemetry = PendantTelemetryMonitor()
+
     // Persisted hardware configuration.
     @AppStorage("nml_hw_wakeword") private var wakeword = "CHIN TILT"
     @AppStorage("nml_hw_audio") private var audioOutput = "BLE BUDS"
@@ -20,8 +22,11 @@ struct PendantStatusView: View {
 
                 ScrollView {
                     VStack(spacing: 0) {
+                        // Hardware status, moved here from the chat list.
+                        DeviceStatusCard(telemetry: telemetry)
+                            .padding(.bottom, 28)
+
                         hardwareConfig
-                            .padding(.top, 8)
 
                         footer
                             .padding(.top, 48)
@@ -50,6 +55,8 @@ struct PendantStatusView: View {
                 }
             }
         }
+        .onAppear { telemetry.start() }
+        .onDisappear { telemetry.stop() }
     }
 
     // MARK: - Hardware config

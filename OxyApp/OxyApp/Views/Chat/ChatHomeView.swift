@@ -26,7 +26,6 @@ struct ChatHomeView: View {
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
     @State private var pendantItem: PendantTranscriptItem?
-    @State private var telemetry = PendantTelemetryMonitor()
 
     private struct PendantTranscriptItem: Identifiable {
         let id = UUID().uuidString
@@ -92,9 +91,7 @@ struct ChatHomeView: View {
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
             setupPendantBridge()
-            telemetry.start()
         }
-        .onDisappear { telemetry.stop() }
         .fullScreenCover(item: $pendantItem) { item in
             ChatView(autoSendTranscript: item.transcript)
         }
@@ -115,10 +112,6 @@ struct ChatHomeView: View {
             .padding(.horizontal, 20)
             .padding(.top, 20)
             .padding(.bottom, 16)
-
-            // Device status — full-width flat ribbon with its own bottom rule
-            DeviceStatusCard(telemetry: telemetry)
-                .padding(.bottom, 16)
 
             // New Chat
             Button {

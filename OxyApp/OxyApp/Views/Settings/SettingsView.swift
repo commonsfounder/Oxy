@@ -286,7 +286,7 @@ struct SettingsView: View {
                 Button("Delete", role: .destructive) { deleteAccount() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This permanently deletes your Oxy account data, including conversations, memories, connectors, preferences, and action history.")
+                Text("This permanently deletes your account data, including conversations, memories, connectors, preferences, and action history.")
             }
             .sheet(isPresented: $showBackendURLEditor) {
                 BackendURLEditorSheet(currentURL: $customBackendURL) {
@@ -703,7 +703,7 @@ private final class VoicePreviewPlayer: NSObject, AVAudioPlayerDelegate {
                     method: "POST",
                     body: [
                         "voice": voice,
-                        "text": "Hey, I am Oxy. This is how I sound."
+                        "text": "This is a preview of how this voice sounds."
                     ]
                 )
                 guard !Task.isCancelled else { return }
@@ -814,7 +814,7 @@ private struct InitiativeScroller: View {
 // MARK: - Settings Model
 
 struct OxySettings: Codable {
-    var name: String = "Oxy"
+    var name: String = "Nameless"
     var voice: String = "Aoede"
     var voiceOn: Bool = true
     var voiceEngine: String = "current"
@@ -846,7 +846,7 @@ struct OxySettings: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Oxy"
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Nameless"
         voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
         voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
         voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"

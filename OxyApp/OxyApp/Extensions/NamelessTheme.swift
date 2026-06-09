@@ -5,8 +5,8 @@ import SwiftUI
 /// fixed rather than light/dark-adaptive: this aesthetic doesn't bend to system
 /// appearance, the same way a well-made object looks the same in any room.
 extension Color {
-    /// Deep obsidian background — richer and darker than the standard surface gray.
-    static let nmlObsidian = Color(red: 6 / 255, green: 6 / 255, blue: 7 / 255)
+    /// Pure black background — the single canvas colour across the app.
+    static let nmlObsidian = Color.black
     /// Slightly raised obsidian surface for cards and rows.
     static let nmlSurface = Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255)
     /// One step lighter still — for elements nested inside a surface (input fields, pills).
@@ -17,8 +17,8 @@ extension Color {
     static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
     /// Soft white for primary editorial type — intentionally never pure white.
     static let nmlInk = Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255)
-    /// Muted warm gray for captions, eyebrows, and secondary detail.
-    static let nmlMuted = Color(red: 142 / 255, green: 141 / 255, blue: 137 / 255)
+    /// Muted secondary gray (#8E8E93) for captions, eyebrows, and secondary detail.
+    static let nmlMuted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
     /// Faint halo behind a live-status dot.
     static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
 }

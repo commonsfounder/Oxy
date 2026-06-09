@@ -26,10 +26,16 @@ struct MessageBubble: View {
         }
     }
 
+    /// A ride booking gets a dedicated native handoff card; suppress the
+    /// assistant's "Opening Uber…" chat text so the card stands alone.
+    private var uberAction: ActionResult? {
+        message.actions.first { $0.action == "book_uber" && !$0.pending }
+    }
+
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 3) {
             // Message content
-            if !message.content.isEmpty {
+            if !message.content.isEmpty && uberAction == nil {
                 HStack(alignment: .bottom, spacing: 0) {
                     if isUser { Spacer(minLength: 56) }
 
@@ -78,7 +84,11 @@ struct MessageBubble: View {
             if !visibleActions.isEmpty {
                 VStack(spacing: 5) {
                     ForEach(visibleActions) { action in
-                        ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
+                        if action.action == "book_uber" {
+                            UberHandoffCard(action: action) { onOpenAction?(action) }
+                        } else {
+                            ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
+                        }
                     }
                 }
                 .padding(.top, 2)
@@ -288,6 +298,122 @@ struct ActionCard: View {
         }
     }
 
+}
+
+// MARK: - Uber Handoff Card
+
+/// A native ride-booking transition card. Pure black with a 0.5px gray border,
+/// minimalist left-aligned monospace readout (destination / ETA / estimate), and
+/// a silent confirm indicator that animates on appear before the tap hands off
+/// to the Uber deep link.
+struct UberHandoffCard: View {
+    let action: ActionResult
+    var onOpen: () -> Void
+
+    @State private var confirmed = false
+
+    private var source: String {
+        action.cardText ?? action.text ?? action.actionSummary ?? ""
+    }
+
+    private var destination: String {
+        if let range = source.range(of: " to ", options: .caseInsensitive) {
+            let tail = source[range.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !tail.isEmpty { return tail }
+        }
+        return source.isEmpty ? "—" : source
+    }
+
+    private var eta: String { firstMatch(#"(\d+)\s*min"#).map { "\($0)" } ?? "—" }
+    private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#) ?? "—" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("RIDE · UBER")
+                    .font(.system(.caption2, design: .monospaced))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.nmlMuted)
+                Spacer()
+                ConfirmTick(active: confirmed)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                handoffRow("DEST", destination)
+                handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
+                handoffRow("EST", estimate)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen() }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.6).delay(0.15)) { confirmed = true }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
+    }
+
+    private func handoffRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(Color.nmlMuted)
+                .frame(width: 38, alignment: .leading)
+            Text(value)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(Color.nmlInk)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func firstMatch(_ pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(source.startIndex..., in: source)
+        guard let match = regex.firstMatch(in: source, range: range) else { return nil }
+        // Prefer the first capture group if present, else the whole match.
+        let target = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
+            ? match.range(at: 1) : match.range
+        guard let r = Range(target, in: source) else { return nil }
+        return String(source[r])
+    }
+}
+
+/// A 1px silver ring that draws a check on appear — a quiet "confirmed" beat.
+private struct ConfirmTick: View {
+    let active: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .frame(width: 18, height: 18)
+            CheckPath()
+                .trim(from: 0, to: active ? 1 : 0)
+                .stroke(Color.nmlTitanium, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .frame(width: 9, height: 7)
+        }
+        .frame(width: 18, height: 18)
+    }
+}
+
+private struct CheckPath: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
 }
 
 #Preview {
