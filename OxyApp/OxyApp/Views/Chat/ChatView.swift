@@ -922,34 +922,30 @@ private struct WelcomeCard: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 24) {
             Text("Where should we begin?")
-                .font(.system(size: 18, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
-                .padding(.bottom, 16)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(Color.nmlInk)
 
-            ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(height: 0.5)
-
-                Button {
-                    onAction(action.label)
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: action.icon)
-                            .font(.system(size: 18, weight: .ultraLight))
-                            .foregroundStyle(Color.nmlMuted)
-                            .frame(width: 22, alignment: .leading)
-                        Text(action.label)
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
-                        Spacer()
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                    Button {
+                        onAction(action.label)
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: action.icon)
+                                .font(.system(size: 18, weight: .ultraLight))
+                                .foregroundStyle(Color.nmlMuted)
+                                .frame(width: 22, alignment: .leading)
+                            Text(action.label)
+                                .font(.system(size: 16, weight: .regular))
+                                .foregroundStyle(Color.nmlMuted)
+                            Spacer()
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 14)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1042,7 +1038,7 @@ private struct ChatInputBar: View {
                 .disabled(isSending)
 
                 VStack(spacing: 8) {
-                    TextField("Speak to Nameless", text: $text, axis: .vertical)
+                    TextField("", text: $text, axis: .vertical)
                         .font(.system(size: 15, weight: .light))
                         .foregroundStyle(Color.nmlInk)
                         .lineLimit(1...5)
