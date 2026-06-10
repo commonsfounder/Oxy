@@ -1,19 +1,19 @@
 import SwiftUI
 
 struct LoadingIndicator: View {
-    var label: String = "Loading..."
-    var tint: Color = .oxyStone
+    var label: String = "Loading…"
+    var tint: Color = .nmlTitanium
 
     var body: some View {
         VStack(spacing: 12) {
             ProgressView()
                 .tint(tint)
             Text(label)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.oxySub)
+                .font(.system(size: 12, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.oxyBg)
+        .background(Color.black)
     }
 }
 
@@ -24,27 +24,28 @@ struct OxyThinkingIndicator: View {
     @State private var active = false
 
     var body: some View {
-        HStack(spacing: compact ? 8 : 10) {
-            ZStack {
+        HStack(spacing: 6) {
+            ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(Color.oxyStone.opacity(active ? 0.18 : 0.08))
-                    .frame(width: compact ? 20 : 24, height: compact ? 20 : 24)
-                    .scaleEffect(active ? 1.06 : 0.92)
-                Image(systemName: "sparkle")
-                    .font(.system(size: compact ? 9 : 11, weight: .bold))
-                    .foregroundStyle(Color.oxyStone)
-                    .rotationEffect(.degrees(active ? 8 : -8))
+                    .fill(Color.nmlMuted)
+                    .frame(width: 5, height: 5)
+                    .opacity(active ? 1 : 0.3)
+                    .animation(
+                        .easeInOut(duration: 0.7)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.18),
+                        value: active
+                    )
             }
-            .animation(.easeInOut(duration: 0.95).repeatForever(autoreverses: true), value: active)
-
             if let label, !label.isEmpty {
                 Text(label)
-                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                    .foregroundStyle(Color.oxySub)
+                    .font(.system(size: compact ? 12 : 13, weight: .regular))
+                    .foregroundStyle(Color.nmlMuted)
                     .lineLimit(1)
+                    .padding(.leading, 4)
             }
         }
-        .accessibilityLabel(label ?? "Oxy is thinking")
+        .accessibilityLabel(label ?? "Thinking")
         .onAppear { active = true }
     }
 }
@@ -57,15 +58,11 @@ struct OxySkeletonCard: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.oxySurface2)
+            .fill(Color.white.opacity(0.03))
             .frame(height: height)
             .overlay(
                 LinearGradient(
-                    colors: [
-                        .clear,
-                        Color.white.opacity(0.10),
-                        .clear
-                    ],
+                    colors: [.clear, Color.white.opacity(0.06), .clear],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
@@ -73,10 +70,6 @@ struct OxySkeletonCard: View {
                 .offset(x: shimmer ? 260 : -260)
             )
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
             .onAppear { shimmer = true }
             .animation(.easeInOut(duration: 1.25).repeatForever(autoreverses: false), value: shimmer)
             .accessibilityHidden(true)
@@ -89,4 +82,5 @@ struct OxySkeletonCard: View {
         OxyThinkingIndicator()
         OxyThinkingIndicator(label: "Thinking")
     }
+    .background(Color.black)
 }

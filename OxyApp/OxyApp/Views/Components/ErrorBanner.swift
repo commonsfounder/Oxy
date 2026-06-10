@@ -6,41 +6,40 @@ struct ErrorBanner: View {
     var onDismiss: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyRed)
-
+        HStack(spacing: 12) {
             Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.oxyText)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Color.nmlDanger)
                 .lineLimit(2)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if let onRetry {
-                Button("Retry", action: onRetry)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                Button("RETRY", action: onRetry)
+                    .font(.nmlMono(11, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.nmlTitanium)
+                    .buttonStyle(.plain)
             }
 
             if let onDismiss {
-                Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.oxySub)
-                }
+                Button("DISMISS", action: onDismiss)
+                    .font(.nmlMono(11, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.nmlMuted)
+                    .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.oxySurface3)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.black)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+        }
     }
 }
 
 #Preview {
-    ErrorBanner(message: "Network connection lost", onDismiss: {})
-        .background(Color.oxyBg)
+    ErrorBanner(message: "Network connection lost", onRetry: {}, onDismiss: {})
+        .background(Color.black)
 }

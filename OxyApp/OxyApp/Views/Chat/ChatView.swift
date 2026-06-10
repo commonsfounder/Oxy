@@ -793,7 +793,7 @@ private struct VoiceRecordingBar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(isTranscribing ? Color.nmlTitanium : Color.oxyRed)
+                            .fill(isTranscribing ? Color.nmlTitanium : Color.nmlDanger)
                             .frame(width: 8, height: 8)
                             .scaleEffect(pulse ? 1.2 : 0.8)
                             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
@@ -1078,7 +1078,7 @@ private struct ChatInputBar: View {
                     }
                     .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
                     .frame(width: 36, height: 36)
-                    .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.nmlTitanium) : Color.nmlSurface2)
+                    .background(canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : Color.nmlSurface2)
                     .clipShape(Circle())
                 }
                 .disabled(!canAct)
@@ -1166,20 +1166,19 @@ struct PendantOverlay: View {
                 if let t = transcript, !t.isEmpty {
                     Text(t)
                         .font(.system(size: 14))
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.nmlInk)
                         .lineLimit(1)
                 } else {
                     Text("Transcribing…")
                         .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.nmlMuted)
                 }
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
-        .background(.regularMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.primary.opacity(0.07), lineWidth: 0.5))
-        .shadow(color: .black.opacity(0.13), radius: 18, x: 0, y: 6)
+        .background(Color.black, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
         .animation(.easeInOut(duration: 0.2), value: state)
     }
 }
