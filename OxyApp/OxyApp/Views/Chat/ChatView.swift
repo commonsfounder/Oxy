@@ -49,6 +49,9 @@ struct ChatView: View {
                         if let onMenu { onMenu() } else { dismiss() }
                     }
                 )
+                .onChange(of: isIncognito) { _, on in
+                    viewModel.incognito = on
+                }
 
                 // Offline banner
                 if isOffline {

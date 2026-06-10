@@ -15,12 +15,17 @@ struct ChatService {
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
         nativeHints: [String: Any]? = nil,
-        tts: Bool = false
+        tts: Bool = false,
+        incognito: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
             "userId": userId,
             "message": message
         ]
+
+        if incognito {
+            body["incognito"] = true
+        }
 
         if let chatStartedAt {
             body["chatStartedAt"] = chatStartedAt

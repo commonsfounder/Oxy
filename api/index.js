@@ -2432,7 +2432,8 @@ function buildConversationSessions(rows = []) {
     .slice(0, 30);
 }
 
-async function maybeGenerateSessionTitle(userId, userMessageText) {
+async function maybeGenerateSessionTitle(userId, userMessageText, trace = null) {
+  if (trace?.incognito) return;
   (async () => {
     try {
       const since = new Date(Date.now() - 50 * 60 * 1000).toISOString();
@@ -2506,6 +2507,8 @@ function backfillSessionTitles(userId, sessions, storedTitles) {
 }
 
 async function saveMessage(userId, role, content, trace = null) {
+  // Incognito ("shadow") turns are never persisted.
+  if (trace?.incognito) return;
   const insertMessage = () => supabase
     .from('conversations')
     .insert({
@@ -4415,7 +4418,9 @@ function getStructuredDataResults(actionResults) {
 }
 
 // Fire-and-forget post-response tasks (memory + style preferences)
-function postResponseTasks(userId, message) {
+function postResponseTasks(userId, message, trace = null) {
+  // Incognito turns leave no trace: no memory, no learned preferences.
+  if (trace?.incognito) return;
   if (shouldSaveMemory(message)) {
     extractMemoryFact(userId, message).then(fact => {
       if (fact) saveMemory(userId, fact, 'fact');
@@ -4436,8 +4441,8 @@ function postResponseTasks(userId, message) {
 async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
   saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
     .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
-  if (message) maybeGenerateSessionTitle(userId, message);
-  postResponseTasks(userId, message);
+  if (message) maybeGenerateSessionTitle(userId, message, trace);
+  postResponseTasks(userId, message, trace);
 
   if (streaming) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -4491,7 +4496,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
-    trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
+    if (req.body.incognito === true) trace.incognito = true;
+    trace.log(`request.start stream=${streaming} tts=${wantsTTS} incognito=${!!trace.incognito} msg=${JSON.stringify((message || '').slice(0, 80))}`);
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
@@ -4544,7 +4550,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     if (deterministicQuickReply) {
       saveMessage(userId, 'assistant', { text: deterministicQuickReply, actions: [] }, trace)
         .catch(err => trace.log('supabase.conversations.insert_assistant.quick_async_fail', err.message));
-      postResponseTasks(userId, message);
+      postResponseTasks(userId, message, trace);
 
       if (streaming) {
         res.setHeader('Content-Type', 'text/event-stream');
@@ -4638,7 +4644,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
         saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
           .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
-        postResponseTasks(userId, message);
+        postResponseTasks(userId, message, trace);
         return;
       }
 
@@ -4662,7 +4668,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
       }
       res.json(result);
-      postResponseTasks(userId, message);
+      postResponseTasks(userId, message, trace);
       return;
     }
 
@@ -4871,7 +4877,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // Fire-and-forget: save assistant message + memory/preferences
         saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
           .catch(err => trace.log('supabase.conversations.insert_assistant.async_fail', err.message));
-        postResponseTasks(userId, message);
+        postResponseTasks(userId, message, trace);
 
       } catch (err) {
         trace.log('request.error', err.message);
@@ -4960,7 +4966,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     trace.log('request.total');
     res.json(result);
-    postResponseTasks(userId, message);
+    postResponseTasks(userId, message, trace);
 
   } catch (err) {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);

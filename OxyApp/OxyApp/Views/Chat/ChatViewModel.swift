@@ -27,6 +27,8 @@ final class ChatViewModel {
     var isViewingHistorySnapshot = false
     var historySnapshotLabel: String?
     var networkError: String?
+    /// When true, this turn is not persisted server-side (shadow / incognito chat).
+    var incognito = false
 
     /// Called on the main actor when a silent pendant execution finishes.
     var onSilentExecComplete: (() -> Void)?
@@ -229,7 +231,8 @@ final class ChatViewModel {
                 chatStartedAt: activeChatStartedAt,
                 settings: settings,
                 location: location,
-                nativeHints: nativeHints
+                nativeHints: nativeHints,
+                incognito: incognito
             )
             var fullText = ""
 
@@ -370,7 +373,8 @@ final class ChatViewModel {
                 chatStartedAt: activeChatStartedAt,
                 settings: settings,
                 location: location,
-                nativeHints: nativeHints
+                nativeHints: nativeHints,
+                incognito: incognito
             )
 
             for await event in stream {
