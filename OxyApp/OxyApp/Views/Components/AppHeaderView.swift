@@ -12,31 +12,40 @@ struct AppHeaderView: View {
 
     private let muted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255) // #8E8E93
 
+    private let circle: CGFloat = 38
+
     var body: some View {
         HStack {
+            // Left: history / menu, in a soft circular button (matches the
+            // app's other circular nav controls).
             Button(action: onLeading) {
                 Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(muted)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: circle, height: circle)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("History")
 
             Spacer()
 
+            // Right: incognito ghost, same circular treatment, only on an empty chat.
             if isEmptyChat {
                 Button {
                     withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
                 } label: {
                     GhostIcon(active: isIncognito)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 18, height: 18)
+                        .frame(width: circle, height: circle)
+                        .background(Circle().fill(Color.white.opacity(isIncognito ? 0.12 : 0.06)))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(Color.black)
     }
 }

@@ -191,73 +191,70 @@ struct ActionCard: View {
     }
 
     private var cardContent: some View {
-        VStack(alignment: .leading, spacing: action.pending ? 12 : 0) {
-            HStack(spacing: 10) {
-                NamelessStatusDot(isLive: action.success, diameter: 5)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(actionSummary)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.nmlInk)
-
-                    if let text = detailText {
-                        Text(text)
-                            .font(.system(size: 11, weight: .light))
-                            .foregroundStyle(Color.nmlMuted)
-                            .lineLimit(action.action == "plan_trip" ? 2 : 1)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-
+        VStack(alignment: .leading, spacing: 12) {
+            // Header: category key on the left, state on the right.
+            HStack {
+                Text(categoryLabel)
+                    .font(.system(.caption2, design: .monospaced))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.nmlMuted)
                 Spacer()
-
                 if hasLink {
                     Text("OPEN")
-                        .font(.nmlMono(10, weight: .medium))
+                        .font(.system(.caption2, design: .monospaced))
                         .tracking(1.2)
                         .foregroundStyle(Color.nmlTitanium)
+                } else {
+                    Text(action.success ? "OK" : "FAIL")
+                        .font(.system(.caption2, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(action.success ? Color.nmlTitanium : Color.nmlDanger)
                 }
             }
 
+            if let text = detailText {
+                Text(text)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(Color.nmlInk)
+                    .lineLimit(action.action == "plan_trip" ? 2 : 1)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             if action.pending, let onCommand {
-                HStack(spacing: 10) {
-                    Button {
-                        onCommand("confirm")
-                    } label: {
-                        Text("CONFIRM")
-                            .font(.nmlMono(11, weight: .medium))
+                HStack(spacing: 0) {
+                    Button { onCommand("confirm") } label: {
+                        Text("[ CONFIRM ]")
+                            .font(.system(.caption2, design: .monospaced))
                             .tracking(1.4)
-                            .foregroundStyle(Color.black)
+                            .foregroundStyle(Color.nmlInk)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .background(Color.white)
-                            .clipShape(Capsule())
+                            .frame(height: 40)
+                            .border(Color.nmlCardBorder, width: 0.5)
                     }
                     .buttonStyle(.plain)
 
-                    Button {
-                        onCommand("cancel")
-                    } label: {
-                        Text("CANCEL")
-                            .font(.nmlMono(11, weight: .medium))
+                    Button { onCommand("cancel") } label: {
+                        Text("[ CANCEL ]")
+                            .font(.system(.caption2, design: .monospaced))
                             .tracking(1.4)
                             .foregroundStyle(Color.nmlMuted)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 38)
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+                            .frame(height: 40)
+                            .border(Color.nmlCardBorder, width: 0.5)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
-        )
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.black)
+        .border(Color.nmlCardBorder, width: 0.5)
+    }
+
+    private var categoryLabel: String {
+        actionSummary.uppercased()
     }
 
     private func openLink() {
@@ -356,11 +353,7 @@ struct UberHandoffCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
-        )
+        .border(Color.nmlCardBorder, width: 0.5)
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onAppear {

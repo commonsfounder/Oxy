@@ -121,6 +121,16 @@ function parseDirectionTime(value, now = new Date()) {
   return Math.floor(arrival.getTime() / 1000);
 }
 
+function formatClockTime(seconds) {
+  const d = new Date(Number(seconds) * 1000);
+  let hour = d.getHours();
+  const minute = d.getMinutes();
+  const meridiem = hour >= 12 ? 'pm' : 'am';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+  return `${hour}:${String(minute).padStart(2, '0')} ${meridiem}`;
+}
+
 function minutesBetween(a, b) {
   const start = Number(a);
   const end = Number(b);
@@ -384,7 +394,7 @@ async function planTrip(destination, params = {}) {
   };
 }
 
-function summarizeDirectionsRoute(route, modeLabel) {
+function summarizeDirectionsRoute(route, modeLabel, arrivalSeconds = null) {
   const leg = route?.legs?.[0];
   if (!leg) return null;
   const duration = leg.duration?.text;
@@ -399,7 +409,28 @@ function summarizeDirectionsRoute(route, modeLabel) {
   const detail = transitSteps.length
     ? transitSteps.map(step => step.text).slice(0, 3).join(' · ')
     : `Open ${modeLabel} directions in Maps`;
-  if (!transitSteps.length) return { headline, detail };
+  if (!transitSteps.length) {
+    // Driving/walking: if the user gave an arrival deadline, compute and lead
+    // with the actual leave-by time instead of just opening Maps.
+    const durationSeconds = leg.duration_in_traffic?.value ?? leg.duration?.value;
+    const durationText = leg.duration_in_traffic?.text || leg.duration?.text || duration;
+    if (arrivalSeconds && Number.isFinite(durationSeconds)) {
+      const leaveText = formatClockTime(arrivalSeconds - durationSeconds);
+      const arriveText = formatClockTime(arrivalSeconds);
+      return {
+        headline: durationText,
+        detail: `Leave by ${leaveText}`,
+        text: `Leave by ${leaveText} to arrive by ${arriveText} — about ${durationText} by ${modeLabel}.`,
+        routeContext: { mode: modeLabel, duration: durationText, leaveBy: leaveText, arrival: arriveText }
+      };
+    }
+    return {
+      headline,
+      detail,
+      text: durationText ? `It's about ${durationText} by ${modeLabel}.` : undefined,
+      routeContext: { mode: modeLabel, duration: durationText }
+    };
+  }
 
   const naturalSteps = transitSteps.slice(0, 4).map((step, index) => {
     const first = index === 0 ? 'Take' : 'Then take';
@@ -470,15 +501,22 @@ async function getGoogleDirections(destination, place, params = {}) {
   };
   const arrival = parseDirectionTime(params.arrival_time);
   const departure = parseDirectionTime(params.departure_time);
-  if (arrival && mode === 'transit') requestParams.arrival_time = arrival;
-  if (!arrival && departure && mode === 'transit') requestParams.departure_time = departure;
+  if (mode === 'transit') {
+    if (arrival) requestParams.arrival_time = arrival;
+    else if (departure) requestParams.departure_time = departure;
+  } else if (mode === 'driving') {
+    // The Directions API ignores arrival_time for driving, so request a
+    // traffic-aware duration (which needs a departure_time) and compute the
+    // leave time ourselves from the requested arrival.
+    requestParams.departure_time = departure || arrival || 'now';
+  }
 
   const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
     params: requestParams,
     timeout: 10000
   });
   if (response.data?.status !== 'OK' || !response.data.routes?.length) return null;
-  return summarizeDirectionsRoute(response.data.routes[0], mode);
+  return summarizeDirectionsRoute(response.data.routes[0], mode, arrival);
 }
 
 function isPlacesSetupError(err) {

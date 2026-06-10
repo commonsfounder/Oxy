@@ -13,6 +13,8 @@ extension Color {
     static let nmlSurface2 = Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255)
     /// Titanium/silver hairline — always drawn at 0.5pt.
     static let nmlHairline = Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16)
+    /// Flat solid card border (#222222) for raw monospace telemetry cards.
+    static let nmlCardBorder = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
     /// Soft titanium for icons, dots, and quiet emphasis.
     static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
     /// Soft white for primary editorial type — intentionally never pure white.
