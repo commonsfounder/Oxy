@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
@@ -9,74 +8,39 @@ struct MainTabView: View {
 
     enum Tab: String, CaseIterable {
         case chat, today, more
-    }
 
-    init() {
-        MainTabView.applyNamelessTabBarAppearance()
-    }
-
-    /// Keeps the translucent "glass" blur but pulls the bar into the Nameless
-    /// palette: a deep obsidian tint over the blur, a 0.5px titanium hairline on
-    /// top, soft-white selected items and muted-grey unselected ones — no warm
-    /// accent colour.
-    private static func applyNamelessTabBarAppearance() {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithDefaultBackground() // retain the system blur
-        appearance.backgroundEffect = UIBlurEffect(style: .systemChromeMaterialDark)
-        appearance.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        appearance.shadowColor = UIColor(white: 0.82, alpha: 0.16) // titanium hairline
-
-        let muted = UIColor(white: 0.56, alpha: 1.0)
-        let selected = UIColor(red: 240 / 255, green: 239 / 255, blue: 235 / 255, alpha: 1.0)
-
-        for layout in [appearance.stackedLayoutAppearance,
-                       appearance.inlineLayoutAppearance,
-                       appearance.compactInlineLayoutAppearance] {
-            layout.normal.iconColor = muted
-            layout.normal.titleTextAttributes = [
-                .font: UIFont.systemFont(ofSize: 10, weight: .medium),
-                .foregroundColor: muted
-            ]
-            layout.selected.iconColor = selected
-            layout.selected.titleTextAttributes = [
-                .font: UIFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: selected
-            ]
+        var icon: String {
+            switch self {
+            case .chat: return "bubble.left"
+            case .today: return "sun.max"
+            case .more: return "square.grid.2x2"
+            }
         }
 
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+        var label: String {
+            switch self {
+            case .chat: return "Chat"
+            case .today: return "Today"
+            case .more: return "More"
+            }
+        }
     }
 
     var body: some View {
+        // A true paged TabView for buttery 1:1 horizontal swiping. The native
+        // page style hides the system tab bar, so a slim custom bar is added via
+        // safeAreaInset (which also keeps page content clear of it).
         TabView(selection: $selectedTab) {
-            ChatHomeView()
-                .tabItem {
-                    Image(systemName: selectedTab == .chat ? "bubble.left.fill" : "bubble.left")
-                    Text("Chat")
-                }
-                .tag(Tab.chat)
-
-            ProactiveView()
-                .tabItem {
-                    Image(systemName: selectedTab == .today ? "sun.max.fill" : "sun.max")
-                    Text("Today")
-                }
-                .tag(Tab.today)
-
-            MoreView()
-                .tabItem {
-                    Image(systemName: selectedTab == .more ? "square.grid.2x2.fill" : "square.grid.2x2")
-                    Text("More")
-                }
-                .tag(Tab.more)
+            ChatHomeView().tag(Tab.chat)
+            ProactiveView().tag(Tab.today)
+            MoreView().tag(Tab.more)
         }
-        .tint(Color.nmlInk)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .animation(.easeInOut(duration: 0.25), value: selectedTab)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomBar
+        }
         .id(accentColor + appTheme)
-        .gesture(
-            DragGesture(minimumDistance: 32)
-                .onEnded(handleSwipe)
-        )
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
         }
@@ -89,16 +53,41 @@ struct MainTabView: View {
         }
     }
 
-    private func handleSwipe(_ value: DragGesture.Value) {
-        let horizontal = value.translation.width
-        let vertical = value.translation.height
-        guard abs(horizontal) > 64, abs(horizontal) > abs(vertical) * 1.8 else { return }
-        guard let index = Tab.allCases.firstIndex(of: selectedTab) else { return }
-        let nextIndex = horizontal < 0 ? index + 1 : index - 1
-        guard Tab.allCases.indices.contains(nextIndex) else { return }
-        withAnimation(.easeOut(duration: 0.25)) {
-            selectedTab = Tab.allCases[nextIndex]
+    // MARK: - Custom bottom bar
+
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    tabButton(tab)
+                }
+            }
+            .padding(.top, 10)
+            .padding(.bottom, 4)
         }
+        .background(Color.black)
+    }
+
+    private func tabButton(_ tab: Tab) -> some View {
+        let selected = selectedTab == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.25)) { selectedTab = tab }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
+                    .font(.system(size: 19, weight: .regular))
+                Text(tab.label)
+                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
+            }
+            .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

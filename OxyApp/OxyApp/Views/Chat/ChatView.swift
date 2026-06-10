@@ -26,7 +26,7 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showAttachMenu = false
-    @State private var showChatMenu = false
+    @State private var isIncognito = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var pendingImageName: String?
@@ -41,6 +41,11 @@ struct ChatView: View {
             Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                AppHeaderView(isIncognito: $isIncognito, onLeading: {
+                    HapticManager.shared.impact(.light)
+                    if let onMenu { onMenu() } else { dismiss() }
+                })
+
                 // Offline banner
                 if isOffline {
                     HStack(spacing: 8) {
@@ -232,50 +237,8 @@ struct ChatView: View {
                 }
 
                 attachmentSheetOverlay
-                chatMenuOverlay
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if let onMenu {
-                        Button {
-                            HapticManager.shared.impact(.light)
-                            onMenu()
-                        } label: {
-                            Image(systemName: "line.3.horizontal")
-                                .font(.system(size: 17, weight: .medium))
-                                .foregroundStyle(Color.nmlMuted)
-                        }
-                    } else {
-                        Button(action: { dismiss() }) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color.nmlMuted)
-                        }
-                    }
-                }
-
-                if let session = initialSession {
-                    ToolbarItem(placement: .principal) {
-                        Text(session.title)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.nmlInk)
-                            .lineLimit(1)
-                    }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.16)) { showChatMenu.toggle() }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(Color.nmlMuted)
-                    }
-                }
-            }
-            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,
@@ -428,67 +391,6 @@ struct ChatView: View {
 
     private func dismissAttachMenu() {
         withAnimation(.easeOut(duration: 0.18)) { showAttachMenu = false }
-    }
-
-    // MARK: - Chat menu (custom, flat obsidian popover)
-
-    @ViewBuilder
-    private var chatMenuOverlay: some View {
-        if showChatMenu {
-            ZStack(alignment: .topTrailing) {
-                Color.clear
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissChatMenu() }
-
-                VStack(spacing: 0) {
-                    chatMenuRow("New Chat") {
-                        dismissChatMenu()
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            viewModel.startNewChat(userId: appState.userId)
-                        }
-                    }
-                    NamelessDivider()
-                    chatMenuRow("Share Location") {
-                        dismissChatMenu()
-                        viewModel.requestLocationAccess()
-                    }
-                    NamelessDivider()
-                    chatMenuRow("Sign Out", destructive: true) {
-                        dismissChatMenu()
-                        appState.logout()
-                    }
-                }
-                .frame(width: 196)
-                .background(Color(white: 9.0 / 255.0))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
-                )
-                .padding(.trailing, 12)
-                .padding(.top, 6)
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .topTrailing)))
-            }
-            .zIndex(20)
-        }
-    }
-
-    private func chatMenuRow(_ title: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func dismissChatMenu() {
-        withAnimation(.easeOut(duration: 0.16)) { showChatMenu = false }
     }
 
     private func sendCurrentDraft() {

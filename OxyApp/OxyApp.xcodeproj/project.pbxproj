@@ -27,6 +27,7 @@
 		A10000010000000000000037 /* ConnectionTroubleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000037 /* ConnectionTroubleView.swift */; };
 		A10000010000000000000038 /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000038 /* ProfileView.swift */; };
 		A10000010000000000000039 /* PendantStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000039 /* PendantStatusView.swift */; };
+		A10000010000000000000040 /* AppHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000040 /* AppHeaderView.swift */; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* LoadingIndicator.swift */; };
 		A10000010000000000000014 /* ErrorBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000014 /* ErrorBanner.swift */; };
 		A10000010000000000000015 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000015 /* MainTabView.swift */; };
@@ -65,6 +66,7 @@
 		A20000010000000000000037 /* ConnectionTroubleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ConnectionTroubleView.swift"; sourceTree = "<group>"; };
 		A20000010000000000000038 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ProfileView.swift"; sourceTree = "<group>"; };
 		A20000010000000000000039 /* PendantStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PendantStatusView.swift"; sourceTree = "<group>"; };
+		A20000010000000000000040 /* AppHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppHeaderView.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
 		A20000010000000000000014 /* ErrorBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorBanner.swift; sourceTree = "<group>"; };
 		A20000010000000000000015 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
@@ -199,6 +201,7 @@
 			children = (
 				A20000010000000000000013 /* LoadingIndicator.swift */,
 				A20000010000000000000014 /* ErrorBanner.swift */,
+				A20000010000000000000040 /* AppHeaderView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -363,6 +366,7 @@
 				A10000010000000000000037 /* ConnectionTroubleView.swift in Sources */,
 				A10000010000000000000038 /* ProfileView.swift in Sources */,
 				A10000010000000000000039 /* PendantStatusView.swift in Sources */,
+				A10000010000000000000040 /* AppHeaderView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
