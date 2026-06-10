@@ -45,8 +45,7 @@ function reviewTitleForAction(action) {
     case 'send_message': return 'Review message';
     case 'send_telegram': return 'Review Telegram';
     case 'book_uber': return 'Review Uber';
-    case 'order_uber_eats':
-    case 'ubereats_checkout': return 'Review Uber Eats';
+    case 'order_uber_eats': return 'Review Uber Eats';
     case 'order_deliveroo': return 'Review Deliveroo';
     case 'make_call': return 'Review call';
     default: return `Review ${humanizeActionType(action?.type || 'action')}`;
