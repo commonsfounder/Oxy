@@ -2027,6 +2027,71 @@ function deriveDirectionTimes(message) {
   return {};
 }
 
+const TRAVEL_MODE_WORDS = /\b(bus|coach|train|rail|tube|metro|tram|transit|subway|underground|walk|walking|on foot|driv(?:e|ing)|car|taxi|cab|cycl(?:e|ing)|bike|biking)\b/i;
+
+function deriveDirectionMode(message) {
+  const t = String(message || '');
+  if (/\b(bus|coach|train|rail|tube|metro|tram|transit|subway|underground)\b/i.test(t)) return 'transit';
+  if (/\b(walk|walking|on foot)\b/i.test(t)) return 'walking';
+  if (/\b(cycl(?:e|ing)|bike|biking)\b/i.test(t)) return 'bicycling';
+  if (/\b(driv(?:e|ing)|car|taxi|cab)\b/i.test(t)) return 'driving';
+  return null;
+}
+
+function hasExplicitDestination(message) {
+  return /\b(?:get to|head to|go to|drive to|walk to|to|toward|towards|reach)\s+[a-z0-9'&]/i.test(String(message || ''));
+}
+
+// A short follow-up that only changes the travel mode ("what if I take the bus")
+// — it names a mode but no new destination, so the previous route should be reused.
+function isModeChangeFollowup(message) {
+  const t = String(message || '');
+  return TRAVEL_MODE_WORDS.test(t) && !hasExplicitDestination(t);
+}
+
+function extractDestinationPhrase(message) {
+  const text = String(message || '');
+  const tail = '(?:\\s+(?:by|before|at|when|how|,|\\?)|[?.]|$)';
+  // Specific verbs first so the infinitive "to" in "need to get to X" can't win.
+  const patterns = [
+    new RegExp(`\\b(?:get to|head to|go to|drive to|walk to|travel to|reach)\\s+(.+?)${tail}`, 'i'),
+    new RegExp(`\\bto\\s+(.+?)${tail}`, 'i')
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    const dest = m ? m[1].trim() : '';
+    if (dest && !TRAVEL_MODE_WORDS.test(dest) && !/\b(if|what|right now)\b/i.test(dest)) {
+      return dest;
+    }
+  }
+  return null;
+}
+
+// Find the user's most recent real directions request so a mode-change follow-up
+// can reuse its destination and timing instead of losing them.
+async function findRecentDirectionsRequest(userId, excludeText) {
+  try {
+    const { data } = await supabase
+      .from('conversations')
+      .select('content, role, created_at')
+      .eq('user_id', userId)
+      .eq('role', 'user')
+      .order('created_at', { ascending: false })
+      .limit(12);
+    for (const row of data || []) {
+      const text = conversationFallbackText(row);
+      if (!text || text === excludeText || isModeChangeFollowup(text)) continue;
+      const destination = extractDestinationPhrase(text);
+      if (destination) {
+        return { destination, ...deriveDirectionTimes(text) };
+      }
+    }
+  } catch (err) {
+    console.warn('[directions] recent route lookup failed:', err.message);
+  }
+  return null;
+}
+
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
@@ -2044,13 +2109,27 @@ async function executeAction(userId, action, params, context = {}) {
     ...(context.location ? { location: context.location } : {})
   };
 
-  // Recover a missing arrival/departure time for directions from the raw message.
-  if ((action === 'get_directions' || action === 'plan_trip')
-    && !enrichedParams.arrival_time && !enrichedParams.departure_time
-    && context.userMessage) {
-    const derived = deriveDirectionTimes(context.userMessage);
-    if (derived.arrival_time) enrichedParams.arrival_time = derived.arrival_time;
-    else if (derived.departure_time) enrichedParams.departure_time = derived.departure_time;
+  if ((action === 'get_directions' || action === 'plan_trip') && context.userMessage) {
+    // Mode-change follow-up ("what if I take the bus?") — reuse the previous
+    // destination and timing, just switch the travel mode, instead of treating
+    // the phrase as a new destination.
+    if (isModeChangeFollowup(context.userMessage)) {
+      const prev = await findRecentDirectionsRequest(userId, context.userMessage);
+      if (prev?.destination) {
+        enrichedParams.destination = prev.destination;
+        if (prev.arrival_time && !enrichedParams.arrival_time) enrichedParams.arrival_time = prev.arrival_time;
+        if (prev.departure_time && !enrichedParams.departure_time) enrichedParams.departure_time = prev.departure_time;
+      }
+      const mode = deriveDirectionMode(context.userMessage);
+      if (mode) enrichedParams.mode = mode;
+    }
+
+    // Recover a missing arrival/departure time from the raw message.
+    if (!enrichedParams.arrival_time && !enrichedParams.departure_time) {
+      const derived = deriveDirectionTimes(context.userMessage);
+      if (derived.arrival_time) enrichedParams.arrival_time = derived.arrival_time;
+      else if (derived.departure_time) enrichedParams.departure_time = derived.departure_time;
+    }
   }
 
   switch (action) {
