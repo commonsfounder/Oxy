@@ -30,6 +30,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['query'],
     inputExample: { query: 'search term' },
+    guidance: 'Use for "play X" / "listen to X". Pass the resolved exact song title and artist as query. If the request depends on current facts, charts, rankings, popularity, or "right now", resolve the exact track via search FIRST — never pass vague queries like "most popular song" or "top song". If there is no specific song and no safe way to ground one, ask what they want to hear instead of inventing a track (e.g. "play some music" is not a request to play a song called "Some").',
     successSummary: 'Music opened',
     failureSummary: 'Music failed',
     confirmation: 'none'
@@ -40,6 +41,7 @@ const ACTION_CONTRACTS = {
     optional: ['playlist'],
     aliases: { playlist: ['playlistName', 'list'] },
     inputExample: { query: 'song or album', playlist: 'optional playlist name' },
+    guidance: 'Use when the user asks to ADD a song or album to their library or a playlist — not to start playback. "Play X" is play_music, not this.',
     successSummary: 'Music added',
     failureSummary: 'Music add failed',
     confirmation: 'none'
@@ -48,6 +50,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
+    guidance: 'Use for "calendar", "schedule", "event", or "add to my calendar". Do not route to Apple Music just because the phrase contains the word "add". If the date or time is missing, ask for it instead of guessing.',
     successSummary: 'Calendar updated',
     failureSummary: 'Calendar failed',
     confirmation: 'none'
@@ -100,6 +103,7 @@ const ACTION_CONTRACTS = {
     required: ['destination'],
     aliases: { destination: ['query', 'place', 'address'] },
     inputExample: { destination: 'natural place or address phrase' },
+    guidance: 'Pass the user\'s natural destination phrase as destination ("the nearest gym", "Kings Cross", "home"). Do not invent a branch name or full street address — resolution handles it from the phrase and device location.',
     successSummary: 'Uber opened',
     failureSummary: 'Uber needs attention',
     confirmation: 'none',
@@ -110,6 +114,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     aliases: { query: ['destination', 'place', 'address'] },
     inputExample: { query: 'natural place or address phrase' },
+    guidance: 'Pass the user\'s natural phrase as query ("nearest gym", "coffee near me", "closest McDonald\'s"). Do not ask for a full address or a specific branch — device location resolves it.',
     successSummary: 'Place found',
     failureSummary: 'Place search failed',
     confirmation: 'none'
