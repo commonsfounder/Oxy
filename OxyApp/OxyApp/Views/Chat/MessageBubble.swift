@@ -312,21 +312,29 @@ struct UberHandoffCard: View {
 
     @State private var confirmed = false
 
-    private var source: String {
-        action.cardText ?? action.text ?? action.actionSummary ?? ""
+    // Destination comes from the assistant text ("Opening Uber to X…"); the
+    // metrics live in cardText ("X · 9 min · £8.40").
+    private var destinationSource: String {
+        action.text ?? action.actionSummary ?? action.cardText ?? ""
+    }
+    private var metricSource: String {
+        "\(action.cardText ?? "") \(action.text ?? "")"
     }
 
     private var destination: String {
-        if let range = source.range(of: " to ", options: .caseInsensitive) {
-            let tail = source[range.upperBound...]
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !tail.isEmpty { return tail }
+        var tail = destinationSource
+        if let range = tail.range(of: " to ", options: .caseInsensitive) {
+            tail = String(tail[range.upperBound...])
         }
-        return source.isEmpty ? "—" : source
+        // Trim at the first sentence end or the " · " metrics separator.
+        if let dot = tail.firstIndex(of: ".") { tail = String(tail[..<dot]) }
+        if let sep = tail.range(of: " · ") { tail = String(tail[..<sep.lowerBound]) }
+        tail = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return tail.isEmpty ? "—" : tail
     }
 
-    private var eta: String { firstMatch(#"(\d+)\s*min"#).map { "\($0)" } ?? "—" }
-    private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#) ?? "—" }
+    private var eta: String { firstMatch(#"(\d+)\s*min"#, in: metricSource) ?? "—" }
+    private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#, in: metricSource) ?? "—" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -376,15 +384,15 @@ struct UberHandoffCard: View {
         }
     }
 
-    private func firstMatch(_ pattern: String) -> String? {
+    private func firstMatch(_ pattern: String, in text: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
-        let range = NSRange(source.startIndex..., in: source)
-        guard let match = regex.firstMatch(in: source, range: range) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range) else { return nil }
         // Prefer the first capture group if present, else the whole match.
         let target = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
             ? match.range(at: 1) : match.range
-        guard let r = Range(target, in: source) else { return nil }
-        return String(source[r])
+        guard let r = Range(target, in: text) else { return nil }
+        return String(text[r])
     }
 }
 
