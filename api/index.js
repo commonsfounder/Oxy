@@ -1988,21 +1988,27 @@ function resolveNativeMessageContact(contact, nativeHints) {
   }
   const normalizedContact = normalizeContactLookup(contact);
   const contacts = Array.isArray(nativeHints?.contacts) ? nativeHints.contacts : [];
-  const match = contacts.find(candidate => {
-    const names = [
-      candidate.displayName,
-      candidate.phone,
-      candidate.email
-    ].map(normalizeContactLookup).filter(Boolean);
-    return names.some(name => (
-      name === normalizedContact ||
-      name.includes(normalizedContact) ||
-      normalizedContact.includes(name)
-    ));
-  });
-  const value = match?.phone || match?.email || '';
+  if (!normalizedContact || !contacts.length) return { label: contact, value: '' };
+
+  // Tiered match so we never pick the wrong person via a loose substring:
+  // exact name > whole-token match ("sam" → "sam smith") > prefix > long substring.
+  let best = null;
+  let bestScore = 0;
+  for (const candidate of contacts) {
+    const name = normalizeContactLookup(candidate.displayName || '');
+    if (!name) continue;
+    const tokens = name.split(/\s+/).filter(Boolean);
+    let score = 0;
+    if (name === normalizedContact) score = 100;
+    else if (tokens.includes(normalizedContact)) score = 80;
+    else if (name.startsWith(normalizedContact) || normalizedContact.startsWith(name)) score = 60;
+    else if (normalizedContact.length >= 4 && name.includes(normalizedContact)) score = 30;
+    if (score > bestScore) { bestScore = score; best = candidate; }
+  }
+
+  const value = best?.phone || best?.email || '';
   return {
-    label: match?.displayName || contact,
+    label: best?.displayName || contact,
     value: looksLikeMessageAddress(value) ? value : ''
   };
 }
@@ -2092,6 +2098,44 @@ async function findRecentDirectionsRequest(userId, excludeText) {
   return null;
 }
 
+// Personal places ("my school", "work", "home") must resolve to the user's own
+// saved location — never silently geocode to the nearest random match, which
+// produces confident-but-wrong directions.
+const PERSONAL_PLACES = ['home', 'house', 'work', 'office', 'school', 'college', 'uni', 'university', 'gym'];
+
+function personalPlaceKeyword(destination) {
+  const d = String(destination || '').trim().toLowerCase()
+    .replace(/^(my|our|the)\s+/, '')
+    .replace(/[?.!]+$/, '')
+    .trim();
+  return PERSONAL_PLACES.includes(d) ? d : null;
+}
+
+// Look up a saved place from memory, e.g. a fact like "my school is Cadbury
+// Sixth Form College" or "work: 10 King St".
+async function resolveSavedPlace(userId, keyword) {
+  try {
+    const { data } = await supabase
+      .from('memories')
+      .select('content, created_at')
+      .eq('user_id', userId)
+      .ilike('content', `%${escapeIlikePattern(keyword)}%`)
+      .order('created_at', { ascending: false })
+      .limit(8);
+    const re = new RegExp(`\\b${keyword}\\b[^.\\n]*?\\b(?:is|are|=|:|at|in)\\s+(.+?)(?:[.\\n]|$)`, 'i');
+    for (const row of data || []) {
+      const m = String(row.content || '').match(re);
+      if (m && m[1]) {
+        const place = m[1].trim().replace(/^(a|an|the)\s+/i, '').trim();
+        if (place && !PERSONAL_PLACES.includes(place.toLowerCase())) return place;
+      }
+    }
+  } catch (err) {
+    console.warn('[place] saved place lookup failed:', err.message);
+  }
+  return null;
+}
+
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
@@ -2129,6 +2173,26 @@ async function executeAction(userId, action, params, context = {}) {
       const derived = deriveDirectionTimes(context.userMessage);
       if (derived.arrival_time) enrichedParams.arrival_time = derived.arrival_time;
       else if (derived.departure_time) enrichedParams.departure_time = derived.departure_time;
+    }
+  }
+
+  // Resolve personal-place destinations from the user's saved memory, or ask
+  // instead of geocoding "school"/"work"/"home" to the nearest random match.
+  const placeField = { get_directions: 'destination', plan_trip: 'destination', book_uber: 'destination', find_place: 'query' }[action];
+  if (placeField) {
+    const keyword = personalPlaceKeyword(enrichedParams[placeField]);
+    if (keyword) {
+      const saved = await resolveSavedPlace(userId, keyword);
+      if (saved) {
+        enrichedParams[placeField] = saved;
+      } else {
+        return {
+          success: false,
+          text: `I don't have your ${keyword} saved yet, so I won't guess. What's its name or address? Tell me and I'll remember it.`,
+          actionSummary: 'Need location',
+          cardText: `Add your ${keyword}`
+        };
+      }
     }
   }
 
@@ -2287,20 +2351,7 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
     return { success: true, text: 'I cleared what I had in memory.' };
   }
 
-  if (normalizedScope === 'recent') {
-    const { data, error } = await supabase
-      .from('memories')
-      .select('id, content')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (error) throw error;
-    if (!data?.length) return { success: true, text: 'There was nothing stored to forget.' };
-    const { error: deleteError } = await supabase.from('memories').delete().eq('id', data[0].id);
-    if (deleteError) throw deleteError;
-    return { success: true, text: 'I forgot the most recent memory.' };
-  }
-
+  // A specific topic takes precedence over "recent" when both are given.
   if (normalizedQuery) {
     const { data, error } = await supabase
       .from('memories')
@@ -2320,6 +2371,20 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
         ? `I forgot what I had stored about "${normalizedQuery}".`
         : `I removed ${ids.length} memories about "${normalizedQuery}".`
     };
+  }
+
+  if (normalizedScope === 'recent') {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, content')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) throw error;
+    if (!data?.length) return { success: true, text: 'There was nothing stored to forget.' };
+    const { error: deleteError } = await supabase.from('memories').delete().eq('id', data[0].id);
+    if (deleteError) throw deleteError;
+    return { success: true, text: 'I forgot the most recent memory.' };
   }
 
   return { success: false, error: 'forget_memory needs scope "recent" or "all", or a query.' };
@@ -4530,6 +4595,12 @@ function getStructuredDataResults(actionResults) {
 function postResponseTasks(userId, message, trace = null) {
   // Incognito turns leave no trace: no memory, no learned preferences.
   if (trace?.incognito) return;
+  // Deterministically capture personal-place statements ("my school is X") so
+  // directions to "school"/"work"/"home" resolve to the user's real location.
+  const placeStmt = String(message || '').match(/\b(?:my|our)\s+(home|house|work|office|school|college|uni|university|gym)\b[^.?!]*?\b(?:is|are|=|:|at|in)\s+([^.?!\n]{2,120})/i);
+  if (placeStmt) {
+    saveMemory(userId, `My ${placeStmt[1].toLowerCase()} is ${placeStmt[2].trim()}`, 'fact').catch(() => {});
+  }
   if (shouldSaveMemory(message)) {
     extractMemoryFact(userId, message).then(fact => {
       if (fact) saveMemory(userId, fact, 'fact');

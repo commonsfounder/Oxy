@@ -344,6 +344,10 @@ async function execute(userId, action, params) {
         const inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
         const references = params.references || inReplyTo;
         if (!to || !body) return { success: false, error: 'send_email requires a recipient and message body' };
+        // Guard against sending to a bare name instead of an address.
+        if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(String(to))) {
+          return { success: false, error: `I need ${to}'s email address — I only have a name, not an address.` };
+        }
         if (isGenericPlaceholderEmail(subject, body)) {
           return {
             success: false,
@@ -389,15 +393,28 @@ async function execute(userId, action, params) {
 
       case 'create_calendar_event': {
         const { title, start_date, end_date, description = '', timezone = 'Europe/London' } = params;
-        if (!title || !start_date || !end_date) return { success: false, error: 'create_calendar_event requires title, start_date, end_date' };
+        if (!title || !start_date) return { success: false, error: 'create_calendar_event requires title and start_date' };
         // Strip timezone offsets (Z, +01:00 etc) so Google uses the timeZone field for local interpretation
-        const toLocal = dt => dt.replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+        const toLocal = dt => String(dt).replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+        const startLocal = toLocal(start_date);
+        // Default a missing end to one hour after the start (local-clock math, no TZ shift).
+        let endLocal = end_date ? toLocal(end_date) : null;
+        if (!endLocal) {
+          const d = new Date(startLocal);
+          if (!Number.isNaN(d.getTime())) {
+            d.setHours(d.getHours() + 1);
+            const pad = n => String(n).padStart(2, '0');
+            endLocal = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+          } else {
+            endLocal = startLocal;
+          }
+        }
         const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
           {
             summary: title,
             description,
-            start: { dateTime: toLocal(start_date), timeZone: timezone },
-            end:   { dateTime: toLocal(end_date),   timeZone: timezone }
+            start: { dateTime: startLocal, timeZone: timezone },
+            end:   { dateTime: endLocal,   timeZone: timezone }
           },
           { headers, timeout: 15000 });
         return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
