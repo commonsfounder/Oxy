@@ -41,10 +41,14 @@ struct ChatView: View {
             Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                AppHeaderView(isIncognito: $isIncognito, onLeading: {
-                    HapticManager.shared.impact(.light)
-                    if let onMenu { onMenu() } else { dismiss() }
-                })
+                AppHeaderView(
+                    isIncognito: $isIncognito,
+                    isEmptyChat: viewModel.messages.isEmpty,
+                    onLeading: {
+                        HapticManager.shared.impact(.light)
+                        if let onMenu { onMenu() } else { dismiss() }
+                    }
+                )
 
                 // Offline banner
                 if isOffline {
