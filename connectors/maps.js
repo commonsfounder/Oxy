@@ -106,7 +106,8 @@ function parseDirectionTime(value, now = new Date()) {
   const text = String(value || '').trim();
   if (!text) return null;
   const tomorrow = /\btomorrow\b/i.test(text);
-  const match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  // Accept ":", ".", or a space between hour and minutes ("9:25", "9.25", "9 25 am").
+  const match = text.match(/(\d{1,2})(?:[:.\s](\d{2}))?\s*(am|pm)?/i);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2] || 0);

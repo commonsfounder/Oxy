@@ -95,7 +95,7 @@ function cleanDestinationPhrase(message) {
 function extractArrivalTime(message) {
   const text = String(message || '');
   const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  const match = text.match(/\bby\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+  const match = text.match(/\bby\s+(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 
@@ -105,8 +105,8 @@ function extractDepartureTime(message) {
   if (/\b(first|earliest)\s+train\b/i.test(text) && /\btomorrow\b/i.test(text)) {
     return 'tomorrow 00:01';
   }
-  const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
-    text.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
+  const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i) ||
+    text.match(/\b(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm))/i);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 
