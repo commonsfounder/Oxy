@@ -10,10 +10,8 @@
 //   node scripts/ubereats-login.js            # logs in the default "cli-user"
 //   node scripts/ubereats-login.js --user bob # logs in a specific user id
 
-const fs = require('fs');
-const path = require('path');
 const readline = require('readline');
-const { cookiesPathForUser, BROWSERS_PATH } = require('../connectors/mcp/ubereats-client');
+const { cookiesPathForUser, BROWSERS_PATH, seedSessionToDB } = require('../connectors/mcp/ubereats-client');
 
 // Point Playwright at the shared browser install before it launches.
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || BROWSERS_PATH;
@@ -38,8 +36,6 @@ function waitForEnter(prompt) {
 
 (async () => {
   const user = getUser(process.argv);
-  const cookiesPath = cookiesPathForUser(user);
-  fs.mkdirSync(path.dirname(cookiesPath), { recursive: true });
 
   console.log(`Opening a login window for user "${user}"...`);
   const browser = await chromium.launch({ headless: false });
@@ -60,15 +56,19 @@ function waitForEnter(prompt) {
 
   const cookies = await context.cookies();
   const hasSession = cookies.some(c => SESSION_COOKIE_NAMES.includes(c.name));
-  fs.writeFileSync(cookiesPath, JSON.stringify(cookies, null, 2));
+  const seededDb = await seedSessionToDB(user, cookies);
   await browser.close();
 
-  console.log(`\nSaved ${cookies.length} cookies → ${cookiesPath}`);
+  console.log(`\nSaved ${cookies.length} cookies for user "${user}".`);
+  console.log(`  local disk: ${cookiesPathForUser(user)}`);
+  console.log(seededDb
+    ? '  cloud DB:   saved ✓ — your deployed (Cloud Run) backend can use this session.'
+    : '  cloud DB:   NOT saved — set SUPABASE_URL and SUPABASE_KEY before running to seed the cloud.');
   if (hasSession) {
-    console.log(`Looks logged in. Now run:  node scripts/ubereats-cli.js status --user ${user}`);
+    console.log(`\nLooks logged in. Test it:  node scripts/ubereats-cli.js status --user ${user}`);
   } else {
-    console.log('WARNING: no Uber Eats session cookie was found — the login may not have completed.');
-    console.log('Re-run this and make sure you are fully signed in before pressing Enter.');
+    console.log('\nWARNING: no Uber Eats session cookie found — the login may not have completed.');
+    console.log('Re-run and make sure you are fully signed in before pressing Enter.');
   }
   process.exit(0);
 })().catch(e => { console.error('FAILED:', e.message); process.exit(1); });

@@ -1,17 +1,20 @@
-// Per-user MCP stdio client for the @striderlabs/mcp-ubereats server.
+// Per-user MCP stdio client for the @striderlabs/mcp-ubereats server, with
+// Supabase-backed sessions so it works on serverless hosts (Cloud Run).
 //
-// Each Oxy user gets their OWN Uber Eats session. The server stores its login
-// cookies at `homedir()/.strider/ubereats/cookies.json`, and Node's
-// os.homedir() honors $HOME on POSIX — so we launch a separate server process
-// per user with its own HOME directory. That isolates logins, carts, and
-// orders between users. The server mkdir's its own config dir, so we only need
-// to point HOME at a writable per-user folder.
+// The server stores its Uber Eats login as cookies on disk at
+// `homedir()/.strider/ubereats/cookies.json`. On Cloud Run that disk is
+// ephemeral, so the DB is the source of truth:
+//   • before a user's server starts, we HYDRATE their cookies from Supabase
+//     onto disk, so the server loads them;
+//   • after every call, we PERSIST the on-disk cookies back to Supabase.
+// If Supabase isn't configured (e.g. local CLI testing) it degrades to
+// disk-only — same behaviour as before.
 //
-// Each process runs a headless browser, so they are spawned lazily on first use
-// and torn down after an idle period to bound resource usage.
+// Each user gets an isolated HOME so concurrent sessions don't collide, and the
+// Playwright browser binary is shared across users via PLAYWRIGHT_BROWSERS_PATH.
 //
 // The @modelcontextprotocol/sdk package is ESM-only; this file is CommonJS, so
-// the SDK is pulled in with dynamic import() inside openClient().
+// the SDK is loaded via dynamic import() inside openClient().
 
 const path = require('path');
 const os = require('os');
@@ -35,24 +38,33 @@ const SERVER_ARGS = process.env.UBEREATS_MCP_ARGS
   ? process.env.UBEREATS_MCP_ARGS.split(' ').filter(Boolean)
   : (LOCAL_SERVER_ENTRY ? [LOCAL_SERVER_ENTRY] : ['-y', '@striderlabs/mcp-ubereats']);
 
-// Where each user's isolated session HOME lives. Persisted across restarts so
-// logins survive — do NOT default to a temp dir.
+// Per-user session HOME (scratch on serverless; the DB is the durable copy).
 const SESSIONS_ROOT = process.env.UBEREATS_SESSIONS_DIR
   || path.join(os.homedir(), '.oxy', 'ubereats-sessions');
 
-// Playwright browser download — SHARED across all users (one ~400MB install,
-// not one per user). Computed from the real host home, before any HOME override.
+// Playwright browser download — SHARED across users (one install, not per user).
 const BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH
   || path.join(os.homedir(), '.oxy', 'ms-playwright');
 
 // Tear down a user's server process after this much idle time.
 const IDLE_MS = Number(process.env.UBEREATS_MCP_IDLE_MS) || 15 * 60 * 1000;
 
-// userKey -> { clientPromise, transport, timer }
-const sessions = new Map();
+const SESSION_TABLE = 'ubereats_sessions';
 
-// Hash the userId into a filesystem-safe directory name (avoids path traversal
-// and odd characters in user identifiers).
+// ── Supabase (lazy; null if unavailable) ─────────────────────────────────────
+let supabaseClient; // undefined = not tried, null = unavailable
+function getSupabase() {
+  if (supabaseClient !== undefined) return supabaseClient;
+  try {
+    const { createSupabaseServiceClient } = require('../../runtime');
+    supabaseClient = createSupabaseServiceClient();
+  } catch {
+    supabaseClient = null;
+  }
+  return supabaseClient;
+}
+
+// ── Disk helpers ─────────────────────────────────────────────────────────────
 function userKey(userId) {
   return crypto.createHash('sha256').update(String(userId || 'default')).digest('hex').slice(0, 32);
 }
@@ -62,6 +74,72 @@ function sessionHome(key) {
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
+
+// The exact cookies.json path the per-user server reads/writes.
+function cookiesPathForUser(userId) {
+  return path.join(SESSIONS_ROOT, userKey(userId), '.strider', 'ubereats', 'cookies.json');
+}
+
+function readDiskCookies(userId) {
+  try {
+    const arr = JSON.parse(fs.readFileSync(cookiesPathForUser(userId), 'utf-8'));
+    return Array.isArray(arr) ? arr : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDiskCookies(userId, cookies) {
+  const file = cookiesPathForUser(userId);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(cookies, null, 2));
+}
+
+// ── DB <-> disk session sync ─────────────────────────────────────────────────
+async function hydrateFromDB(userId) {
+  const db = getSupabase();
+  if (!db) return;
+  try {
+    const { data } = await db
+      .from(SESSION_TABLE)
+      .select('cookies')
+      .eq('user_id', String(userId))
+      .maybeSingle();
+    if (Array.isArray(data?.cookies) && data.cookies.length) {
+      writeDiskCookies(userId, data.cookies);
+    }
+  } catch (e) {
+    console.warn('[ubereats] hydrateFromDB failed:', e.message);
+  }
+}
+
+// Save the on-disk cookies back to the DB. Returns true if persisted.
+async function persistToDB(userId) {
+  const db = getSupabase();
+  if (!db) return false;
+  const cookies = readDiskCookies(userId);
+  if (!cookies || !cookies.length) return false;
+  try {
+    const { error } = await db.from(SESSION_TABLE).upsert(
+      { user_id: String(userId), cookies, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    return !error;
+  } catch (e) {
+    console.warn('[ubereats] persistToDB failed:', e.message);
+    return false;
+  }
+}
+
+// Used by scripts/ubereats-login.js: write a freshly-captured session to disk
+// AND the DB. Returns true if it reached the DB.
+async function seedSessionToDB(userId, cookies) {
+  writeDiskCookies(userId, cookies);
+  return persistToDB(userId);
+}
+
+// ── Per-user MCP process management ───────────────────────────────────────────
+const sessions = new Map(); // key -> { clientPromise, transport, timer }
 
 async function closeSession(key) {
   const entry = sessions.get(key);
@@ -93,7 +171,7 @@ async function openClient(key) {
     args: SERVER_ARGS,
     env: {
       ...process.env,
-      // Isolate this user's Uber Eats session (cookies) via HOME / USERPROFILE.
+      // Isolate this user's session (cookies) via HOME / USERPROFILE...
       HOME: home,
       USERPROFILE: home,
       // ...but share one Playwright browser install across all users.
@@ -107,7 +185,6 @@ async function openClient(key) {
   const entry = sessions.get(key);
   if (entry) entry.transport = transport;
 
-  // If the process dies, drop the session so the next call respawns it.
   const drop = () => closeSession(key);
   transport.onclose = drop;
   transport.onerror = drop;
@@ -115,15 +192,17 @@ async function openClient(key) {
   return client;
 }
 
-function getClient(key) {
+// Hydrate the user's session from the DB, THEN start their server so it loads
+// those cookies on first use.
+function getClient(userId) {
+  const key = userKey(userId);
   let entry = sessions.get(key);
   if (!entry) {
     entry = { clientPromise: null, transport: null, timer: null };
     sessions.set(key, entry);
-    entry.clientPromise = openClient(key).catch(err => {
-      sessions.delete(key);
-      throw err;
-    });
+    entry.clientPromise = hydrateFromDB(userId)
+      .then(() => openClient(key))
+      .catch(err => { sessions.delete(key); throw err; });
   }
   return entry.clientPromise;
 }
@@ -138,20 +217,13 @@ function extractText(result) {
     .trim();
 }
 
-// The exact cookies.json path the per-user headless server reads/writes. Used
-// by scripts/ubereats-login.js to seed a session into the right place.
-function cookiesPathForUser(userId) {
-  return path.join(SESSIONS_ROOT, userKey(userId), '.strider', 'ubereats', 'cookies.json');
-}
-
 // Call a tool on the given user's server. Returns { text, isError, raw }.
-// Throws only on a transport/connection failure — tool-level errors come back
-// as isError.
 async function callTool(userId, name, args = {}) {
-  const key = userKey(userId);
-  const client = await getClient(key);
-  touch(key);
+  const client = await getClient(userId);
+  touch(userKey(userId));
   const result = await client.callTool({ name, arguments: args });
+  // Capture any session change (login refresh, etc.) durably.
+  await persistToDB(userId);
   return {
     text: extractText(result),
     isError: Boolean(result?.isError),
@@ -159,4 +231,4 @@ async function callTool(userId, name, args = {}) {
   };
 }
 
-module.exports = { callTool, cookiesPathForUser, BROWSERS_PATH };
+module.exports = { callTool, cookiesPathForUser, BROWSERS_PATH, seedSessionToDB };
