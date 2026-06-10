@@ -2007,6 +2007,26 @@ function resolveNativeMessageContact(contact, nativeHints) {
   };
 }
 
+// Safety net: if the model omits the time on a directions/trip action, recover it
+// from the user's own wording ("...by 9:25", "leave at 6") so "when should I
+// leave" always gets a real computed answer instead of just opening Maps.
+function deriveDirectionTimes(message) {
+  const text = String(message || '');
+  const TIME = '(\\d{1,2}(?:[:.\\s]\\d{2})?\\s*(?:am|pm)?)';
+  const norm = (raw) => {
+    const m = String(raw || '').match(/(\d{1,2})(?:[:.\s]+(\d{2}))?\s*(am|pm)?/i);
+    if (!m) return null;
+    return `${m[1]}:${m[2] || '00'}${(m[3] || '').toLowerCase()}`;
+  };
+  const depRe = new RegExp(`\\b(?:leave|leaving|set\\s*off|setting\\s*off|depart|departing|head\\s*off)\\b[^.!?]{0,24}?\\b(?:at|by)\\s+${TIME}`, 'i');
+  const arrRe = new RegExp(`\\b(?:by|before)\\s+${TIME}`, 'i');
+  const dep = depRe.exec(text);
+  if (dep && /\d/.test(dep[1] || '')) return { departure_time: norm(dep[1]) };
+  const arr = arrRe.exec(text);
+  if (arr && /\d/.test(arr[1] || '')) return { arrival_time: norm(arr[1]) };
+  return {};
+}
+
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
@@ -2023,6 +2043,16 @@ async function executeAction(userId, action, params, context = {}) {
     ...(params || {}),
     ...(context.location ? { location: context.location } : {})
   };
+
+  // Recover a missing arrival/departure time for directions from the raw message.
+  if ((action === 'get_directions' || action === 'plan_trip')
+    && !enrichedParams.arrival_time && !enrichedParams.departure_time
+    && context.userMessage) {
+    const derived = deriveDirectionTimes(context.userMessage);
+    if (derived.arrival_time) enrichedParams.arrival_time = derived.arrival_time;
+    else if (derived.departure_time) enrichedParams.departure_time = derived.departure_time;
+  }
+
   switch (action) {
     case 'send_message': {
       const contact = String(params?.contact || '').trim();
