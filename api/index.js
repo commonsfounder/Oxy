@@ -2186,13 +2186,35 @@ async function executeAction(userId, action, params, context = {}) {
       if (saved) {
         enrichedParams[placeField] = saved;
       } else {
+        if (!context.trace?.incognito) {
+          await setPendingPlace(userId, {
+            keyword,
+            action,
+            field: placeField,
+            arrival_time: enrichedParams.arrival_time || null,
+            departure_time: enrichedParams.departure_time || null,
+            mode: enrichedParams.mode || null
+          }).catch(() => {});
+        }
         return {
           success: false,
+          needsPlace: keyword,
           text: `I don't have your ${keyword} saved yet, so I won't guess. What's its name or address? Tell me and I'll remember it.`,
           actionSummary: 'Need location',
           cardText: `Add your ${keyword}`
         };
       }
+    }
+  }
+
+  // Uber pickup that names a personal place ("from home"): use the saved address,
+  // or fall back to device GPS — never geocode the bare word "home".
+  if (action === 'book_uber') {
+    const pickupKeyword = personalPlaceKeyword(enrichedParams.pickup);
+    if (pickupKeyword) {
+      const saved = await resolveSavedPlace(userId, pickupKeyword);
+      if (saved) enrichedParams.pickup = saved;
+      else delete enrichedParams.pickup;
     }
   }
 
@@ -3610,6 +3632,41 @@ const CONNECTORS = [
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 const PENDING_ACTION_PREF = 'pending.action';
+const PENDING_PLACE_PREF = 'pending.place';
+
+async function setPendingPlace(userId, payload) {
+  await setPreferenceValue(userId, PENDING_PLACE_PREF, JSON.stringify({ ...payload, createdAt: new Date().toISOString() }));
+}
+
+async function getPendingPlace(userId) {
+  const { data, error } = await supabase
+    .from('preferences')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', PENDING_PLACE_PREF)
+    .maybeSingle();
+  if (error || !data?.value) return null;
+  try {
+    const parsed = JSON.parse(data.value);
+    // Expire after 15 minutes so a stale ask doesn't hijack a later message.
+    if (parsed?.createdAt && Date.now() - new Date(parsed.createdAt).getTime() > 15 * 60 * 1000) return null;
+    return parsed?.keyword ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearPendingPlace(userId) {
+  await supabase.from('preferences').delete().eq('user_id', userId).eq('key', PENDING_PLACE_PREF);
+}
+
+// A short, command-free reply that's plausibly a place name answering our ask.
+function looksLikePlaceAnswer(message) {
+  const t = String(message || '').trim();
+  if (!t || t.length > 80 || /[?]/.test(t)) return false;
+  if (/^(play|send|remind|remember|book|order|email|text|call|what|when|why|how|who|where|cancel|stop|no|nevermind|never mind|forget|yes|yeah)\b/i.test(t)) return false;
+  return true;
+}
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
@@ -4681,6 +4738,31 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+
+    // If we asked the user for a personal place ("what's your school?"), capture
+    // their reply, remember it, and re-run the original action with it.
+    if (!trace.incognito) {
+      const pendingPlace = await getPendingPlace(userId);
+      if (pendingPlace) {
+        if (looksLikePlaceAnswer(message)) {
+          await clearPendingPlace(userId);
+          const place = message.trim();
+          saveMemory(userId, `My ${pendingPlace.keyword} is ${place}`, 'fact').catch(() => {});
+          const input = {};
+          input[pendingPlace.field === 'query' ? 'query' : 'destination'] = place;
+          if (pendingPlace.mode) input.mode = pendingPlace.mode;
+          if (pendingPlace.arrival_time) input.arrival_time = pendingPlace.arrival_time;
+          if (pendingPlace.departure_time) input.departure_time = pendingPlace.departure_time;
+          let placeResults = await executeActions(userId, [{ type: pendingPlace.action, input }], { userMessage: message, location, nativeHints, trace }, trace);
+          placeResults = normalizeActionResultsForClient(placeResults);
+          const spoken = summarizeFinishedActionsForUser(placeResults) || `Got it — I'll remember your ${pendingPlace.keyword}.`;
+          await respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults: placeResults });
+          return;
+        }
+        // Not a place answer — drop the stale ask and continue normally.
+        await clearPendingPlace(userId).catch(() => {});
+      }
+    }
 
     const pendingAction = await getPendingAction(userId);
     if (pendingAction && isPendingCancelMessage(message)) {

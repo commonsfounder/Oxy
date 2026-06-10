@@ -341,12 +341,24 @@ async function execute(userId, action, params) {
         const body = params.body || params.message || params.content;
         const subject = params.subject || inferEmailSubject(body);
         const threadId = params.thread_id || params.threadId;
-        const inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
-        const references = params.references || inReplyTo;
+        let inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
+        let references = params.references || inReplyTo;
         if (!to || !body) return { success: false, error: 'send_email requires a recipient and message body' };
         // Guard against sending to a bare name instead of an address.
         if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(String(to))) {
           return { success: false, error: `I need ${to}'s email address — I only have a name, not an address.` };
+        }
+        // For a reply, derive RFC threading headers from the thread's actual last
+        // message — the model can't see the real Message-ID, so don't trust it.
+        if (threadId) {
+          try {
+            const threadMsgs = await fetchThreadMessages(headers, threadId);
+            const last = threadMsgs[threadMsgs.length - 1];
+            if (last?.messageId) {
+              inReplyTo = last.messageId;
+              references = [last.references, last.messageId].filter(Boolean).join(' ').trim();
+            }
+          } catch { /* fall back to whatever the model supplied */ }
         }
         if (isGenericPlaceholderEmail(subject, body)) {
           return {
