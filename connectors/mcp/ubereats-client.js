@@ -217,11 +217,23 @@ function extractText(result) {
     .trim();
 }
 
+// Hard cap so a stalled browser surfaces a clear error instead of hanging.
+const CALL_TIMEOUT_MS = Number(process.env.UBEREATS_CALL_TIMEOUT_MS) || 90000;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    if (timer.unref) timer.unref();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Call a tool on the given user's server. Returns { text, isError, raw }.
 async function callTool(userId, name, args = {}) {
   const client = await getClient(userId);
   touch(userKey(userId));
-  const result = await client.callTool({ name, arguments: args });
+  const result = await withTimeout(client.callTool({ name, arguments: args }), CALL_TIMEOUT_MS, name);
   // Capture any session change (login refresh, etc.) durably.
   await persistToDB(userId);
   return {

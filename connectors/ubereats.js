@@ -10,6 +10,7 @@
 // emit it becomes a pending-review card and does NOT run. It only reaches this
 // connector after the user approves, so checkout here places the real order
 // (confirm: true). The total the user reviews comes from ubereats_view_cart.
+const axios = require('axios');
 const { callTool } = require('./mcp/ubereats-client');
 
 const SUPPORTED_ACTIONS = [
@@ -61,6 +62,38 @@ function clean(value) {
   return String(value == null ? '' : value).trim();
 }
 
+// Reverse-geocode the device's GPS (passed as params.location by the action
+// runner) into a street address Uber Eats can use, via the same Google key the
+// maps connector uses. Returns null if no coords / no key / lookup fails.
+async function addressFromLocation(location) {
+  const lat = Number(location?.latitude ?? location?.lat);
+  const lng = Number(location?.longitude ?? location?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const key = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY;
+  if (!key) return null;
+  try {
+    const res = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+      params: { latlng: `${lat},${lng}`, key },
+      timeout: 8000
+    });
+    return res.data?.results?.[0]?.formatted_address || null;
+  } catch {
+    return null;
+  }
+}
+
+// Uber Eats shows zero restaurants until a delivery address is set. Set it from
+// the device location once per user (per process) so searching just works
+// without the user typing an address. Best-effort: never blocks the search.
+const addressEnsured = new Set();
+async function ensureAddressFromLocation(userId, location) {
+  if (addressEnsured.has(userId)) return;
+  const address = await addressFromLocation(location);
+  if (!address) return;
+  const result = await call(userId, 'ubereats_set_address', { address });
+  if (result.success) addressEnsured.add(userId);
+}
+
 async function execute(userId, action, params = {}) {
   try {
     switch (action) {
@@ -72,9 +105,14 @@ async function execute(userId, action, params = {}) {
         return call(userId, 'ubereats_status', {}, 'Checked your Uber Eats session.');
 
       case 'ubereats_set_address': {
-        const address = clean(params.address);
-        if (!address) return { success: false, error: 'ubereats_set_address requires an address' };
-        return call(userId, 'ubereats_set_address', { address }, `Set delivery address to ${address}.`);
+        // Use the typed address if given, else derive it from device location.
+        const address = clean(params.address) || await addressFromLocation(params.location);
+        if (!address) {
+          return { success: false, error: 'ubereats_set_address needs an address or device location' };
+        }
+        const result = await call(userId, 'ubereats_set_address', { address }, `Set delivery address to ${address}.`);
+        if (result.success) addressEnsured.add(userId);
+        return result;
       }
 
       case 'ubereats_search': {
@@ -83,6 +121,9 @@ async function execute(userId, action, params = {}) {
         if (!query && !cuisine) {
           return { success: false, error: 'ubereats_search requires a query or cuisine' };
         }
+        // Auto-set the delivery address from device location first, or Uber
+        // returns nothing and the scraper stalls on an empty page.
+        await ensureAddressFromLocation(userId, params.location);
         return call(userId, 'ubereats_search', { query, cuisine }, 'Here are some places.');
       }
 
