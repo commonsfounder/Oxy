@@ -44,7 +44,15 @@ struct MainTabView: View {
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
         }
-        .onAppear { HapticManager.shared.prepare() }
+        .onAppear {
+            HapticManager.shared.prepare()
+            // Cold-launch from the "Ask Oxy" Siri intent: the jump-to-chat
+            // notification fired before this view subscribed, so peek the bus
+            // (ChatView.task consumes the query itself).
+            if SiriRequestBus.shared.pendingQuery != nil {
+                selectedTab = .chat
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }

@@ -211,12 +211,7 @@ extension View {
         if #available(iOS 26.0, *) {
             self.glassEffect(Self.nmlGlassStyle(tint: tint, interactive: interactive), in: shape)
         } else {
-            self.background {
-                shape
-                    .fill(.ultraThinMaterial)
-                    .overlay(shape.fill((tint ?? Color.white).opacity(tint == nil ? 0.05 : 0.25)))
-                    .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
-            }
+            self.background { NamelessGlassFill(shape: shape, tint: tint) }
         }
     }
 
@@ -226,6 +221,54 @@ extension View {
         if let tint { glass = glass.tint(tint) }
         if interactive { glass = glass.interactive() }
         return glass
+    }
+}
+
+/// A hand-built glass fill for iOS 17–25, where Apple's `glassEffect` doesn't
+/// exist. A flat `.ultraThinMaterial` reads as frosted plastic; real glass needs
+/// the cues the eye looks for — a frosted base, a top-down sheen where light
+/// gathers, a bright specular highlight on the upper rim, and a refractive edge
+/// that fades toward the bottom. Layering those makes a chip read as glass on a
+/// pure-black UI instead of a dim disc.
+private struct NamelessGlassFill<S: InsettableShape>: View {
+    let shape: S
+    let tint: Color?
+
+    var body: some View {
+        ZStack {
+            // Frosted base + a faint wash (or the control's tint) so it's visible on black.
+            shape.fill(.ultraThinMaterial)
+            shape.fill((tint ?? Color.white).opacity(tint == nil ? 0.06 : 0.22))
+
+            // Sheen: light gathers along the top and falls off downward.
+            shape.fill(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.24),
+                        Color.white.opacity(0.0),
+                        Color.white.opacity(0.05)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+
+            // Refractive rim: bright at the top edge, dim at the bottom.
+            shape.strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.6),
+                        Color.white.opacity(0.14),
+                        Color.white.opacity(0.04)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 0.75
+            )
+        }
+        .compositingGroup()
+        .shadow(color: Color.black.opacity(0.35), radius: 4, y: 2)
     }
 }
 

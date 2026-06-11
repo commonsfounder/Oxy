@@ -4,8 +4,10 @@ extension Notification.Name {
     static let oxySessionExpired = Notification.Name("oxy.sessionExpired")
     static let oxyJumpToChat = Notification.Name("oxy.jumpToChat")
     static let oxyJumpToMore = Notification.Name("oxy.jumpToMore")
-    /// Posted by the "Ask Oxy" App Intent (Siri / Shortcuts / Action Button).
-    static let oxyAskFromSiri = Notification.Name("oxy.askFromSiri")
+    /// Carries a spoken message (from the pendant or the "Ask Oxy" Siri intent)
+    /// into the *currently visible* ChatView — userInfo["text"]. This replaces
+    /// presenting a second ChatView, which caused a duplicate-screen overlay.
+    static let oxyVoiceMessage = Notification.Name("oxy.voiceMessage")
 }
 
 final class APIClient: @unchecked Sendable {

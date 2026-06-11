@@ -25,12 +25,6 @@ struct ChatHomeView: View {
 
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
-    @State private var pendantItem: PendantTranscriptItem?
-
-    private struct PendantTranscriptItem: Identifiable {
-        let id = UUID().uuidString
-        let transcript: String
-    }
 
     private let sidebarWidth: CGFloat = 312
     private var edgeWidth: CGFloat { 22 }
@@ -91,26 +85,6 @@ struct ChatHomeView: View {
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
             setupPendantBridge()
-            drainSiriRequest()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .oxyAskFromSiri)) { note in
-            let query = (note.userInfo?["query"] as? String) ?? SiriRequestBus.shared.take()
-            if let query, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                SiriRequestBus.shared.pendingQuery = nil
-                pendantItem = PendantTranscriptItem(transcript: query)
-            }
-        }
-        .fullScreenCover(item: $pendantItem) { item in
-            ChatView(autoSendTranscript: item.transcript)
-        }
-    }
-
-    /// On a cold launch from the "Ask Oxy" Siri intent, the notification may fire
-    /// before this view subscribes — so also drain any pending query on appear.
-    private func drainSiriRequest() {
-        if let query = SiriRequestBus.shared.take(),
-           !query.trimmingCharacters(in: .whitespaces).isEmpty {
-            pendantItem = PendantTranscriptItem(transcript: query)
         }
     }
 
@@ -419,7 +393,13 @@ struct ChatHomeView: View {
             Task { @MainActor in
                 HapticManager.shared.impact(.medium)
                 NativeIntegrationManager.shared.pendant.sendCommand("THINK")
-                self.pendantItem = PendantTranscriptItem(transcript: transcript)
+                // Send into the chat the user is already looking at, rather than
+                // presenting a second ChatView on top (the old duplicate-screen bug).
+                NotificationCenter.default.post(
+                    name: .oxyVoiceMessage,
+                    object: nil,
+                    userInfo: ["text": transcript]
+                )
             }
         }
 

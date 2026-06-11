@@ -783,28 +783,49 @@ function isImplausibleTranscript(text, durationMs) {
   return wordsPerSecond > 6.0;
 }
 
-async function transcribeAudio(buffer, contextHint = '') {
+function buildTranscribeAndCleanPrompt(contextHint = '') {
+  const contextLine = contextHint
+    ? `Known names/terms the speaker may reference (prefer these spellings when a word matches phonetically): ${contextHint}\n\n`
+    : '';
+  return `${contextLine}You are the transcription engine of a premium voice-dictation system (like Wispr Flow). Transcribe this audio AND clean it up in a single step, returning exactly what the speaker meant to say.
+
+- Capture intended meaning over strict phonetics; the speaker may have a non-native accent. Infer unclear words from context rather than dropping them.
+- Remove filler words and verbal tics (um, uh, er, like, you know, I mean, sort of, basically, actually, and "so"/"well"/"right" used as filler).
+- Resolve self-corrections — keep ONLY the final intended version ("send it to John, no wait, Sarah" → "send it to Sarah").
+- Remove false starts, stutters, and accidentally repeated words.
+- Fix grammar, capitalisation, and punctuation; format numbers, times, dates, currency, emails ("john at gmail dot com" → "john@gmail.com"), and spoken punctuation.
+- Spell proper nouns correctly, preferring the known names above.
+- Preserve meaning, intent, tone, and language EXACTLY. Never answer, reply to, summarise, translate, or add content. Keep commands as direct commands.
+- Output ONLY the final cleaned text. If there is no speech at all, output absolutely nothing — not a single word or symbol.`;
+}
+
+// Single Gemini call that transcribes AND applies Wispr-style cleanup. Doing
+// both in one request (instead of transcribe → separate polish) removes a whole
+// model round trip from every voice turn — the dominant voice-latency cost.
+async function transcribeAndCleanAudio(buffer, contextHint = '') {
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-  const transcribeModel = genAI.getGenerativeModel({ model: FAST_MODEL });
+  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
   const durationMs = getWavDurationMs(buffer);
 
-  const contextLine = contextHint
-    ? `Context — names/topics the speaker may reference: ${contextHint}\n\n`
-    : '';
-
-  const prompt = `${contextLine}Transcribe this audio. The speaker may have a non-native accent — prioritise capturing their intended meaning over strict phonetic matching. If a word is unclear, infer from context rather than omitting it. Output only the spoken words with correct capitalisation and punctuation. If there is no speech at all, output absolutely nothing — do not write any word or symbol.`;
-
-  const response = await transcribeModel.generateContent({
-    contents: [{ role: 'user', parts: [{ text: prompt }, audioPart] }],
-    generationConfig: { temperature: 0.1, topP: 0.95, topK: 40, maxOutputTokens: 512 }
+  const response = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: buildTranscribeAndCleanPrompt(contextHint) }, audioPart] }],
+    generationConfig: { temperature: 0.1, topP: 0.95, topK: 40, maxOutputTokens: 1024 }
   });
 
   const transcript = normalizeTranscript(response.response.text());
   return isImplausibleTranscript(transcript, durationMs) ? '' : transcript;
 }
 
+// Memory-derived names change rarely, but voice turns come in bursts — so cache
+// the hint per user (5 min) to skip a Supabase round trip before every
+// transcription. Keeps back-to-back pendant/mic utterances snappy.
+const transcriptionHintCache = new Map();
+const TRANSCRIPTION_HINT_TTL = 5 * 60 * 1000;
+
 async function buildTranscriptionHint(userId) {
+  const cached = transcriptionHintCache.get(userId);
+  if (cached && Date.now() - cached.at < TRANSCRIPTION_HINT_TTL) return cached.hint;
   try {
     const { data } = await supabase
       .from('memories')
@@ -812,34 +833,40 @@ async function buildTranscriptionHint(userId) {
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(15);
-    if (!data?.length) return '';
-    const words = data.map(r => r.content).join(' ').match(/\b[A-Z][a-z]{2,}\b/g) || [];
-    return [...new Set(words)].slice(0, 20).join(', ');
+    const words = data?.length
+      ? (data.map(r => r.content).join(' ').match(/\b[A-Z][a-z]{2,}\b/g) || [])
+      : [];
+    const hint = [...new Set(words)].slice(0, 20).join(', ');
+    transcriptionHintCache.set(userId, { hint, at: Date.now() });
+    return hint;
   } catch { return ''; }
 }
 
-function buildPolishPrompt(transcript) {
-  return `You are a speech-to-text post-processor. Your job is to clean up raw voice transcriptions into clear, polished text while preserving the speaker's exact intent.
+function buildPolishPrompt(transcript, contextHint = '') {
+  return `You are the cleanup layer of a premium voice-dictation system (like Wispr Flow). You receive a raw speech-to-text transcript and rewrite it into exactly what the speaker meant to say — clean, correctly punctuated, and ready to send.
 
-Rules:
-- Remove filler words (um, uh, like, you know, basically, so, well, I mean)
-- Fix grammar, punctuation, and capitalisation
-- Remove false starts and repetitions
-- Keep the meaning and tone identical — do NOT add, remove, or change any intent
-- If the input is a command or request (e.g. "play music", "send a message", "set a timer"), keep it as a direct command
-- If the input is already clean, return it unchanged
-- Return ONLY the polished text, nothing else — no quotes, no explanation
+Apply all of these:
+- Remove filler words and verbal tics: um, uh, er, hmm, like, you know, I mean, sort of, kind of, basically, literally, actually, and "so"/"well"/"right"/"okay" when used as filler.
+- Resolve self-corrections — when the speaker changes their mind mid-sentence, keep ONLY the final intended version. E.g. "send it to John, no wait, to Sarah" → "send it to Sarah"; "let's meet at 5, sorry I mean 6pm" → "let's meet at 6pm".
+- Remove false starts, stutters, and accidental repeated words.
+- Fix grammar, verb tense, capitalisation, and punctuation. Add sentence breaks, and paragraph breaks for longer dictation.
+- Format spoken forms correctly: numbers, times, dates, currency, emails ("john at gmail dot com" → "john@gmail.com"), URLs, and spoken punctuation ("new line", "comma", "question mark") when clearly dictated.
+- Spell proper nouns correctly. When a spoken word phonetically matches one of these known names/terms, prefer that spelling: ${contextHint || '(none provided)'}.
+- Preserve the speaker's meaning, intent, tone, and language EXACTLY. Never answer, reply to, comment on, summarise, translate, or invent content. If it is a command or request ("play music", "text mum I'm running late"), keep it as a direct command.
+- If the transcript is already clean, return it unchanged.
 
-Raw transcription: ${transcript}`;
+Return ONLY the cleaned text — no quotes, labels, or explanation.
+
+Raw transcript: ${transcript}`;
 }
 
-async function polishTranscriptText(transcript) {
+async function polishTranscriptText(transcript, contextHint = '') {
   if (!transcript?.trim()) return transcript;
   try {
     const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const result = await model.generateContent({
-      contents: [{ role: 'user', parts: [{ text: buildPolishPrompt(transcript) }] }],
-      generationConfig: { temperature: 0, maxOutputTokens: 512 }
+      contents: [{ role: 'user', parts: [{ text: buildPolishPrompt(transcript, contextHint) }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 1024 }
     });
     return (result.response?.text?.() || transcript).trim() || transcript;
   } catch { return transcript; }
@@ -3310,8 +3337,11 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   };
 
   try {
+    const hint = await buildTranscriptionHint(userId);
+    // Transcribe + Wispr-style cleanup in one call, in parallel with context
+    // building — so the first response token is gated only by one STT call.
     const [userText, context] = await Promise.all([
-      transcribeAudio(req.file.buffer),
+      transcribeAndCleanAudio(req.file.buffer, hint),
       buildChatContext(userId, '', null, STREAMING_CHAT_MODEL) // message unknown yet — no search for audio transcription step
     ]);
 
@@ -3426,9 +3456,10 @@ app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
 
   try {
     const hint = await buildTranscriptionHint(userId);
-    const raw = await transcribeAudio(req.file.buffer, hint);
-    const transcript = raw ? await polishTranscriptText(raw) : '';
-    console.log(`[pendant/transcribe] userId=${userId} raw="${raw}" polished="${transcript}"`);
+    // One call transcribes and cleans (Wispr-style) — half the model round trips
+    // of the old transcribe-then-polish path, so the pendant/mic feels snappier.
+    const transcript = await transcribeAndCleanAudio(req.file.buffer, hint);
+    console.log(`[pendant/transcribe] userId=${userId} transcript="${transcript}"`);
     res.json({ transcript: transcript || '' });
   } catch (err) {
     console.error('/pendant/transcribe error:', err.message);

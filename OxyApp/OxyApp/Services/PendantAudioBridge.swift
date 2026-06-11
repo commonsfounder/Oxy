@@ -59,9 +59,11 @@ final class PendantAudioBridge {
     @ObservationIgnored private var isSessionActive = false
     @ObservationIgnored private var utteranceEnded = false
 
-    // Silence offset: debounce timer fires upload 1.5 s after last speech batch.
+    // Silence offset: debounce timer fires upload after the last speech batch.
+    // 1.1 s is long enough to ride over a natural mid-sentence pause but ~0.4 s
+    // snappier than the old 1.5 s, which the user feels on every utterance.
     @ObservationIgnored private var silenceEndTimer: DispatchWorkItem?
-    @ObservationIgnored private let silenceDebounce: TimeInterval = 1.5
+    @ObservationIgnored private let silenceDebounce: TimeInterval = 1.1
 
     @ObservationIgnored private var diagnosticCounter = 0
 

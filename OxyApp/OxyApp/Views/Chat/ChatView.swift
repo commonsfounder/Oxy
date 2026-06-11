@@ -318,6 +318,13 @@ struct ChatView: View {
                 viewModel.inputText = text
                 viewModel.sendMessage(userId: appState.userId)
             }
+            // Spoken input from the pendant or the "Ask Oxy" Siri intent — routed
+            // into this existing chat instead of opening a second screen.
+            .onReceive(NotificationCenter.default.publisher(for: .oxyVoiceMessage)) { note in
+                guard let text = note.userInfo?["text"] as? String else { return }
+                SiriRequestBus.shared.pendingQuery = nil
+                injectVoiceMessage(text)
+            }
         .task {
             if let session = initialSession {
                 await viewModel.loadHistoryAround(
@@ -330,8 +337,12 @@ struct ChatView: View {
                 await viewModel.prepareChat(userId: appState.userId)
             }
             if let transcript = autoSendTranscript, !transcript.isEmpty {
-                viewModel.inputText = transcript
-                viewModel.sendMessage(userId: appState.userId)
+                injectVoiceMessage(transcript)
+            }
+            // Cold-launch from the Siri intent: the notification may have fired
+            // before this view subscribed, so drain any pending query here.
+            if let pending = SiriRequestBus.shared.take() {
+                injectVoiceMessage(pending)
             }
         }
         .onAppear {
@@ -398,6 +409,16 @@ struct ChatView: View {
 
     private func dismissAttachMenu() {
         withAnimation(.easeOut(duration: 0.18)) { showAttachMenu = false }
+    }
+
+    /// Send a spoken transcript as a message into this conversation. De-dupes
+    /// against an in-flight send so an overlapping pendant + Siri trigger can't
+    /// fire the same text twice.
+    private func injectVoiceMessage(_ rawText: String) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        viewModel.inputText = text
+        viewModel.sendMessage(userId: appState.userId)
     }
 
     private func sendCurrentDraft() {

@@ -41,8 +41,11 @@ struct AskOxyIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
+            // Bus is the cold-launch fallback (drained in ChatView.task); the
+            // notification handles the warm case where a ChatView is already alive.
             SiriRequestBus.shared.pendingQuery = trimmed
-            NotificationCenter.default.post(name: .oxyAskFromSiri, object: nil, userInfo: ["query": trimmed])
+            NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
+            NotificationCenter.default.post(name: .oxyVoiceMessage, object: nil, userInfo: ["text": trimmed])
         }
         return .result()
     }
