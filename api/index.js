@@ -317,6 +317,21 @@ const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.5-flash';
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
+
+// Gemini 3.x Flash thinks before answering by default, which added ~4.5s to
+// first token and ~2s to transcription. For this interactive voice path we want
+// speed over deep reasoning, so thinking is disabled by default. Tune or re-enable
+// with OXY_THINKING_BUDGET (0 = off; a positive token budget = some thinking).
+const OXY_THINKING_BUDGET = Number.isFinite(Number(process.env.OXY_THINKING_BUDGET))
+  ? Number(process.env.OXY_THINKING_BUDGET)
+  : 0;
+
+// Returns `{ thinkingConfig: {...} }` to spread into a generation config, or `{}`
+// when OXY_THINKING_BUDGET is negative — an env-only kill switch in case a model
+// rejects the field (set OXY_THINKING_BUDGET=-1 to revert instantly, no redeploy).
+function latencyThinkingConfig() {
+  return OXY_THINKING_BUDGET >= 0 ? { thinkingConfig: { thinkingBudget: OXY_THINKING_BUDGET } } : {};
+}
 const promptCacheStates = new Map();
 const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
 const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
@@ -810,7 +825,7 @@ async function transcribeAndCleanAudio(buffer, contextHint = '') {
 
   const response = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: buildTranscribeAndCleanPrompt(contextHint) }, audioPart] }],
-    generationConfig: { temperature: 0.1, topP: 0.95, topK: 40, maxOutputTokens: 1024 }
+    generationConfig: { temperature: 0.1, topP: 0.95, topK: 40, maxOutputTokens: 1024, ...latencyThinkingConfig() }
   });
 
   const transcript = normalizeTranscript(response.response.text());
@@ -1479,7 +1494,9 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
     systemInstruction: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
     temperature: useSearch ? 0.1 : 0.2,
     topP: 0.8,
-    topK: 20
+    topK: 20,
+    // Disable (or limit) model thinking — the dominant first-token latency.
+    ...latencyThinkingConfig()
   };
   if (useSearch) config.tools = [{ googleSearch: {} }];
   const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
