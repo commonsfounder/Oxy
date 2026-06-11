@@ -3337,6 +3337,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   };
 
   try {
+    const tStart = Date.now();
     const hint = await buildTranscriptionHint(userId);
     // Transcribe + Wispr-style cleanup in one call, in parallel with context
     // building — so the first response token is gated only by one STT call.
@@ -3344,6 +3345,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       transcribeAndCleanAudio(req.file.buffer, hint),
       buildChatContext(userId, '', null, STREAMING_CHAT_MODEL) // message unknown yet — no search for audio transcription step
     ]);
+    console.log(`[latency][process-audio] userId=${userId} transcribe+context=${Date.now() - tStart}ms`);
 
     if (!userText) {
       sse({ type: 'transcription-error', error: "I couldn't clearly make out what you said." });
@@ -3423,6 +3425,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     });
     saveMessage(userId, 'assistant', { text: finalSpoken, actions: actionResults }).catch(() => {});
 
+    console.log(`[latency][process-audio] userId=${userId} fullResponse=${Date.now() - tStart}ms (transcribe→spoken+audio ready)`);
     sse({ type: 'response', text: finalSpoken, actions: actionResults });
     if (audioBase64) sse({ type: 'audio', data: audioBase64, format: 'wav', mimeType: 'audio/wav' });
     if (ttsError) sse({ type: 'tts-error', error: ttsError });
@@ -3455,11 +3458,16 @@ app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
   audioRateLimit.set(userId, [...recentHits, now]);
 
   try {
+    const tStart = Date.now();
     const hint = await buildTranscriptionHint(userId);
+    const tHint = Date.now();
     // One call transcribes and cleans (Wispr-style) — half the model round trips
     // of the old transcribe-then-polish path, so the pendant/mic feels snappier.
     const transcript = await transcribeAndCleanAudio(req.file.buffer, hint);
-    console.log(`[pendant/transcribe] userId=${userId} transcript="${transcript}"`);
+    const tEnd = Date.now();
+    // Greppable in Cloud Run: `grep "[latency]"`. This is half the pendant turn;
+    // the other half (the spoken reply) is the /chat `request.total` marker.
+    console.log(`[latency][pendant/transcribe] userId=${userId} audioMs=${getWavDurationMs(req.file.buffer) || '?'} hint=${tHint - tStart}ms transcribe=${tEnd - tHint}ms total=${tEnd - tStart}ms transcript="${transcript}"`);
     res.json({ transcript: transcript || '' });
   } catch (err) {
     console.error('/pendant/transcribe error:', err.message);
