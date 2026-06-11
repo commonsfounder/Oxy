@@ -48,6 +48,11 @@ function reviewTitleForAction(action) {
     case 'order_uber_eats': return 'Review Uber Eats';
     case 'order_deliveroo': return 'Review Deliveroo';
     case 'make_call': return 'Review call';
+    case 'send_outlook_email': return 'Review email';
+    case 'create_github_issue': return 'Review GitHub issue';
+    case 'comment_github_issue': return 'Review GitHub comment';
+    case 'create_linear_issue': return 'Review Linear issue';
+    case 'comment_linear_issue': return 'Review Linear comment';
     default: return `Review ${humanizeActionType(action?.type || 'action')}`;
   }
 }
@@ -56,7 +61,16 @@ function reviewDetailForAction(action) {
   const input = action?.input || {};
   switch (action?.type) {
     case 'send_email':
+    case 'send_outlook_email':
       return [input.to, input.subject, input.body].filter(Boolean).join(' · ');
+    case 'create_github_issue':
+      return [input.repo, input.title, input.body].filter(Boolean).join(' · ');
+    case 'comment_github_issue':
+      return [input.repo && input.issue_number ? `${input.repo}#${input.issue_number}` : (input.repo || ''), input.body].filter(Boolean).join(' · ');
+    case 'create_linear_issue':
+      return [input.team, input.title, input.description].filter(Boolean).join(' · ');
+    case 'comment_linear_issue':
+      return [input.issue, input.body].filter(Boolean).join(' · ');
     case 'send_message':
     case 'send_telegram':
       return [input.contact, input.message].filter(Boolean).join(' · ');

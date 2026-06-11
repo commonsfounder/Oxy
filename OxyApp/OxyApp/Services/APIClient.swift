@@ -4,6 +4,8 @@ extension Notification.Name {
     static let oxySessionExpired = Notification.Name("oxy.sessionExpired")
     static let oxyJumpToChat = Notification.Name("oxy.jumpToChat")
     static let oxyJumpToMore = Notification.Name("oxy.jumpToMore")
+    /// Posted by the "Ask Oxy" App Intent (Siri / Shortcuts / Action Button).
+    static let oxyAskFromSiri = Notification.Name("oxy.askFromSiri")
 }
 
 final class APIClient: @unchecked Sendable {

@@ -190,6 +190,56 @@ struct NamelessPrimaryButton: View {
     }
 }
 
+// MARK: - Liquid Glass (iOS 26+)
+//
+// Apple's Liquid Glass material gives icon-sized chrome — header buttons, the
+// composer's floating action button, floating overlays — a refractive,
+// light-bending surface. It's reserved for that "chrome": flat list rows
+// (Settings, Connectors, Memory, More) keep the existing raw-typography
+// treatment untouched. On iOS 17–25, where `glassEffect` doesn't exist, a
+// frosted `.ultraThinMaterial` approximation keeps the same silhouette and
+// tint so the layout doesn't shift between OS versions.
+
+extension View {
+    /// Wraps an icon/control in Liquid Glass on iOS 26+, or a frosted-material
+    /// approximation on earlier versions. `tint` carries through the control's
+    /// existing accent colour (e.g. titanium-fill buttons); pass `nil` for a
+    /// neutral glass chip. `interactive` adds the press/highlight response
+    /// Liquid Glass gives tappable controls.
+    @ViewBuilder
+    func nmlGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(Self.nmlGlassStyle(tint: tint, interactive: interactive), in: shape)
+        } else {
+            self.background {
+                shape
+                    .fill(.ultraThinMaterial)
+                    .overlay(shape.fill((tint ?? Color.white).opacity(tint == nil ? 0.05 : 0.25)))
+                    .overlay(shape.strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
+            }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    fileprivate static func nmlGlassStyle(tint: Color?, interactive: Bool) -> Glass {
+        var glass = Glass.regular
+        if let tint { glass = glass.tint(tint) }
+        if interactive { glass = glass.interactive() }
+        return glass
+    }
+}
+
+/// Groups adjacent Liquid Glass controls so iOS 26 can render them as a single
+/// fluid surface that can morph between states. No-op passthrough on iOS 17–25.
+@ViewBuilder
+func nmlGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) -> some View {
+    if #available(iOS 26.0, *) {
+        GlassEffectContainer(spacing: spacing, content: content)
+    } else {
+        content()
+    }
+}
+
 /// The quiet counterpart: border-only, muted titanium text, no fill.
 struct NamelessOutlineButton: View {
     let title: String

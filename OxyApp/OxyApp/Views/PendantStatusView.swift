@@ -20,7 +20,9 @@ struct PendantStatusView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Pendant", onBack: { dismiss() })
+                    ScrollView {
                     VStack(spacing: 0) {
                         // Hardware status, moved here from the chat list.
                         DeviceStatusCard(telemetry: telemetry)
@@ -39,21 +41,10 @@ struct PendantStatusView: View {
                     .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: hapticForce)
                     // Soft, quiet selection feedback for footer utility taps.
                     .sensoryFeedback(.selection, trigger: footerTap)
-                }
-            }
-            .navigationTitle("Pendant")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Text("Back")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .onAppear { telemetry.start() }
         .onDisappear { telemetry.stop() }

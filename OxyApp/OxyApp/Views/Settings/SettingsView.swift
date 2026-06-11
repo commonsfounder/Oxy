@@ -26,7 +26,9 @@ struct SettingsView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Settings", onBack: { dismiss() })
+                    ScrollView {
                     VStack(spacing: 36) {
                         // Identity
                         settingsSection(title: "Profile") {
@@ -253,23 +255,10 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 12)
-                }
-            }
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Back")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .alert("Sign Out", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) { appState.logout() }
                 Button("Cancel", role: .cancel) {}

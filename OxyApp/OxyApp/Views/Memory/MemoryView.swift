@@ -38,7 +38,13 @@ struct MemoryView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            ScrollView {
+            VStack(spacing: 0) {
+                // Embedded inside another screen (which owns the header); standalone
+                // gets its own minimal header in place of a chunky nav title.
+                if !embedded {
+                    ScreenHeaderView(title: "Memory", onBack: { dismiss() })
+                }
+                ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
                     // Capture
                     VStack(alignment: .leading, spacing: 20) {
@@ -82,23 +88,10 @@ struct MemoryView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 40)
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
-            }
-        }
-        .navigationTitle("Memory")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.black, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if !embedded {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Text("Back")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
-                    }
                 }
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
         .task { await loadMemory() }
         .refreshable { await loadMemory() }
     }

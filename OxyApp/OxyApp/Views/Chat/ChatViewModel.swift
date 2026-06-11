@@ -114,6 +114,7 @@ final class ChatViewModel {
         let startedAt = Date().oxyISO8601String
         activeChatStartedAt = startedAt
         UserDefaults.standard.set(startedAt, forKey: chatStartedAtKey(userId))
+        UserDefaults.standard.set(startedAt, forKey: lastActivityKey(userId))
         isViewingHistorySnapshot = false
         historySnapshotLabel = nil
         nativeManager.resetConversationContext()
@@ -128,6 +129,7 @@ final class ChatViewModel {
         if activeChatStartedAt == nil {
             activeChatStartedAt = chatStartedAt(for: userId)
         }
+        markChatActivity(for: userId)
         let pendingDecision = localActionDecision(for: text)
 
         audioPlayback.stop()
@@ -534,20 +536,41 @@ final class ChatViewModel {
         }
     }
 
+    // Resume the current session only if it's still "live" by the same rule the
+    // server uses to group sessions (`buildConversationSessions`): less than 45
+    // minutes since the last activity AND the same calendar day. Otherwise start
+    // a fresh session. This keeps the client's notion of the active chat aligned
+    // with the sidebar's session list — reopening the app the next day (or after
+    // a long idle) no longer feeds yesterday's messages into the current context.
     private func chatStartedAt(for userId: String) -> String {
         let key = chatStartedAtKey(userId)
+        let now = Date()
         if let saved = UserDefaults.standard.string(forKey: key),
-           let savedDate = Date.oxyParse(saved),
-           Date().timeIntervalSince(savedDate) < TimeInterval(12 * 60 * 60) {
+           Date.oxyParse(saved) != nil,
+           let lastActivity = UserDefaults.standard.string(forKey: lastActivityKey(userId)).flatMap(Date.oxyParse),
+           now.timeIntervalSince(lastActivity) < TimeInterval(45 * 60),
+           Calendar.current.isDate(lastActivity, inSameDayAs: now) {
             return saved
         }
-        let startedAt = Date().oxyISO8601String
+        let startedAt = now.oxyISO8601String
         UserDefaults.standard.set(startedAt, forKey: key)
+        UserDefaults.standard.set(startedAt, forKey: lastActivityKey(userId))
         return startedAt
+    }
+
+    /// Stamp the active session's last-activity time. Called whenever the user
+    /// sends a message so the 45-minute reuse window in `chatStartedAt(for:)`
+    /// tracks real activity rather than when the session first opened.
+    private func markChatActivity(for userId: String) {
+        UserDefaults.standard.set(Date().oxyISO8601String, forKey: lastActivityKey(userId))
     }
 
     private func chatStartedAtKey(_ userId: String) -> String {
         "oxy_current_chat_started_at_\(userId)"
+    }
+
+    private func lastActivityKey(_ userId: String) -> String {
+        "oxy_current_chat_last_activity_\(userId)"
     }
 
     private func closestMessageID(in messages: [Message], to createdAt: String, messageId: String? = nil) -> UUID? {

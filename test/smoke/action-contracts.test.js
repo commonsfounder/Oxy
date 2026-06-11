@@ -35,7 +35,26 @@ test('Core 20 actions have contracts for reliability work', () => {
     'make_call',
     'generate_visual',
     'create_diagram',
-    'create_presentation'
+    'create_presentation',
+    'search_github',
+    'get_github_notifications',
+    'create_github_issue',
+    'comment_github_issue',
+    'send_outlook_email',
+    'get_outlook_emails',
+    'search_outlook_emails',
+    'create_outlook_event',
+    'get_outlook_events',
+    'search_spotify',
+    'play_spotify',
+    'control_spotify_playback',
+    'add_to_spotify_queue',
+    'add_to_spotify_playlist',
+    'get_now_playing_spotify',
+    'search_linear_issues',
+    'get_linear_issues',
+    'create_linear_issue',
+    'comment_linear_issue'
   ];
 
   for (const action of expected) {

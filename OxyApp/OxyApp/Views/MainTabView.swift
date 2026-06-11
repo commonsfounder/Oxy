@@ -80,6 +80,8 @@ struct MainTabView: View {
             VStack(spacing: 4) {
                 Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
                     .font(.system(size: 19, weight: .regular))
+                    .frame(width: 34, height: 34)
+                    .modifier(TabGlassModifier(selected: selected))
                 Text(tab.label)
                     .font(.system(size: 10, weight: selected ? .semibold : .medium))
             }
@@ -88,6 +90,21 @@ struct MainTabView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Gives the active tab's icon a Liquid Glass pill on iOS 26+ (a frosted
+/// circle approximation on earlier versions); unselected icons stay bare.
+private struct TabGlassModifier: ViewModifier {
+    let selected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if selected {
+            content.nmlGlass(Circle())
+        } else {
+            content
+        }
     }
 }
 
@@ -107,7 +124,9 @@ struct MoreView: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                ScrollView {
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "More")
+                    ScrollView {
                     VStack(spacing: 0) {
                         moreRow(title: "Profile", subtitle: "Your account and assistant name") {
                             destination = .profile
@@ -136,12 +155,10 @@ struct MoreView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
                     .padding(.bottom, 32)
+                    }
                 }
             }
-            .navigationTitle("More")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in
                 switch dest {
                 case .profile: ProfileView()

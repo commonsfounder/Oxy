@@ -25,6 +25,11 @@ const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
+const githubConnector = require('../connectors/github');
+const microsoftConnector = require('../connectors/microsoft');
+const spotifyConnector = require('../connectors/spotify');
+const linearConnector = require('../connectors/linear');
+const notionConnector = require('../connectors/notion');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
 const {
@@ -133,13 +138,13 @@ function humanizeActionType(type) {
     .replace(/\b\w/g, ch => ch.toUpperCase());
 }
 
-function signOAuthState(userId) {
-  return signPayload({ type: 'google_oauth', userId }, 15 * 60 * 1000);
+function signOAuthState(userId, provider = 'google') {
+  return signPayload({ type: `${provider}_oauth`, provider, userId }, 15 * 60 * 1000);
 }
 
-function verifyOAuthState(state) {
+function verifyOAuthState(state, provider = 'google') {
   const payload = verifySignedPayload(state);
-  if (!payload || payload.type !== 'google_oauth') return null;
+  if (!payload || payload.type !== `${provider}_oauth`) return null;
   return isValidUserId(payload.userId) ? payload.userId : null;
 }
 
@@ -1614,6 +1619,36 @@ const ACTION_STATUS_LABELS = {
   order_deliveroo: 'Opening Deliveroo',
   search_netflix_title: 'Searching Netflix',
   add_to_netflix_list: 'Opening Netflix list',
+  search_github: 'Searching GitHub',
+  get_github_notifications: 'Checking GitHub notifications',
+  create_github_issue: 'Creating GitHub issue',
+  comment_github_issue: 'Posting GitHub comment',
+  send_outlook_email: 'Sending email',
+  get_outlook_emails: 'Checking emails',
+  search_outlook_emails: 'Searching emails',
+  create_outlook_event: 'Creating calendar event',
+  get_outlook_events: 'Checking calendar',
+  search_youtube: 'Searching YouTube',
+  search_indeed_jobs: 'Searching Indeed',
+  search_linkedin_jobs: 'Searching LinkedIn',
+  share_linkedin_post: 'Opening LinkedIn',
+  search_notion: 'Searching Notion',
+  create_notion_page: 'Creating Notion page',
+  append_notion_page: 'Updating Notion page',
+  create_google_doc: 'Creating Google Doc',
+  search_google_docs: 'Searching Google Docs',
+  append_google_doc: 'Updating Google Doc',
+  get_google_doc: 'Reading Google Doc',
+  search_spotify: 'Searching Spotify',
+  play_spotify: 'Playing on Spotify',
+  control_spotify_playback: 'Controlling Spotify',
+  add_to_spotify_queue: 'Queuing on Spotify',
+  add_to_spotify_playlist: 'Updating Spotify playlist',
+  get_now_playing_spotify: 'Checking Spotify',
+  search_linear_issues: 'Searching Linear',
+  get_linear_issues: 'Checking Linear issues',
+  create_linear_issue: 'Creating Linear issue',
+  comment_linear_issue: 'Posting Linear comment',
   forget_memory: 'Updating memory',
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
@@ -2605,6 +2640,7 @@ function buildConversationSessions(rows = []) {
         id: row.id || row.created_at,
         title: '',
         preview: '',
+        firstUserText: '',
         started_at: row.created_at,
         last_at: row.created_at,
         message_count: 0
@@ -2615,7 +2651,11 @@ function buildConversationSessions(rows = []) {
     const text = conversationFallbackText(row).trim();
     session.last_at = row.created_at;
     session.message_count += 1;
+    // Capture the session's *opening* user message once — this is what titles
+    // should describe. `preview` (below) is the latest message and is only a
+    // fallback for sessions that never had a user turn.
     if (!session.title && row.role === 'user' && text) session.title = text.slice(0, 80);
+    if (!session.firstUserText && row.role === 'user' && text) session.firstUserText = text.slice(0, 240);
     if (text) session.preview = text.slice(0, 140);
   }
 
@@ -2628,44 +2668,11 @@ function buildConversationSessions(rows = []) {
     .slice(0, 30);
 }
 
-async function maybeGenerateSessionTitle(userId, userMessageText, trace = null) {
-  if (trace?.incognito) return;
-  (async () => {
-    try {
-      const since = new Date(Date.now() - 50 * 60 * 1000).toISOString();
-      const { data: recent } = await supabase
-        .from('conversations')
-        .select('id, role')
-        .eq('user_id', userId)
-        .gte('created_at', since)
-        .order('created_at', { ascending: true })
-        .limit(6);
-      if (!recent) return;
-      const userMsgs = recent.filter(m => m.role === 'user');
-      const asstMsgs = recent.filter(m => m.role === 'assistant');
-      if (userMsgs.length !== 1 || asstMsgs.length !== 1) return;
-      const firstMsgId = userMsgs[0].id;
-      const titleKey = `_stitle_${firstMsgId}`;
-      const { data: existing } = await supabase
-        .from('preferences').select('value')
-        .eq('user_id', userId).eq('key', titleKey).maybeSingle();
-      if (existing) return;
-      const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-      const result = await model.generateContent(
-        `Create a concise chat title (3-6 words, no quotes, no punctuation at end) for a conversation that starts with: "${userMessageText.slice(0, 200)}"\nReply with ONLY the title.`
-      );
-      const title = result.response.text().trim().replace(/^["'“”]|["'“”]$/g, '').slice(0, 60);
-      if (title) {
-        await supabase.from('preferences').upsert({ user_id: userId, key: titleKey, value: title }, { onConflict: 'user_id,key' });
-      }
-    } catch (_) {}
-  })();
-}
-
-// Generate a descriptive AI title for one session from its opening text.
-// Returns the title (and persists it) or null on failure.
-async function generateSessionTitleFromText(userId, sessionId, sourceText) {
-  const text = (sourceText || '').trim();
+// Single source of truth for turning a conversation's opening text into a
+// short descriptive title. Returns the cleaned title string or null on failure.
+// Does NOT persist — callers store it under the right `_stitle_${sessionId}` key.
+async function titleFromOpeningText(openingText) {
+  const text = (openingText || '').trim();
   if (!text) return null;
   try {
     const model = genAI.getGenerativeModel({ model: FAST_MODEL });
@@ -2676,28 +2683,65 @@ async function generateSessionTitleFromText(userId, sessionId, sourceText) {
       `Conversation opening: "${text.slice(0, 240)}"\nReply with ONLY the title.`
     );
     const title = result.response.text().trim().replace(/^["'“”]|["'“”]$/g, '').slice(0, 60);
-    if (!title) return null;
-    await supabase.from('preferences').upsert(
-      { user_id: userId, key: `_stitle_${sessionId}`, value: title },
-      { onConflict: 'user_id,key' }
-    );
-    return title;
+    return title || null;
   } catch (_) {
     return null;
   }
 }
 
+// Right after the first turn of a new session, generate and store its title.
+// We rebuild the session grouping from recent rows (same logic the sessions
+// endpoint uses) so the title is keyed on the SAME session id the UI looks up
+// — avoiding the old "1 user + 1 assistant message" heuristic that could key
+// on the wrong id or skip valid sessions.
+async function maybeGenerateSessionTitle(userId, userMessageText, trace = null) {
+  if (trace?.incognito) return;
+  (async () => {
+    try {
+      const since = new Date(Date.now() - 50 * 60 * 1000).toISOString();
+      const { data: recent } = await supabase
+        .from('conversations')
+        .select('id, role, content, created_at')
+        .eq('user_id', userId)
+        .neq('role', 'system')
+        .gte('created_at', since)
+        .order('created_at', { ascending: true })
+        .limit(20);
+      if (!recent || !recent.length) return;
+      const sessions = buildConversationSessions(recent);
+      const session = sessions[0]; // most recent (buildConversationSessions reverses)
+      if (!session || session.message_count > 2) return;
+      const titleKey = `_stitle_${session.id}`;
+      const { data: existing } = await supabase
+        .from('preferences').select('value')
+        .eq('user_id', userId).eq('key', titleKey).maybeSingle();
+      if (existing) return;
+      const title = await titleFromOpeningText(session.firstUserText || userMessageText);
+      if (title) {
+        await supabase.from('preferences').upsert({ user_id: userId, key: titleKey, value: title }, { onConflict: 'user_id,key' });
+      }
+    } catch (_) {}
+  })();
+}
+
 // Backfill descriptive titles for older sessions that still show a verbatim
 // excerpt. Fire-and-forget so the listing stays fast; titles improve on the
-// next load. Capped per request to avoid hammering the model.
+// next load. Capped per request to avoid hammering the model. Titles are
+// generated from the session's OPENING user message, not its latest line.
 function backfillSessionTitles(userId, sessions, storedTitles) {
   const missing = sessions
-    .filter(s => !storedTitles[s.id] && (s.preview || s.title))
+    .filter(s => !storedTitles[s.id] && (s.firstUserText || s.preview || s.title))
     .slice(0, 12);
   if (!missing.length) return;
   (async () => {
     for (const s of missing) {
-      await generateSessionTitleFromText(userId, s.id, s.preview || s.title);
+      const title = await titleFromOpeningText(s.firstUserText || s.preview || s.title);
+      if (title) {
+        await supabase.from('preferences').upsert(
+          { user_id: userId, key: `_stitle_${s.id}`, value: title },
+          { onConflict: 'user_id,key' }
+        );
+      }
     }
   })();
 }
@@ -2809,11 +2853,11 @@ async function getEnabledConnectors(userId, trace = null) {
 
 function buildAvailableActions(enabled) {
   const actionMap = {
-    google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'],
+    google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events', 'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc'],
     imessage: ['send_message'],
     whatsapp: ['send_message'],
     reminders: ['create_reminder'],
-    spotify: ['play_music'],
+    spotify: ['search_spotify', 'play_spotify', 'control_spotify_playback', 'add_to_spotify_queue', 'add_to_spotify_playlist', 'get_now_playing_spotify'],
     homekit: ['homekit_control'],
     maps: ['find_place', 'get_directions', 'plan_trip'],
     uber: ['book_uber'],
@@ -2823,8 +2867,14 @@ function buildAvailableActions(enabled) {
     deliveroo: ['order_deliveroo'],
     monzo: ['check_balance'],
     betfair: ['place_bet'],
-    notion: ['create_note'],
-    trainline: ['search_trains', 'station_board']
+    notion: ['search_notion', 'create_notion_page', 'append_notion_page'],
+    trainline: ['search_trains', 'station_board'],
+    github: ['search_github', 'get_github_notifications', 'create_github_issue', 'comment_github_issue'],
+    microsoft: ['send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events'],
+    youtube: ['search_youtube'],
+    indeed: ['search_indeed_jobs'],
+    linkedin: ['search_linkedin_jobs', 'share_linkedin_post'],
+    linear: ['search_linear_issues', 'get_linear_issues', 'create_linear_issue', 'comment_linear_issue']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
   if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation.';
@@ -3628,6 +3678,14 @@ const CONNECTORS = [
   { id: 'maps',      name: 'Maps',                      icon: 'maps', category: 'Travel',        implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
   { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
+  { id: 'github',    name: 'GitHub',                    icon: 'github', category: 'Developer',      implemented: true, auth: 'oauth' },
+  { id: 'microsoft', name: 'Outlook (Mail + Calendar)', icon: 'outlook', category: 'Microsoft',     implemented: true, auth: 'oauth' },
+  { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity',   implemented: true, auth: 'oauth' },
+  { id: 'youtube',   name: 'YouTube',                   icon: 'youtube', category: 'Entertainment', implemented: true },
+  { id: 'indeed',    name: 'Indeed',                    icon: 'indeed', category: 'Jobs',           implemented: true },
+  { id: 'linkedin',  name: 'LinkedIn',                  icon: 'linkedin', category: 'Jobs',           implemented: true },
+  { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Entertainment', implemented: true, auth: 'oauth' },
+  { id: 'linear',    name: 'Linear',                    icon: 'linear', category: 'Developer',      implemented: true, auth: 'oauth' },
 ];
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
@@ -5304,7 +5362,9 @@ app.post('/auth/telegram/2fa', async (req, res) => {
 
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
-  'https://www.googleapis.com/auth/calendar'
+  'https://www.googleapis.com/auth/calendar',
+  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/drive.file'
 ].join(' ');
 
 app.get('/auth/google/redirect-uri', (req, res) => {
@@ -5388,6 +5448,372 @@ app.get('/auth/google/callback', async (req, res) => {
         <p style="font-size:18px">✗ Connection failed</p>
         <p style="color:#888;font-size:13px">${errMsg}</p>
         <script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── GitHub OAuth ──────────────────────────────────────────────────────────────
+
+const GITHUB_SCOPES = 'repo notifications read:user';
+
+app.get('/auth/github/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'GitHub OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/github/callback`;
+  const state = signOAuthState(userId, 'github');
+  const params = new URLSearchParams({
+    client_id: process.env.GITHUB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: GITHUB_SCOPES,
+    state
+  });
+  res.json({ url: `https://github.com/login/oauth/authorize?${params}` });
+});
+
+app.get('/auth/github/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'github');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('github_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/github/callback`;
+    const resp = await axios.post('https://github.com/login/oauth/access_token', {
+      client_id: process.env.GITHUB_CLIENT_ID,
+      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: redirectUri
+    }, { headers: { Accept: 'application/json' }, timeout: 15000 });
+
+    if (resp.data?.error || !resp.data?.access_token) {
+      throw new Error(resp.data?.error_description || resp.data?.error || 'No access token returned');
+    }
+
+    await githubConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      scope: resp.data.scope,
+      token_type: resp.data.token_type
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ GitHub connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('github_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/github/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('github_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── Microsoft (Outlook) OAuth ─────────────────────────────────────────────────
+
+const MS_TENANT = process.env.MS_TENANT || 'common';
+const MS_SCOPES = 'offline_access Mail.Read Mail.Send Calendars.ReadWrite User.Read';
+
+app.get('/auth/microsoft/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.MS_CLIENT_ID || !process.env.MS_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Microsoft OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/microsoft/callback`;
+  const state = signOAuthState(userId, 'microsoft');
+  const params = new URLSearchParams({
+    client_id: process.env.MS_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    response_mode: 'query',
+    scope: MS_SCOPES,
+    state
+  });
+  res.json({ url: `https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/authorize?${params}` });
+});
+
+app.get('/auth/microsoft/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'microsoft');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('microsoft_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/microsoft/callback`;
+    const resp = await axios.post(`https://login.microsoftonline.com/${MS_TENANT}/oauth2/v2.0/token`,
+      new URLSearchParams({
+        client_id: process.env.MS_CLIENT_ID,
+        client_secret: process.env.MS_CLIENT_SECRET,
+        code,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 });
+
+    await microsoftConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + resp.data.expires_in * 1000
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Outlook connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('microsoft_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/microsoft/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('microsoft_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── Spotify OAuth ─────────────────────────────────────────────────────────────
+// Spotify's token endpoint authenticates the client via HTTP Basic auth
+// (base64(client_id:client_secret)) rather than body params — see the connector's
+// refresh flow in connectors/spotify.js for the matching pattern.
+
+const SPOTIFY_SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-modify-public playlist-modify-private playlist-read-private';
+
+app.get('/auth/spotify/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.SPOTIFY_CLIENT_ID || !process.env.SPOTIFY_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Spotify OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/spotify/callback`;
+  const state = signOAuthState(userId, 'spotify');
+  const params = new URLSearchParams({
+    client_id: process.env.SPOTIFY_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: SPOTIFY_SCOPES,
+    state
+  });
+  res.json({ url: `https://accounts.spotify.com/authorize?${params}` });
+});
+
+app.get('/auth/spotify/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'spotify');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('spotify_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/spotify/callback`;
+    const basic = Buffer.from(`${process.env.SPOTIFY_CLIENT_ID}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString('base64');
+    const resp = await axios.post('https://accounts.spotify.com/api/token',
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, timeout: 15000 });
+
+    await spotifyConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + resp.data.expires_in * 1000
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Spotify connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('spotify_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/spotify/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('spotify_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── Linear OAuth ──────────────────────────────────────────────────────────────
+
+const LINEAR_SCOPES = 'read,write';
+
+app.get('/auth/linear/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.LINEAR_CLIENT_ID || !process.env.LINEAR_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Linear OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/linear/callback`;
+  const state = signOAuthState(userId, 'linear');
+  const params = new URLSearchParams({
+    client_id: process.env.LINEAR_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: LINEAR_SCOPES,
+    state
+  });
+  res.json({ url: `https://linear.app/oauth/authorize?${params}` });
+});
+
+app.get('/auth/linear/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'linear');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('linear_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/linear/callback`;
+    const resp = await axios.post('https://api.linear.app/oauth/token',
+      new URLSearchParams({
+        client_id: process.env.LINEAR_CLIENT_ID,
+        client_secret: process.env.LINEAR_CLIENT_SECRET,
+        code,
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code'
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 });
+
+    if (resp.data?.error || !resp.data?.access_token) {
+      throw new Error(resp.data?.error_description || resp.data?.error || 'No access token returned');
+    }
+
+    await linearConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      scope: resp.data.scope,
+      token_type: resp.data.token_type
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Linear connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('linear_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/linear/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('linear_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── Notion OAuth ──────────────────────────────────────────────────────────────
+
+app.get('/auth/notion/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.NOTION_CLIENT_ID || !process.env.NOTION_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Notion OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/notion/callback`;
+  const state = signOAuthState(userId, 'notion');
+  const params = new URLSearchParams({
+    client_id: process.env.NOTION_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    owner: 'user',
+    state
+  });
+  res.json({ url: `https://api.notion.com/v1/oauth/authorize?${params}` });
+});
+
+app.get('/auth/notion/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'notion');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('notion_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/notion/callback`;
+    const basicAuth = Buffer.from(`${process.env.NOTION_CLIENT_ID}:${process.env.NOTION_CLIENT_SECRET}`).toString('base64');
+    const resp = await axios.post('https://api.notion.com/v1/oauth/token', {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri
+    }, {
+      headers: { Authorization: `Basic ${basicAuth}`, 'Content-Type': 'application/json' },
+      timeout: 15000
+    });
+
+    if (!resp.data?.access_token) {
+      throw new Error(resp.data?.error || 'No access token returned');
+    }
+
+    await notionConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      bot_id: resp.data.bot_id,
+      workspace_id: resp.data.workspace_id,
+      workspace_name: resp.data.workspace_name
+    });
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Notion connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('notion_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/notion/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.response?.data?.error || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('notion_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
       </body></html>
     `);
   }

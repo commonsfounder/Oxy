@@ -13,6 +13,7 @@ struct ConnectorsView: View {
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
     @State private var googleStatus: GoogleStatus = .idle
+    @State private var oauthConnecting = false
     @State private var errorMessage: String?
     @State private var cardsVisible = false
     @State private var capabilities: NativeCapabilities?
@@ -25,6 +26,9 @@ struct ConnectorsView: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Connectors", onBack: { dismiss() })
 
                 if isLoading {
                     VStack(spacing: 0) {
@@ -81,22 +85,9 @@ struct ConnectorsView: View {
                         .padding(.bottom, 44)
                     }
                 }
-            }
-            .navigationTitle("Connectors")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Back")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
-                    }
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await loadAll()
             }
@@ -106,7 +97,10 @@ struct ConnectorsView: View {
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active {
                     Task {
-                        if googleStatus == .connecting { await loadConnectors() }
+                        if googleStatus == .connecting || oauthConnecting {
+                            oauthConnecting = false
+                            await loadConnectors()
+                        }
                         capabilities = await NativeIntegrationManager.shared.currentCapabilities()
                     }
                 }
@@ -303,7 +297,47 @@ struct ConnectorsView: View {
             connectGoogle()
             return
         }
+        // OAuth connectors (GitHub, Microsoft) launch the browser flow when not
+        // yet connected; once connected, the toggle disables them.
+        if connector.usesOAuth {
+            if connector.enabled && connector.connectionState == "connected" {
+                updateConnector(connector, enabled: false)
+            } else {
+                connectOAuth(connector)
+            }
+            return
+        }
         updateConnector(connector, enabled: !connector.enabled)
+    }
+
+    private func connectOAuth(_ connector: Connector) {
+        oauthConnecting = true
+        Task {
+            do {
+                let data = try await APIClient.shared.request(
+                    path: "/auth/\(connector.id)/start",
+                    queryItems: [URLQueryItem(name: "userId", value: appState.userId)]
+                )
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let urlStr = json["url"] as? String,
+                   let url = URL(string: urlStr) {
+                    await MainActor.run {
+                        errorMessage = nil
+                        UIApplication.shared.open(url)
+                    }
+                } else {
+                    await MainActor.run {
+                        oauthConnecting = false
+                        errorMessage = "\(connector.name) connect failed."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    oauthConnecting = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func updateConnector(_ connector: Connector, enabled: Bool) {
@@ -496,9 +530,12 @@ struct Connector: Codable, Identifiable {
     let implemented: Bool
     var connectionState: String
     var statusText: String
+    /// "oauth" for connectors that authenticate via a browser OAuth flow
+    /// (Google, GitHub, Microsoft); nil/"" for toggle-only connectors.
+    let auth: String
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, category, enabled, implemented, connectionState, statusText
+        case id, name, icon, category, enabled, implemented, connectionState, statusText, auth
     }
 
     init(from decoder: Decoder) throws {
@@ -511,7 +548,10 @@ struct Connector: Codable, Identifiable {
         implemented = try c.decodeIfPresent(Bool.self, forKey: .implemented) ?? false
         connectionState = try c.decodeIfPresent(String.self, forKey: .connectionState) ?? (enabled ? "connected" : "available")
         statusText = try c.decodeIfPresent(String.self, forKey: .statusText) ?? (enabled ? "Connected" : "Available")
+        auth = try c.decodeIfPresent(String.self, forKey: .auth) ?? ""
     }
+
+    var usesOAuth: Bool { auth == "oauth" }
 
     var actionLabel: String {
         if connectionState == "needs_reconnect" { return "Reconnect" }

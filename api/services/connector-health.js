@@ -15,7 +15,37 @@ const ACTION_CONNECTOR = {
   order_uber_eats: 'ubereats',
   order_deliveroo: 'deliveroo',
   search_netflix_title: 'netflix',
-  add_to_netflix_list: 'netflix'
+  add_to_netflix_list: 'netflix',
+  search_github: 'github',
+  get_github_notifications: 'github',
+  create_github_issue: 'github',
+  comment_github_issue: 'github',
+  send_outlook_email: 'microsoft',
+  get_outlook_emails: 'microsoft',
+  search_outlook_emails: 'microsoft',
+  create_outlook_event: 'microsoft',
+  get_outlook_events: 'microsoft',
+  search_youtube: 'youtube',
+  search_indeed_jobs: 'indeed',
+  search_linkedin_jobs: 'linkedin',
+  share_linkedin_post: 'linkedin',
+  search_notion: 'notion',
+  create_notion_page: 'notion',
+  append_notion_page: 'notion',
+  create_google_doc: 'google',
+  search_google_docs: 'google',
+  append_google_doc: 'google',
+  get_google_doc: 'google',
+  search_spotify: 'spotify',
+  play_spotify: 'spotify',
+  control_spotify_playback: 'spotify',
+  add_to_spotify_queue: 'spotify',
+  add_to_spotify_playlist: 'spotify',
+  get_now_playing_spotify: 'spotify',
+  search_linear_issues: 'linear',
+  get_linear_issues: 'linear',
+  create_linear_issue: 'linear',
+  comment_linear_issue: 'linear'
 };
 
 function connectorForAction(actionType) {
@@ -75,6 +105,14 @@ function humanConnectorName(connectorId) {
     case 'telegram': return 'Telegram';
     case 'trainline': return 'Trainline';
     case 'netflix': return 'Netflix';
+    case 'github': return 'GitHub';
+    case 'microsoft': return 'Outlook';
+    case 'notion': return 'Notion';
+    case 'youtube': return 'YouTube';
+    case 'indeed': return 'Indeed';
+    case 'linkedin': return 'LinkedIn';
+    case 'spotify': return 'Spotify';
+    case 'linear': return 'Linear';
     default: return connectorId ? connectorId.replace(/_/g, ' ') : 'connector';
   }
 }

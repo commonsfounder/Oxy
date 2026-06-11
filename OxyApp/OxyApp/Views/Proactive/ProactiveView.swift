@@ -6,6 +6,7 @@ struct ProactiveView: View {
     @State private var isLoading = false
     @State private var isChecking = false
     @State private var errorMessage: String?
+    @State private var weather: OxyWeatherService.OxyWeatherSnapshot?
 
     private let service = ChatService()
     private var visibleBriefings: [Briefing] {
@@ -26,6 +27,7 @@ struct ProactiveView: View {
 
                         ProactiveHeader(
                             isChecking: isChecking,
+                            weather: weather,
                             onCheckNow: { Task { await checkNow() } }
                         )
                         .padding(.top, 8)
@@ -62,6 +64,7 @@ struct ProactiveView: View {
         }
         .task {
             await loadBriefings()
+            weather = await OxyWeatherService.shared.currentWeather()
         }
     }
 
@@ -100,6 +103,7 @@ struct ProactiveView: View {
 
 private struct ProactiveHeader: View {
     let isChecking: Bool
+    let weather: OxyWeatherService.OxyWeatherSnapshot?
     let onCheckNow: () -> Void
 
     var body: some View {
@@ -123,6 +127,18 @@ private struct ProactiveHeader: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isChecking)
+            }
+
+            if let weather {
+                HStack(spacing: 7) {
+                    Image(systemName: weather.symbolName)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Color.nmlTitanium)
+                    Text(weather.shortLine)
+                        .font(.nmlMono(11, weight: .medium))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.nmlMuted)
+                }
             }
         }
     }

@@ -30,7 +30,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['query'],
     inputExample: { query: 'search term' },
-    guidance: 'Use for "play X" / "listen to X". Pass the resolved exact song title and artist as query. If the request depends on current facts, charts, rankings, popularity, or "right now", resolve the exact track via search FIRST — never pass vague queries like "most popular song" or "top song". If there is no specific song and no safe way to ground one, ask what they want to hear instead of inventing a track (e.g. "play some music" is not a request to play a song called "Some").',
+    guidance: 'Use for "play X" / "listen to X" via the device\'s native music app. Pass the resolved exact song title and artist as query. If the request depends on current facts, charts, rankings, popularity, or "right now", resolve the exact track via search FIRST — never pass vague queries like "most popular song" or "top song". If there is no specific song and no safe way to ground one, ask what they want to hear instead of inventing a track (e.g. "play some music" is not a request to play a song called "Some"). If the user explicitly says "on Spotify" (or Spotify is their connected player), use play_spotify instead.',
     successSummary: 'Music opened',
     failureSummary: 'Music failed',
     confirmation: 'none'
@@ -244,6 +244,303 @@ const ACTION_CONTRACTS = {
     successSummary: 'Presentation built',
     failureSummary: 'Presentation failed',
     confirmation: 'none'
+  },
+  search_github: {
+    risk: 'low',
+    required: ['query'],
+    aliases: { query: ['q', 'search'] },
+    inputExample: { query: 'GitHub search syntax, e.g. is:pr is:open author:@me' },
+    guidance: 'Use for finding GitHub issues and pull requests. Build a GitHub search query — e.g. "is:open is:issue assignee:@me", "repo:owner/name is:pr review-requested:@me". "@me" resolves to the connected user.',
+    successSummary: 'GitHub searched',
+    failureSummary: 'GitHub search failed',
+    confirmation: 'none'
+  },
+  get_github_notifications: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    guidance: 'Use for "my GitHub notifications", "what needs my attention on GitHub". Returns unread notifications only.',
+    successSummary: 'GitHub notifications checked',
+    failureSummary: 'GitHub notifications failed',
+    confirmation: 'none'
+  },
+  create_github_issue: {
+    risk: 'high',
+    required: ['repo', 'title'],
+    optional: ['body'],
+    aliases: { repo: ['repository'], title: ['name', 'subject'], body: ['description', 'content'] },
+    inputExample: { repo: 'owner/name', title: 'issue title', body: 'optional issue body in markdown' },
+    guidance: 'repo must be "owner/name". Write a clear title and, when the user gave substance, a complete markdown body. Confirm the repo if ambiguous.',
+    successSummary: 'Issue created',
+    failureSummary: 'Issue failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  comment_github_issue: {
+    risk: 'high',
+    required: ['repo', 'issue_number', 'body'],
+    aliases: { repo: ['repository'], issue_number: ['number', 'issue'], body: ['comment', 'message', 'content'] },
+    inputExample: { repo: 'owner/name', issue_number: 123, body: 'comment text in markdown' },
+    guidance: 'repo must be "owner/name". issue_number is the issue or PR number. Draft a complete, well-formed comment.',
+    successSummary: 'Comment posted',
+    failureSummary: 'Comment failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  send_outlook_email: {
+    risk: 'high',
+    required: ['to', 'body'],
+    optional: ['subject', 'tone'],
+    aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
+    inputExample: { to: 'email', subject: 'optional subject inferred from the body if omitted', body: 'polished complete email draft based on the user intent, not a terse literal fragment', tone: 'optional requested tone such as casual, warm, professional' },
+    guidance: 'Outlook/Microsoft 365 email. If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Use this only when the user is connected to Microsoft/Outlook rather than Google.',
+    successSummary: 'Email sent',
+    failureSummary: 'Email failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  get_outlook_emails: {
+    risk: 'low',
+    required: [],
+    optional: ['max'],
+    inputExample: { max: 10 },
+    successSummary: 'Emails checked',
+    failureSummary: 'Email check failed',
+    confirmation: 'none'
+  },
+  search_outlook_emails: {
+    risk: 'low',
+    required: ['query'],
+    inputExample: { query: 'search term' },
+    successSummary: 'Emails searched',
+    failureSummary: 'Email search failed',
+    confirmation: 'none'
+  },
+  create_outlook_event: {
+    risk: 'medium',
+    required: ['title', 'start_date', 'end_date'],
+    inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
+    guidance: 'Outlook/Microsoft 365 calendar. Use for "add to my Outlook calendar" / "schedule" when the user is connected to Microsoft. If the date or time is missing, ask for it instead of guessing.',
+    successSummary: 'Calendar updated',
+    failureSummary: 'Calendar failed',
+    confirmation: 'none'
+  },
+  get_outlook_events: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Calendar checked',
+    failureSummary: 'Calendar failed',
+    confirmation: 'none'
+  },
+  search_youtube: {
+    risk: 'low',
+    required: ['query'],
+    aliases: { query: ['q', 'search'] },
+    inputExample: { query: 'search term' },
+    guidance: 'Use for "find a video about X" / "play me a video on Y" on YouTube. Returns matching videos when YouTube search is configured, otherwise a search link.',
+    successSummary: 'YouTube searched',
+    failureSummary: 'YouTube search failed',
+    confirmation: 'none'
+  },
+  search_indeed_jobs: {
+    risk: 'low',
+    required: ['query'],
+    optional: ['location'],
+    aliases: { query: ['role', 'title'], location: ['where'] },
+    inputExample: { query: 'job title or keywords', location: 'optional city or area' },
+    guidance: 'Use for "find me a job as X" / "search Indeed for Y". Opens an Indeed search — Indeed has no public results API.',
+    successSummary: 'Indeed searched',
+    failureSummary: 'Indeed search failed',
+    confirmation: 'none'
+  },
+  search_linkedin_jobs: {
+    risk: 'low',
+    required: ['query'],
+    optional: ['location'],
+    aliases: { query: ['role', 'title'], location: ['where'] },
+    inputExample: { query: 'job title or keywords', location: 'optional city or area' },
+    guidance: 'Use for "find me a job on LinkedIn" type requests. Opens a LinkedIn jobs search.',
+    successSummary: 'LinkedIn jobs searched',
+    failureSummary: 'LinkedIn search failed',
+    confirmation: 'none'
+  },
+  share_linkedin_post: {
+    risk: 'low',
+    required: ['url'],
+    aliases: { url: ['link'] },
+    inputExample: { url: 'https://...' },
+    guidance: "Use for \"share this on LinkedIn\". Opens LinkedIn's share dialog with the link prefilled — the user still chooses to post.",
+    successSummary: 'LinkedIn share opened',
+    failureSummary: 'LinkedIn share failed',
+    confirmation: 'none'
+  },
+  search_notion: {
+    risk: 'low',
+    required: ['query'],
+    inputExample: { query: 'search term' },
+    guidance: 'Use for "find my Notion page about X" / "search Notion for Y".',
+    successSummary: 'Notion searched',
+    failureSummary: 'Notion search failed',
+    confirmation: 'none'
+  },
+  create_notion_page: {
+    risk: 'medium',
+    required: ['title'],
+    optional: ['content', 'parent_title'],
+    aliases: { content: ['body', 'text'], parent_title: ['parent'] },
+    inputExample: { title: 'page title', content: 'optional body text', parent_title: 'optional name of the page or database to create it under' },
+    guidance: 'Use for "create a Notion page/note about X". If parent_title is omitted, the most recently edited accessible page is used as the parent.',
+    successSummary: 'Notion page created',
+    failureSummary: 'Notion page failed',
+    confirmation: 'none'
+  },
+  append_notion_page: {
+    risk: 'medium',
+    required: ['page_title', 'content'],
+    aliases: { page_title: ['page', 'title'], content: ['body', 'text'] },
+    inputExample: { page_title: 'name of an existing Notion page', content: 'text to add' },
+    guidance: 'Use for "add this to my X note in Notion".',
+    successSummary: 'Notion page updated',
+    failureSummary: 'Notion update failed',
+    confirmation: 'none'
+  },
+  create_google_doc: {
+    risk: 'medium',
+    required: ['title'],
+    optional: ['content'],
+    aliases: { content: ['body', 'text'] },
+    inputExample: { title: 'document title', content: 'optional starting text' },
+    guidance: 'Use for "create a Google Doc about X". Requires the user to be connected to Google with Docs access.',
+    successSummary: 'Google Doc created',
+    failureSummary: 'Google Doc failed',
+    confirmation: 'none'
+  },
+  search_google_docs: {
+    risk: 'low',
+    required: [],
+    optional: ['query'],
+    inputExample: { query: 'optional search term' },
+    guidance: 'Use for "find my Google Doc about X" / "what docs do I have".',
+    successSummary: 'Google Docs searched',
+    failureSummary: 'Google Docs search failed',
+    confirmation: 'none'
+  },
+  append_google_doc: {
+    risk: 'medium',
+    required: ['title', 'content'],
+    aliases: { title: ['document_title'], content: ['body', 'text'] },
+    inputExample: { title: 'name of an existing Google Doc', content: 'text to add' },
+    guidance: 'Use for "add this to my X doc".',
+    successSummary: 'Google Doc updated',
+    failureSummary: 'Google Doc update failed',
+    confirmation: 'none'
+  },
+  get_google_doc: {
+    risk: 'low',
+    required: ['title'],
+    inputExample: { title: 'name of an existing Google Doc' },
+    guidance: 'Use for "read me my X doc" / "what does my X doc say".',
+    successSummary: 'Google Doc read',
+    failureSummary: 'Google Doc read failed',
+    confirmation: 'none'
+  },
+  search_spotify: {
+    risk: 'low',
+    required: ['query'],
+    optional: ['type'],
+    inputExample: { query: 'song, artist, album, or playlist name', type: 'track' },
+    guidance: 'Use for "search Spotify for X". type is one of track/album/artist/playlist (default track).',
+    successSummary: 'Spotify searched',
+    failureSummary: 'Spotify search failed',
+    confirmation: 'none'
+  },
+  play_spotify: {
+    risk: 'low',
+    required: ['query'],
+    optional: ['type'],
+    inputExample: { query: 'song title and artist', type: 'track' },
+    guidance: 'Use for "play X on Spotify" — only when the user explicitly says Spotify or Spotify is their connected player. Otherwise use play_music. type is one of track/album/artist/playlist (default track); resolve a specific item, never a vague query.',
+    successSummary: 'Spotify playing',
+    failureSummary: 'Spotify play failed',
+    confirmation: 'none'
+  },
+  control_spotify_playback: {
+    risk: 'low',
+    required: ['command'],
+    inputExample: { command: 'pause' },
+    guidance: 'command is one of pause, resume, next, previous. Use for "pause/skip/resume Spotify" requests.',
+    successSummary: 'Spotify playback updated',
+    failureSummary: 'Spotify control failed',
+    confirmation: 'none'
+  },
+  add_to_spotify_queue: {
+    risk: 'low',
+    required: ['query'],
+    inputExample: { query: 'song title and artist' },
+    guidance: 'Use for "queue X on Spotify" / "play X next on Spotify".',
+    successSummary: 'Added to Spotify queue',
+    failureSummary: 'Spotify queue failed',
+    confirmation: 'none'
+  },
+  add_to_spotify_playlist: {
+    risk: 'low',
+    required: ['query', 'playlist'],
+    inputExample: { query: 'song title and artist', playlist: 'playlist name' },
+    guidance: 'Use for "add X to my Y playlist on Spotify".',
+    successSummary: 'Added to Spotify playlist',
+    failureSummary: 'Spotify playlist update failed',
+    confirmation: 'none'
+  },
+  get_now_playing_spotify: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    guidance: 'Use for "what\'s playing on Spotify" / "what song is this".',
+    successSummary: 'Now playing checked',
+    failureSummary: 'Now playing check failed',
+    confirmation: 'none'
+  },
+  search_linear_issues: {
+    risk: 'low',
+    required: ['query'],
+    inputExample: { query: 'search term' },
+    guidance: 'Use for "find my Linear issue about X" / "search Linear for Y".',
+    successSummary: 'Linear searched',
+    failureSummary: 'Linear search failed',
+    confirmation: 'none'
+  },
+  get_linear_issues: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    guidance: 'Use for "what are my Linear issues" / "what\'s assigned to me on Linear".',
+    successSummary: 'Linear issues checked',
+    failureSummary: 'Linear check failed',
+    confirmation: 'none'
+  },
+  create_linear_issue: {
+    risk: 'high',
+    required: ['title'],
+    optional: ['team', 'description'],
+    aliases: { title: ['name', 'subject'], description: ['body', 'content'] },
+    inputExample: { title: 'issue title', team: 'optional team name', description: 'optional issue description in markdown' },
+    guidance: "Use for \"create a Linear issue/ticket for X\". If team is omitted, the user's default team is used. Write a clear title and, when the user gave substance, a complete description.",
+    successSummary: 'Linear issue created',
+    failureSummary: 'Linear issue failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  comment_linear_issue: {
+    risk: 'high',
+    required: ['issue', 'body'],
+    aliases: { issue: ['issue_id', 'identifier'], body: ['comment', 'message', 'content'] },
+    inputExample: { issue: 'ENG-123', body: 'comment text in markdown' },
+    guidance: 'issue is the Linear issue identifier (e.g. ENG-123). Draft a complete, well-formed comment.',
+    successSummary: 'Comment posted',
+    failureSummary: 'Comment failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
   }
 };
 

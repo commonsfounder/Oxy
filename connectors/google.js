@@ -5,7 +5,10 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
 
-const SUPPORTED_ACTIONS = ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'];
+const SUPPORTED_ACTIONS = [
+  'send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events',
+  'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc'
+];
 
 async function getTokens(userId) {
   try {
@@ -325,6 +328,31 @@ function summarizeCalendarEvents(events = [], emptyText = 'No upcoming events fo
   return `Upcoming events:\n${lines.join('\n')}`;
 }
 
+function extractDocText(document = {}) {
+  const content = document.body?.content || [];
+  const lines = [];
+  for (const el of content) {
+    const elements = el.paragraph?.elements;
+    if (!elements) continue;
+    const text = elements.map(e => e.textRun?.content || '').join('');
+    if (text.trim()) lines.push(text.replace(/\n$/, ''));
+  }
+  return lines.join('\n').trim();
+}
+
+async function findDocByTitle(headers, title) {
+  const resp = await axios.get('https://www.googleapis.com/drive/v3/files', {
+    headers,
+    params: {
+      q: `mimeType='application/vnd.google-apps.document' and trashed=false and name contains '${String(title).replace(/'/g, "\\'")}'`,
+      pageSize: 1,
+      fields: 'files(id,name)'
+    },
+    timeout: 15000
+  });
+  return resp.data.files?.[0] || null;
+}
+
 async function execute(userId, action, params) {
   let token;
   try {
@@ -443,6 +471,92 @@ async function execute(userId, action, params) {
           id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
         }));
         return { success: true, events, text: summarizeCalendarEvents(events) };
+      }
+
+      case 'create_google_doc': {
+        const title = String(params?.title || '').trim() || 'Untitled document';
+        const content = params?.content;
+        const doc = await axios.post('https://docs.googleapis.com/v1/documents', { title }, { headers, timeout: 15000 });
+        const documentId = doc.data.documentId;
+        if (content) {
+          await axios.post(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+            { requests: [{ insertText: { location: { index: 1 }, text: String(content) } }] },
+            { headers, timeout: 15000 });
+        }
+        return {
+          success: true,
+          text: `Created Google Doc "${title}"`,
+          documentId,
+          webLink: `https://docs.google.com/document/d/${documentId}/edit`
+        };
+      }
+
+      case 'search_google_docs': {
+        const query = String(params?.query || '').trim();
+        const maxResults = params?.max_results || 5;
+        const qParts = ["mimeType='application/vnd.google-apps.document'", 'trashed=false'];
+        if (query) qParts.push(`fullText contains '${query.replace(/'/g, "\\'")}'`);
+        const resp = await axios.get('https://www.googleapis.com/drive/v3/files', {
+          headers,
+          params: { q: qParts.join(' and '), pageSize: maxResults, fields: 'files(id,name,webViewLink,modifiedTime)', orderBy: 'modifiedTime desc' },
+          timeout: 15000
+        });
+        const docs = (resp.data.files || []).map(f => ({ id: f.id, title: f.name, url: f.webViewLink, modifiedAt: f.modifiedTime }));
+        return {
+          success: true,
+          docs,
+          text: docs.length
+            ? `Found ${docs.length} Google Doc${docs.length === 1 ? '' : 's'}${query ? ` for "${query}"` : ''}:\n${docs.map((d, i) => `${i + 1}. ${d.title}`).join('\n')}`
+            : `No Google Docs found${query ? ` for "${query}"` : ''}`
+        };
+      }
+
+      case 'append_google_doc': {
+        const content = String(params?.content || '').trim();
+        if (!content) return { success: false, error: 'append_google_doc requires content' };
+        let documentId = params?.document_id;
+        let title = params?.title;
+        if (!documentId) {
+          const docTitle = String(params?.title || params?.document_title || '').trim();
+          if (!docTitle) return { success: false, error: 'append_google_doc requires a title or document_id' };
+          const file = await findDocByTitle(headers, docTitle);
+          if (!file) return { success: false, error: `No Google Doc found matching "${docTitle}"` };
+          documentId = file.id;
+          title = file.name;
+        }
+        const doc = await axios.get(`https://docs.googleapis.com/v1/documents/${documentId}`, { headers, timeout: 15000 });
+        const lastElement = doc.data.body?.content?.slice(-1)[0];
+        const insertIndex = Math.max(1, (lastElement?.endIndex || 1) - 1);
+        await axios.post(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+          { requests: [{ insertText: { location: { index: insertIndex }, text: `\n${content}` } }] },
+          { headers, timeout: 15000 });
+        return {
+          success: true,
+          text: `Added to Google Doc "${title || documentId}"`,
+          documentId,
+          webLink: `https://docs.google.com/document/d/${documentId}/edit`
+        };
+      }
+
+      case 'get_google_doc': {
+        let documentId = params?.document_id;
+        let title = params?.title;
+        if (!documentId) {
+          const docTitle = String(params?.title || '').trim();
+          if (!docTitle) return { success: false, error: 'get_google_doc requires a title or document_id' };
+          const file = await findDocByTitle(headers, docTitle);
+          if (!file) return { success: false, error: `No Google Doc found matching "${docTitle}"` };
+          documentId = file.id;
+          title = file.name;
+        }
+        const doc = await axios.get(`https://docs.googleapis.com/v1/documents/${documentId}`, { headers, timeout: 15000 });
+        const text = extractDocText(doc.data);
+        return {
+          success: true,
+          text: text ? `${title ? `"${title}":\n` : ''}${text}` : 'Document is empty',
+          documentId,
+          title: doc.data.title
+        };
       }
 
       default:

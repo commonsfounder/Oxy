@@ -13,7 +13,9 @@ struct ProfileView: View {
             ZStack {
                 Color.black.ignoresSafeArea()
 
-                ScrollView {
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Profile", onBack: { dismiss() })
+                    ScrollView {
                     VStack(spacing: 0) {
                         HStack {
                             Text("Assistant Name")
@@ -39,21 +41,10 @@ struct ProfileView: View {
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 8)
-                }
-            }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: {
-                        Text("Back")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
             }
+            .toolbar(.hidden, for: .navigationBar)
             .onAppear(perform: loadSettings)
         }
     }

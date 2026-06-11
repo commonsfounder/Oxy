@@ -611,8 +611,7 @@ private struct ActionReviewSheet: View {
                     .font(.system(size: 15, weight: .bold))
                     .foregroundStyle(Color.nmlTitanium)
                     .frame(width: 34, height: 34)
-                    .background(Color.nmlTitanium.opacity(0.12))
-                    .clipShape(Circle())
+                    .nmlGlass(Circle(), tint: Color.nmlTitanium)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -726,8 +725,7 @@ private struct VoiceRecordingBar: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.nmlObsidian)
                             .frame(width: 36, height: 36)
-                            .background(Color.nmlTitanium)
-                            .clipShape(Circle())
+                            .nmlGlass(Circle(), tint: Color.nmlTitanium, interactive: true)
                     }
                 }
             }
@@ -909,8 +907,7 @@ private struct ChatInputBar: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(Color.nmlTitanium)
                             .frame(width: 38, height: 38)
-                            .background(Color.nmlSurface2)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .nmlGlass(RoundedRectangle(cornerRadius: 8))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
@@ -943,6 +940,7 @@ private struct ChatInputBar: View {
                         .font(.system(size: 20, weight: .medium))
                         .foregroundStyle(Color.nmlMuted)
                         .frame(width: 36, height: 36)
+                        .nmlGlass(Circle(), interactive: true)
                 }
                 .disabled(isSending)
 
@@ -987,8 +985,11 @@ private struct ChatInputBar: View {
                     }
                     .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
                     .frame(width: 36, height: 36)
-                    .background(canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : Color.nmlSurface2)
-                    .clipShape(Circle())
+                    .nmlGlass(
+                        Circle(),
+                        tint: canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : nil,
+                        interactive: true
+                    )
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
@@ -1086,8 +1087,7 @@ struct PendantOverlay: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
-        .background(Color.black, in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5))
+        .nmlGlass(Capsule())
         .animation(.easeInOut(duration: 0.2), value: state)
     }
 }

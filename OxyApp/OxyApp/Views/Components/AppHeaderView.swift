@@ -15,33 +15,35 @@ struct AppHeaderView: View {
     private let circle: CGFloat = 38
 
     var body: some View {
-        HStack {
-            // Left: history / menu, in a soft circular button (matches the
-            // app's other circular nav controls).
-            Button(action: onLeading) {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(.white.opacity(0.85))
-                    .frame(width: circle, height: circle)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("History")
-
-            Spacer()
-
-            // Right: incognito ghost, same circular treatment, only on an empty chat.
-            if isEmptyChat {
-                Button {
-                    withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
-                } label: {
-                    GhostIcon(active: isIncognito)
-                        .frame(width: 18, height: 18)
+        nmlGlassContainer(spacing: 16) {
+            HStack {
+                // Left: history / menu, in a soft circular button (matches the
+                // app's other circular nav controls), finished with Liquid Glass.
+                Button(action: onLeading) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
                         .frame(width: circle, height: circle)
-                        .background(Circle().fill(Color.white.opacity(isIncognito ? 0.12 : 0.06)))
+                        .nmlGlass(Circle(), interactive: true)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
+                .accessibilityLabel("History")
+
+                Spacer()
+
+                // Right: incognito ghost, same circular glass treatment, only on an empty chat.
+                if isEmptyChat {
+                    Button {
+                        withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
+                    } label: {
+                        GhostIcon(active: isIncognito)
+                            .frame(width: 18, height: 18)
+                            .frame(width: circle, height: circle)
+                            .nmlGlass(Circle(), tint: isIncognito ? Color.white : nil, interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
+                }
             }
         }
         .padding(.horizontal, 12)
