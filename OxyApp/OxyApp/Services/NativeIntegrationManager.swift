@@ -1289,12 +1289,18 @@ final class NativeIntegrationManager: NSObject {
     }
 
     private func searchITunesSong(_ query: String) async throws -> ITunesSong? {
+        // Parse "<title> by <artist>" so we can pick the *exact* requested track.
+        // With limit=1, iTunes returns its single most-popular hit for the term —
+        // so "Often by The Weeknd" came back as "Blinding Lights". Fetching a page
+        // of results and matching title+artist fixes that.
+        let (desiredTitle, desiredArtist) = Self.parseSongQuery(query)
+
         var components = URLComponents(string: "https://itunes.apple.com/search")
         components?.queryItems = [
             URLQueryItem(name: "term", value: query),
             URLQueryItem(name: "media", value: "music"),
             URLQueryItem(name: "entity", value: "song"),
-            URLQueryItem(name: "limit", value: "1"),
+            URLQueryItem(name: "limit", value: "25"),
             URLQueryItem(name: "country", value: Locale.current.region?.identifier ?? "GB")
         ]
         guard let url = components?.url else {
@@ -1307,8 +1313,63 @@ final class NativeIntegrationManager: NSObject {
             throw NSError(domain: "OxyMusic", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "iTunes search failed with HTTP \(http.statusCode)"])
         }
         let decoded = try JSONDecoder().decode(ITunesSongResult.self, from: data)
-        guard decoded.resultCount > 0 else { return nil }
-        return decoded.results.first { $0.trackId != nil }
+        let candidates = decoded.results.filter { $0.trackId != nil }
+        guard !candidates.isEmpty else { return nil }
+        // Best title+artist match; fall back to iTunes' top hit only if nothing
+        // scores (e.g. a vague one-word query with no clear title).
+        return Self.bestSongMatch(candidates, title: desiredTitle, artist: desiredArtist) ?? candidates.first
+    }
+
+    /// Splits "Often by The Weeknd" → ("Often", "The Weeknd"). No "by" → all title.
+    private static func parseSongQuery(_ query: String) -> (title: String, artist: String?) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let r = trimmed.range(of: " by ", options: [.caseInsensitive, .backwards]) {
+            let title = trimmed[..<r.lowerBound].trimmingCharacters(in: .whitespaces)
+            let artist = trimmed[r.upperBound...].trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty { return (title, artist.isEmpty ? nil : artist) }
+        }
+        return (trimmed, nil)
+    }
+
+    private static func normalizedMusicText(_ s: String) -> String {
+        s.lowercased()
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: "", options: .regularExpression)
+            .replacingOccurrences(of: " +", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Scores each result on title + artist match and returns the best, or nil if
+    /// nothing matches (so the caller can fall back to the raw top result).
+    private static func bestSongMatch(_ candidates: [ITunesSong], title: String, artist: String?) -> ITunesSong? {
+        let wantTitle = normalizedMusicText(title)
+        let wantArtist = artist.map { normalizedMusicText($0) } ?? ""
+
+        func score(_ s: ITunesSong) -> Int {
+            let t = normalizedMusicText(s.trackName ?? "")
+            let a = normalizedMusicText(s.artistName ?? "")
+            var score = 0
+            if !wantTitle.isEmpty {
+                if t == wantTitle { score += 100 }
+                else if t.contains(wantTitle) || wantTitle.contains(t) { score += 40 }
+            }
+            if !wantArtist.isEmpty {
+                if a == wantArtist { score += 50 }
+                else if a.contains(wantArtist) || wantArtist.contains(a) { score += 25 }
+            }
+            return score
+        }
+
+        var best: ITunesSong?
+        var bestScore = 0
+        for c in candidates {
+            let s = score(c)
+            if s > bestScore {   // strictly greater keeps the earliest (most popular) on ties
+                bestScore = s
+                best = c
+            }
+        }
+        return bestScore > 0 ? best : nil
     }
 
     private func searchITunesAlbum(_ query: String, originalQuery: String) async throws -> ITunesAlbum? {
