@@ -282,6 +282,7 @@ enum SSEEvent {
     case transcription(String)
     case transcriptionError(String)
     case ttsError(String)
+    case sources([MessageSource])
     case done
     case error(String)
 
@@ -317,6 +318,12 @@ enum SSEEvent {
             return .transcriptionError(json["error"] as? String ?? "Transcription failed")
         case "tts-error":
             return .ttsError(json["error"] as? String ?? "TTS failed")
+        case "sources":
+            if let itemsData = try? JSONSerialization.data(withJSONObject: json["items"] ?? []),
+               let items = try? JSONDecoder().decode([MessageSource].self, from: itemsData) {
+                return .sources(items)
+            }
+            return .sources([])
         case "done":
             return .done
         case "error":

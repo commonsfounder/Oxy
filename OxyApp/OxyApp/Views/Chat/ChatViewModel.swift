@@ -276,6 +276,9 @@ final class ChatViewModel {
                         guard updateAssistantMessage(id: assistantID, { $0.content = error }) else { return }
                         statusLabel = nil
 
+                    case .sources(let sources):
+                        guard updateAssistantMessage(id: assistantID, { $0.sources = sources }) else { return }
+
                     case .audio(let base64Audio, _):
                         playAudio(base64Audio)
 

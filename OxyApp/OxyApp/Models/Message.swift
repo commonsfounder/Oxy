@@ -8,6 +8,8 @@ struct Message: Identifiable, Equatable {
     let timestamp: Date
     var actions: [ActionResult]
     var isStreaming: Bool
+    /// Web sources behind a grounded answer, when the model searched for it.
+    var sources: [MessageSource]
 
     enum Role: String, Codable {
         case user
@@ -21,7 +23,8 @@ struct Message: Identifiable, Equatable {
         content: String,
         timestamp: Date = Date(),
         actions: [ActionResult] = [],
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        sources: [MessageSource] = []
     ) {
         self.id = id
         self.dbId = dbId
@@ -30,6 +33,7 @@ struct Message: Identifiable, Equatable {
         self.timestamp = timestamp
         self.actions = actions
         self.isStreaming = isStreaming
+        self.sources = sources
     }
 
     static func == (lhs: Message, rhs: Message) -> Bool {
@@ -37,7 +41,15 @@ struct Message: Identifiable, Equatable {
             && lhs.content == rhs.content
             && lhs.isStreaming == rhs.isStreaming
             && lhs.actions == rhs.actions
+            && lhs.sources == rhs.sources
     }
+}
+
+/// A web source behind a grounded answer — a publisher title and the link.
+struct MessageSource: Codable, Equatable, Identifiable {
+    let title: String
+    let uri: String
+    var id: String { uri }
 }
 
 extension Date {

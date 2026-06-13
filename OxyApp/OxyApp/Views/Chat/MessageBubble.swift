@@ -94,6 +94,13 @@ struct MessageBubble: View {
                 .padding(.top, 2)
             }
 
+            // Sources — quiet proof that a grounded answer came from a real lookup.
+            if !isUser, !message.sources.isEmpty {
+                MessageSourceChips(sources: message.sources)
+                    .padding(.top, 7)
+                    .padding(.trailing, 56)
+            }
+
             // Timestamp — only shown on the last message in each group run.
             if isGroupEnd {
                 HStack(spacing: 4) {
@@ -138,6 +145,46 @@ private struct StreamingWordText: View {
             output += part
         }
         return output
+    }
+}
+
+// MARK: - Source Chips
+
+/// A restrained row of web sources beneath a grounded answer: a quiet eyebrow and
+/// tappable publisher chips. The trust signal that the answer was looked up, not
+/// guessed. Sharp-edged and muted to stay in the luxury language.
+private struct MessageSourceChips: View {
+    let sources: [MessageSource]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Text("Sources")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(Color.nmlMuted)
+
+                ForEach(sources) { source in
+                    Button {
+                        guard let url = URL(string: source.uri) else { return }
+                        UIApplication.shared.open(url)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(source.title)
+                                .font(.system(size: 11, weight: .regular))
+                                .lineLimit(1)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.nmlTitanium)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
     }
 }
 

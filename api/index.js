@@ -1519,6 +1519,30 @@ async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MO
   return cacheState.pending;
 }
 
+// Pull displayable web sources out of Gemini grounding metadata so the client can
+// show where a grounded answer came from — the trust signal that separates a real
+// lookup from a confident guess. Deduped by publisher, capped to keep it quiet.
+function groundingSourcesFrom(meta) {
+  const chunks = meta && meta.groundingChunks;
+  if (!Array.isArray(chunks)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of chunks) {
+    const web = c && c.web;
+    if (!web || !web.uri) continue;
+    let title = String(web.title || '').trim();
+    if (!title) {
+      try { title = new URL(web.uri).hostname.replace(/^www\./, ''); } catch { title = 'Source'; }
+    }
+    const key = title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ title, uri: web.uri });
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
 function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
   const cacheState = getPromptCacheState(modelName);
   if (cacheState.name && Date.now() < cacheState.expireAt) {
@@ -5466,7 +5490,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           trace,
           onSpeakingStart: () => sendStatus('speaking_start', 'Speaking')
         }) : null;
+        let groundingMeta = null;
         for await (const chunk of stream) {
+          const gm = chunk.candidates?.[0]?.groundingMetadata;
+          if (gm) groundingMeta = gm;
           const text = chunk.text || '';
           if (text) {
             if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
@@ -5478,6 +5505,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
         flushSafeDisplayText();
         trace.log('gemini.initial_complete');
+        // Surface where a grounded answer came from (web search sources).
+        const groundingSources = groundingSourcesFrom(groundingMeta);
+        if (groundingSources.length) sse({ type: 'sources', items: groundingSources });
         if (!fullText.trim()) {
           fullText = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
           if (fullText) trace.log('gemini.empty_recovery_success');
