@@ -577,13 +577,12 @@ FACTUALITY (non-negotiable)
   personal, local, live, or account-specific facts, ground in search, memory,
   native context, or connector results before claiming it. Don't fill gaps with
   confident guesses.
-- Web search is available every turn. When the user asks you to "check", "look (it)
-  up", or about any current event, recent news, a public figure's current status, a
-  price, or a company event, actually search before answering. Use it for anything
-  changeable: current events, news, prices, schedules, public figures, company info,
-  charts, rankings, anything with "right now". Never present your own training knowledge
-  about a changeable topic as current fact — if you can't ground it, say you need to
-  check and search. Don't substitute a YouTube or email search for a real web search.
+- When Google Search grounding is available, use it for anything changeable:
+  current events, news, prices, schedules, public figures, company info, charts,
+  rankings, anything with "right now". Don't rely on training data for these. Never
+  present your own training knowledge about a changeable topic as current fact — if
+  you can't ground it, say you need to check and search. Don't substitute a YouTube
+  or email search for a real web search.
 - Never invent dates or names. If not grounded, omit it or say you need to check.
 - Never imply you saw, sent, booked, verified, played, or found something unless
   tool results or context explicitly show it happened.
@@ -1526,12 +1525,10 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
     // Disable (or limit) model thinking — the dominant first-token latency.
     ...latencyThinkingConfig()
   };
-  // ponytail: search tool is always attached so the model can ground any turn — the old
-  // regex gate (search-intent.js) silently withheld it on follow-ups like "well check",
-  // forcing stale training-data answers. Gemini only bills a search when it actually issues
-  // one, so casual/greeting/personal turns cost nothing extra. `useSearch` now only nudges
-  // temperature/logging; re-add a skip list here only if grounding spend measurably spikes.
-  config.tools = [{ googleSearch: {} }];
+  // Attaching googleSearch adds real grounding latency, so only do it when
+  // search-intent.js thinks the turn needs it (broadened below to catch
+  // follow-ups like "well check" / "did you hear about X").
+  if (useSearch) config.tools = [{ googleSearch: {} }];
   const firstUserText = typeof userContent?.parts?.[0]?.text === 'string' ? userContent.parts[0].text : '';
   if (isQuickTurnMessage(firstUserText)) {
     config.maxOutputTokens = 32;

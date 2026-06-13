@@ -9,7 +9,16 @@ const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
   { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach|trump|biden|harris|vance)\b/i },
   { reason: 'explicit-search', pattern: /\b(search|look\s*it\s*up|look up|lookup|find out|google|check online|check it|re-?check|verify|online)\b/i },
-  { reason: 'contextual-fact-check', pattern: /\b(is|was|are|were)\s+(that|this|it)\s+(right|correct|true|accurate)\b|\b(are you sure|source\??|prove it|check that)\b/i }
+  { reason: 'contextual-fact-check', pattern: /\b(is|was|are|were)\s+(that|this|it)\s+(right|correct|true|accurate)\b|\b(are you sure|source\??|prove it|check that)\b/i },
+  // "did you hear about X" / "have you seen the news on Y" — common phrasing for
+  // "go check on this topic" that doesn't contain any of the keywords above.
+  { reason: 'heard-about-prompt', pattern: /\b(did|have|has)\s+(you|u)\s+(hear(d)?|seen|see)\b/i },
+  // Bare "check" / "well check" — a follow-up telling Oxy to go look something up.
+  // Excludes "check my/our/your ..." so checking email/calendar/reminders isn't
+  // misrouted into a web search.
+  { reason: 'bare-check', pattern: /\bcheck(ed)?\b(?!.*\b(my|our|your)\b)/i },
+  // "what did you get/find" — asking for the result of a search just requested.
+  { reason: 'search-followup', pattern: /\bwhat did (you|it) (get|find|see|say|come up with)\b/i }
 ];
 
 const CHANGEABLE_QUESTION_PATTERNS = [
