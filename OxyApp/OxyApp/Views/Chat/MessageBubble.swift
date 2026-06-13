@@ -177,90 +177,112 @@ struct ActionCard: View {
     }
 
     var body: some View {
-        Group {
-            if action.pending {
-                cardContent
-            } else {
-                Button(action: openLink) {
-                    cardContent
-                }
-                .buttonStyle(.plain)
-                .disabled(!hasLink)
+        if action.pending {
+            pendingCard
+        } else {
+            Button(action: openLink) {
+                confirmationRow
             }
+            .buttonStyle(.plain)
+            .disabled(!hasLink)
         }
     }
 
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header: category key on the left, state on the right.
-            HStack {
-                Text(categoryLabel)
-                    .font(.system(.caption2, design: .monospaced))
-                    .tracking(1.4)
-                    .foregroundStyle(Color.nmlMuted)
-                Spacer()
-                if hasLink {
-                    // A tappable link — give it a chevron so it reads differently
-                    // from the OK/FAIL status states below.
-                    HStack(spacing: 4) {
-                        Text("OPEN")
-                            .font(.system(.caption2, design: .monospaced))
-                            .tracking(1.2)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
-                    }
-                    .foregroundStyle(Color.nmlTitanium)
-                } else {
-                    Text(action.success ? "OK" : "FAIL")
-                        .font(.system(.caption2, design: .monospaced))
-                        .tracking(1.2)
-                        .foregroundStyle(action.success ? Color.nmlTitanium : Color.nmlDanger)
+    /// A completed action, rendered as a quiet receipt line — a status mark, a
+    /// confident Title Case confirmation, optional detail, and an Open affordance
+    /// when there's somewhere to go. Flat (a single hairline), never a boxed card.
+    private var confirmationRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            statusGlyph
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(headline)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(action.success ? Color.nmlInk : Color.nmlDanger)
+                if let detail = detailText {
+                    Text(detail)
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
-            if let text = detailText {
-                Text(text)
-                    .font(.system(.caption2, design: .monospaced))
+            Spacer(minLength: 8)
+
+            if hasLink {
+                HStack(spacing: 3) {
+                    Text("Open")
+                        .font(.system(size: 13, weight: .regular))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(Color.nmlTitanium)
+            }
+        }
+        .padding(.vertical, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var statusGlyph: some View {
+        Image(systemName: action.success ? "checkmark" : "exclamationmark")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(action.success ? Color.nmlGlow : Color.nmlDanger)
+            .frame(width: 16, height: 19, alignment: .center)
+    }
+
+    /// Title Case confirmation copy, e.g. "Email Sent", "Place Found".
+    private var headline: String {
+        actionSummary.capitalized
+    }
+
+    /// A high-risk action awaiting the user's confirmation keeps a bordered
+    /// surface — it's a decision to make, not a receipt, so it should hold the eye.
+    private var pendingCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(headline)
+                    .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let detail = detailText {
+                    Text(detail)
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
-            if action.pending, let onCommand {
+            if let onCommand {
                 HStack(spacing: 0) {
-                    Button { onCommand("confirm") } label: {
-                        Text("[ CONFIRM ]")
-                            .font(.system(.caption2, design: .monospaced))
-                            .tracking(1.4)
-                            .foregroundStyle(Color.nmlInk)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .border(Color.nmlCardBorder, width: 0.5)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button { onCommand("cancel") } label: {
-                        Text("[ CANCEL ]")
-                            .font(.system(.caption2, design: .monospaced))
-                            .tracking(1.4)
-                            .foregroundStyle(Color.nmlMuted)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 40)
-                            .border(Color.nmlCardBorder, width: 0.5)
-                    }
-                    .buttonStyle(.plain)
+                    pendingButton("Confirm") { onCommand("confirm") }
+                    pendingButton("Cancel", muted: true) { onCommand("cancel") }
                 }
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black)
-        .border(Color.nmlCardBorder, width: 0.5)
+        .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
     }
 
-    private var categoryLabel: String {
-        actionSummary.uppercased()
+    private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
     }
 
     private func openLink() {
