@@ -125,6 +125,7 @@ const ACTION_CONTRACTS = {
     inputExample: { query: 'search term', max_results: 5 },
     successSummary: 'Emails searched',
     failureSummary: 'Email search failed',
+    guidance: 'Search the user\'s own inbox for a specific email only. Never use to look up news or public information — that is a web search.',
     confirmation: 'none'
   },
   book_uber: {
@@ -367,7 +368,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     aliases: { query: ['q', 'search'] },
     inputExample: { query: 'search term' },
-    guidance: 'Use for "find a video about X" / "play me a video on Y" on YouTube. Returns matching videos when YouTube search is configured, otherwise a search link.',
+    guidance: 'Use for "find a video about X" / "play me a video on Y" on YouTube. Returns matching videos when YouTube search is configured, otherwise a search link. Never use to look up news, current events, or facts — that is a web search, not a video search.',
     successSummary: 'YouTube searched',
     failureSummary: 'YouTube search failed',
     confirmation: 'none'

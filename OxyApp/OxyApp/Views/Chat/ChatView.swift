@@ -41,18 +41,6 @@ struct ChatView: View {
             Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                AppHeaderView(
-                    isIncognito: $isIncognito,
-                    isEmptyChat: viewModel.messages.isEmpty,
-                    onLeading: {
-                        HapticManager.shared.impact(.light)
-                        if let onMenu { onMenu() } else { dismiss() }
-                    }
-                )
-                .onChange(of: isIncognito) { _, on in
-                    viewModel.incognito = on
-                }
-
                 // Offline banner
                 if isOffline {
                     HStack(spacing: 8) {
@@ -158,6 +146,22 @@ struct ChatView: View {
                             }
                         }
                         .scrollDismissesKeyboard(.interactively)
+                        // Floating glass header: messages scroll cleanly underneath it,
+                        // matching the bottom tab bar's .safeAreaInset(.bottom). No opaque
+                        // bar, no content bleeding behind the menu button.
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            AppHeaderView(
+                                isIncognito: $isIncognito,
+                                isEmptyChat: viewModel.messages.isEmpty,
+                                onLeading: {
+                                    HapticManager.shared.impact(.light)
+                                    if let onMenu { onMenu() } else { dismiss() }
+                                }
+                            )
+                            .onChange(of: isIncognito) { _, on in
+                                viewModel.incognito = on
+                            }
+                        }
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
                             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {

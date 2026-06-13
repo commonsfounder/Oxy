@@ -63,7 +63,7 @@ struct MessageBubble: View {
                     .background {
                         if isUser {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .fill(Color.white.opacity(0.06))
+                                .fill(Color.white.opacity(0.12))
                         }
                     }
 
@@ -200,10 +200,16 @@ struct ActionCard: View {
                     .foregroundStyle(Color.nmlMuted)
                 Spacer()
                 if hasLink {
-                    Text("OPEN")
-                        .font(.system(.caption2, design: .monospaced))
-                        .tracking(1.2)
-                        .foregroundStyle(Color.nmlTitanium)
+                    // A tappable link — give it a chevron so it reads differently
+                    // from the OK/FAIL status states below.
+                    HStack(spacing: 4) {
+                        Text("OPEN")
+                            .font(.system(.caption2, design: .monospaced))
+                            .tracking(1.2)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.nmlTitanium)
                 } else {
                     Text(action.success ? "OK" : "FAIL")
                         .font(.system(.caption2, design: .monospaced))
@@ -216,7 +222,7 @@ struct ActionCard: View {
                 Text(text)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(Color.nmlInk)
-                    .lineLimit(action.action == "plan_trip" ? 2 : 1)
+                    .lineLimit(3)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
