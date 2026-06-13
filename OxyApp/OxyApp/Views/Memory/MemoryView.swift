@@ -59,7 +59,7 @@ struct MemoryView: View {
                         // The actual memories — view and delete each, like ChatGPT/Claude.
                         VStack(alignment: .leading, spacing: 0) {
                             HStack {
-                                NamelessSectionHeader(title: "Saved memories")
+                                NamelessSectionHeader(title: "Saved Memories")
                                 Spacer()
                                 if !items.isEmpty {
                                     Text("\(items.count)")

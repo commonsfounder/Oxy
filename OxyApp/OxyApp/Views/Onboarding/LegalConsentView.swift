@@ -91,11 +91,11 @@ private struct NamelessCheckbox: View {
     let isOn: Bool
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 3)
+        Rectangle()
             .fill(isOn ? Color.nmlInk : Color.clear)
             .frame(width: 16, height: 16)
             .overlay(
-                RoundedRectangle(cornerRadius: 3)
+                Rectangle()
                     .strokeBorder(isOn ? Color.clear : Color.white.opacity(0.3), lineWidth: 1)
             )
             .animation(.easeInOut(duration: 0.15), value: isOn)

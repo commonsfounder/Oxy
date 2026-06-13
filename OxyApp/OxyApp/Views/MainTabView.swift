@@ -4,6 +4,7 @@ struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
+    @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
     @State private var selectedTab = Tab.today
 
     enum Tab: String, CaseIterable {
@@ -40,7 +41,7 @@ struct MainTabView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar
         }
-        .id(accentColor + appTheme)
+        .id(accentColor + appTheme + themeProfile)
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
         }

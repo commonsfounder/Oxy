@@ -4,25 +4,93 @@ import SwiftUI
 /// deep obsidian, titanium hairlines, soft white editorial type. Intentionally
 /// fixed rather than light/dark-adaptive: this aesthetic doesn't bend to system
 /// appearance, the same way a well-made object looks the same in any room.
+// MARK: - Customization engine
+//
+// One luxury aesthetic, three finishes. The background is always pure black and
+// the *structure* never changes — only the subtle accent/detail/border colourway
+// shifts between profiles. Every view reads the `nml*` colour tokens below, so
+// switching the finish re-skins the entire app from this one place.
+
+/// A single finish: the colourway that paints the app's accents, text and rules
+/// on top of the invariant pure-black canvas.
+struct OxyThemeProfile: Identifiable, Equatable {
+    let id: String
+    let name: String
+    /// Primary editorial text.
+    let ink: Color
+    /// Secondary captions and quiet detail.
+    let muted: Color
+    /// The accent — interactive text, active states, quiet emphasis.
+    let accent: Color
+    /// Halo behind a live-status dot.
+    let glow: Color
+    /// Hairline rules and container borders (the only separators allowed).
+    let border: Color
+    /// Slightly-raised surface for nested fields.
+    let surface: Color
+    let surface2: Color
+
+    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
+        Color(red: r / 255, green: g / 255, blue: b / 255)
+    }
+
+    /// Raw Obsidian — pure black, dark-grey accents, near-white text.
+    static let obsidian = OxyThemeProfile(
+        id: "obsidian", name: "Raw Obsidian",
+        ink: rgb(250, 250, 250), muted: rgb(110, 110, 115),
+        accent: rgb(124, 124, 130), glow: rgb(184, 184, 190),
+        border: rgb(34, 34, 34), surface: rgb(12, 12, 13), surface2: rgb(22, 22, 24)
+    )
+
+    /// Brushed Titanium — pure black, muted steel-grey accents, cool silver detail.
+    static let titanium = OxyThemeProfile(
+        id: "titanium", name: "Brushed Titanium",
+        ink: rgb(240, 239, 235), muted: rgb(142, 142, 147),
+        accent: rgb(199, 202, 206), glow: rgb(214, 217, 220),
+        border: rgb(34, 34, 34), surface: rgb(14, 14, 16), surface2: rgb(21, 21, 23)
+    )
+
+    /// Warm Gold — pure black, deep champagne accents, soft gold detail.
+    static let gold = OxyThemeProfile(
+        id: "gold", name: "Warm Gold",
+        ink: rgb(244, 239, 230), muted: rgb(140, 131, 120),
+        accent: rgb(200, 168, 118), glow: rgb(224, 207, 168),
+        border: rgb(41, 35, 26), surface: rgb(16, 14, 10), surface2: rgb(24, 21, 15)
+    )
+}
+
+/// The finish engine. The selection lives in UserDefaults so the plain `static`
+/// colour tokens can read it synchronously; the app root re-keys its identity on
+/// the same value so a change re-skins every screen at once.
+enum OxyTheme {
+    static let storageKey = "oxy_theme_profile"
+    static let profiles: [OxyThemeProfile] = [.obsidian, .titanium, .gold]
+
+    static var current: OxyThemeProfile {
+        let id = UserDefaults.standard.string(forKey: storageKey) ?? OxyThemeProfile.titanium.id
+        return profiles.first { $0.id == id } ?? .titanium
+    }
+}
+
 extension Color {
-    /// Pure black background — the single canvas colour across the app.
+    /// Pure black background — the single canvas colour, invariant across finishes.
     static let nmlObsidian = Color.black
     /// Slightly raised obsidian surface for cards and rows.
-    static let nmlSurface = Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255)
+    static var nmlSurface: Color { OxyTheme.current.surface }
     /// One step lighter still — for elements nested inside a surface (input fields, pills).
-    static let nmlSurface2 = Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255)
-    /// Titanium/silver hairline — always drawn at 0.5pt.
-    static let nmlHairline = Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16)
-    /// Flat solid card border (#222222) for raw monospace telemetry cards.
-    static let nmlCardBorder = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
-    /// Soft titanium for icons, dots, and quiet emphasis.
-    static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
-    /// Soft white for primary editorial type — intentionally never pure white.
-    static let nmlInk = Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255)
-    /// Muted secondary gray (#8E8E93) for captions, eyebrows, and secondary detail.
-    static let nmlMuted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
+    static var nmlSurface2: Color { OxyTheme.current.surface2 }
+    /// Hairline / container border (≈#222222), tinted subtly by the active finish.
+    static var nmlHairline: Color { OxyTheme.current.border }
+    /// Flat solid container border — same source as the hairline.
+    static var nmlCardBorder: Color { OxyTheme.current.border }
+    /// The finish accent — icons, dots, interactive text, quiet emphasis.
+    static var nmlTitanium: Color { OxyTheme.current.accent }
+    /// Primary editorial type for the active finish.
+    static var nmlInk: Color { OxyTheme.current.ink }
+    /// Muted secondary detail for the active finish.
+    static var nmlMuted: Color { OxyTheme.current.muted }
     /// Faint halo behind a live-status dot.
-    static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
+    static var nmlGlow: Color { OxyTheme.current.glow }
 }
 
 extension Font {
@@ -38,7 +106,6 @@ extension View {
     func nmlEyebrow() -> some View {
         font(.system(size: 11, weight: .semibold))
             .tracking(2.6)
-            .textCase(.uppercase)
             .foregroundStyle(Color.nmlMuted)
     }
 
@@ -91,21 +158,22 @@ struct NamelessDivider: View {
     var inset: CGFloat = 0
     var body: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.08))
+            // The spec separator: 0.5px ≈ #222222, tinted subtly by the active finish.
+            .fill(Color.nmlHairline)
             .frame(height: 0.5)
             .padding(.leading, inset)
     }
 }
 
-/// Small, uppercase, wide-tracked monospaced section header in muted gray.
+/// Title Case, wide-tracked sans-serif section header in muted detail colour.
+/// Elegant spacing instead of a loud uppercase monospace grid.
 struct NamelessSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .tracking(2)
-            .textCase(.uppercase)
-            .foregroundStyle(Color.gray)
+            .font(.system(size: 12, weight: .regular))
+            .tracking(2.4)
+            .foregroundStyle(Color.nmlMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

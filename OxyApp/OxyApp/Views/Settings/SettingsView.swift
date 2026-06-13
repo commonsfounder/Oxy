@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
+    @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
 
     var body: some View {
         NavigationStack {
@@ -26,19 +27,19 @@ struct SettingsView: View {
                     ScrollView {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
-                            settingRow(label: "Accent", description: nil) {
+                            settingRow(label: "Finish", description: "Same structure, three luxury colorways") {
                                 Menu {
-                                    ForEach(OxySettings.accentOptions) { option in
+                                    ForEach(OxyTheme.profiles) { profile in
                                         Button {
-                                            settings.accentColor = option.value
-                                            saveSettings()
+                                            themeProfile = profile.id
+                                            HapticManager.shared.impact(.light)
                                         } label: {
                                             HStack {
                                                 Circle()
-                                                    .fill(option.color)
+                                                    .fill(profile.accent)
                                                     .frame(width: 10, height: 10)
-                                                Text(option.label)
-                                                if settings.accentColor == option.value {
+                                                Text(profile.name)
+                                                if themeProfile == profile.id {
                                                     Spacer()
                                                     Image(systemName: "checkmark")
                                                 }
@@ -48,31 +49,17 @@ struct SettingsView: View {
                                 } label: {
                                     HStack(spacing: 9) {
                                         Circle()
-                                            .fill(selectedAccentColor)
+                                            .fill(OxyTheme.current.accent)
                                             .frame(width: 9, height: 9)
-                                        Text(selectedAccentLabel.uppercased())
-                                            .font(.nmlMono(12, weight: .medium))
-                                            .tracking(1.2)
+                                        Text(currentFinishName)
+                                            .font(.system(size: 13, weight: .regular))
+                                            .tracking(0.6)
                                         Text("›")
                                             .font(.system(size: 15, weight: .light))
                                     }
                                     .foregroundStyle(Color.nmlTitanium)
                                 }
                                 .buttonStyle(.plain)
-                            }
-
-                            NamelessDivider()
-
-                            settingRow(label: "Theme", description: nil) {
-                                Picker("Theme", selection: $settings.appTheme) {
-                                    Text("Light").tag("light")
-                                    Text("Dark").tag("dark")
-                                    Text("System").tag("system")
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(Color.nmlTitanium)
-                                .onChange(of: settings.appTheme) { _, _ in saveSettings() }
                             }
 
                             NamelessDivider()
@@ -207,12 +194,8 @@ struct SettingsView: View {
         OxySettings.voiceOptions.first(where: { $0.value == settings.voice })?.label ?? settings.voice
     }
 
-    private var selectedAccentLabel: String {
-        OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.label ?? "Stone"
-    }
-
-    private var selectedAccentColor: Color {
-        OxySettings.accentOptions.first(where: { $0.value == settings.accentColor })?.color ?? Color.oxyDefaultStone
+    private var currentFinishName: String {
+        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Brushed Titanium"
     }
 
     private func previewVoice(_ voice: String) {
@@ -394,7 +377,7 @@ private struct BackendURLEditorSheet: View {
             ZStack {
                 Color.black.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
-                    NamelessSectionHeader(title: "Custom backend URL")
+                    NamelessSectionHeader(title: "Custom Backend URL")
 
                     NamelessLineField(
                         placeholder: "https://your-backend.run.app",

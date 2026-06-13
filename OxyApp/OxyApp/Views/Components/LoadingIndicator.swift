@@ -52,7 +52,7 @@ struct OxyThinkingIndicator: View {
 
 struct OxySkeletonCard: View {
     var height: CGFloat = 84
-    var cornerRadius: CGFloat = 16
+    var cornerRadius: CGFloat = 0
 
     @State private var shimmer = false
 
