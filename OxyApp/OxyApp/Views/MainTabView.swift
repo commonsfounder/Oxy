@@ -111,6 +111,9 @@ struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
     @State private var showSignOutConfirm = false
+    @State private var assistantName = "Nameless"
+
+    private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
 
     enum MoreDestination: Identifiable {
         case profile, pendant, connectors, memory, settings
@@ -124,34 +127,40 @@ struct MoreView: View {
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "More")
                     ScrollView {
-                    VStack(spacing: 0) {
-                        moreRow(title: "Profile", subtitle: "Your account and assistant name") {
-                            destination = .profile
-                        }
-                        NamelessDivider()
-                        moreRow(title: "Pendant", subtitle: "Device status and pairing") {
-                            destination = .pendant
-                        }
-                        NamelessDivider()
-                        moreRow(title: "Connectors", subtitle: "Link your accounts and devices") {
-                            destination = .connectors
-                        }
-                        NamelessDivider()
-                        moreRow(title: "Memory", subtitle: "What Nameless remembers about you") {
-                            destination = .memory
-                        }
-                        NamelessDivider()
-                        moreRow(title: "Settings", subtitle: "Appearance, voice, account") {
-                            destination = .settings
-                        }
+                        VStack(alignment: .leading, spacing: 34) {
+                            accountHeader
 
-                        // Sign out lives apart, low-contrast, with breathing room.
-                        signOutRow
-                            .padding(.top, 56)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 8)
-                    .padding(.bottom, 32)
+                            group(title: "Assistant") {
+                                moreRow(title: "Memory", subtitle: "What \(assistantName) remembers about you") {
+                                    destination = .memory
+                                }
+                                NamelessDivider()
+                                moreRow(title: "Connectors", subtitle: "Accounts, services, device access") {
+                                    destination = .connectors
+                                }
+                                NamelessDivider()
+                                moreRow(title: "Settings", subtitle: "Voice, appearance, behaviour") {
+                                    destination = .settings
+                                }
+                            }
+
+                            group(title: "Device") {
+                                moreRow(
+                                    title: "Pendant",
+                                    subtitle: "Pairing, status, hardware",
+                                    trailing: pendantStatusText,
+                                    trailingLive: pendant.isConnected
+                                ) {
+                                    destination = .pendant
+                                }
+                            }
+
+                            signOutRow
+                                .padding(.top, 22)
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.top, 12)
+                        .padding(.bottom, 32)
                     }
                 }
             }
@@ -171,10 +180,79 @@ struct MoreView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            .onAppear(perform: loadAssistantName)
         }
     }
 
-    private func moreRow(title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+    // MARK: - Account header
+
+    private var accountHeader: some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            destination = .profile
+        } label: {
+            HStack(spacing: 14) {
+                // A quiet monogram instead of a colourful avatar — first letter of
+                // the assistant name in a hairline ring.
+                Text(monogram)
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(Color.nmlInk)
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(Color.white.opacity(0.05)))
+                    .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(assistantName)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(Color.nmlInk)
+                    Text("Profile · account · sign out")
+                        .font(.system(size: 12, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
+                }
+
+                Spacer()
+
+                Text("›")
+                    .font(.system(size: 18, weight: .light))
+                    .foregroundStyle(Color.nmlMuted)
+            }
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var monogram: String {
+        let trimmed = assistantName.trimmingCharacters(in: .whitespaces)
+        return String(trimmed.first ?? "O").uppercased()
+    }
+
+    private var pendantStatusText: String? {
+        switch pendant.connectionState {
+        case .connected: return "Connected"
+        case .scanning, .connecting: return "Pairing…"
+        case .error: return "Error"
+        case .disconnected: return "Not connected"
+        }
+    }
+
+    // MARK: - Grouped rows
+
+    private func group<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            NamelessSectionHeader(title: title)
+                .padding(.bottom, 6)
+            VStack(spacing: 0) { content() }
+        }
+    }
+
+    private func moreRow(
+        title: String,
+        subtitle: String,
+        trailing: String? = nil,
+        trailingLive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
         Button {
             HapticManager.shared.impact(.light)
             action()
@@ -190,11 +268,22 @@ struct MoreView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if let trailing {
+                    HStack(spacing: 7) {
+                        if trailingLive {
+                            NamelessStatusDot(isLive: true, diameter: 5)
+                        }
+                        Text(trailing.uppercased())
+                            .font(.nmlMono(10, weight: .medium))
+                            .tracking(1.0)
+                            .foregroundStyle(Color.nmlMuted)
+                    }
+                }
                 Text("›")
                     .font(.system(size: 18, weight: .light))
                     .foregroundStyle(Color.nmlMuted)
             }
-            .padding(.vertical, 21)
+            .padding(.vertical, 18)
         }
         .buttonStyle(.plain)
     }
@@ -214,6 +303,14 @@ struct MoreView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    private func loadAssistantName() {
+        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+           let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
+           !saved.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            assistantName = saved.name
+        }
     }
 }
 

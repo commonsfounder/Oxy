@@ -2,23 +2,18 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
+/// Cross-cutting app preferences only. Identity and account actions live in
+/// Profile, memory in the Memory screen, and pendant pairing on the Pendant
+/// screen — Settings used to duplicate all three.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
-    @State private var showSignOutConfirm = false
-    @State private var showSignOutAllConfirm = false
-    @State private var showDeleteAccountConfirm = false
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
-    @State private var accountStatusText: String?
-    @State private var isExportingData = false
-    @State private var isDeletingAccount = false
-    @State private var isSigningOutAll = false
-    @State private var sharePayload: SharePayload?
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     var body: some View {
@@ -30,31 +25,6 @@ struct SettingsView: View {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
                     VStack(spacing: 36) {
-                        // Identity
-                        settingsSection(title: "Profile") {
-                            settingRow(label: "Assistant Name", description: nil) {
-                                TextField("Nameless", text: $settings.name)
-                                    .font(.system(size: 15, weight: .light))
-                                    .foregroundStyle(Color.nmlInk)
-                                    .tint(Color.nmlTitanium)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(width: 140)
-                                    .onChange(of: settings.name) { _, _ in saveSettings() }
-                            }
-                        }
-
-                        settingsSection(title: "Personalisation") {
-                            NavigationLink {
-                                MemoryView(embedded: true)
-                            } label: {
-                                settingsNavigationRow(
-                                    label: "Memory",
-                                    description: "Saved facts and preferences"
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
                         settingsSection(title: "Appearance") {
                             settingRow(label: "Accent", description: nil) {
                                 Menu {
@@ -177,58 +147,7 @@ struct SettingsView: View {
                             }
                         }
 
-                        // Pendant / Hardware
-                        PendantSettingsSection(pendant: NativeIntegrationManager.shared.pendant)
-
-                        settingsSection(title: "Account") {
-                            accountRow(
-                                label: isExportingData ? "Preparing Export" : "Export My Data",
-                                action: exportMyData
-                            )
-                            .disabled(isExportingData || isDeletingAccount)
-                            .accessibilityLabel("Export my data")
-
-                            NamelessDivider()
-
-                            accountRow(
-                                label: isDeletingAccount ? "Deleting Account" : "Delete Account",
-                                destructive: true,
-                                action: { showDeleteAccountConfirm = true }
-                            )
-                            .disabled(isExportingData || isDeletingAccount)
-                            .accessibilityLabel("Delete account")
-
-                            NamelessDivider()
-
-                            accountRow(
-                                label: "Sign Out",
-                                destructive: true,
-                                action: { showSignOutConfirm = true }
-                            )
-                            .accessibilityLabel("Sign out")
-
-                            NamelessDivider()
-
-                            accountRow(
-                                label: isSigningOutAll ? "Signing Out…" : "Sign Out All Devices",
-                                destructive: true,
-                                action: { showSignOutAllConfirm = true }
-                            )
-                            .disabled(isSigningOutAll)
-                            .accessibilityLabel("Sign out all devices")
-
-                            if let accountStatusText {
-                                NamelessDivider()
-                                Text(accountStatusText)
-                                    .font(.system(size: 12, weight: .light))
-                                    .foregroundStyle(Color.nmlMuted)
-                                    .lineSpacing(3)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 14)
-                            }
-                        }
-
-                        settingsSection(title: "Support & Legal") {
+                        settingsSection(title: "About") {
                             legalLink(label: "Support", path: "/support")
                             NamelessDivider()
                             legalLink(label: "Privacy Policy", path: "/privacy")
@@ -259,24 +178,6 @@ struct SettingsView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .alert("Sign Out", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) { appState.logout() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Are you sure you want to sign out?")
-            }
-            .alert("Sign Out All Devices", isPresented: $showSignOutAllConfirm) {
-                Button("Sign Out All", role: .destructive) { signOutAllDevices() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will invalidate all active sessions on every device. You will be signed out here too.")
-            }
-            .alert("Delete Account", isPresented: $showDeleteAccountConfirm) {
-                Button("Delete", role: .destructive) { deleteAccount() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This permanently deletes your account data, including conversations, memories, connectors, preferences, and action history.")
-            }
             .sheet(isPresented: $showBackendURLEditor) {
                 BackendURLEditorSheet(currentURL: $customBackendURL) {
                     showBackendURLEditor = false
@@ -284,9 +185,6 @@ struct SettingsView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
-            }
-            .sheet(item: $sharePayload) { payload in
-                ShareSheet(activityItems: [payload.url])
             }
             .onAppear {
                 loadSettings()
@@ -343,70 +241,6 @@ struct SettingsView: View {
         }
     }
 
-    private func exportMyData() {
-        guard !isExportingData else { return }
-        accountStatusText = nil
-        isExportingData = true
-        Task {
-            do {
-                let data = try await APIClient.shared.exportUserData(userId: appState.userId)
-                let url = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("oxy-data-export-\(Int(Date().timeIntervalSince1970)).json")
-                try data.write(to: url, options: .atomic)
-                await MainActor.run {
-                    isExportingData = false
-                    sharePayload = SharePayload(url: url)
-                    accountStatusText = "Export ready."
-                }
-            } catch {
-                await MainActor.run {
-                    isExportingData = false
-                    accountStatusText = "Could not export your data: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func signOutAllDevices() {
-        guard !isSigningOutAll else { return }
-        accountStatusText = nil
-        isSigningOutAll = true
-        Task {
-            do {
-                _ = try await APIClient.shared.request(path: "/auth/logout-all", method: "POST")
-                await MainActor.run {
-                    isSigningOutAll = false
-                    appState.logout()
-                }
-            } catch {
-                await MainActor.run {
-                    isSigningOutAll = false
-                    accountStatusText = "Could not sign out all devices: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
-    private func deleteAccount() {
-        guard !isDeletingAccount else { return }
-        accountStatusText = nil
-        isDeletingAccount = true
-        Task {
-            do {
-                try await APIClient.shared.deleteAccount(userId: appState.userId)
-                await MainActor.run {
-                    isDeletingAccount = false
-                    appState.logout()
-                }
-            } catch {
-                await MainActor.run {
-                    isDeletingAccount = false
-                    accountStatusText = "Could not delete your account: \(error.localizedDescription)"
-                }
-            }
-        }
-    }
-
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             NamelessSectionHeader(title: title)
@@ -435,28 +269,6 @@ struct SettingsView: View {
             }
             Spacer()
             accessory()
-        }
-        .padding(.vertical, 16)
-    }
-
-    private func settingsNavigationRow(label: String, description: String?) -> some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(label)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
-                if let description {
-                    Text(description)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
-                }
-            }
-
-            Spacer()
-
-            Text("›")
-                .font(.system(size: 18, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
         }
         .padding(.vertical, 16)
     }
@@ -551,28 +363,6 @@ struct SettingsView: View {
         }
     }
 
-    /// A flat, icon-free account action row — raw text, optional muted-red
-    /// destructive tint, and a quiet "›" affordance instead of an SF chevron.
-    private func accountRow(
-        label: String,
-        destructive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack {
-                Text(label)
-                    .font(.system(size: 15, weight: .regular))
-                Spacer()
-                Text("›")
-                    .font(.system(size: 18, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
-            }
-            .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
-            .padding(.vertical, 16)
-        }
-        .buttonStyle(.plain)
-    }
-
     private func handleVersionTap() {
         versionTapCount += 1
         if versionTapCount >= 5 {
@@ -592,11 +382,6 @@ struct SettingsView: View {
         }
         settings.designPalette = settings.accentColor
     }
-}
-
-private struct SharePayload: Identifiable {
-    let id = UUID()
-    let url: URL
 }
 
 private struct BackendURLEditorSheet: View {
@@ -657,16 +442,6 @@ private struct BackendURLEditorSheet: View {
         }
         .onAppear { draft = currentURL }
     }
-}
-
-private struct ShareSheet: UIViewControllerRepresentable {
-    let activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Voice Preview
@@ -920,156 +695,6 @@ struct OxySettings: Codable {
         AccentOption(value: "violet", label: "Violet", color: Color(red: 162/255, green: 132/255, blue: 245/255)),
         AccentOption(value: "indigo", label: "Indigo", color: Color(red: 105/255, green: 126/255, blue: 235/255))
     ]
-}
-
-// MARK: - PendantSettingsSection
-
-private struct PendantSettingsSection: View {
-    var pendant: PendantBLEManager
-    @State private var showUnpairConfirm = false
-    @State private var scanPulse = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: "Pendant")
-                .padding(.bottom, 10)
-
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Status")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Color.nmlInk)
-                    Spacer()
-                    HStack(spacing: 10) {
-                        Text(statusDescription)
-                            .font(.nmlMono(12))
-                            .foregroundStyle(statusColor)
-                            .contentTransition(.numericText())
-                            .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
-                        statusIndicator
-                            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pendant.connectionState)
-                    }
-                }
-                .padding(.vertical, 16)
-
-                if let name = pendant.peripheralName, pendant.isConnected {
-                    NamelessDivider()
-                    HStack {
-                        Text("Device")
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(Color.nmlInk)
-                        Spacer()
-                        Text(name)
-                            .font(.nmlMono(12))
-                            .foregroundStyle(Color.nmlMuted)
-                    }
-                    .padding(.vertical, 16)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                if let error = pendant.lastError {
-                    NamelessDivider()
-                    Text(error)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlDanger)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 16)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-
-                NamelessDivider()
-
-                HStack(spacing: 12) {
-                    if pendant.isConnected {
-                        Button("UNPAIR") {
-                            showUnpairConfirm = true
-                        }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlDanger)
-                        .transition(.opacity)
-                    } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
-                        Button("CANCEL") {
-                            pendant.stopScan()
-                        }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlMuted)
-                        .transition(.opacity)
-                    } else {
-                        Button("SCAN FOR PENDANT") {
-                            pendant.startScan()
-                        }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlTitanium)
-                        .transition(.opacity)
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 16)
-                .animation(.easeInOut(duration: 0.25), value: pendant.connectionState)
-            }
-        }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: pendant.connectionState)
-        .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
-            Button("Unpair", role: .destructive) { pendant.unpair() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will disconnect and forget the paired pendant. You can pair again later.")
-        }
-    }
-
-    private var statusDescription: String {
-        switch pendant.connectionState {
-        case .disconnected: return "Not connected"
-        case .scanning: return "Scanning…"
-        case .connecting: return "Connecting…"
-        case .connected: return "Connected"
-        case .error: return "Error"
-        }
-    }
-
-    private var statusColor: Color {
-        switch pendant.connectionState {
-        case .connected: return Color.nmlTitanium
-        case .error: return Color.nmlDanger
-        case .scanning, .connecting: return Color.nmlMuted
-        default: return Color.nmlMuted
-        }
-    }
-
-    @ViewBuilder
-    private var statusIndicator: some View {
-        switch pendant.connectionState {
-        case .connected:
-            NamelessStatusDot(isLive: true, diameter: 6)
-        case .scanning, .connecting:
-            ScanPulseView()
-        case .error:
-            NamelessStatusDot(isLive: false, diameter: 6)
-        case .disconnected:
-            NamelessStatusDot(isLive: false, diameter: 6)
-        }
-    }
-}
-
-private struct ScanPulseView: View {
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.nmlTitanium.opacity(pulse ? 0 : 0.4), lineWidth: 2)
-                .frame(width: pulse ? 24 : 12, height: pulse ? 24 : 12)
-                .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: pulse)
-
-            Circle()
-                .fill(Color.nmlTitanium)
-                .frame(width: 8, height: 8)
-        }
-        .onAppear { pulse = true }
-    }
 }
 
 #Preview {
