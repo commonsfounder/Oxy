@@ -63,21 +63,21 @@ struct MainTabView: View {
 
     // MARK: - Custom bottom bar
 
-    // A floating Liquid Glass bar (Apple iOS 26 style): the whole bar is one
-    // refractive glass surface that hovers above the bottom edge, with a soft
-    // highlight capsule marking the active tab.
     private var bottomBar: some View {
-        nmlGlassContainer(spacing: 4) {
-            HStack(spacing: 4) {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+
+            HStack(spacing: 0) {
                 ForEach(Tab.allCases, id: \.self) { tab in
                     tabButton(tab)
                 }
             }
-            .padding(6)
-            .nmlGlass(Capsule(), interactive: true)
+            .padding(.top, 10)
+            .padding(.bottom, 4)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 4)
+        .background(Color.black)
     }
 
     private func tabButton(_ tab: Tab) -> some View {
@@ -85,23 +85,34 @@ struct MainTabView: View {
         return Button {
             withAnimation(.easeInOut(duration: 0.25)) { selectedTab = tab }
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: 4) {
                 Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
-                    .font(.system(size: 18, weight: .regular))
+                    .font(.system(size: 19, weight: .regular))
+                    .frame(width: 34, height: 34)
+                    .modifier(TabGlassModifier(selected: selected))
                 Text(tab.label)
                     .font(.system(size: 10, weight: selected ? .semibold : .medium))
             }
             .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background {
-                if selected {
-                    Capsule().fill(Color.white.opacity(0.12))
-                }
-            }
-            .contentShape(Capsule())
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Gives the active tab's icon a Liquid Glass pill on iOS 26+ (a frosted
+/// circle approximation on earlier versions); unselected icons stay bare.
+private struct TabGlassModifier: ViewModifier {
+    let selected: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if selected {
+            content.nmlGlass(Circle())
+        } else {
+            content
+        }
     }
 }
 
