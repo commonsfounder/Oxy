@@ -39,6 +39,10 @@ DO $$ BEGIN
 EXCEPTION WHEN undefined_table THEN NULL; END $$;
 
 DO $$ BEGIN
+  ALTER TABLE scheduled_tasks ENABLE ROW LEVEL SECURITY;
+EXCEPTION WHEN undefined_table THEN NULL; END $$;
+
+DO $$ BEGIN
   ALTER TABLE rate_limits ENABLE ROW LEVEL SECURITY;
 EXCEPTION WHEN undefined_table THEN NULL; END $$;
 

@@ -225,7 +225,10 @@ final class NativeIntegrationManager: NSObject {
             "capabilities": capabilities.dictionary,
             "settings": settings.nativeDictionary
         ]
-        if let location = LocationManager.shared.locationDict {
+        // Actively fetch a fresh fix (requests one-shot location + awaits with timeout) rather
+        // than reading a cached value that is almost always nil at sync time — otherwise the
+        // server never receives location and proactive briefings can't do weather/places.
+        if let location = await LocationManager.shared.currentLocationForLocalRequest() {
             body["location"] = location
         }
         do {

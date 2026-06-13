@@ -19,11 +19,40 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   create_reminder: {
-    risk: 'medium',
+    risk: 'low',
     required: ['title', 'due_date'],
-    inputExample: { title: 'reminder', due_date: 'ISO date' },
+    inputExample: { title: 'Call the dentist', due_date: 'ISO datetime' },
+    guidance: 'One-off reminder delivered as a notification at due_date. due_date must be an ISO datetime worked out from the user\'s request and the current time (Europe/London) — never invent a date. For recurring requests ("every morning...", "every Monday...") use create_scheduled_task instead.',
     successSummary: 'Reminder created',
     failureSummary: 'Reminder failed',
+    confirmation: 'none'
+  },
+  create_scheduled_task: {
+    risk: 'low',
+    required: ['title', 'instruction'],
+    optional: ['recurrence', 'time', 'day_of_week', 'date'],
+    inputExample: { title: 'Morning traffic check', instruction: "Check traffic for the user's commute and report it.", recurrence: 'daily', time: '07:30' },
+    guidance: 'Use for recurring or scheduled future requests like "every morning at 7:30 check traffic", "every Monday tell me what\'s on my calendar", or "in two hours remind me to call back". recurrence is "daily", "weekly", or "once" — pick "once" only for a single future occurrence, otherwise infer "daily"/"weekly" from the phrasing. time is 24h HH:MM in Europe/London (default 09:00 if unspecified). For weekly, set day_of_week to the day name (e.g. "Monday"). For "once" tasks not due today, set date to an ISO date. instruction is a self-directed note describing what Oxy should do or say when this fires, e.g. "Check the weather and tell the user if they need an umbrella."',
+    successSummary: 'Scheduled task created',
+    failureSummary: 'Scheduling failed',
+    confirmation: 'none'
+  },
+  list_scheduled_tasks: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    guidance: 'Use when the user asks what reminders or scheduled tasks they have set up.',
+    successSummary: 'Scheduled tasks checked',
+    failureSummary: 'Could not check scheduled tasks',
+    confirmation: 'none'
+  },
+  cancel_scheduled_task: {
+    risk: 'low',
+    required: ['title'],
+    inputExample: { title: 'Morning traffic check' },
+    guidance: 'Use to cancel or delete a previously created reminder or scheduled task. Match it by the title or description the user gives.',
+    successSummary: 'Scheduled task cancelled',
+    failureSummary: 'Could not cancel scheduled task',
     confirmation: 'none'
   },
   play_music: {

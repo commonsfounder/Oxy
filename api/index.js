@@ -33,6 +33,14 @@ const notionConnector = require('../connectors/notion');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
 const {
+  createScheduledTask,
+  listScheduledTasks,
+  cancelScheduledTask,
+  getDueScheduledTasks,
+  advanceScheduledTask,
+  describeSchedule
+} = require('./services/scheduled-tasks');
+const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
   isPendingRevisionMessage,
@@ -313,9 +321,15 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3.5-flash';
-const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.5-flash';
-const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
+// Cost split: the user-facing reasoning + voice/streaming brain stays on a capable Flash
+// model; background helper calls run on the much cheaper Flash-Lite tier.
+// gemini-3-flash-preview: $0.50/$3.00 per 1M (≈3x cheaper than 3.5-flash).
+// gemini-3.1-flash-lite: $0.25/$1.50 per 1M (≈6x cheaper than 3.5-flash).
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
+// Voice/streaming tracks the primary brain (not the lite helper tier) so the core
+// experience stays sharp; override with OXY_STREAM_MODEL if needed.
+const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 
 // Gemini 3.x Flash thinks before answering by default, which added ~4.5s to
@@ -429,21 +443,32 @@ function apnsAuthToken() {
   return `${signingInput}.${signature}`;
 }
 
+function apnsConfigured() {
+  return Boolean(process.env.APNS_BUNDLE_ID && apnsAuthToken());
+}
+
 async function sendPushToUser(userId, briefing) {
   const bundleId = process.env.APNS_BUNDLE_ID;
   const token = apnsAuthToken();
-  if (!bundleId || !token) return { sent: 0, skipped: true };
+  if (!bundleId || !token) {
+    console.warn('[push] skipped: APNs not configured (set APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY, APNS_BUNDLE_ID).');
+    return { sent: 0, skipped: true, reason: 'apns_not_configured' };
+  }
 
   const { data: devices, error } = await supabase
     .from('devices')
     .select('push_token, platform')
     .eq('user_id', userId);
   if (error || !Array.isArray(devices)) return { sent: 0, error: error?.message || 'No devices' };
+  const iosDevices = devices.filter(device => device.platform === 'ios' && device.push_token);
+  if (!iosDevices.length) {
+    console.warn(`[push] no registered iOS device tokens for ${userId} (app must POST /devices/register).`);
+    return { sent: 0, reason: 'no_devices' };
+  }
 
   const host = process.env.APNS_USE_SANDBOX === 'true' ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
   let sent = 0;
-  await Promise.all(devices
-    .filter(device => device.platform === 'ios' && device.push_token)
+  await Promise.all(iosDevices
     .map(async device => {
       try {
         await axios.post(
@@ -1696,7 +1721,11 @@ const ACTION_STATUS_LABELS = {
   forget_memory: 'Updating memory',
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
-  create_presentation: 'Building presentation'
+  create_presentation: 'Building presentation',
+  create_reminder: 'Setting reminder',
+  create_scheduled_task: 'Scheduling task',
+  list_scheduled_tasks: 'Checking scheduled tasks',
+  cancel_scheduled_task: 'Cancelling scheduled task'
 };
 
 function getActionStatusLabel(actionType, phase = 'start') {
@@ -2356,6 +2385,73 @@ async function executeAction(userId, action, params, context = {}) {
     }
     case 'forget_memory':
       return forgetMemory(userId, params || {});
+    case 'create_reminder': {
+      const title = String(params?.title || '').trim();
+      const dueDate = params?.due_date ? new Date(params.due_date) : null;
+      if (!title || !dueDate || Number.isNaN(dueDate.getTime())) {
+        return { success: false, error: 'create_reminder needs a title and a valid due_date.' };
+      }
+      const created = await createScheduledTask(userId, { title, due_date: dueDate.toISOString() });
+      if (!created.success) return { success: false, error: created.error };
+      const when = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/London', dateStyle: 'medium', timeStyle: 'short' }).format(dueDate);
+      return {
+        success: true,
+        text: `Reminder set: "${title}" on ${when}.`,
+        cardText: title,
+        actionSummary: 'Reminder set'
+      };
+    }
+    case 'create_scheduled_task': {
+      const title = String(params?.title || '').trim();
+      const instruction = String(params?.instruction || '').trim();
+      if (!title || !instruction) {
+        return { success: false, error: 'create_scheduled_task needs a title and instruction.' };
+      }
+      const created = await createScheduledTask(userId, {
+        title,
+        instruction,
+        recurrence: params?.recurrence,
+        time: params?.time,
+        day_of_week: params?.day_of_week,
+        date: params?.date
+      });
+      if (!created.success) return { success: false, error: created.error };
+      return {
+        success: true,
+        text: `Done — I'll ${describeSchedule(created.task)}: ${title}.`,
+        cardText: title,
+        actionSummary: 'Scheduled task created'
+      };
+    }
+    case 'list_scheduled_tasks': {
+      const listed = await listScheduledTasks(userId);
+      if (!listed.success) return { success: false, error: listed.error };
+      if (!listed.tasks.length) {
+        return { success: true, text: "You don't have any reminders or scheduled tasks set up.", actionSummary: 'No scheduled tasks' };
+      }
+      const lines = listed.tasks.map(task => `- ${task.title} (${describeSchedule(task)})`);
+      return {
+        success: true,
+        text: `Here's what's scheduled:\n${lines.join('\n')}`,
+        actionSummary: 'Scheduled tasks checked'
+      };
+    }
+    case 'cancel_scheduled_task': {
+      const title = String(params?.title || '').trim();
+      if (!title) return { success: false, error: 'cancel_scheduled_task needs a title.' };
+      const cancelled = await cancelScheduledTask(userId, { title });
+      if (!cancelled.success) {
+        if (cancelled.error === 'not_found') {
+          return { success: false, error: `I couldn't find a scheduled task matching "${title}".` };
+        }
+        return { success: false, error: cancelled.error };
+      }
+      return {
+        success: true,
+        text: `Cancelled "${cancelled.task.title}".`,
+        actionSummary: 'Scheduled task cancelled'
+      };
+    }
     case 'generate_visual': {
       const brief = params?.brief || params?.prompt || params?.topic;
       if (!brief) return { success: false, error: 'generate_visual needs a brief.' };
@@ -2900,7 +2996,6 @@ function buildAvailableActions(enabled) {
     google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events', 'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc'],
     imessage: ['send_message'],
     whatsapp: ['send_message'],
-    reminders: ['create_reminder'],
     spotify: ['search_spotify', 'play_spotify', 'control_spotify_playback', 'add_to_spotify_queue', 'add_to_spotify_playlist', 'get_now_playing_spotify'],
     homekit: ['homekit_control'],
     maps: ['find_place', 'get_directions', 'plan_trip'],
@@ -2921,9 +3016,10 @@ function buildAvailableActions(enabled) {
     linear: ['search_linear_issues', 'get_linear_issues', 'create_linear_issue', 'comment_linear_issue']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
-  if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation.';
+  const internalActions = 'forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation, create_reminder, create_scheduled_task, list_scheduled_tasks, cancel_scheduled_task';
+  if (live.length === 0) return `No connectors enabled. Internal actions still available: ${internalActions}.`;
   const active = live.flatMap(id => actionMap[id] || []);
-  return `Available connector actions: ${active.join(', ')}. Internal actions always available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
+  return `Available connector actions: ${active.join(', ')}. Internal actions always available: ${internalActions}. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
 }
 
 async function savePreference(userId, key, value) {
@@ -3923,6 +4019,31 @@ app.post('/push/test', async (req, res) => {
   }
 });
 
+// Push config diagnostic: shows whether APNs is configured and how many devices are registered.
+// Device push needs a paid Apple Developer account + APNS_* env on Cloud Run; until then
+// briefings still appear in the in-app feed.
+app.get('/push/status', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { count } = await supabase
+      .from('devices')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('platform', 'ios');
+    res.json({
+      ok: true,
+      apnsConfigured: apnsConfigured(),
+      deviceCount: count || 0,
+      note: apnsConfigured()
+        ? undefined
+        : 'APNs not configured. Set APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY, APNS_BUNDLE_ID (needs a paid Apple Developer account). Briefings still appear in the in-app feed without push.'
+    });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 app.post('/native/context', async (req, res) => {
   try {
     const { userId, location = null, health = {}, capabilities = {}, settings = {} } = req.body || {};
@@ -4314,10 +4435,81 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
 const DATA_ACTIONS = new Set(['search_trains', 'station_board', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
 const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains', 'station_board']);
 
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms))
+  ]);
+}
+
+// Pulls real context from the user's enabled connectors (today's calendar, recent email) plus
+// device location/health, so proactive briefings and scheduled tasks can speak to actual data
+// instead of generic filler. Each connector call is timeout-guarded and failure-tolerant — a
+// broken or slow connector is skipped, never fatal to the briefing.
+async function gatherProactiveContext(userId, now = new Date()) {
+  const [enabled, nativeContext] = await Promise.all([
+    getEnabledConnectors(userId).catch(() => []),
+    getLatestNativeContext(userId).catch(() => null)
+  ]);
+
+  const tasks = [];
+  if (enabled.includes('google')) {
+    tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_calendar_events', { max_results: 5 }) });
+    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_emails', { max_results: 5, label: 'INBOX' }) });
+  } else if (enabled.includes('microsoft')) {
+    tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_outlook_events', { max_results: 5 }) });
+    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_outlook_emails', { max_results: 5 }) });
+  }
+
+  const context = { calendarText: '', emailText: '' };
+  const settled = await Promise.allSettled(
+    tasks.map(task => withTimeout(task.run(), 12000, task.key))
+  );
+  settled.forEach((outcome, i) => {
+    const { key } = tasks[i];
+    if (outcome.status === 'fulfilled' && outcome.value?.success && outcome.value?.text) {
+      context[key] = String(outcome.value.text).trim();
+    } else if (outcome.status === 'rejected') {
+      console.warn(`[proactive] context ${key} failed:`, outcome.reason?.message || outcome.reason);
+    }
+  });
+
+  context.location = parseJsonObject(nativeContext?.location);
+  context.health = parseJsonObject(nativeContext?.health);
+  return context;
+}
+
+// Generates briefing/task copy with Google Search grounding enabled so the model can add
+// weather/local/general info. Falls back to an ungrounded call if grounding errors, so a
+// search failure never blanks the output.
+async function generateGroundedBriefing(systemPrompt, userPrompt) {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: PRIMARY_CHAT_MODEL,
+      systemInstruction: systemPrompt,
+      tools: [{ googleSearch: {} }]
+    });
+    const res = await model.generateContent(userPrompt);
+    return res.response.text() || '';
+  } catch (groundingError) {
+    console.warn('[proactive] grounded briefing failed, retrying without search:', groundingError.message);
+    const model = genAI.getGenerativeModel({ model: PRIMARY_CHAT_MODEL, systemInstruction: systemPrompt });
+    const res = await model.generateContent(userPrompt);
+    return res.response.text() || '';
+  }
+}
+
+function formatLocationForPrompt(location) {
+  return location?.latitude && location?.longitude
+    ? `${location.latitude}, ${location.longitude}`
+    : 'not available';
+}
+
 async function buildMorningBriefing(userId, now = new Date()) {
-  const [memory, history] = await Promise.all([
+  const [memory, history, ctx] = await Promise.all([
     getMemory(userId),
-    getHistory(userId)
+    getHistory(userId),
+    gatherProactiveContext(userId, now)
   ]);
 
   const hour = getLocalHour(now);
@@ -4330,19 +4522,24 @@ ${memory || 'Not much yet — learn as you go.'}
 Recent conversation:
 ${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
 
-Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
-- Only mention things that are directly supported by memory or recent conversation shown above.
-- Do not invent plans, meetings, news, weather, or tasks.
-- If there is no concrete update, just greet them and say it's a quiet start.
+Today's calendar:
+${ctx.calendarText || 'No calendar data available.'}
+
+Recent inbox:
+${ctx.emailText || 'No email data available.'}
+
+Their location: ${formatLocationForPrompt(ctx.location)}
+
+Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. Be brief — under 100 words.
+- Lead with what actually matters today: real calendar events and emails shown above, then anything from memory or recent conversation.
+- You have Google Search grounding: you may add genuinely useful current info (e.g. weather for their location, relevant news) but only if it adds value. Use their location for weather.
+- Don't invent calendar events, emails, or facts beyond what's shown above or what search returns.
+- If there's genuinely nothing useful, just greet them and say it's a quiet start.
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
-  const model = genAI.getGenerativeModel({
-    model: PRIMARY_CHAT_MODEL,
-    systemInstruction: systemPrompt
-  });
-  const geminiRes = await model.generateContent('whats going on today?');
-  return parseActions(geminiRes.response.text());
+  const text = await generateGroundedBriefing(systemPrompt, 'whats going on today?');
+  return parseActions(text);
 }
 
 async function maybeCreateMorningBriefing(userId, now = new Date()) {
@@ -4386,18 +4583,24 @@ async function getLatestNativeContext(userId) {
 }
 
 async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
-  const [memory, history, preferences] = await Promise.all([
+  const [memory, history, preferences, ctx] = await Promise.all([
     getMemory(userId),
     getHistory(userId),
-    getPreferences(userId)
+    getPreferences(userId),
+    gatherProactiveContext(userId, now)
   ]);
 
-  const health = parseJsonObject(nativeContext?.health);
-  const location = parseJsonObject(nativeContext?.location);
+  const health = ctx.health;
+  const location = ctx.location;
   const systemPrompt = `You are Oxy writing a useful, concise ${window.label.toLowerCase()} for the user.
 
-Use only the information shown here. Do not invent weather, traffic, calendar events, health facts, or plans.
-If there is nothing useful, write one warm quiet-start sentence.
+Lead with what actually matters right now: real calendar events and emails shown below, then memory/preferences. You have Google Search grounding — add genuinely useful current info (weather for their location, relevant news) only when it helps. Use their location for weather. Don't invent calendar events, emails, or facts beyond what's shown or what search returns. If there is genuinely nothing useful, write one warm quiet-start sentence.
+
+Today's calendar:
+${ctx.calendarText || 'No calendar data available.'}
+
+Recent inbox:
+${ctx.emailText || 'No email data available.'}
 
 Memory:
 ${memory || 'none'}
@@ -4409,18 +4612,14 @@ Recent conversation:
 ${history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none'}
 
 Native context:
-Location: ${location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : 'not available'}
+Location: ${formatLocationForPrompt(location)}
 Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
 Keep it under 70 words. Include only useful items.`;
 
-  const model = genAI.getGenerativeModel({
-    model: PRIMARY_CHAT_MODEL,
-    systemInstruction: systemPrompt
-  });
-  const geminiRes = await model.generateContent(`${window.label} now`);
-  return stripActionMarkupForDisplay(geminiRes.response.text() || '').trim();
+  const text = await generateGroundedBriefing(systemPrompt, `${window.label} now`);
+  return stripActionMarkupForDisplay(text).trim();
 }
 
 async function maybeCreateIntervalBriefing(userId, now = new Date()) {
@@ -4570,6 +4769,66 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   return { type: 'failed_action_followup', text: followUpText };
 }
 
+async function buildScheduledTaskResponse(userId, task, now = new Date()) {
+  const [memory, preferences, ctx] = await Promise.all([
+    getMemory(userId),
+    getPreferences(userId),
+    gatherProactiveContext(userId, now)
+  ]);
+
+  const health = ctx.health;
+  const location = ctx.location;
+  const systemPrompt = `You are Oxy. The user previously asked you to do this on a schedule:
+"${task.instruction}"
+
+Fulfil it now. Use the real calendar events, emails, and context below, and Google Search
+grounding for anything current (weather for their location, news, facts). Use their location
+for weather. Don't invent calendar events or emails beyond what's shown. Write a short spoken
+message (under 60 words) as if reaching out to the user proactively.
+
+Today's calendar:
+${ctx.calendarText || 'No calendar data available.'}
+
+Recent inbox:
+${ctx.emailText || 'No email data available.'}
+
+Memory:
+${memory || 'none'}
+
+Preferences:
+${preferences || 'none'}
+
+Native context:
+Location: ${formatLocationForPrompt(location)}
+Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
+Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
+
+  const text = await generateGroundedBriefing(systemPrompt, task.title);
+  return stripActionMarkupForDisplay(text).trim();
+}
+
+async function runDueScheduledTasksForUser(userId, now = new Date()) {
+  const summary = { reminders: 0, scheduledTasks: 0 };
+  const dueTasks = await getDueScheduledTasks(userId, now);
+  for (const task of dueTasks) {
+    const isReminder = !task.instruction;
+    const body = isReminder ? task.title : await buildScheduledTaskResponse(userId, task, now);
+    if (body) {
+      await createBriefing(userId, {
+        kind: isReminder ? 'reminder' : 'scheduled_task',
+        title: task.title,
+        body,
+        source: 'scheduled_task',
+        metadata: { taskId: task.id }
+      });
+    }
+    if (isReminder) summary.reminders += 1;
+    else summary.scheduledTasks += 1;
+    await advanceScheduledTask(task, now);
+  }
+  return summary;
+}
+
 function emptyProactiveSummary() {
   return {
     usersScanned: 0,
@@ -4577,6 +4836,8 @@ function emptyProactiveSummary() {
     failureFollowUps: 0,
     healthAlerts: 0,
     locationReminders: 0,
+    reminders: 0,
+    scheduledTasks: 0,
     failures: 0
   };
 }
@@ -4586,17 +4847,23 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   summary.usersScanned = 1;
   try {
     const nativeContext = await getLatestNativeContext(userId);
-    const [briefing, followUp, healthAlert, foodReminder] = await Promise.all([
+    const [briefing, followUp, healthAlert, foodReminder, scheduledTasks] = await Promise.all([
       maybeCreateIntervalBriefing(userId, now),
       maybeCreateFailedActionFollowUp(userId, now),
       nativeContext ? maybeCreateHealthAlert(userId, nativeContext, now) : Promise.resolve(null),
-      nativeContext ? maybeCreateHomeFoodReminder(userId, nativeContext, now) : Promise.resolve(null)
+      nativeContext ? maybeCreateHomeFoodReminder(userId, nativeContext, now) : Promise.resolve(null),
+      runDueScheduledTasksForUser(userId, now)
     ]);
     if (briefing) summary.briefings += 1;
     if (followUp) summary.failureFollowUps += 1;
     if (healthAlert) summary.healthAlerts += 1;
     if (foodReminder) summary.locationReminders += 1;
+    summary.reminders += scheduledTasks.reminders;
+    summary.scheduledTasks += scheduledTasks.scheduledTasks;
     const created = [briefing?.type, followUp?.type, healthAlert?.type, foodReminder?.type].filter(Boolean);
+    if (scheduledTasks.reminders || scheduledTasks.scheduledTasks) {
+      created.push(`${scheduledTasks.reminders} reminder(s), ${scheduledTasks.scheduledTasks} scheduled task(s)`);
+    }
     if (created.length) logger.log(`[proactive] queued for ${userId}: ${created.join(', ')}`);
   } catch (sweepError) {
     summary.failures += 1;
