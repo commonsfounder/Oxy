@@ -537,7 +537,8 @@ final class ChatViewModel {
                 role: role,
                 content: entry.content,
                 timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
-                actions: entry.actions ?? []
+                actions: entry.actions ?? [],
+                sources: entry.sources ?? []
             )
         }
     }

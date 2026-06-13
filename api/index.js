@@ -2805,6 +2805,7 @@ function serializeConversationContent(payload) {
   if (typeof payload.text === 'string') next.text = payload.text;
   if (typeof payload.image === 'string') next.image = payload.image;
   if (Array.isArray(payload.actions) && payload.actions.length) next.actions = payload.actions;
+  if (Array.isArray(payload.sources) && payload.sources.length) next.sources = payload.sources;
   if (typeof payload.audio === 'string') next.audio = payload.audio;
   if (typeof payload.kind === 'string') next.kind = payload.kind;
 
@@ -2837,6 +2838,7 @@ function normalizeConversationRow(row) {
       content: typeof parsed.text === 'string' ? parsed.text : '',
       image: typeof parsed.image === 'string' ? parsed.image : null,
       actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      sources: Array.isArray(parsed.sources) ? parsed.sources : [],
       audio: typeof parsed.audio === 'string' ? parsed.audio : null,
       kind: typeof parsed.kind === 'string' ? parsed.kind : null
     };
@@ -5620,7 +5622,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.end();
 
         // Fire-and-forget: save assistant message + memory/preferences
-        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+        saveMessage(userId, 'assistant', { text: spoken, actions: actionResults, sources: groundingSources }, trace)
           .catch(err => trace.log('supabase.conversations.insert_assistant.async_fail', err.message));
         postResponseTasks(userId, message, trace);
 

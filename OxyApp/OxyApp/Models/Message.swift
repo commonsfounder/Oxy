@@ -225,12 +225,14 @@ struct HistoryEntry: Codable, Identifiable {
     let content: String
     let createdAt: String?
     let actions: [ActionResult]?
+    let sources: [MessageSource]?
 
     enum CodingKeys: String, CodingKey {
         case id
         case role
         case content
         case actions
+        case sources
         case createdAt = "created_at"
     }
 
