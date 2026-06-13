@@ -347,7 +347,6 @@ function latencyThinkingConfig() {
   return OXY_THINKING_BUDGET >= 0 ? { thinkingConfig: { thinkingBudget: OXY_THINKING_BUDGET } } : {};
 }
 const promptCacheStates = new Map();
-const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
 const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
 const PROACTIVE_WINDOWS = [
   { id: 'wake', label: 'Wake briefing', start: 6, end: 10 },
@@ -4295,31 +4294,6 @@ app.post('/tts-preview', async (req, res) => {
   }
 });
 
-app.get('/briefing-legacy/:userId', async (req, res) => {
-  if (!requireMatchingUser(req, res, req.params.userId)) return;
-  try {
-    const userId = req.params.userId;
-    const history = await getHistory(userId);
-    const latestQueuedBriefing = [...history]
-      .reverse()
-      .find(entry => {
-        if (entry.role !== 'assistant') return false;
-        if (entry.kind !== 'briefing' && entry.kind !== 'proactive') return false;
-        return entry.created_at && (Date.now() - new Date(entry.created_at).getTime()) < 36 * 60 * 60 * 1000;
-      });
-
-    if (latestQueuedBriefing) {
-      return res.json({ text: latestQueuedBriefing.content, actions: latestQueuedBriefing.actions || [] });
-    }
-
-    const { spoken, actions } = await buildMorningBriefing(userId, new Date());
-    res.json({ text: spoken, actions });
-  } catch (err) {
-    console.error('/briefing error:', err.message);
-    return sendServerError(res, err, 'server.error');
-  }
-});
-
 app.get('/briefing/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
@@ -4619,74 +4593,6 @@ function formatLocationForPrompt(location) {
   return location?.latitude && location?.longitude
     ? `${location.latitude}, ${location.longitude}`
     : 'not available';
-}
-
-async function buildMorningBriefing(userId, now = new Date()) {
-  const [memory, history, ctx] = await Promise.all([
-    getMemory(userId),
-    getHistory(userId),
-    gatherProactiveContext(userId, now)
-  ]);
-
-  const hour = getLocalHour(now);
-  const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const systemPrompt = `You are Oxy. It's ${greeting} and you're checking in with your friend.
-
-Here's what you know about them:
-${memory || 'Not much yet — learn as you go.'}
-
-Recent conversation:
-${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
-
-Today's calendar:
-${ctx.calendarText || 'No calendar data available.'}
-
-Recent inbox:
-${ctx.emailText || 'No email data available.'}
-
-Their location: ${formatLocationForPrompt(ctx.location)}
-
-Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. Be brief — under 100 words.
-- Lead with what actually matters today: real calendar events and emails shown above, then anything from memory or recent conversation.
-- You have Google Search grounding: you may add genuinely useful current info (e.g. weather for their location, relevant news) but only if it adds value. Use their location for weather.
-- Don't invent calendar events, emails, or facts beyond what's shown above or what search returns.
-- If there's genuinely nothing useful, just greet them and say it's a quiet start.
-
-The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
-
-  const text = await generateGroundedBriefing(systemPrompt, 'whats going on today?');
-  return parseActions(text);
-}
-
-async function maybeCreateMorningBriefing(userId, now = new Date()) {
-  const localHour = getLocalHour(now);
-  if (localHour < 6 || localHour > 11) return null;
-
-  const prefs = await getPreferenceMap(userId);
-  const todayKey = getLocalDateKey(now);
-  if (prefs[PROACTIVE_MORNING_PREF] === todayKey) return null;
-
-  const { data: latestConversation } = await supabase
-    .from('conversations')
-    .select('created_at')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (!latestConversation?.created_at) return null;
-  const lastConversationAt = new Date(latestConversation.created_at).getTime();
-  if (Number.isNaN(lastConversationAt) || (Date.now() - lastConversationAt) > 14 * 24 * 60 * 60 * 1000) {
-    return null;
-  }
-
-  const { spoken, actions } = await buildMorningBriefing(userId, now);
-  const text = stripActionMarkupForDisplay(spoken || '').trim();
-  if (!text) return null;
-
-  await saveMessage(userId, 'assistant', { text, actions, kind: 'briefing' });
-  await setPreferenceValue(userId, PROACTIVE_MORNING_PREF, todayKey);
-  return { type: 'morning_briefing', text };
 }
 
 async function getLatestNativeContext(userId) {

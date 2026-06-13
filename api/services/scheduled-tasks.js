@@ -175,7 +175,9 @@ async function cancelScheduledTask(userId, { id, title }) {
   if (id) {
     query = query.eq('id', id);
   } else if (title) {
-    query = query.ilike('title', `%${String(title).trim()}%`);
+    // Escape LIKE wildcards so a title with % or _ matches literally.
+    const safe = String(title).trim().replace(/[\\%_]/g, m => `\\${m}`);
+    query = query.ilike('title', `%${safe}%`);
   } else {
     return { success: false, error: 'A title or id is required to cancel a scheduled task.' };
   }
@@ -217,9 +219,6 @@ async function advanceScheduledTask(task, now = new Date()) {
 }
 
 module.exports = {
-  TIMEZONE,
-  computeNextRun,
-  localTimeToUtc,
   describeSchedule,
   createScheduledTask,
   listScheduledTasks,
