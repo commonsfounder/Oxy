@@ -910,93 +910,73 @@ final class ChatViewModel {
     }
 }
 
-// Streamed TTS arrives as many small WAV chunks (one per PCM segment). Playing each as a
-// separate AVAudioPlayer left a gap + click at every boundary (crackling). Instead we schedule
-// the raw PCM gaplessly into a single AVAudioEngine player node, so chunks play as one
-// continuous stream. Backend TTS is 24kHz / 16-bit / mono.
-private final class AudioPlaybackManager: NSObject {
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
-    private let renderFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
+private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
+    private var audioPlayer: AVAudioPlayer?
+    private var pendingAudio: [Data] = []
     private var onError: ((String) -> Void)?
-    private var configured = false
-    private var observerAdded = false
+    private var sessionConfigured = false
 
     func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
-        guard let data = Data(base64Encoded: base64Audio),
-              let buffer = Self.pcmBuffer(fromWav: data, format: renderFormat) else { return }
+        guard let data = Data(base64Encoded: base64Audio) else { return }
         self.onError = onError
-        guard ensureRunning() else { return }
-        playerNode.scheduleBuffer(buffer, completionHandler: nil)
-        if !playerNode.isPlaying { playerNode.play() }
+        pendingAudio.append(data)
+        playNextAudioIfNeeded()
     }
 
     func stop() {
-        if playerNode.isPlaying { playerNode.stop() }
-        if engine.isRunning { engine.stop() }
-        configured = false
+        audioPlayer?.stop()
+        audioPlayer = nil
+        pendingAudio.removeAll()
+        sessionConfigured = false
     }
 
-    // Engine + audio session are set up once; reconfiguring per chunk added latency and gaps.
-    private func ensureRunning() -> Bool {
-        if configured && engine.isRunning { return true }
+    // Configure the audio session once. Reconfiguring on every chunk added latency
+    // and audible gaps between streamed sentence clips.
+    private func ensureSessionActive() {
+        guard !sessionConfigured else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try session.setActive(true)
-
-            if !observerAdded {
-                observerAdded = true
-                NotificationCenter.default.addObserver(
-                    forName: AVAudioSession.interruptionNotification,
-                    object: nil, queue: .main
-                ) { [weak self] note in
-                    guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                          let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
-                    if t == .began { self?.stop() } else { self?.configured = false }
+            sessionConfigured = true
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification,
+                object: nil, queue: .main
+            ) { [weak self] note in
+                guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                      let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
+                if t == .began {
+                    self?.stop()
+                } else {
+                    self?.sessionConfigured = false
                 }
             }
-
-            if engine.attachedNodes.contains(playerNode) == false {
-                engine.attach(playerNode)
-                engine.connect(playerNode, to: engine.mainMixerNode, format: renderFormat)
-            }
-            engine.prepare()
-            try engine.start()
-            configured = true
-            return true
         } catch {
-            onError?("Voice playback failed")
-            return false
+            // Non-fatal: playback may still work with the default session.
         }
     }
 
-    // Strips the WAV header and converts 16-bit PCM to a float buffer the engine can schedule.
-    private static func pcmBuffer(fromWav data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        let bytes = [UInt8](data)
-        // Find the "data" subchunk; fall back to the canonical 44-byte header offset.
-        var pcmStart = 44
-        if let marker = "data".data(using: .ascii) {
-            let markerBytes = [UInt8](marker)
-            var i = 12
-            while i + 8 <= bytes.count {
-                if Array(bytes[i..<i+4]) == markerBytes { pcmStart = i + 8; break }
-                i += 1
-            }
+    private func playNextAudioIfNeeded() {
+        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
+        let data = pendingAudio.removeFirst()
+
+        ensureSessionActive()
+        do {
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            player.prepareToPlay()
+            audioPlayer = player
+            player.play()
+        } catch {
+            onError?("Voice playback failed")
+            playNextAudioIfNeeded()
         }
-        guard bytes.count > pcmStart else { return nil }
-        let pcmBytes = bytes[pcmStart...]
-        let sampleCount = pcmBytes.count / 2
-        guard sampleCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sampleCount)),
-              let channel = buffer.floatChannelData?[0] else { return nil }
-        buffer.frameLength = AVAudioFrameCount(sampleCount)
-        pcmBytes.withUnsafeBytes { raw in
-            let samples = raw.bindMemory(to: Int16.self)
-            for i in 0..<sampleCount {
-                channel[i] = Float(Int16(littleEndian: samples[i])) / 32768.0
-            }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        if audioPlayer === player {
+            audioPlayer = nil
         }
-        return buffer
+        playNextAudioIfNeeded()
     }
 }
