@@ -910,73 +910,93 @@ final class ChatViewModel {
     }
 }
 
-private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
-    private var audioPlayer: AVAudioPlayer?
-    private var pendingAudio: [Data] = []
+// Streamed TTS arrives as many small WAV chunks (one per PCM segment). Playing each as a
+// separate AVAudioPlayer left a gap + click at every boundary (crackling). Instead we schedule
+// the raw PCM gaplessly into a single AVAudioEngine player node, so chunks play as one
+// continuous stream. Backend TTS is 24kHz / 16-bit / mono.
+private final class AudioPlaybackManager: NSObject {
+    private let engine = AVAudioEngine()
+    private let playerNode = AVAudioPlayerNode()
+    private let renderFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
     private var onError: ((String) -> Void)?
-    private var sessionConfigured = false
+    private var configured = false
+    private var observerAdded = false
 
     func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
-        guard let data = Data(base64Encoded: base64Audio) else { return }
+        guard let data = Data(base64Encoded: base64Audio),
+              let buffer = Self.pcmBuffer(fromWav: data, format: renderFormat) else { return }
         self.onError = onError
-        pendingAudio.append(data)
-        playNextAudioIfNeeded()
+        guard ensureRunning() else { return }
+        playerNode.scheduleBuffer(buffer, completionHandler: nil)
+        if !playerNode.isPlaying { playerNode.play() }
     }
 
     func stop() {
-        audioPlayer?.stop()
-        audioPlayer = nil
-        pendingAudio.removeAll()
-        sessionConfigured = false
+        if playerNode.isPlaying { playerNode.stop() }
+        if engine.isRunning { engine.stop() }
+        configured = false
     }
 
-    // Configure the audio session once. Reconfiguring on every chunk added latency
-    // and audible gaps between streamed sentence clips.
-    private func ensureSessionActive() {
-        guard !sessionConfigured else { return }
+    // Engine + audio session are set up once; reconfiguring per chunk added latency and gaps.
+    private func ensureRunning() -> Bool {
+        if configured && engine.isRunning { return true }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             try session.setActive(true)
-            sessionConfigured = true
-            NotificationCenter.default.addObserver(
-                forName: AVAudioSession.interruptionNotification,
-                object: nil, queue: .main
-            ) { [weak self] note in
-                guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                      let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
-                if t == .began {
-                    self?.stop()
-                } else {
-                    self?.sessionConfigured = false
+
+            if !observerAdded {
+                observerAdded = true
+                NotificationCenter.default.addObserver(
+                    forName: AVAudioSession.interruptionNotification,
+                    object: nil, queue: .main
+                ) { [weak self] note in
+                    guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                          let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
+                    if t == .began { self?.stop() } else { self?.configured = false }
                 }
             }
-        } catch {
-            // Non-fatal: playback may still work with the default session.
-        }
-    }
 
-    private func playNextAudioIfNeeded() {
-        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
-        let data = pendingAudio.removeFirst()
-
-        ensureSessionActive()
-        do {
-            let player = try AVAudioPlayer(data: data)
-            player.delegate = self
-            player.prepareToPlay()
-            audioPlayer = player
-            player.play()
+            if engine.attachedNodes.contains(playerNode) == false {
+                engine.attach(playerNode)
+                engine.connect(playerNode, to: engine.mainMixerNode, format: renderFormat)
+            }
+            engine.prepare()
+            try engine.start()
+            configured = true
+            return true
         } catch {
             onError?("Voice playback failed")
-            playNextAudioIfNeeded()
+            return false
         }
     }
 
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if audioPlayer === player {
-            audioPlayer = nil
+    // Strips the WAV header and converts 16-bit PCM to a float buffer the engine can schedule.
+    private static func pcmBuffer(fromWav data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let bytes = [UInt8](data)
+        // Find the "data" subchunk; fall back to the canonical 44-byte header offset.
+        var pcmStart = 44
+        if let marker = "data".data(using: .ascii) {
+            let markerBytes = [UInt8](marker)
+            var i = 12
+            while i + 8 <= bytes.count {
+                if Array(bytes[i..<i+4]) == markerBytes { pcmStart = i + 8; break }
+                i += 1
+            }
         }
-        playNextAudioIfNeeded()
+        guard bytes.count > pcmStart else { return nil }
+        let pcmBytes = bytes[pcmStart...]
+        let sampleCount = pcmBytes.count / 2
+        guard sampleCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sampleCount)),
+              let channel = buffer.floatChannelData?[0] else { return nil }
+        buffer.frameLength = AVAudioFrameCount(sampleCount)
+        pcmBytes.withUnsafeBytes { raw in
+            let samples = raw.bindMemory(to: Int16.self)
+            for i in 0..<sampleCount {
+                channel[i] = Float(Int16(littleEndian: samples[i])) / 32768.0
+            }
+        }
+        return buffer
     }
 }

@@ -235,6 +235,11 @@ private struct EmptyProactiveState: View {
 private extension Briefing {
     var isWorthShowing: Bool {
         if source == "action_log" { return false }
+        // "Today" feed — drop stale cards (older than 36h) so read briefings from past days
+        // don't linger.
+        if let created = Date.oxyParse(createdAt), Date().timeIntervalSince(created) > 36 * 60 * 60 {
+            return false
+        }
         let lowerKind = kind.lowercased()
         if lowerKind.contains("failed") || lowerKind.contains("cancel") { return false }
         let lower = body.lowercased()

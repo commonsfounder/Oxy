@@ -2613,7 +2613,12 @@ async function extractMemoryFact(userId, text) {
   try {
     const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const result = await model.generateContent(
-      `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
+      `Extract one short personal fact worth remembering from this message. Write it as a concise note.
+
+CRITICAL: keep specific proper nouns exactly as stated — names of schools, colleges, employers, places, people, teams. NEVER generalise a name away. "I go to Cadbury Sixth Form College" → "School is Cadbury Sixth Form College" (NOT "Goes to school"). "I work at KPMG" → "Works at KPMG". For a school/college/work/home location, phrase it as "School is <name>" / "Work is <name>" / "Home is <address>" so it can be looked up later.
+
+Other examples: "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham".
+Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
     const fact = result.response.text().trim().replace(/^["']|["']$/g, '');
     if (!fact) return null;
@@ -2703,6 +2708,12 @@ function conversationFallbackText(entry) {
     return humanizeActionType(firstAction);
   }
   return '';
+}
+
+// Proactive briefings/reminders are stored in conversations for model continuity but belong
+// only on the Today tab — keep them out of the Chat thread.
+function isChatVisibleEntry(entry) {
+  return entry?.kind !== 'briefing' && entry?.kind !== 'proactive';
 }
 
 function normalizeConversationRow(row) {
@@ -4114,10 +4125,14 @@ app.get('/briefings/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const limit = Math.min(Number(req.query.limit) || 30, 100);
+    // "Today" feed — only show recent briefings (last 36h), not a weeks-old archive of
+    // already-read cards.
+    const cutoff = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from('briefings')
       .select('id, kind, title, body, source, metadata, read, created_at')
       .eq('user_id', req.params.userId)
+      .gte('created_at', cutoff)
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -4243,7 +4258,9 @@ app.get('/history/:userId', async (req, res) => {
     const history = await getHistory(req.params.userId, null, req.query.limit || 50, {
       since: req.query.since
     });
-    res.json({ history });
+    // Proactive briefings/reminders live on the Today tab (the briefings table). They're also
+    // saved to conversations for model continuity, but must not show in the Chat thread.
+    res.json({ history: history.filter(isChatVisibleEntry) });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }
@@ -4341,7 +4358,7 @@ app.get('/history/:userId/around', async (req, res) => {
     [...(before.data || []).reverse(), ...(after.data || [])].forEach(row => {
       rowsByKey.set(`${row.created_at}:${row.role}:${row.content}`, row);
     });
-    res.json({ history: [...rowsByKey.values()].map(normalizeConversationRow) });
+    res.json({ history: [...rowsByKey.values()].map(normalizeConversationRow).filter(isChatVisibleEntry) });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }
@@ -4364,7 +4381,7 @@ app.get('/history/:userId/date', async (req, res) => {
       .order('created_at', { ascending: true })
       .limit(50);
     if (error) throw error;
-    res.json({ history: (data || []).map(normalizeConversationRow) });
+    res.json({ history: (data || []).map(normalizeConversationRow).filter(isChatVisibleEntry) });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }
@@ -4455,7 +4472,9 @@ async function gatherProactiveContext(userId, now = new Date()) {
   const tasks = [];
   if (enabled.includes('google')) {
     tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_calendar_events', { max_results: 5 }) });
-    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_emails', { max_results: 5, label: 'INBOX' }) });
+    // Primary tab only (INBOX + CATEGORY_PERSONAL) so briefings surface real mail, not
+    // promotions/job-alerts/Father's-Day spam that Gmail files under other categories.
+    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_emails', { max_results: 5, label: ['INBOX', 'CATEGORY_PERSONAL'] }) });
   } else if (enabled.includes('microsoft')) {
     tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_outlook_events', { max_results: 5 }) });
     tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_outlook_emails', { max_results: 5 }) });
@@ -4594,12 +4613,19 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
   const location = ctx.location;
   const systemPrompt = `You are Oxy writing a useful, concise ${window.label.toLowerCase()} for the user.
 
-Lead with what actually matters right now: real calendar events and emails shown below, then memory/preferences. You have Google Search grounding — add genuinely useful current info (weather for their location, relevant news) only when it helps. Use their location for weather. Don't invent calendar events, emails, or facts beyond what's shown or what search returns. If there is genuinely nothing useful, write one warm quiet-start sentence.
+Report only concrete, real items: actual calendar events and emails shown below, plus genuinely useful current info from Google Search grounding (weather for their location, relevant news). Use their location for weather.
+
+Hard rules:
+- State facts plainly. Do NOT give unsolicited advice, pep talks, or life-coaching ("stick to your goals", "stay sharp", "get a study session in", "hope you have a chill evening"). No motivational filler.
+- Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
+- Refer to calendar events by their literal title and time. Do NOT guess who a meeting is "with" unless the event explicitly names another attendee — and never name the user themselves as the other party.
+- Emails shown are the user's Primary inbox. Don't treat marketing/automated mail as important.
+- If there is no real calendar event, email, or useful current info, reply with exactly: NOTHING
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}
 
-Recent inbox:
+Recent inbox (Primary):
 ${ctx.emailText || 'No email data available.'}
 
 Memory:
@@ -4616,7 +4642,7 @@ Location: ${formatLocationForPrompt(location)}
 Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
-Keep it under 70 words. Include only useful items.`;
+Keep it under 70 words. Just the real, useful items — nothing else.`;
 
   const text = await generateGroundedBriefing(systemPrompt, `${window.label} now`);
   return stripActionMarkupForDisplay(text).trim();
@@ -4637,7 +4663,13 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   if (prefs[key] === 'sent') return null;
 
   const text = await buildIntervalBriefing(userId, window, nativeContext, now);
-  if (!text) return null;
+  // Suppress empty/filler briefings: the model returns "NOTHING" when there's no real item, and
+  // we never post a briefing with no concrete content. Mark the window sent so we don't retry
+  // all day.
+  if (!text || /^NOTHING\b/i.test(text) || text.length < 12) {
+    await setPreferenceValue(userId, key, 'sent');
+    return null;
+  }
   const briefing = await createBriefing(userId, {
     kind: `${window.id}_briefing`,
     title: window.label,
@@ -5035,9 +5067,19 @@ function postResponseTasks(userId, message, trace = null) {
   if (trace?.incognito) return;
   // Deterministically capture personal-place statements ("my school is X") so
   // directions to "school"/"work"/"home" resolve to the user's real location.
-  const placeStmt = String(message || '').match(/\b(?:my|our)\s+(home|house|work|office|school|college|uni|university|gym)\b[^.?!]*?\b(?:is|are|=|:|at|in)\s+([^.?!\n]{2,120})/i);
+  const msg = String(message || '');
+  const placeStmt = msg.match(/\b(?:my|our)\s+(home|house|work|office|school|college|uni|university|gym)\b[^.?!]*?\b(?:is|are|=|:|at|in)\s+([^.?!\n]{2,120})/i);
   if (placeStmt) {
-    saveMemory(userId, `My ${placeStmt[1].toLowerCase()} is ${placeStmt[2].trim()}`, 'fact').catch(() => {});
+    const slot = placeStmt[1].toLowerCase();
+    // Normalise college/uni/university phrasing onto "school" so directions to "school" resolve.
+    const keyword = ['college', 'uni', 'university'].includes(slot) ? 'school' : slot;
+    saveMemory(userId, `My ${keyword} is ${placeStmt[2].trim()}`, 'fact').catch(() => {});
+  } else {
+    // "I go to / attend / study at <School Name>" — no "my X is" phrasing, but still a school fact.
+    const attendStmt = msg.match(/\bI\s+(?:go to|goto|attend|study at|study in)\s+([A-Z][^.?!\n]{2,120}?(?:school|college|university|academy|sixth form)[^.?!\n]{0,40})/i);
+    if (attendStmt) {
+      saveMemory(userId, `My school is ${attendStmt[1].trim()}`, 'fact').catch(() => {});
+    }
   }
   if (shouldSaveMemory(message)) {
     extractMemoryFact(userId, message).then(fact => {
