@@ -2515,11 +2515,53 @@ async function getMemory(userId, trace = null) {
   return [manualProfile, ...facts].filter(Boolean).join('\n');
 }
 
+// Single-valued attributes: a person has exactly one. A new value REPLACES the old
+// instead of stacking a contradictory second fact (the "3 different usual stations" bug).
+const SINGLE_VALUED_SUBJECTS = [
+  { key: 'school', re: /^(?:my|our)\s+(?:school|college|university|uni|sixth\s*form)\b/i },
+  { key: 'home', re: /^(?:lives?|live|home\s+is|my\s+(?:home|house|flat|address)\s+is)\b/i },
+  { key: 'work', re: /^(?:works?\s+(?:at|for)|my\s+(?:job|work|employer|office)\s+is)\b/i },
+  { key: 'station', re: /^(?:usual\s+station|my\s+station|nearest\s+station)\b/i },
+  { key: 'bank', re: /^banks?\s+with\b/i },
+  { key: 'name', re: /^(?:my\s+name\s+is|name\s+is|is\s+called)\b/i },
+  { key: 'gym', re: /^my\s+gym\s+is\b/i }
+];
+
+function factSubjectKey(content) {
+  const c = String(content || '').trim();
+  return SINGLE_VALUED_SUBJECTS.find(s => s.re.test(c))?.key || null;
+}
+
+// (a) Reject junk the extractor sometimes emits — empty strings, markdown/code fences,
+// zero-width characters, or content with no actual words.
+function sanitizeFactContent(content) {
+  let c = String(content || '')
+    .replace(/```[a-z]*\n?/gi, '')
+    .replace(/```/g, '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
+  if (!c || c.length < 3) return null;
+  if (!/[a-z]/i.test(c)) return null;
+  const junk = new Set(['empty string', 'none', 'n/a', 'na', 'null', 'undefined', 'no fact', 'nothing', 'no personal fact']);
+  if (junk.has(c.toLowerCase())) return null;
+  return c;
+}
+
+function normalizeForDedup(content) {
+  return String(content || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
 async function saveMemory(userId, content, source = 'fact') {
+  const clean = sanitizeFactContent(content);
+  if (!clean) return; // (a) drop junk
+
   if (source === 'manual_profile') {
     const { data: inserted } = await supabase
       .from('memories')
-      .insert({ user_id: userId, content, source, created_at: new Date().toISOString() })
+      .insert({ user_id: userId, content: clean, source, created_at: new Date().toISOString() })
       .select('id');
 
     if (inserted?.[0]?.id) {
@@ -2533,9 +2575,30 @@ async function saveMemory(userId, content, source = 'fact') {
     return;
   }
 
+  const { data: existing } = await supabase
+    .from('memories').select('id, content').eq('user_id', userId);
+  const rows = existing || [];
+
+  // (c) Skip near-duplicates. The substring check is capped to short facts so the long
+  // profile blob can't accidentally swallow every new fact whose words appear inside it.
+  const normNew = normalizeForDedup(clean);
+  const isDup = rows.some(r => {
+    const n = normalizeForDedup(r.content);
+    if (n === normNew) return true;
+    return r.content.length < 160 && n.length > 8 && (n.includes(normNew) || normNew.includes(n));
+  });
+  if (isDup) return;
+
+  // (b) Replace a prior fact about the same single-valued subject.
+  const subject = factSubjectKey(clean);
+  if (subject) {
+    const stale = rows.filter(r => factSubjectKey(r.content) === subject).map(r => r.id);
+    if (stale.length) await supabase.from('memories').delete().in('id', stale);
+  }
+
   await supabase
     .from('memories')
-    .insert({ user_id: userId, content, source, created_at: new Date().toISOString() });
+    .insert({ user_id: userId, content: clean, source, created_at: new Date().toISOString() });
 }
 
 async function forgetMemory(userId, { scope = '', query = '' } = {}) {
@@ -3732,7 +3795,9 @@ app.post('/memory', async (req, res) => {
     const { userId, content } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
-    await saveMemory(userId, content.trim(), 'manual_profile');
+    // User-added memories are additive items (each persists and is individually
+    // deletable), not the single-slot manual_profile blob.
+    await saveMemory(userId, content.trim(), 'manual');
 
     res.json({ success: true });
   } catch (err) {
@@ -3744,6 +3809,38 @@ app.get('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     res.json({ summary: await getMemorySummary(req.params.userId) });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+// Full list of individual memories for the Memory tab (view + delete each).
+app.get('/memory/:userId/items', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, content, source, created_at')
+      .eq('user_id', req.params.userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+// Delete a single memory by id.
+app.delete('/memory/:userId/items/:id', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const { error } = await supabase
+      .from('memories')
+      .delete()
+      .eq('user_id', req.params.userId)
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }

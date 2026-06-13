@@ -3,11 +3,12 @@ import SwiftUI
 struct MemoryView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var summary = MemorySummary()
+    @State private var items: [MemoryItem] = []
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var draft = ""
     @State private var saveMessage: String?
+    @State private var showClearAllConfirm = false
     private let embedded: Bool
 
     init(embedded: Bool = false) {
@@ -39,112 +40,108 @@ struct MemoryView: View {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Embedded inside another screen (which owns the header); standalone
-                // gets its own minimal header in place of a chunky nav title.
                 if !embedded {
                     ScreenHeaderView(title: "Memory", onBack: { dismiss() })
                 }
                 ScrollView {
-                VStack(alignment: .leading, spacing: 36) {
-                    // Capture
-                    VStack(alignment: .leading, spacing: 20) {
-                        NamelessSectionHeader(title: "Remember")
-                        MemoryDropBox(
-                            draft: $draft,
-                            isSaving: isSaving,
-                            message: saveMessage,
-                            onSave: { Task { await saveMemory() } }
-                        )
-                    }
+                    VStack(alignment: .leading, spacing: 36) {
+                        // Capture
+                        VStack(alignment: .leading, spacing: 20) {
+                            NamelessSectionHeader(title: "Remember")
+                            MemoryDropBox(
+                                draft: $draft,
+                                isSaving: isSaving,
+                                message: saveMessage,
+                                onSave: { Task { await saveMemory() } }
+                            )
+                        }
 
-                    // Ledger
-                    VStack(alignment: .leading, spacing: 4) {
-                        NamelessSectionHeader(title: "Ledger")
+                        // The actual memories — view and delete each, like ChatGPT/Claude.
+                        VStack(alignment: .leading, spacing: 0) {
+                            HStack {
+                                NamelessSectionHeader(title: "Saved memories")
+                                Spacer()
+                                if !items.isEmpty {
+                                    Text("\(items.count)")
+                                        .font(.nmlMono(12))
+                                        .foregroundStyle(Color.nmlMuted)
+                                }
+                            }
                             .padding(.bottom, 12)
 
-                        if isLoading {
-                            ForEach(0..<3, id: \.self) { _ in
-                                OxySkeletonCard(height: 52, cornerRadius: 0)
-                                NamelessDivider()
-                            }
-                        } else {
-                            // "Saved" = what you added by hand; "Learned" = what
-                            // Nameless picked up on its own. Disjoint, so they add
-                            // up to your total memories instead of overlapping.
-                            statRow(title: "Saved", value: "\(max(0, summary.total - summary.learned))")
-                            NamelessDivider()
-                            statRow(title: "Learned", value: "\(summary.learned)")
-                            NamelessDivider()
-                            statRow(title: "Profile", value: summary.profile ? "Enabled" : "Disabled")
+                            if isLoading {
+                                ForEach(0..<4, id: \.self) { _ in
+                                    OxySkeletonCard(height: 44, cornerRadius: 0)
+                                    NamelessDivider()
+                                }
+                            } else if items.isEmpty {
+                                Text("Nothing remembered yet. Add something above, or just talk to Oxy and it'll learn as you go.")
+                                    .font(.system(size: 14, weight: .light))
+                                    .foregroundStyle(Color.nmlMuted)
+                                    .padding(.vertical, 20)
+                            } else {
+                                ForEach(items) { item in
+                                    MemoryRow(item: item) {
+                                        Task { await deleteItem(item) }
+                                    }
+                                    NamelessDivider()
+                                }
 
-                            if let lastUpdated = summary.lastUpdated {
-                                NamelessDivider()
-                                statRow(title: "Updated", value: formattedDate(lastUpdated))
+                                Button {
+                                    HapticManager.shared.impact(.light)
+                                    showClearAllConfirm = true
+                                } label: {
+                                    Text("Clear all memories")
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundStyle(Color.nmlDanger)
+                                        .padding(.vertical, 18)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 12)
-                .padding(.bottom, 40)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 40)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
+                    .animation(.easeInOut(duration: 0.2), value: items)
                 }
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         .task { await loadMemory() }
         .refreshable { await loadMemory() }
-    }
-
-    /// A flat row: clean white title on the left, muted right-aligned detail.
-    private func statRow(title: String, value: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
-            Spacer()
-            Text(value)
-                .font(.nmlMono(13))
-                .foregroundStyle(Color.nmlMuted)
+        .alert("Clear all memories?", isPresented: $showClearAllConfirm) {
+            Button("Clear all", role: .destructive) { Task { await clearAll() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes everything Oxy remembers about you.")
         }
-        .padding(.vertical, 16)
     }
 
     private func loadMemory() async {
-        await MainActor.run {
-            isLoading = true
-            saveMessage = nil
-        }
+        await MainActor.run { isLoading = true; saveMessage = nil }
         do {
-            let data = try await APIClient.shared.request(path: "/memory/\(appState.userId)")
-            let response = try JSONDecoder().decode(MemoryResponse.self, from: data)
+            let data = try await APIClient.shared.request(path: "/memory/\(appState.userId)/items")
+            let response = try JSONDecoder().decode(MemoryItemsResponse.self, from: data)
             await MainActor.run {
-                summary = response.summary ?? MemorySummary()
+                items = response.items
                 isLoading = false
             }
         } catch {
-            await MainActor.run {
-                summary = MemorySummary()
-                isLoading = false
-            }
+            await MainActor.run { items = []; isLoading = false }
         }
     }
 
     private func saveMemory() async {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, !isSaving else { return }
-        await MainActor.run {
-            isSaving = true
-            saveMessage = nil
-        }
+        await MainActor.run { isSaving = true; saveMessage = nil }
         do {
             _ = try await APIClient.shared.request(
                 path: "/memory",
                 method: "POST",
-                body: [
-                    "userId": appState.userId,
-                    "content": content
-                ]
+                body: ["userId": appState.userId, "content": content]
             )
             await MainActor.run {
                 draft = ""
@@ -160,12 +157,60 @@ struct MemoryView: View {
         }
     }
 
-    private func formattedDate(_ dateStr: String) -> String {
-        let iso = ISO8601DateFormatter()
-        guard let date = iso.date(from: dateStr) else { return dateStr }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm - d MMM"
-        return fmt.string(from: date)
+    private func deleteItem(_ item: MemoryItem) async {
+        HapticManager.shared.impact(.light)
+        // Optimistic removal so the row disappears instantly.
+        await MainActor.run { items.removeAll { $0.id == item.id } }
+        do {
+            _ = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)/items/\(item.id)",
+                method: "DELETE"
+            )
+        } catch {
+            await loadMemory() // restore on failure
+        }
+    }
+
+    private func clearAll() async {
+        await MainActor.run { items = [] }
+        do {
+            _ = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)",
+                method: "DELETE",
+                body: ["scope": "all"]
+            )
+        } catch {
+            await loadMemory()
+        }
+    }
+}
+
+private struct MemoryRow: View {
+    let item: MemoryItem
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.content)
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(item.sourceLabel)
+                    .font(.nmlMono(10))
+                    .foregroundStyle(Color.nmlMuted)
+            }
+            Spacer(minLength: 8)
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.nmlMuted)
+                    .frame(width: 30, height: 30)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.vertical, 16)
     }
 }
 
@@ -181,7 +226,7 @@ private struct MemoryDropBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Add it once. Nameless keeps it for later.")
+            Text("Add it once. Oxy keeps it for later.")
                 .font(.system(size: 19, weight: .light))
                 .foregroundStyle(Color.nmlInk)
 
@@ -219,15 +264,28 @@ private struct MemoryDropBox: View {
     }
 }
 
-struct MemorySummary: Codable {
-    var total: Int = 0
-    var learned: Int = 0
-    var profile: Bool = false
-    var lastUpdated: String?
+struct MemoryItem: Codable, Identifiable, Equatable {
+    let id: String
+    let content: String
+    let source: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content, source
+        case createdAt = "created_at"
+    }
+
+    // "Saved" = added by hand; "Learned" = picked up from conversation.
+    var sourceLabel: String {
+        switch source {
+        case "manual", "manual_profile": return "Saved"
+        default: return "Learned"
+        }
+    }
 }
 
-struct MemoryResponse: Codable {
-    let summary: MemorySummary?
+struct MemoryItemsResponse: Codable {
+    let items: [MemoryItem]
 }
 
 #Preview {
