@@ -67,6 +67,9 @@ final class ChatViewModel {
     ]
 
     func prepareChat(userId: String) async {
+        #if DEBUG
+        Self.runSessionRuleCheck()
+        #endif
         activeChatStartedAt = chatStartedAt(for: userId)
         await loadHistory(userId: userId)
     }
@@ -542,14 +545,29 @@ final class ChatViewModel {
     // a fresh session. This keeps the client's notion of the active chat aligned
     // with the sidebar's session list — reopening the app the next day (or after
     // a long idle) no longer feeds yesterday's messages into the current context.
+    // Must match the server's buildConversationSessions grouping.
+    static let sessionReuseWindow: TimeInterval = 45 * 60
+    static func canReuseSession(lastActivity: Date, now: Date) -> Bool {
+        now.timeIntervalSince(lastActivity) < sessionReuseWindow
+            && Calendar.current.isDate(lastActivity, inSameDayAs: now)
+    }
+
+    #if DEBUG
+    static func runSessionRuleCheck() {
+        let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 60 * 60) // midday
+        assert(canReuseSession(lastActivity: now.addingTimeInterval(-10 * 60), now: now), "recent same-day should reuse")
+        assert(!canReuseSession(lastActivity: now.addingTimeInterval(-46 * 60), now: now), "past window should start new")
+        assert(!canReuseSession(lastActivity: now.addingTimeInterval(-13 * 60 * 60), now: now), "different day should start new")
+    }
+    #endif
+
     private func chatStartedAt(for userId: String) -> String {
         let key = chatStartedAtKey(userId)
         let now = Date()
         if let saved = UserDefaults.standard.string(forKey: key),
            Date.oxyParse(saved) != nil,
            let lastActivity = UserDefaults.standard.string(forKey: lastActivityKey(userId)).flatMap(Date.oxyParse),
-           now.timeIntervalSince(lastActivity) < TimeInterval(45 * 60),
-           Calendar.current.isDate(lastActivity, inSameDayAs: now) {
+           Self.canReuseSession(lastActivity: lastActivity, now: now) {
             return saved
         }
         let startedAt = now.oxyISO8601String
@@ -954,6 +972,15 @@ private final class AudioPlaybackManager: NSObject {
                     guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                           let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
                     if t == .began { self?.stop() } else { self?.configured = false }
+                }
+                // Headphones unplugged etc.: stop so audio doesn't blast the speaker mid-reply.
+                NotificationCenter.default.addObserver(
+                    forName: AVAudioSession.routeChangeNotification,
+                    object: nil, queue: .main
+                ) { [weak self] note in
+                    guard let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
+                          reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
+                    self?.stop()
                 }
             }
 

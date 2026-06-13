@@ -38,6 +38,9 @@ final class APIClient: @unchecked Sendable {
         KeychainHelper.shared.read(key: "session_token") ?? ""
     }
 
+    // Sent on every request so the backend can attribute SSE/version issues to a build.
+    private static let clientVersion = "ios/" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?")
+
     // MARK: - Requests
 
     func request(
@@ -65,6 +68,7 @@ final class APIClient: @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -139,6 +143,7 @@ final class APIClient: @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -195,6 +200,7 @@ final class APIClient: @unchecked Sendable {
                     var req = URLRequest(url: url)
                     req.httpMethod = method
                     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
                     if !token.isEmpty {
                         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                     }

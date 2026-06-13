@@ -8,7 +8,11 @@ pendant hardware on the roadmap.
 - **Backend:** Node.js + Express 5 (`server.js` → `api/index.js`). Deployed to **Google Cloud Run**,
   **auto-deploys from GitHub `main`**. Data + auth in **Supabase (Postgres)**.
 - **AI:** Google Gemini (`@google/genai`, `@google/generative-ai`) — chat, live voice, STT, TTS, image.
+  Model defaults (`api/index.js`, overridable by env): `PRIMARY_CHAT_MODEL`/`STREAMING_CHAT_MODEL` =
+  `gemini-3-flash-preview` (reasoning + voice), `FAST_MODEL` = `gemini-3.1-flash-lite` (cheap helpers).
 - **Surfaces:** `OxyApp/` (SwiftUI iOS), a React PWA, and `firmware/` + `OxyPendantFirmware/` (BLE pendant).
+  **iOS is built locally in Xcode from the working tree — it does NOT deploy via `main`.** Only the
+  backend auto-deploys. So iOS edits need a user rebuild to take effect.
 - **Key dirs:** `connectors/` (service integrations), `api/services/` (action runner, connector-health,
   context-brain, pending-review, token-crypto, etc.), `docs/` (runbooks), `launch/` (GTM), `test/smoke/`.
 
@@ -45,7 +49,8 @@ There is **no local `.env`** — env comes from the shell / Cloud Run.
 
 ## Adding a connector (do ALL of these — they're coupled)
 1. `connectors/<name>.js` — export `SUPPORTED_ACTIONS` + `async execute(userId, action, params)`.
-2. `connectors/index.js` — `require` it and register its actions; add the id to `IMPLEMENTED_CONNECTORS`.
+2. `connectors/index.js` — `require` it and add it to the `MODULES` map (registry + `IMPLEMENTED_CONNECTORS`
+   are derived from it automatically).
 3. `api/action-contracts.js` — add an `ACTION_CONTRACTS` entry per action (risk, required, inputExample,
    guidance). High-risk → `confirmation: 'review_required'`, `executionMode: 'review'`.
 4. `api/services/connector-health.js` — add each action to `ACTION_CONNECTOR`; add a `humanConnectorName` case.
@@ -59,6 +64,17 @@ Then run `npm run smoke` (the contract test sweeps every entry).
   only push `main` when intended.
 - Commit trailer: `Co-Authored-By: Claude <noreply@anthropic.com>`.
 - Process timezone is `Europe/London` (date math depends on it).
+- **Proactive briefings & scheduled tasks** pull real context via `gatherProactiveContext` (calendar +
+  Gmail Primary) and write spoken copy via `generateGroundedBriefing` (Google Search grounding). Briefings
+  live in the `briefings` table (Today tab) and are filtered out of chat history. `scheduled_tasks` table +
+  `api/services/scheduled-tasks.js` back reminders/recurring tasks.
+- **Memory:** `saveMemory` rejects junk, replaces single-valued facts (school/home/work/station/bank/…),
+  and dedupes. User-added memories are additive (`manual`); the Memory tab lists/deletes individual items.
+- **Push (APNs) is blocked** until there's a paid Apple Developer account — `/push/status` shows config
+  state; briefings still land in-app without it.
+- **iOS 27 + older Xcode debugger gotcha:** Run-from-Xcode SIGABRTs with `-[OS_dispatch_mach_msg
+  _setContext:]` are the debug instrumentation (Main Thread Checker), NOT app code. Update Xcode or
+  uncheck the scheme's Diagnostics; the app runs fine launched standalone.
 - **Connector reliability matters:** prefer official APIs or deep-link handoffs. An Uber Eats *scraper*
   (`@striderlabs/mcp-ubereats`) was built then **reverted** — it returns no results against Uber's live
   site. Don't reintroduce scraper-based connectors without proving reliability first.
