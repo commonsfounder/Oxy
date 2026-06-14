@@ -8,7 +8,7 @@ import UIKit
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("oxy_appTheme") private var appTheme = "dark"
+    @AppStorage("oxy_appTheme") private var appTheme = "soft"
     @State private var settings = OxySettings()
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
@@ -20,46 +20,36 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
-                            settingRow(label: "Finish", description: "Same structure, three luxury colorways") {
-                                Menu {
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Finish")
+                                    .font(.system(size: 16, weight: .regular))
+                                    .foregroundStyle(Color.nmlInk)
+                                Text("Choose the metal. The whole app takes on its shine.")
+                                    .font(.system(size: 13, weight: .regular))
+                                    .foregroundStyle(Color.nmlMuted)
+                                HStack(spacing: 14) {
                                     ForEach(OxyTheme.profiles) { profile in
-                                        Button {
-                                            themeProfile = profile.id
-                                            HapticManager.shared.impact(.light)
-                                        } label: {
-                                            HStack {
-                                                Circle()
-                                                    .fill(profile.accent)
-                                                    .frame(width: 10, height: 10)
-                                                Text(profile.name)
-                                                if themeProfile == profile.id {
-                                                    Spacer()
-                                                    Image(systemName: "checkmark")
-                                                }
-                                            }
-                                        }
+                                        finishSwatch(profile)
                                     }
-                                } label: {
-                                    HStack(spacing: 9) {
-                                        Circle()
-                                            .fill(OxyTheme.current.accent)
-                                            .frame(width: 9, height: 9)
-                                        Text(currentFinishName)
-                                            .font(.system(size: 13, weight: .regular))
-                                            .tracking(0.6)
-                                        Text("›")
-                                            .font(.system(size: 15, weight: .light))
-                                    }
-                                    .foregroundStyle(Color.nmlTitanium)
+                                    Spacer(minLength: 0)
                                 }
-                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 6)
+
+                            NamelessDivider()
+
+                            settingRow(label: "Daylight", description: "Soft, light canvas for daytime wear") {
+                                NamelessToggle(isOn: Binding(
+                                    get: { appTheme != "dark" },
+                                    set: { appTheme = $0 ? "soft" : "dark"; HapticManager.shared.impact(.light) }
+                                ))
                             }
 
                             NamelessDivider()
@@ -195,7 +185,35 @@ struct SettingsView: View {
     }
 
     private var currentFinishName: String {
-        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Brushed Titanium"
+        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Sterling Silver"
+    }
+
+    /// A live jewelry swatch: the finish's own metal gradient, with its name and a
+    /// ring when selected. Tapping it re-skins the whole app.
+    private func finishSwatch(_ profile: OxyThemeProfile) -> some View {
+        let selected = themeProfile == profile.id
+        return Button {
+            themeProfile = profile.id
+            HapticManager.shared.impact(.light)
+        } label: {
+            VStack(spacing: 8) {
+                Circle()
+                    .fill(profile.metal)
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle().strokeBorder(Color.nmlInk, lineWidth: selected ? 2 : 0)
+                            .padding(-4)
+                    )
+                    .shadow(color: profile.glow.opacity(selected ? 0.5 : 0.25), radius: selected ? 10 : 5, y: 3)
+                Text(profile.name)
+                    .font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(profile.name)
+        .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
     }
 
     private func previewVoice(_ voice: String) {
@@ -375,7 +393,7 @@ private struct BackendURLEditorSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlBackground.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
                     NamelessSectionHeader(title: "Custom Backend URL")
 
@@ -512,15 +530,17 @@ private struct InitiativeScroller: View {
         )
     }
 
+    private var maxIndex: Int { OxySettings.autonomyLevels.count - 1 }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Initiative")
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 16, weight: .regular))
                         .foregroundStyle(Color.nmlInk)
                     Text(description)
-                        .font(.system(size: 12, weight: .light))
+                        .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Color.nmlMuted)
                 }
                 Spacer()
@@ -530,8 +550,7 @@ private struct InitiativeScroller: View {
                     .foregroundStyle(Color.nmlTitanium)
             }
 
-            Slider(value: value, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
-                .tint(Color.nmlTitanium)
+            dial
 
             HStack {
                 Text("QUIET")
@@ -540,11 +559,46 @@ private struct InitiativeScroller: View {
                 Spacer()
                 Text("ACTIVE")
             }
-            .font(.nmlMono(9, weight: .medium))
+            .font(.nmlMono(10, weight: .medium))
             .tracking(1.0)
             .foregroundStyle(Color.nmlMuted)
         }
         .padding(.vertical, 16)
+    }
+
+    /// A delicate dial: a hairline track, a metal-gradient fill, and a metal bead
+    /// that snaps to each level with a soft haptic detent.
+    private var dial: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let frac = maxIndex == 0 ? 0 : value.wrappedValue / Double(maxIndex)
+            let bead: CGFloat = 28
+            let x = (w - bead) * frac
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.nmlFill(0.12)).frame(height: 6)
+                Capsule().fill(.nmlMetal).frame(width: x + bead / 2, height: 6)
+                Circle()
+                    .fill(.nmlMetal)
+                    .frame(width: bead, height: bead)
+                    .overlay(Circle().strokeBorder(Color.nmlBackground, lineWidth: 2))
+                    .shadow(color: Color.nmlGlow.opacity(0.4), radius: 6, y: 2)
+                    .offset(x: x)
+            }
+            .frame(height: bead)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        let f = min(max(g.location.x / w, 0), 1)
+                        let idx = (f * Double(maxIndex)).rounded()
+                        if Int(idx) != Int(value.wrappedValue.rounded()) {
+                            HapticManager.shared.impact(.light)
+                        }
+                        value.wrappedValue = idx
+                    }
+            )
+        }
+        .frame(height: 28)
     }
 
     private var description: String {

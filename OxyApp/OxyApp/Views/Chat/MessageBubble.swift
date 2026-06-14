@@ -43,27 +43,28 @@ struct MessageBubble: View {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
-                                fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 3 : 5
+                                fontSize: isCompact ? 15 : 17,
+                                lineSpacing: isCompact ? 4 : 7
                             )
                         } else {
                             Text(message.content)
-                                .font(.system(size: isCompact ? 14 : 15))
-                                .foregroundStyle(Color.nmlInk)
-                                .lineSpacing(isCompact ? 3 : 5)
+                                .font(.system(size: isCompact ? 15 : 17))
+                                .foregroundStyle(isUser ? Color.nmlOnMetal : Color.nmlInk)
+                                .lineSpacing(isCompact ? 4 : 7)
                         }
                     }
-                    // User messages get an ultra-subtle fill in a small-radius
-                    // container; assistant replies stay transparent and flush so
-                    // the conversation reads as one continuous column of text.
-                    // The rounded shape is drawn as a *background* (never a
-                    // clipShape) so the assistant's text is never sliced at (0,0).
-                    .padding(.horizontal, isUser ? 14 : 0)
-                    .padding(.vertical, isUser ? 9 : 0)
+                    // The user's words sit in a soft metal "jewel" — the finish's
+                    // gradient in a rounded capsule; the assistant's reply stays
+                    // transparent and flush so it reads as one continuous column.
+                    // The shape is a *background* (never a clipShape) so the
+                    // assistant's text is never sliced at (0,0).
+                    .padding(.horizontal, isUser ? 16 : 0)
+                    .padding(.vertical, isUser ? 11 : 0)
                     .background {
                         if isUser {
-                            Rectangle()
-                                .fill(Color.white.opacity(0.12))
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(.nmlMetal)
+                                .shadow(color: Color.nmlGlow.opacity(0.25), radius: 8, y: 3)
                         }
                     }
 
@@ -106,7 +107,7 @@ struct MessageBubble: View {
                 HStack(spacing: 4) {
                     if isUser { Spacer() }
                     Text(message.timestamp, style: .time)
-                        .font(.nmlMono(9))
+                        .font(.nmlMono(10))
                         .foregroundStyle(Color.nmlMuted)
                     if !isUser { Spacer() }
                 }
@@ -169,17 +170,18 @@ private struct MessageSourceChips: View {
                         guard let url = URL(string: source.uri) else { return }
                         UIApplication.shared.open(url)
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 5) {
                             Text(source.title)
-                                .font(.system(size: 11, weight: .regular))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Color.nmlInk)
                                 .lineLimit(1)
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 8, weight: .semibold))
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Color.nmlTitanium)
                         }
-                        .foregroundStyle(Color.nmlTitanium)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .overlay(Capsule().strokeBorder(Color.nmlHairline, lineWidth: 1))
                     }
                     .buttonStyle(.plain)
                 }
@@ -244,11 +246,11 @@ struct ActionCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(headline)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(action.success ? Color.nmlInk : Color.nmlDanger)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.system(size: 13, weight: .light))
+                        .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
@@ -261,9 +263,9 @@ struct ActionCard: View {
             if hasLink {
                 HStack(spacing: 3) {
                     Text("Open")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 14, weight: .medium))
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                 }
                 .foregroundStyle(Color.nmlTitanium)
             }
@@ -279,9 +281,11 @@ struct ActionCard: View {
     @ViewBuilder
     private var statusGlyph: some View {
         Image(systemName: action.success ? "checkmark" : "exclamationmark")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(action.success ? Color.nmlGlow : Color.nmlDanger)
-            .frame(width: 16, height: 19, alignment: .center)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(action.success ? Color.nmlTitanium : Color.nmlDanger)
+            .frame(width: 30, height: 30)
+            .background(Circle().fill(Color.nmlFill(0.05)))
+            .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
     }
 
     /// Title Case confirmation copy, e.g. "Email Sent", "Place Found".
@@ -295,11 +299,11 @@ struct ActionCard: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(headline)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(Color.nmlInk)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.system(size: 13, weight: .light))
+                        .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -308,26 +312,32 @@ struct ActionCard: View {
             }
 
             if let onCommand {
-                HStack(spacing: 0) {
+                HStack(spacing: 10) {
                     pendingButton("Confirm") { onCommand("confirm") }
                     pendingButton("Cancel", muted: true) { onCommand("cancel") }
                 }
             }
         }
-        .padding(14)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black)
-        .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
+        .background(Color.nmlSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.nmlCardBorder, lineWidth: 1))
     }
 
     private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(muted ? Color.nmlMuted : Color.nmlOnMetal)
                 .frame(maxWidth: .infinity)
-                .frame(height: 42)
-                .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
+                .frame(height: 48)
+                .background {
+                    if muted {
+                        Capsule().strokeBorder(Color.nmlHairline, lineWidth: 1)
+                    } else {
+                        Capsule().fill(.nmlMetal)
+                    }
+                }
         }
         .buttonStyle(.plain)
     }
@@ -425,11 +435,11 @@ struct UberHandoffCard: View {
                 handoffRow("EST", estimate)
             }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black)
-        .border(Color.nmlCardBorder, width: 0.5)
-        .contentShape(Rectangle())
+        .background(Color.nmlSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Color.nmlCardBorder, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .onTapGesture { onOpen() }
         .onAppear {
             withAnimation(.easeInOut(duration: 0.6).delay(0.15)) { confirmed = true }
@@ -471,7 +481,7 @@ private struct ConfirmTick: View {
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.nmlHairline, lineWidth: 1)
                 .frame(width: 18, height: 18)
             CheckPath()
                 .trim(from: 0, to: active ? 1 : 0)

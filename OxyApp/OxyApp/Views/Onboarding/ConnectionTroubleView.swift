@@ -15,7 +15,7 @@ struct ConnectionTroubleView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlBackground.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)

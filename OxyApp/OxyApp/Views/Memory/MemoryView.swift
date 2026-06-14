@@ -37,7 +37,7 @@ struct MemoryView: View {
 
     private var memoryContent: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if !embedded {
@@ -76,16 +76,19 @@ struct MemoryView: View {
                                 }
                             } else if items.isEmpty {
                                 Text("Nothing remembered yet. Add something above, or just talk to Oxy and it'll learn as you go.")
-                                    .font(.system(size: 14, weight: .light))
+                                    .font(.system(size: 15, weight: .regular))
                                     .foregroundStyle(Color.nmlMuted)
+                                    .lineSpacing(4)
                                     .padding(.vertical, 20)
                             } else {
-                                ForEach(items) { item in
-                                    MemoryRow(item: item) {
-                                        Task { await deleteItem(item) }
+                                VStack(spacing: 12) {
+                                    ForEach(items) { item in
+                                        MemoryRow(item: item) {
+                                            Task { await deleteItem(item) }
+                                        }
                                     }
-                                    NamelessDivider()
                                 }
+                                .padding(.bottom, 4)
 
                                 Button {
                                     HapticManager.shared.impact(.light)
@@ -190,27 +193,34 @@ private struct MemoryRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(item.content)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
+                    .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(item.sourceLabel)
-                    .font(.nmlMono(10))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(Color.nmlMuted)
             }
             Spacer(minLength: 8)
             Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.nmlMuted)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color.nmlFill(0.05)))
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Delete memory")
         }
-        .padding(.vertical, 16)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.nmlSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.06), radius: 10, y: 4)
     }
 }
 
@@ -227,7 +237,7 @@ private struct MemoryDropBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Add it once. Oxy keeps it for later.")
-                .font(.system(size: 19, weight: .light))
+                .font(.system(size: 20, weight: .regular))
                 .foregroundStyle(Color.nmlInk)
 
             NamelessLineField(

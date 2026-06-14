@@ -13,7 +13,7 @@ struct LegalConsentView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlBackground.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
@@ -96,7 +96,7 @@ private struct NamelessCheckbox: View {
             .frame(width: 16, height: 16)
             .overlay(
                 Rectangle()
-                    .strokeBorder(isOn ? Color.clear : Color.white.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(isOn ? Color.clear : Color.nmlMuted, lineWidth: 1)
             )
             .animation(.easeInOut(duration: 0.15), value: isOn)
     }

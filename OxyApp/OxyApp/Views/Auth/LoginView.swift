@@ -12,7 +12,7 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlBackground.ignoresSafeArea()
 
             // Straight to the sign-in form — no intro carousel, no mic slide.
             LoginFormPage(
@@ -108,18 +108,18 @@ private struct LoginFormPage: View {
                     HStack(spacing: 8) {
                         if isLoading {
                             ProgressView()
-                                .tint(.black)
+                                .tint(Color.nmlOnMetal)
                                 .scaleEffect(0.8)
                         }
-                        Text("[ \(isRegistering ? "CREATE ACCOUNT" : "SIGN IN") ]")
-                            .font(.system(size: 14, weight: .semibold))
-                            .tracking(2)
+                        Text(isRegistering ? "Create Account" : "Sign In")
+                            .font(.system(size: 16, weight: .semibold))
+                            .tracking(0.8)
                     }
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(Color.nmlOnMetal)
                     .frame(maxWidth: .infinity)
                     .frame(height: 58)
-                    .background(Color.white)
-                    .clipShape(Capsule())
+                    .background(.nmlMetal, in: Capsule())
+                    .shadow(color: Color.nmlGlow.opacity(0.35), radius: 12, y: 4)
                 }
                 .buttonStyle(.plain)
                 .disabled(isLoading || userId.isEmpty || password.isEmpty)
@@ -162,7 +162,7 @@ private struct LoginFormPage: View {
             .focused($focusedField, equals: field)
 
             Rectangle()
-                .fill(focusedField == field ? Color.nmlInk.opacity(0.55) : Color.white.opacity(0.08))
+                .fill(focusedField == field ? Color.nmlTitanium : Color.nmlHairline)
                 .frame(height: focusedField == field ? 1 : 0.5)
                 .animation(.easeInOut(duration: 0.2), value: focusedField)
         }

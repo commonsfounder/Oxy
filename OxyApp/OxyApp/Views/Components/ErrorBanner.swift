@@ -32,9 +32,9 @@ struct ErrorBanner: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.black)
+        .background(Color.nmlBackground)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
         }
     }
 }

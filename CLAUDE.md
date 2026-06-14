@@ -59,21 +59,30 @@ There is **no local `.env`** — env comes from the shell / Cloud Run.
 Then run `npm run smoke` (the contract test sweeps every entry).
 
 ## iOS design system & product direction
-- **Positioning:** Oxy is a **premium design-object** (Celine/Saint Laurent register), aimed at the
-  design-literate, ~$400 buyer — not a cheap gadget. The aesthetic *is* the marketing. Bias every UI
-  call toward restraint + visible competence over feature density.
-- **Aesthetic = "silent luxury":** pure black `#000000`, hairline `~#222` dividers, high negative space,
-  flat lists (no boxed card groupings), Title Case labels, elegant tracking-spaced **sans** (monospace
-  ONLY for raw telemetry — battery/latency/IDs). Sharp 90° corners everywhere **except** the one
-  signature: the liquid-glass bottom tab bar + circular header controls keep their curve.
-- **Theme tokens live in `OxyApp/.../Extensions/NamelessTheme.swift`.** Every view reads the `nml*`
-  `Color` tokens (`nmlInk`, `nmlMuted`, `nmlTitanium` = accent, `nmlHairline`/`nmlCardBorder` = border,
-  `nmlGlow`, `nmlSurface`). These are **computed from the active finish** — change them here, the whole
-  app re-skins. Don't hardcode colors in views.
-- **Customization engine = 3 finishes** (`OxyTheme` in the same file): Raw Obsidian, **Brushed Titanium
-  (default)**, Warm Gold. Pure black is invariant; only accent/detail/border shift. Selection persists to
-  `@AppStorage("oxy_theme_profile")`; `MainTabView` re-keys its `.id(...)` on it so a change repaints the
-  tree. There is no longer a 9-accent picker — don't reintroduce one.
+- **Positioning:** Oxy is a **premium design-object** in a **feminine-luxe jewelry register**
+  (Hermès / Calm / Oura), aimed at design-literate, female-leaning early adopters (~$400+ buyer). The
+  aesthetic *is* the marketing. Bias toward emotional warmth + visible competence + legibility over
+  feature density. (This superseded the earlier monochrome "Celine/Saint Laurent silent-luxury" framing.)
+- **Aesthetic = "soft metal luxe":** a warm-pearl **light canvas by default** (daytime-first for
+  wearability), soft metallic finishes, **large airy editorial type**, full-ink answers/values, hairline
+  dividers, high negative space, **soft rounded cards** ("precious notes"). Monospace ONLY for raw
+  telemetry (battery/latency/IDs/commit). The liquid-glass tab bar + circular header controls keep their
+  curve; icons are **fleshed-out glass chips** (`NamelessGlassIcon`), not tiny bare glyphs. **No
+  sparkle/particle FX** — restraint via the glass sheen + metal gradient + glow.
+- **Theme = two axes (finish × appearance), `OxyApp/.../Extensions/NamelessTheme.swift`.** Every view
+  reads the appearance-aware `nml*` `Color` tokens (`nmlInk`, `nmlMuted`, `nmlTitanium` = accent,
+  `nmlHairline`/`nmlCardBorder`, `nmlGlow`, `nmlSurface`, **`nmlBackground`** = canvas, **`nmlOnMetal`** =
+  text on metal, `nmlFill(_:)` = appearance-aware raised fill). Use **`.nmlMetal`** (a `LinearGradient`)
+  for the jewelry shine — user chat bubble, primary button, monogram, finish swatches. Pure black is **no
+  longer invariant** — never hardcode `Color.black`/`.white.opacity` as a canvas/fill; use the tokens so
+  both appearances flip.
+- **Customization engine = 4 finishes** (`OxyTheme`): **Sterling Silver (id `titanium`, default)**, Warm
+  Gold, Rose Gold, Pearl (Raw Obsidian was removed). A finish = the metal (accent/glow/border-warmth);
+  each carries a dark + light neutral set. **Appearance** = Soft/light (default) or Dark, stored in
+  `@AppStorage("oxy_appTheme")` ("soft"|"dark"; `OxyTheme.isLight` treats absent/non-"dark" as light;
+  `OxyApp.swift` maps it to `preferredColorScheme`). Finish persists to `@AppStorage("oxy_theme_profile")`;
+  `MainTabView` re-keys `.id(accentColor+appTheme+themeProfile)` so either axis repaints the tree. No
+  9-accent picker — don't reintroduce one.
 - **More-tab IA = one home per domain** (`MainTabView.MoreView` → fullScreenCover): **Profile** = account
   (identity + export/sign-out/delete), **Pendant** = pairing + live status + hardware, **Connectors**,
   **Memory** (single entry point), **Settings** = cross-cutting prefs only (Appearance/Voice/Assistant/
@@ -89,9 +98,10 @@ Then run `npm run smoke` (the contract test sweeps every entry).
   (`groundingSourcesFrom`), emits a `sources` SSE event, and the client renders + persists source chips
   (`serializeConversationContent`/`normalizeConversationRow`, iOS `MessageSource`).
 - **Roadmap to the $400 object (3 levers):** ① *make competence visible* — **DONE** (confirmation cards,
-  source chips). ② *legibility & restraint pass* — **NEXT** (full ink on answers/values, quieter chrome,
-  declutter, more whitespace; the muted greys read slightly squinty). ③ *onboarding as unboxing* (first-run
-  / pendant-pairing as a designed reveal).
+  source chips). ② *legibility & restraint pass* — **DONE**, folded into the feminine-luxe pivot (full
+  ink on answers/values, lifted muted greys, larger/airier type, glass icons, jewelry finishes + light
+  mode, soft cards). ③ *onboarding as unboxing* — **NEXT** (first-run / pendant-pairing as a designed
+  reveal; the aspirational not-connected pendant hero is a first step).
 - **iOS does NOT auto-deploy** — only the backend rides `main`. iOS edits need a user Xcode rebuild. Verify
   iOS changes with a simulator build: `xcodebuild -project OxyApp/OxyApp.xcodeproj -scheme OxyApp -destination
   'platform=iOS Simulator,name=iPhone 17 Pro' build`. SourceKit cross-file "cannot find X" diagnostics are
