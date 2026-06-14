@@ -1167,7 +1167,7 @@ final class NativeIntegrationManager: NSObject {
     }
 
     private func playStoreID(_ storeID: String, player: MPMusicPlayerController, label: String) async throws {
-        try prepareAudioSessionForMusic()
+        try await prepareAudioSessionForMusic()
         let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: [storeID])
         player.setQueue(with: descriptor)
         try await withMusicTimeout(seconds: 5) {
@@ -1224,7 +1224,7 @@ final class NativeIntegrationManager: NSObject {
         guard !storeID.isEmpty, storeID != "0" else {
             throw NSError(domain: "OxyMusic", code: 9, userInfo: [NSLocalizedDescriptionKey: "Missing store ID for playlist add"])
         }
-        guard let playlist = findMediaPlaylist(named: playlistName) else {
+        guard let playlist = await findMediaPlaylist(named: playlistName) else {
             throw NSError(domain: "OxyMusic", code: 10, userInfo: [NSLocalizedDescriptionKey: "Playlist not found: \(playlistName)"])
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -1239,14 +1239,22 @@ final class NativeIntegrationManager: NSObject {
         return playlist.name ?? playlistName
     }
 
-    private func findMediaPlaylist(named name: String) -> MPMediaPlaylist? {
+    private func findMediaPlaylist(named name: String) async -> MPMediaPlaylist? {
         let normalized = normalizeMusicText(name)
-        return MPMediaQuery.playlists().collections?
-            .compactMap { $0 as? MPMediaPlaylist }
-            .first { playlist in
-                let playlistName = normalizeMusicText(playlist.name ?? "")
-                return playlistName == normalized || playlistName.contains(normalized) || normalized.contains(playlistName)
-            }
+        // Match off-main (full playlist scan), return only the Sendable ID, re-fetch on main.
+        let persistentID: MPMediaEntityPersistentID? = await Task.detached(priority: .userInitiated) {
+            let match = MPMediaQuery.playlists().collections?
+                .compactMap { $0 as? MPMediaPlaylist }
+                .first { playlist in
+                    let playlistName = self.normalizeMusicText(playlist.name ?? "")
+                    return playlistName == normalized || playlistName.contains(normalized) || normalized.contains(playlistName)
+                }
+            return (match?.value(forProperty: MPMediaPlaylistPropertyPersistentID) as? NSNumber)?.uint64Value
+        }.value
+        guard let persistentID else { return nil }
+        let lookup = MPMediaQuery.playlists()
+        lookup.addFilterPredicate(MPMediaPropertyPredicate(value: persistentID, forProperty: MPMediaPlaylistPropertyPersistentID))
+        return lookup.collections?.compactMap { $0 as? MPMediaPlaylist }.first
     }
 
     private func playLocalLibraryItem(matching query: String) async throws {
@@ -1254,21 +1262,29 @@ final class NativeIntegrationManager: NSObject {
         guard !normalizedQuery.isEmpty else {
             throw NSError(domain: "OxyMusic", code: 3, userInfo: [NSLocalizedDescriptionKey: "Empty music query"])
         }
-        let mediaQuery = MPMediaQuery.songs()
-        let item = mediaQuery.items?.first { item in
-            let title = normalizeMusicText(item.title ?? "")
-            let artist = normalizeMusicText(item.artist ?? "")
-            let combined = normalizeMusicText("\(item.title ?? "") \(item.artist ?? "")")
-            return combined.contains(normalizedQuery)
-                || normalizedQuery.contains(combined)
-                || title.contains(normalizedQuery)
-                || normalizedQuery.contains(title)
-                || (!artist.isEmpty && normalizedQuery.contains(artist) && !title.isEmpty && normalizedQuery.contains(title))
-        }
-        guard let item else {
+        // Scan the library off the main actor — MPMediaQuery.items is a synchronous full-library
+        // read that freezes the UI on a large library. Hand back only the Sendable persistent ID.
+        let persistentID: MPMediaEntityPersistentID? = await Task.detached(priority: .userInitiated) {
+            MPMediaQuery.songs().items?.first { item in
+                let title = self.normalizeMusicText(item.title ?? "")
+                let artist = self.normalizeMusicText(item.artist ?? "")
+                let combined = self.normalizeMusicText("\(item.title ?? "") \(item.artist ?? "")")
+                return combined.contains(normalizedQuery)
+                    || normalizedQuery.contains(combined)
+                    || title.contains(normalizedQuery)
+                    || normalizedQuery.contains(title)
+                    || (!artist.isEmpty && normalizedQuery.contains(artist) && !title.isEmpty && normalizedQuery.contains(title))
+            }?.persistentID
+        }.value
+        guard let persistentID else {
             throw NSError(domain: "OxyMusic", code: 4, userInfo: [NSLocalizedDescriptionKey: "No matching local library item"])
         }
-        try prepareAudioSessionForMusic()
+        let lookup = MPMediaQuery.songs()
+        lookup.addFilterPredicate(MPMediaPropertyPredicate(value: persistentID, forProperty: MPMediaItemPropertyPersistentID))
+        guard let item = lookup.items?.first else {
+            throw NSError(domain: "OxyMusic", code: 4, userInfo: [NSLocalizedDescriptionKey: "No matching local library item"])
+        }
+        try await prepareAudioSessionForMusic()
         let player = MPMusicPlayerController.applicationMusicPlayer
         let collection = MPMediaItemCollection(items: [item])
         player.setQueue(with: collection)
@@ -1283,24 +1299,31 @@ final class NativeIntegrationManager: NSObject {
         guard !normalizedQuery.isEmpty else {
             throw NSError(domain: "OxyMusic", code: 14, userInfo: [NSLocalizedDescriptionKey: "Empty album query"])
         }
-        let albumQuery = MPMediaQuery.albums()
-        let collection = albumQuery.collections?.first { collection in
-            guard let item = collection.representativeItem else { return false }
-            let albumTitle = normalizeMusicText(item.albumTitle ?? "")
-            let artist = normalizeMusicText(item.albumArtist ?? item.artist ?? "")
-            let combined = normalizeMusicText("\(item.albumTitle ?? "") \(item.albumArtist ?? item.artist ?? "")")
-            return combined.contains(normalizedQuery)
-                || normalizedQuery.contains(combined)
-                || albumTitle.contains(normalizedQuery)
-                || normalizedQuery.contains(albumTitle)
-                || compactMusicText(combined).contains(compactMusicText(normalizedQuery))
-                || compactMusicText(albumTitle).contains(compactMusicText(normalizedQuery))
-                || (!artist.isEmpty && normalizedQuery.contains(artist) && !albumTitle.isEmpty && normalizedQuery.contains(albumTitle))
-        }
-        guard let collection else {
+        // Off-main library scan (see playLocalLibraryItem) returning only the Sendable album ID.
+        let albumID: MPMediaEntityPersistentID? = await Task.detached(priority: .userInitiated) {
+            MPMediaQuery.albums().collections?.first { collection in
+                guard let item = collection.representativeItem else { return false }
+                let albumTitle = self.normalizeMusicText(item.albumTitle ?? "")
+                let artist = self.normalizeMusicText(item.albumArtist ?? item.artist ?? "")
+                let combined = self.normalizeMusicText("\(item.albumTitle ?? "") \(item.albumArtist ?? item.artist ?? "")")
+                return combined.contains(normalizedQuery)
+                    || normalizedQuery.contains(combined)
+                    || albumTitle.contains(normalizedQuery)
+                    || normalizedQuery.contains(albumTitle)
+                    || self.compactMusicText(combined).contains(self.compactMusicText(normalizedQuery))
+                    || self.compactMusicText(albumTitle).contains(self.compactMusicText(normalizedQuery))
+                    || (!artist.isEmpty && normalizedQuery.contains(artist) && !albumTitle.isEmpty && normalizedQuery.contains(albumTitle))
+            }?.representativeItem?.albumPersistentID
+        }.value
+        guard let albumID else {
             throw NSError(domain: "OxyMusic", code: 15, userInfo: [NSLocalizedDescriptionKey: "No matching local library album"])
         }
-        try prepareAudioSessionForMusic()
+        let lookup = MPMediaQuery.albums()
+        lookup.addFilterPredicate(MPMediaPropertyPredicate(value: albumID, forProperty: MPMediaItemPropertyAlbumPersistentID))
+        guard let collection = lookup.collections?.first else {
+            throw NSError(domain: "OxyMusic", code: 15, userInfo: [NSLocalizedDescriptionKey: "No matching local library album"])
+        }
+        try await prepareAudioSessionForMusic()
         let player = MPMusicPlayerController.applicationMusicPlayer
         player.setQueue(with: collection)
         player.play()
@@ -1309,10 +1332,14 @@ final class NativeIntegrationManager: NSObject {
         }
     }
 
-    private func prepareAudioSessionForMusic() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .default)
-        try session.setActive(true)
+    // AVAudioSession.setActive(true) is a synchronous IPC to the audio daemon that can block
+    // for a noticeable time — run it off the main actor so it never freezes the UI on a play.
+    private func prepareAudioSessionForMusic() async throws {
+        try await Task.detached(priority: .userInitiated) {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default)
+            try session.setActive(true)
+        }.value
     }
 
     private func searchITunesSong(_ query: String) async throws -> ITunesSong? {
@@ -1782,14 +1809,16 @@ final class NativeIntegrationManager: NSObject {
             .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
     }
 
-    private func normalizeMusicText(_ text: String) -> String {
+    // nonisolated + pure so the off-main-thread library scans below can call them without
+    // hopping back to the main actor on every comparison.
+    nonisolated private func normalizeMusicText(_ text: String) -> String {
         text.lowercased()
             .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func compactMusicText(_ text: String) -> String {
+    nonisolated private func compactMusicText(_ text: String) -> String {
         normalizeMusicText(text).replacingOccurrences(of: " ", with: "")
     }
 
