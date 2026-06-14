@@ -177,10 +177,12 @@ private struct BriefingRow: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
-                Text(sourceLabel.uppercased())
-                    .font(.nmlMono(10, weight: .medium))
-                    .tracking(1.0)
-                    .foregroundStyle(Color.nmlMuted)
+                if let sourceLabel {
+                    Text(sourceLabel.uppercased())
+                        .font(.nmlMono(10, weight: .medium))
+                        .tracking(1.0)
+                        .foregroundStyle(Color.nmlMuted)
+                }
                 Spacer()
                 Button("DISMISS", action: onDismiss)
                     .font(.nmlMono(10, weight: .medium))
@@ -206,13 +208,14 @@ private struct BriefingRow: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var sourceLabel: String {
+    // Only attribute genuinely distinct sources. The everyday morning/midday/evening briefing
+    // doesn't need a "SCHEDULED"/"PROACTIVE" chip stamped under it — that's just noise.
+    private var sourceLabel: String? {
         switch briefing.source {
         case "healthkit": return "HealthKit"
         case "location": return "Location"
         case "action_log": return "Action follow-up"
-        case "schedule": return "Scheduled"
-        default: return "Proactive"
+        default: return nil
         }
     }
 

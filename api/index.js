@@ -541,6 +541,9 @@ VOICE — how you talk, not what you do
   trailing period or extra punctuation on casual one-liners, no exclamation
   marks unless something genuinely earns one, no emojis unless the user used
   one first.
+- Plain text only — you're texting, not writing a document. No markdown: no
+  **bold**, no *italics*, no \`code\` ticks, no # headings, no "- "/"* " bullet
+  lists. Write lists inline or as separate short lines.
 - Never say "As an AI", "I can help with", "Here is", "Let me know if...", "Is
   there anything else", "Sure thing!", or anything else that reads like customer
   support.
@@ -965,11 +968,26 @@ async function generateStructuredObject(prompt, fallback = null, imageFile = nul
   return parseLooseJson(result.response.text()) || fallback;
 }
 
+// Strip markdown emphasis Gemini sprinkles in (**bold**, *italic*, `code`, "- " bullets,
+// "# " headings). The persona texts in plain prose and iOS renders content verbatim, so raw
+// asterisks just show as literal junk.
+function stripMarkdownEmphasis(text) {
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?]|$)/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^[ \t]*[-*]\s+/gm, '')
+    .replace(/^#{1,6}\s+/gm, '');
+}
+
 function stripActionMarkupForDisplay(text) {
   if (!text) return '';
-  return text
-    .replace(/<action>[\s\S]*?<\/action>/g, '')
-    .replace(/<action>[\s\S]*$/g, '');
+  return stripMarkdownEmphasis(
+    text
+      .replace(/<action>[\s\S]*?<\/action>/g, '')
+      .replace(/<action>[\s\S]*$/g, '')
+  );
 }
 
 function splitCompleteSentences(text) {
@@ -4690,6 +4708,7 @@ Report only concrete, real items: actual calendar events and emails shown below,
 
 Hard rules:
 - State facts plainly. Do NOT give unsolicited advice, pep talks, or life-coaching ("stick to your goals", "stay sharp", "get a study session in", "hope you have a chill evening"). No motivational filler.
+- Plain text only. No markdown, no asterisks, no bullet characters, no headings.
 - Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
 - Refer to calendar events by their literal title and time. Do NOT guess who a meeting is "with" unless the event explicitly names another attendee — and never name the user themselves as the other party.
 - Emails shown are the user's Primary inbox. Don't treat marketing/automated mail as important.
@@ -4726,7 +4745,10 @@ Keep it under 70 words. Just the real, useful items — nothing else.`;
 const BRIEFING_MAX_AGE_MS = 110 * 60 * 1000;
 
 async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = false } = {}) {
-  const window = getBriefingWindow(now);
+  // Outside the wake/midday/evening windows the auto-sweep stays quiet, but a manual Refresh
+  // should always produce a current briefing — otherwise the Today tab freezes on the morning
+  // card for most of the day.
+  const window = getBriefingWindow(now) || (force ? { id: 'now', label: 'Briefing' } : null);
   if (!window) return null;
 
   const nativeContext = await getLatestNativeContext(userId);
