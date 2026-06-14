@@ -3,7 +3,7 @@ import SwiftUI
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
-    @AppStorage("oxy_appTheme") private var appTheme = "soft"
+    @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
     @State private var selectedTab = Tab.today
 
@@ -86,18 +86,18 @@ struct MainTabView: View {
         return Button {
             withAnimation(.easeInOut(duration: 0.25)) { selectedTab = tab }
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
-                    .font(.system(size: 22, weight: .regular))
+                    .font(.system(size: 18, weight: .regular))
                 Text(tab.label)
-                    .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
             }
             .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 11)
+            .padding(.vertical, 9)
             .background {
                 if selected {
-                    Capsule().fill(Color.nmlFill(0.10))
+                    Capsule().fill(Color.white.opacity(0.12))
                 }
             }
             .contentShape(Capsule())
@@ -124,7 +124,7 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlBackground.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "More")
                     ScrollView {
@@ -132,15 +132,15 @@ struct MoreView: View {
                             accountHeader
 
                             group(title: "Assistant") {
-                                moreRow(title: "Memory", subtitle: "What \(assistantName) remembers about you", icon: "brain") {
+                                moreRow(title: "Memory", subtitle: "What \(assistantName) remembers about you") {
                                     destination = .memory
                                 }
                                 NamelessDivider()
-                                moreRow(title: "Connectors", subtitle: "Accounts, services, device access", icon: "link") {
+                                moreRow(title: "Connectors", subtitle: "Accounts, services, device access") {
                                     destination = .connectors
                                 }
                                 NamelessDivider()
-                                moreRow(title: "Settings", subtitle: "Voice, appearance, behaviour", icon: "slider.horizontal.3") {
+                                moreRow(title: "Settings", subtitle: "Voice, appearance, behaviour") {
                                     destination = .settings
                                 }
                             }
@@ -149,7 +149,6 @@ struct MoreView: View {
                                 moreRow(
                                     title: "Pendant",
                                     subtitle: "Pairing, status, hardware",
-                                    icon: "waveform",
                                     trailing: pendantStatusText,
                                     trailingLive: pendant.isConnected
                                 ) {
@@ -193,29 +192,29 @@ struct MoreView: View {
             HapticManager.shared.impact(.light)
             destination = .profile
         } label: {
-            HStack(spacing: 16) {
-                // A monogram set in the finish's metal — a small piece of jewelry
-                // standing in for an avatar.
+            HStack(spacing: 14) {
+                // A quiet monogram instead of a colourful avatar — first letter of
+                // the assistant name in a hairline ring.
                 Text(monogram)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(Color.nmlOnMetal)
-                    .frame(width: 54, height: 54)
-                    .background(Circle().fill(.nmlMetal))
-                    .shadow(color: Color.nmlGlow.opacity(0.3), radius: 8, y: 3)
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(Color.nmlInk)
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(Color.white.opacity(0.05)))
+                    .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(assistantName)
-                        .font(.system(size: 20, weight: .regular))
+                        .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(Color.nmlInk)
                     Text("Profile · account · sign out")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                 }
 
                 Spacer()
 
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .medium))
+                Text("›")
+                    .font(.system(size: 18, weight: .light))
                     .foregroundStyle(Color.nmlMuted)
             }
             .padding(.vertical, 14)
@@ -251,7 +250,6 @@ struct MoreView: View {
     private func moreRow(
         title: String,
         subtitle: String,
-        icon: String,
         trailing: String? = nil,
         trailingLive: Bool = false,
         action: @escaping () -> Void
@@ -260,14 +258,13 @@ struct MoreView: View {
             HapticManager.shared.impact(.light)
             action()
         } label: {
-            HStack(spacing: 14) {
-                NamelessGlassIcon(systemName: icon, size: 18, diameter: 44)
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 17, weight: .regular))
+                        .font(.system(size: 16, weight: .regular))
                         .foregroundStyle(Color.nmlInk)
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(1)
                 }
@@ -275,19 +272,19 @@ struct MoreView: View {
                 if let trailing {
                     HStack(spacing: 7) {
                         if trailingLive {
-                            NamelessStatusDot(isLive: true, diameter: 6)
+                            NamelessStatusDot(isLive: true, diameter: 5)
                         }
                         Text(trailing.uppercased())
-                            .font(.nmlMono(11, weight: .medium))
+                            .font(.nmlMono(10, weight: .medium))
                             .tracking(1.0)
-                            .foregroundStyle(trailingLive ? Color.nmlInk : Color.nmlMuted)
+                            .foregroundStyle(Color.nmlMuted)
                     }
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .medium))
+                Text("›")
+                    .font(.system(size: 18, weight: .light))
                     .foregroundStyle(Color.nmlMuted)
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 18)
         }
         .buttonStyle(.plain)
     }

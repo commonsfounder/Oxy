@@ -4,7 +4,7 @@ import SwiftUI
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    @AppStorage("oxy_appTheme") private var appTheme = "soft"
+    @AppStorage("oxy_appTheme") private var appTheme = "dark"
 
     var body: some Scene {
         WindowGroup {
@@ -17,7 +17,7 @@ struct OxyApp: App {
 
     private var preferredColorScheme: ColorScheme? {
         switch appTheme {
-        case "soft", "light":
+        case "light":
             return .light
         case "system":
             return nil
@@ -37,7 +37,7 @@ struct RootView: View {
                 // Hold on a plain black screen until the keychain session check
                 // finishes, so a returning user never sees a flash of the login
                 // screen on cold launch.
-                Color.nmlBackground.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
             } else if appState.isAuthenticated {
                 MainTabView()
             } else {

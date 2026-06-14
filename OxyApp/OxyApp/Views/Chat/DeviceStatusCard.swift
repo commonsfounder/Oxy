@@ -40,16 +40,16 @@ struct DeviceStatusCard: View {
 
     private func metric(_ text: String) -> some View {
         Text(text)
-            .font(.nmlMono(12, weight: .medium))
+            .font(.nmlMono(10, weight: .medium))
             .tracking(0.4)
-            .foregroundStyle(Color.nmlInk)
+            .foregroundStyle(Color.nmlTitanium)
             .fixedSize()
     }
 }
 
 #Preview {
     ZStack(alignment: .top) {
-        Color.nmlBackground.ignoresSafeArea()
+        Color.black.ignoresSafeArea()
         DeviceStatusCard(telemetry: {
             let monitor = PendantTelemetryMonitor()
             monitor.start()

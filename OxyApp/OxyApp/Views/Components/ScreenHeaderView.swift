@@ -36,7 +36,7 @@ struct ScreenHeaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.nmlBackground)
+        .background(Color.black)
     }
 }
 

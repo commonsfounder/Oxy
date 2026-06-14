@@ -16,7 +16,7 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlBackground.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -59,7 +59,7 @@ struct ProactiveView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.nmlBackground, for: .navigationBar)
+            .toolbarBackground(Color.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {
@@ -107,18 +107,11 @@ private struct ProactiveHeader: View {
     let onCheckNow: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(greeting)
-                        .font(.system(size: 13, weight: .semibold))
-                        .tracking(1.6)
-                        .textCase(.uppercase)
-                        .foregroundStyle(Color.nmlTitanium)
-                    Text("Today")
-                        .font(.system(size: 38, weight: .regular, design: .serif))
-                        .foregroundStyle(Color.nmlInk)
-                }
+                Text("Today")
+                    .font(.system(size: 30, weight: .regular, design: .serif))
+                    .foregroundStyle(Color.nmlInk)
                 Spacer()
                 Button(action: onCheckNow) {
                     if isChecking {
@@ -126,7 +119,10 @@ private struct ProactiveHeader: View {
                             .scaleEffect(0.7)
                             .tint(Color.nmlMuted)
                     } else {
-                        NamelessGlassIcon(systemName: "arrow.clockwise", size: 16, diameter: 42)
+                        Text("REFRESH")
+                            .font(.nmlMono(11, weight: .medium))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.nmlTitanium)
                     }
                 }
                 .buttonStyle(.plain)
@@ -134,25 +130,16 @@ private struct ProactiveHeader: View {
             }
 
             if let weather {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     Image(systemName: weather.symbolName)
-                        .font(.system(size: 15, weight: .regular))
+                        .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(Color.nmlTitanium)
                     Text(weather.shortLine)
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.nmlMono(11, weight: .medium))
+                        .tracking(0.5)
                         .foregroundStyle(Color.nmlMuted)
                 }
             }
-        }
-    }
-
-    private var greeting: String {
-        let hour = Calendar.current.component(.hour, from: Date())
-        switch hour {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Good night"
         }
     }
 }
@@ -165,18 +152,18 @@ private struct BriefingRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(briefing.title ?? title)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                 Spacer(minLength: 12)
                 Text(timeLabel)
-                    .font(.nmlMono(11))
+                    .font(.nmlMono(10))
                     .foregroundStyle(Color.nmlMuted)
             }
 
             Text(cleanBody)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
-                .lineSpacing(5)
+                .font(.system(size: 14, weight: .light))
+                .foregroundStyle(Color.nmlMuted)
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
@@ -193,7 +180,7 @@ private struct BriefingRow: View {
             }
             .padding(.top, 2)
         }
-        .padding(.vertical, 24)
+        .padding(.vertical, 20)
     }
 
     private var title: String {
@@ -235,9 +222,9 @@ private struct EmptyProactiveState: View {
                 .font(.system(size: 17, weight: .regular, design: .serif))
                 .foregroundStyle(Color.nmlInk)
             Text("Nameless will only interrupt when there's something actually useful.")
-                .font(.system(size: 14, weight: .regular))
+                .font(.system(size: 13, weight: .light))
                 .foregroundStyle(Color.nmlMuted)
-                .lineSpacing(4)
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

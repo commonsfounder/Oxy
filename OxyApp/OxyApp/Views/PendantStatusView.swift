@@ -17,7 +17,7 @@ struct PendantStatusView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlBackground.ignoresSafeArea()
+                Color.black.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Pendant", onBack: { dismiss() })
@@ -112,51 +112,6 @@ private struct PendantPairingSection: View {
     @State private var showUnpairConfirm = false
 
     var body: some View {
-        if pendant.connectionState == .disconnected && pendant.lastError == nil {
-            notConnectedHero
-        } else {
-            pairingDetail
-        }
-    }
-
-    /// An aspirational first-run state instead of a stark "Not connected" line: a
-    /// softly glowing pendant, an inviting headline, and the metal scan button.
-    private var notConnectedHero: some View {
-        VStack(spacing: 22) {
-            ZStack {
-                Circle()
-                    .fill(Color.nmlGlow.opacity(0.25))
-                    .frame(width: 140, height: 140)
-                    .blur(radius: 40)
-                Image(systemName: "circle.hexagongrid.circle")
-                    .font(.system(size: 56, weight: .ultraLight))
-                    .foregroundStyle(.nmlMetal)
-                    .frame(width: 104, height: 104)
-                    .nmlGlass(Circle())
-                    .shadow(color: Color.nmlGlow.opacity(0.4), radius: 16, y: 6)
-            }
-            .padding(.top, 8)
-
-            VStack(spacing: 8) {
-                Text("Bring your Oxy closer")
-                    .font(.system(size: 24, weight: .regular, design: .serif))
-                    .foregroundStyle(Color.nmlInk)
-                Text("Hold your pendant nearby and we'll find it. Once it's paired, this is where its heartbeat lives.")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlMuted)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 8)
-            }
-
-            NamelessPrimaryButton(title: "Scan for Pendant") { pendant.startScan() }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-    }
-
-    private var pairingDetail: some View {
         VStack(alignment: .leading, spacing: 4) {
             NamelessSectionHeader(title: "Pairing")
                 .padding(.bottom, 10)
@@ -197,7 +152,7 @@ private struct PendantPairingSection: View {
                 if let error = pendant.lastError {
                     NamelessDivider()
                     Text(error)
-                        .font(.system(size: 14, weight: .regular))
+                        .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 16)

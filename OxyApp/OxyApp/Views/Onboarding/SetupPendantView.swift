@@ -6,7 +6,7 @@ import SwiftUI
 struct SetupPendantView: View {
     var body: some View {
         ZStack {
-            Color.nmlBackground.ignoresSafeArea()
+            Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -53,12 +53,12 @@ private struct PendantGlyph: View {
             Circle()
                 .strokeBorder(Color.nmlTitanium, lineWidth: 1)
                 .background(
-                    Circle().fill(Color.nmlFill(0.04))
+                    Circle().fill(Color.white.opacity(0.03))
                 )
                 .frame(width: 116, height: 116)
                 .overlay(
                     Circle()
-                        .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
                         .padding(16)
                 )
                 .offset(y: -8)
