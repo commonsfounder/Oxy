@@ -79,7 +79,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
-    guidance: 'Use for "calendar", "schedule", "event", or "add to my calendar". Do not route to Apple Music just because the phrase contains the word "add". If the date or time is missing, ask for it instead of guessing.',
+    guidance: 'Use for "calendar", "schedule", "event", or "add to my calendar". Do not route to Apple Music just because the phrase contains the word "add". If the date or time is missing, ask for it instead of guessing. title is a short label (2-5 words: activity + key entity) — NEVER the user\'s full instruction. "im going to see my gf in apsley, add it to my calendar and find me the train" -> title "See gf in Apsley". Strip meta-instructions ("add it to my calendar", "and find me the train", "tell it to...") entirely — those are separate intents handled by other actions, not part of the event name.',
     successSummary: 'Calendar updated',
     failureSummary: 'Calendar failed',
     confirmation: 'none'

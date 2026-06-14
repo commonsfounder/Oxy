@@ -1,6 +1,10 @@
 // Detect whether a message likely needs current/real-time information or other changeable facts.
 const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
+  // "find me a/the X under £700" / "best X under 700" / "buy X for less than 500" —
+  // shopping/product recommendations need current pricing, which is not an action
+  // (no shopping connector exists) and not training data (prices change).
+  { reason: 'shopping-product', pattern: /\b(find|get|show|recommend)\s+(?:me\s+)?(?:a|an|some)\b[^?!.]*\b(under|below|for less than|cheaper than|up to)\s*[£$€]?\s*\d|\b(best|cheapest|top|good)\b[^?!.]*\b(under|below|for less than|cheaper than|up to)\s*[£$€]?\s*\d|\bbuy\b[^?!.]*\b(under|below|for less than|cheaper than)\s*[£$€]?\s*\d/i },
   { reason: 'current-music-chart', pattern: /\b(billboard|hot\s*100|official singles chart|charts?|number\s*one|no\.?\s*1|top\s+(song|track|single)|most popular song|most streamed|viral song)\b|(?=.*\b(song|track|single|music)\b)(?=.*\b(right now|currently|today|latest|trending|most popular|top|number\s*one|no\.?\s*1)\b)/i },
   { reason: 'public-transport-live', pattern: /\b(next|first|last|live|departures?|platforms?)\s+(train|bus|tram|tube)\b|\b(what|which)\s+(train|bus|tram|tube|platform)\b|\bplatform\s*(number)?\??$|\b(train|bus|tram|tube)\s+from\b.+\bto\b/i },
   { reason: 'public-safety-events', pattern: /\b(assassination|assassinate|attempt(?:ed)?|shooting|shooter|gunman|armed|rally|campaign rally|security incident|suspect|arrested|charged|identified|names?|who did it|who was it)\b/i },
