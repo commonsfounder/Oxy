@@ -58,6 +58,45 @@ There is **no local `.env`** — env comes from the shell / Cloud Run.
 6. `api/services/pending-review.js` — add review title/detail cases **only if** the action is review-gated.
 Then run `npm run smoke` (the contract test sweeps every entry).
 
+## iOS design system & product direction
+- **Positioning:** Oxy is a **premium design-object** (Celine/Saint Laurent register), aimed at the
+  design-literate, ~$400 buyer — not a cheap gadget. The aesthetic *is* the marketing. Bias every UI
+  call toward restraint + visible competence over feature density.
+- **Aesthetic = "silent luxury":** pure black `#000000`, hairline `~#222` dividers, high negative space,
+  flat lists (no boxed card groupings), Title Case labels, elegant tracking-spaced **sans** (monospace
+  ONLY for raw telemetry — battery/latency/IDs). Sharp 90° corners everywhere **except** the one
+  signature: the liquid-glass bottom tab bar + circular header controls keep their curve.
+- **Theme tokens live in `OxyApp/.../Extensions/NamelessTheme.swift`.** Every view reads the `nml*`
+  `Color` tokens (`nmlInk`, `nmlMuted`, `nmlTitanium` = accent, `nmlHairline`/`nmlCardBorder` = border,
+  `nmlGlow`, `nmlSurface`). These are **computed from the active finish** — change them here, the whole
+  app re-skins. Don't hardcode colors in views.
+- **Customization engine = 3 finishes** (`OxyTheme` in the same file): Raw Obsidian, **Brushed Titanium
+  (default)**, Warm Gold. Pure black is invariant; only accent/detail/border shift. Selection persists to
+  `@AppStorage("oxy_theme_profile")`; `MainTabView` re-keys its `.id(...)` on it so a change repaints the
+  tree. There is no longer a 9-accent picker — don't reintroduce one.
+- **More-tab IA = one home per domain** (`MainTabView.MoreView` → fullScreenCover): **Profile** = account
+  (identity + export/sign-out/delete), **Pendant** = pairing + live status + hardware, **Connectors**,
+  **Memory** (single entry point), **Settings** = cross-cutting prefs only (Appearance/Voice/Assistant/
+  Action Defaults/About). Do NOT re-duplicate a domain into Settings.
+- **Persona/voice** lives in `OXCY_SYSTEM_PROMPT` (`api/index.js`): dry, terse friend; lowercase casual
+  one-liners; anti-sycophancy; banned chatbot phrases ("As an AI", "Here is", "Let me know if"…); mirrors
+  the user. Governs spoken/chat replies only — drafted emails/messages and action JSON keep their own rules.
+- **Grounding is conditional, NOT always-on.** `api/services/search-intent.js` (`getSearchReason`) gates
+  whether the `googleSearch` tool is attached. Always-on grounding was tried and **froze fast actions
+  like "play music"** — reverted. The regex is broadened to catch follow-ups ("well check", "did you hear
+  about X", "what did you get") while skipping "check my email/calendar".
+- **Grounded answers surface sources:** the chat-stream extracts Gemini grounding metadata
+  (`groundingSourcesFrom`), emits a `sources` SSE event, and the client renders + persists source chips
+  (`serializeConversationContent`/`normalizeConversationRow`, iOS `MessageSource`).
+- **Roadmap to the $400 object (3 levers):** ① *make competence visible* — **DONE** (confirmation cards,
+  source chips). ② *legibility & restraint pass* — **NEXT** (full ink on answers/values, quieter chrome,
+  declutter, more whitespace; the muted greys read slightly squinty). ③ *onboarding as unboxing* (first-run
+  / pendant-pairing as a designed reveal).
+- **iOS does NOT auto-deploy** — only the backend rides `main`. iOS edits need a user Xcode rebuild. Verify
+  iOS changes with a simulator build: `xcodebuild -project OxyApp/OxyApp.xcodeproj -scheme OxyApp -destination
+  'platform=iOS Simulator,name=iPhone 17 Pro' build`. SourceKit cross-file "cannot find X" diagnostics are
+  false positives in isolation — trust the build.
+
 ## Conventions & gotchas
 - **Match surrounding code** (style, naming, comment density). Backend is CommonJS (`require`).
 - **`main` auto-deploys to prod and there is NO CI gate** — run `release:check` and branch before pushing;
