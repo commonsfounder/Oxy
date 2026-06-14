@@ -795,15 +795,37 @@ final class NativeIntegrationManager: NSObject {
         ]
     }
 
-    private static let musicContentKeywords: Set<String> = ["music", "song", "playlist", "album", "skip"]
-    private static let musicExactKeywords: Set<String> = ["pause", "resume", "resume it", "unpause", "next", "previous", "back"]
-    private static let musicPrefixes = ["pause ", "resume ", "unpause ", "play ", "listen to "]
+    private static let musicExactKeywords: Set<String> = ["pause", "resume", "resume it", "unpause", "next", "previous", "back", "skip"]
+    private static let musicPrefixes = ["pause ", "resume ", "unpause ", "play ", "listen to ", "put on "]
+    // Phrases that mean "I don't want this track" — these map to skip, NOT to playing a song
+    // literally titled "i dont like this".
+    private static let dislikeSkipPhrases: [String] = [
+        "i dont like this", "i don't like this", "i hate this", "not this one", "not this song",
+        "this is bad", "change this", "change the song", "change the track", "different song",
+        "something else", "next one", "skip this one"
+    ]
+    // Bare residues that carry no actual song — "play some music" must not search for "some".
+    private static let vagueMusicResidues: Set<String> = [
+        "", "some", "a", "an", "any", "anything", "something", "some music", "music", "songs",
+        "song", "tunes", "some tunes", "stuff", "some stuff", "whatever", "play", "some songs"
+    ]
+
+    private func isDislikeSkip(_ lower: String) -> Bool {
+        Self.dislikeSkipPhrases.contains(where: { lower.contains($0) })
+    }
+
+    private func isVagueMusicResidue(_ query: String) -> Bool {
+        Self.vagueMusicResidues.contains(normalizeMusicText(query))
+    }
 
     private func isMusicRelated(_ lower: String) -> Bool {
-        Self.musicContentKeywords.contains(where: { lower.contains($0) })
-        || Self.musicExactKeywords.contains(lower)
+        // Require an actual control intent. A sentence that merely *contains* "song"/"music"
+        // ("what song is this", "i don't like this song") is not a play command.
+        Self.musicExactKeywords.contains(lower)
         || Self.musicPrefixes.contains(where: { lower.hasPrefix($0) })
+        || Self.skipKeywords.contains(where: { lower.contains($0) })
         || isMusicAddRequest(lower)
+        || isDislikeSkip(lower)
     }
 
     private func handleNativeMusicRequest(_ message: String) async -> NativeLocalActionResult? {
@@ -897,7 +919,7 @@ final class NativeIntegrationManager: NSObject {
             return NativeLocalActionResult(action: "music_control", text: "Resumed.", cardText: "Playback resumed", actionSummary: "Music resumed", deepLink: nil)
         }
 
-        if matchesTransport(lower, keywords: Self.skipKeywords) {
+        if matchesTransport(lower, keywords: Self.skipKeywords) || isDislikeSkip(lower) {
             try? await ApplicationMusicPlayer.shared.skipToNextEntry()
             try? await SystemMusicPlayer.shared.skipToNextEntry()
             MPMusicPlayerController.systemMusicPlayer.skipToNextItem()
@@ -910,11 +932,13 @@ final class NativeIntegrationManager: NSObject {
     private func playNativeMusic(from message: String) async -> NativeLocalActionResult? {
         if isAlbumPlaybackRequest(message) {
             let query = resolvedAlbumQuery(from: message)
-            guard !query.isEmpty else { return nil }
+            guard !isVagueMusicResidue(query) else { return nil }
             return await playNativeAlbumQuery(query)
         }
         let query = resolvedMusicQuery(from: message)
-        guard !query.isEmpty else { return nil }
+        // "play some music" / "play a song" leaves no real title — don't literal-search the
+        // filler (that's how "some" became Steve Lacy). Defer so the assistant can ask.
+        guard !isVagueMusicResidue(query) else { return nil }
         return await playNativeMusicQuery(query)
     }
 

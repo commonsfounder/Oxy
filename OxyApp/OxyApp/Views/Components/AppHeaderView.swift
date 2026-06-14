@@ -31,8 +31,10 @@ struct AppHeaderView: View {
 
                 Spacer()
 
-                // Right: incognito ghost, same circular glass treatment, only on an empty chat.
-                if isEmptyChat {
+                // Right: incognito ghost. Offered on an empty chat, and kept visible whenever
+                // shadow mode is ON so the user can see they're in it and switch it back off
+                // mid-conversation — not just silently active behind an absent button.
+                if isEmptyChat || isIncognito {
                     Button {
                         withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
                     } label: {

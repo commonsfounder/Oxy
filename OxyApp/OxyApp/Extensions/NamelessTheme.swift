@@ -351,6 +351,40 @@ func nmlGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder conten
     }
 }
 
+/// Adds an interactive left-edge swipe-to-dismiss to a screen, which `fullScreenCover`
+/// otherwise lacks. Starting the drag near the leading edge keeps it from fighting the
+/// vertical scroll views inside the presented screens, and mirrors the native back gesture.
+private struct SwipeToDismissModifier: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    @State private var offset: CGFloat = 0
+    private let edgeWidth: CGFloat = 28
+    private let dismissThreshold: CGFloat = 110
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: offset)
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        guard value.startLocation.x < edgeWidth, value.translation.width > 0 else { return }
+                        offset = value.translation.width
+                    }
+                    .onEnded { value in
+                        if value.startLocation.x < edgeWidth, value.translation.width > dismissThreshold {
+                            dismiss()
+                        } else {
+                            withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
+                        }
+                    }
+            )
+    }
+}
+
+extension View {
+    /// Edge-swipe-to-dismiss for full-screen covers. Apply to the presented screen's root.
+    func swipeToDismiss() -> some View { modifier(SwipeToDismissModifier()) }
+}
+
 /// The quiet counterpart: border-only, muted titanium text, no fill.
 struct NamelessOutlineButton: View {
     let title: String

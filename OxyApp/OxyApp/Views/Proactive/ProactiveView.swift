@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProactiveView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
     @State private var briefings: [Briefing] = []
     @State private var isLoading = false
     @State private var isChecking = false
@@ -65,6 +66,15 @@ struct ProactiveView: View {
         .task {
             await loadBriefings()
             weather = await OxyWeatherService.shared.currentWeather()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Re-fetch when returning to the app so a returning user sees the briefing the
+            // backend refreshed through the day, not a stale snapshot from first launch.
+            guard phase == .active else { return }
+            Task {
+                await loadBriefings()
+                weather = await OxyWeatherService.shared.currentWeather()
+            }
         }
     }
 

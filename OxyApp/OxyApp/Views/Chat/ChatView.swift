@@ -223,6 +223,7 @@ struct ChatView: View {
                         attachmentData: pendingImageData,
                         attachmentIsImage: pendingIsImage,
                         isFocused: $isInputFocused,
+                        incognito: isIncognito,
                         onSend: {
                             sendCurrentDraft()
                         },
@@ -846,12 +847,38 @@ struct ChatSessionsResponse: Codable {
 private struct WelcomeCard: View {
     var onAction: (String) -> Void
     @State private var appeared = false
+    // The three starter actions are user-swappable and persisted (newline-joined labels).
+    @AppStorage("oxy_starter_actions") private var storedActions = "Send an email\nPlay some music\nBook a ride"
 
-    private let actions: [(icon: String, label: String)] = [
+    // The pool a user can long-press to swap a slot to.
+    private static let pool: [(icon: String, label: String)] = [
         ("envelope", "Send an email"),
         ("music.note", "Play some music"),
-        ("car", "Book a ride")
+        ("car", "Book a ride"),
+        ("magnifyingglass", "Search the web"),
+        ("calendar", "Add to my calendar"),
+        ("cloud.sun", "What's the weather"),
+        ("message", "Send a message"),
+        ("map", "Get directions"),
+        ("bell", "Set a reminder")
     ]
+
+    private var actions: [String] {
+        let parts = storedActions.split(separator: "\n").map(String.init)
+        return parts.isEmpty ? Array(Self.pool.prefix(3).map(\.label)) : parts
+    }
+
+    private func icon(for label: String) -> String {
+        Self.pool.first { $0.label == label }?.icon ?? "sparkles"
+    }
+
+    private func replace(slot: Int, with label: String) {
+        var parts = actions
+        guard slot < parts.count else { return }
+        parts[slot] = label
+        storedActions = parts.joined(separator: "\n")
+        HapticManager.shared.impact(.light)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -860,16 +887,16 @@ private struct WelcomeCard: View {
                 .foregroundStyle(Color.nmlInk)
 
             VStack(alignment: .leading, spacing: 16) {
-                ForEach(Array(actions.enumerated()), id: \.offset) { _, action in
+                ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
                     Button {
-                        onAction(action.label)
+                        onAction(label)
                     } label: {
                         HStack(spacing: 14) {
-                            Image(systemName: action.icon)
+                            Image(systemName: icon(for: label))
                                 .font(.system(size: 18, weight: .ultraLight))
                                 .foregroundStyle(Color.nmlMuted)
                                 .frame(width: 22, alignment: .leading)
-                            Text(action.label)
+                            Text(label)
                                 .font(.system(size: 16, weight: .regular))
                                 .foregroundStyle(Color.nmlMuted)
                             Spacer()
@@ -877,6 +904,16 @@ private struct WelcomeCard: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    // Long-press to swap this slot to a different starter action.
+                    .contextMenu {
+                        ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
+                            Button {
+                                replace(slot: index, with: option.label)
+                            } label: {
+                                Label(option.label, systemImage: option.icon)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -908,6 +945,7 @@ private struct ChatInputBar: View {
     let attachmentData: Data?
     let attachmentIsImage: Bool
     var isFocused: FocusState<Bool>.Binding
+    let incognito: Bool
     let onSend: () -> Void
     let onVoice: () -> Void
     let onAttach: () -> Void
@@ -978,6 +1016,15 @@ private struct ChatInputBar: View {
                         .onSubmit {
                             if canSend { onSend() }
                         }
+                        // Visible cue that this turn won't be saved while shadow mode is on.
+                        .overlay(alignment: .leading) {
+                            if incognito && text.isEmpty {
+                                Text("Shadow chat — not saved")
+                                    .font(.system(size: 15, weight: .light))
+                                    .foregroundStyle(Color.nmlMuted)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                     Rectangle()
                         .fill(Color.nmlHairline)
                         .frame(height: 0.5)
@@ -1010,10 +1057,14 @@ private struct ChatInputBar: View {
                     }
                     .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
                     .frame(width: 36, height: 36)
+                    // Pin the hit area to the 36pt circle so the overflowing pulse rings (50–62pt)
+                    // don't create dead/erratic tap zones, and keep the glass passive so it doesn't
+                    // compete with ScaleButtonStyle's gesture.
+                    .contentShape(Circle())
                     .nmlGlass(
                         Circle(),
                         tint: canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : nil,
-                        interactive: true
+                        interactive: false
                     )
                 }
                 .disabled(!canAct)

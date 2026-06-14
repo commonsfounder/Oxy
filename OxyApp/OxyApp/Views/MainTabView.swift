@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
@@ -6,6 +7,10 @@ struct MainTabView: View {
     @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
     @State private var selectedTab = Tab.today
+    // The bar slides out of the way while the keyboard is up (e.g. composing in chat) and
+    // returns when the keyboard dismisses — which the interactive scroll-to-dismiss makes a
+    // natural "swipe near that area to bring it back" gesture.
+    @State private var keyboardUp = false
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -40,6 +45,16 @@ struct MainTabView: View {
         .animation(.easeInOut(duration: 0.25), value: selectedTab)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar
+                .offset(y: keyboardUp ? 130 : 0)
+                .opacity(keyboardUp ? 0 : 1)
+                .allowsHitTesting(!keyboardUp)
+                .animation(.easeInOut(duration: 0.22), value: keyboardUp)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            keyboardUp = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardUp = false
         }
         .id(accentColor + appTheme + themeProfile)
         .onChange(of: selectedTab) { _, _ in
@@ -75,7 +90,10 @@ struct MainTabView: View {
                 }
             }
             .padding(6)
-            .nmlGlass(Capsule(), interactive: true)
+            // Passive glass: an `interactive` surface here captures presses for the whole bar
+            // and starves the individual tab Buttons (the "tap 50 times" bug). The buttons own
+            // their own gesture + highlight.
+            .nmlGlass(Capsule(), interactive: false)
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 4)
@@ -125,9 +143,10 @@ struct MoreView: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                VStack(spacing: 0) {
-                    ScreenHeaderView(title: "More")
-                    ScrollView {
+                // No fixed "More" header — the tab bar already labels this screen, and a sticky
+                // title here read as inconsistent next to Chat/Today. Let the account header lead,
+                // matching Today's scrolling feel.
+                ScrollView {
                         VStack(alignment: .leading, spacing: 34) {
                             accountHeader
 
@@ -163,17 +182,19 @@ struct MoreView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 32)
                     }
-                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in
-                switch dest {
-                case .profile: ProfileView()
-                case .pendant: PendantStatusView()
-                case .connectors: ConnectorsView()
-                case .memory: MemoryView()
-                case .settings: SettingsView()
+                Group {
+                    switch dest {
+                    case .profile: ProfileView()
+                    case .pendant: PendantStatusView()
+                    case .connectors: ConnectorsView()
+                    case .memory: MemoryView()
+                    case .settings: SettingsView()
+                    }
                 }
+                .swipeToDismiss()
             }
             .alert("Sign Out", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) { appState.logout() }
@@ -266,8 +287,9 @@ struct MoreView: View {
                     Text(subtitle)
                         .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .layoutPriority(1)
                 Spacer()
                 if let trailing {
                     HStack(spacing: 7) {
