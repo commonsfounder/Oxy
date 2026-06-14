@@ -78,6 +78,38 @@ test('context brain reuses route for what about tomorrow', () => {
   assert.equal(turn.actions[0].input.departure_time, 'tomorrow');
 });
 
+test('what about tomorrow keeps an arrival deadline instead of dropping it', () => {
+  const turn = resolveContextualTurn({
+    message: 'what about tomorrow',
+    recentActions: [
+      { type: 'get_directions', input: { destination: 'Selfridges', mode: 'transit', arrival_time: '9am' }, status: 'executed' }
+    ]
+  });
+  assert.equal(turn.actions[0].type, 'get_directions');
+  assert.equal(turn.actions[0].input.arrival_time, 'tomorrow 9am');
+  assert.equal(turn.actions[0].input.departure_time, undefined);
+});
+
+test('what platform answers from a route that carries a reliable platform', () => {
+  const turn = resolveContextualTurn({
+    message: 'what platform',
+    recentActions: [
+      {
+        type: 'plan_trip',
+        input: { origin: "King's Cross", destination: 'Edinburgh' },
+        status: 'executed',
+        result: {
+          itinerary: [{ type: 'rail', service: 'LNER', departure: '14:32', platform: '7' }],
+          routeContext: { platformReliable: true }
+        }
+      }
+    ]
+  });
+  assert.equal(turn.reason, 'contextual_platform');
+  assert.equal(turn.spokenOnly, true);
+  assert.match(turn.spoken, /Platform 7/);
+});
+
 test('context brain answers next bus confirmation from last route without model fallback', () => {
   const turn = resolveContextualTurn({
     message: "so that's the next bus?",

@@ -74,6 +74,20 @@ test('leave-time directions use preferred transport when no mode is explicit', (
   });
 });
 
+test('a meeting time is an arrival deadline, never a departure time', () => {
+  const routed = inferDeterministicAction('how do i get to selfridges, i have a meeting at 9');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.actions[0].input.arrival_time, '9');
+  assert.equal(routed.actions[0].input.departure_time, undefined);
+});
+
+test('an explicit leaving time is a departure time', () => {
+  const routed = inferDeterministicAction('how do i get to selfridges if i leave at 6');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.actions[0].input.departure_time, '6');
+  assert.equal(routed.actions[0].input.arrival_time, undefined);
+});
+
 test('future train journey requests defer to grounded answer instead of route connector', () => {
   assert.equal(inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley'), null);
 });

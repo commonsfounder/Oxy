@@ -706,13 +706,12 @@ is high — a missed train)
 - For live train times, platforms, or journey options, prefer a grounded search
   answer over the legacy transport connector. If route/train data is unavailable,
   say why plainly and give the best grounded alternative — don't paraphrase a
-  failure into "there are no trains".
-
-NOTE FOR MAINTAINER: tool-argument routing that used to live here (calendar-vs-
-music disambiguation, play_music vs add_to_music_playlist, find_place phrasing,
-book_uber natural-destination handling) belongs in the individual function
-descriptions inside actionPromptBlock(), not in the global prompt. Put each rule
-next to the tool it governs.`;
+  failure into "there are no trains".`;
+// Maintainer note (kept out of the model's context on purpose): tool-argument
+// routing — calendar-vs-music disambiguation, play_music vs add_to_music_playlist,
+// find_place phrasing, book_uber natural-destination handling — belongs in the
+// individual function descriptions inside actionPromptBlock(), not the global
+// prompt. Put each rule next to the tool it governs.
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -4328,7 +4327,9 @@ app.post('/proactive/:userId/run', async (req, res) => {
   try {
     const { userId } = req.params;
     if (!requireMatchingUser(req, res, userId)) return;
-    const summary = await runProactiveForUser(userId);
+    // Manual "Refresh" from the Today tab: force a regenerate so it never returns the same
+    // already-posted briefing.
+    const summary = await runProactiveForUser(userId, console, new Date(), { force: true });
     res.json({ ok: true, summary });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
@@ -4673,12 +4674,12 @@ async function getLatestNativeContext(userId) {
   return data || null;
 }
 
-async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
+async function buildIntervalBriefing(userId, window, nativeContext, now = new Date(), prefetchedCtx = null) {
   const [memory, history, preferences, ctx] = await Promise.all([
     getMemory(userId),
     getHistory(userId),
     getPreferences(userId),
-    gatherProactiveContext(userId, now)
+    prefetchedCtx ? Promise.resolve(prefetchedCtx) : gatherProactiveContext(userId, now)
   ]);
 
   const health = ctx.health;
@@ -4720,7 +4721,11 @@ Keep it under 70 words. Just the real, useful items — nothing else.`;
   return stripActionMarkupForDisplay(text).trim();
 }
 
-async function maybeCreateIntervalBriefing(userId, now = new Date()) {
+// Re-refresh a live window's briefing at most this often when nothing changed, so weather/news
+// stay current without re-calling the model on every 15-minute sweep.
+const BRIEFING_MAX_AGE_MS = 110 * 60 * 1000;
+
+async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = false } = {}) {
   const window = getBriefingWindow(now);
   if (!window) return null;
 
@@ -4732,24 +4737,47 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const todayKey = getLocalDateKey(now);
   const key = `proactive.briefing.${window.id}.${todayKey}`;
   const prefs = await getPreferenceMap(userId);
-  if (prefs[key] === 'sent') return null;
+  const state = parseJsonObject(prefs[key]); // { id, sig, at } — empty {} on first run / legacy 'sent'
 
-  const text = await buildIntervalBriefing(userId, window, nativeContext, now);
-  // Suppress empty/filler briefings: the model returns "NOTHING" when there's no real item, and
-  // we never post a briefing with no concrete content. Mark the window sent so we don't retry
-  // all day.
+  // Gather context up front and fingerprint it. Regenerate when the underlying calendar/email
+  // changed, when the last briefing is older than the max age, or when the user forced a refresh.
+  const ctx = await gatherProactiveContext(userId, now);
+  const sig = crypto.createHash('sha256').update(`${ctx.calendarText}\n--\n${ctx.emailText}`).digest('hex').slice(0, 16);
+  const fresh = state.at && (now.getTime() - new Date(state.at).getTime()) < BRIEFING_MAX_AGE_MS;
+  if (!force && state.sig === sig && fresh) return null;
+
+  const text = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
+  // No concrete content right now — record the signature so we don't re-call the model until
+  // something actually changes, but never permanently lock the window (later in the day there
+  // may be a real item).
   if (!text || /^NOTHING\b/i.test(text) || text.length < 12) {
-    await setPreferenceValue(userId, key, 'sent');
+    await setPreferenceValue(userId, key, JSON.stringify({ id: state.id, sig, at: now.toISOString() }));
     return null;
   }
-  const briefing = await createBriefing(userId, {
-    kind: `${window.id}_briefing`,
-    title: window.label,
-    body: text,
-    source: 'schedule',
-    metadata: { window: window.id, date: todayKey }
-  });
-  await setPreferenceValue(userId, key, 'sent');
+
+  let briefing;
+  if (state.id) {
+    // Refresh the existing window card in place so the Today tab shows one rolling card per
+    // window with current content, rather than stacking a new card on every change.
+    const { data, error } = await supabase
+      .from('briefings')
+      .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey } })
+      .eq('id', state.id)
+      .eq('user_id', userId)
+      .select('id, body')
+      .single();
+    briefing = error ? null : data;
+  }
+  if (!briefing) {
+    briefing = await createBriefing(userId, {
+      kind: `${window.id}_briefing`,
+      title: window.label,
+      body: text,
+      source: 'schedule',
+      metadata: { window: window.id, date: todayKey }
+    });
+  }
+  await setPreferenceValue(userId, key, JSON.stringify({ id: briefing.id, sig, at: now.toISOString() }));
   return { type: `${window.id}_briefing`, text: briefing.body };
 }
 
@@ -4946,13 +4974,13 @@ function emptyProactiveSummary() {
   };
 }
 
-async function runProactiveForUser(userId, logger = console, now = new Date()) {
+async function runProactiveForUser(userId, logger = console, now = new Date(), { force = false } = {}) {
   const summary = emptyProactiveSummary();
   summary.usersScanned = 1;
   try {
     const nativeContext = await getLatestNativeContext(userId);
     const [briefing, followUp, healthAlert, foodReminder, scheduledTasks] = await Promise.all([
-      maybeCreateIntervalBriefing(userId, now),
+      maybeCreateIntervalBriefing(userId, now, { force }),
       maybeCreateFailedActionFollowUp(userId, now),
       nativeContext ? maybeCreateHealthAlert(userId, nativeContext, now) : Promise.resolve(null),
       nativeContext ? maybeCreateHomeFoodReminder(userId, nativeContext, now) : Promise.resolve(null),

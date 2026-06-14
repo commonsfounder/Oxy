@@ -92,10 +92,18 @@ function cleanDestinationPhrase(message) {
   return text || normalizeText(message);
 }
 
+const TIME = /(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i;
+// Arrival cues mean a deadline to BE somewhere — "at 9" here is when to ARRIVE.
+const ARRIVAL_CUE = /\b(be (there|at)|need to be|needs? to be|meeting|appointment|arrive|arriving|get there|make it|for)\b/i;
+
 function extractArrivalTime(message) {
   const text = String(message || '');
   const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  const match = text.match(/\bby\s+(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i);
+  // "by X" is always an arrival deadline. "at/for X" only when an arrival cue is
+  // present ("meeting at 9", "be there at 8", "make it for 8") — otherwise a bare
+  // "at 9" is ambiguous and handled by departure detection below.
+  const match = text.match(new RegExp(`\\bby\\s+${TIME.source}`, 'i')) ||
+    (ARRIVAL_CUE.test(text) ? text.match(new RegExp(`\\b(?:at|for|by)\\s+${TIME.source}`, 'i')) : null);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 
@@ -105,8 +113,10 @@ function extractDepartureTime(message) {
   if (/\b(first|earliest)\s+train\b/i.test(text) && /\btomorrow\b/i.test(text)) {
     return 'tomorrow 00:01';
   }
-  const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i) ||
-    text.match(/\b(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm))/i);
+  // Only treat a time as a departure when the user explicitly states when they
+  // LEAVE — never from a bare "at 9" / "9pm", which is usually an arrival deadline
+  // (HARDCODED CORRECTNESS TRAP: a wrong departure_time = a missed train).
+  const match = text.match(new RegExp(`\\b(?:leav(?:e|ing)|set(?:ting)?\\s+off|depart(?:ing)?|head(?:ing)?\\s+off)\\s+(?:at|around|about|after|by)?\\s*${TIME.source}`, 'i'));
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 

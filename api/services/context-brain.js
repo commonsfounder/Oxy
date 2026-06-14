@@ -255,6 +255,14 @@ function routeLegSentence(leg, fallbackText = '') {
   return `${service}${dep}${from}${to}${arr}.${platform}`.trim();
 }
 
+// Shift a time string onto tomorrow without losing the clock time, so a "what
+// about tomorrow" follow-up keeps the original deadline instead of querying today.
+function withTomorrow(timeStr) {
+  const t = normalizeText(timeStr);
+  if (!t) return 'tomorrow';
+  return /tomorrow/i.test(t) ? t : `tomorrow ${t}`;
+}
+
 function contextualActionForMessage(message, contexts = [], memory = '', settings = {}) {
   const text = normalizeText(message);
   const lower = text.toLowerCase();
@@ -298,6 +306,24 @@ function contextualActionForMessage(message, contexts = [], memory = '', setting
         : `That is the route information I found: ${normalizeText(fallback).slice(0, 320)}`,
       resolvedContext: latestRoute
     };
+  }
+
+  if (latestRoute && /\b(what|which)\s+platform\b|^platform\??$/i.test(text)) {
+    const leg = firstRouteLeg(latestRoute, /rail|train/i);
+    const platform = leg?.platform || latestRoute.routeContext?.mainRailLeg?.platform;
+    const reliable = latestRoute.routeContext?.platformReliable !== false;
+    // Only answer from context when we actually have a reliable platform — otherwise
+    // fall through (return null) so the live grounded-search path can answer, since a
+    // planned-route platform is often stale or absent.
+    if (platform && reliable) {
+      return {
+        reason: 'contextual_platform',
+        spokenOnly: true,
+        spoken: `Platform ${platform}.`,
+        resolvedContext: latestRoute
+      };
+    }
+    return null;
   }
 
   if (latestRoute && /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text)) {
@@ -365,22 +391,22 @@ function contextualActionForMessage(message, contexts = [], memory = '', setting
 
   if (/\bwhat about\s+tomorrow\b/i.test(lower) && latestRoute?.input) {
     const input = { ...latestRoute.input };
-    if (latestRoute.suggestedAction === 'get_directions') {
-      input.departure_time = input.departure_time || 'tomorrow';
-      return {
-        reason: 'contextual_route_tomorrow',
-        spoken: "I'll check that for tomorrow.",
-        actions: [{ type: 'get_directions', input }],
-        resolvedContext: { ...latestRoute, suggestedAction: 'get_directions' }
-      };
+    // Preserve the original constraint: if the journey was arrival-deadline-driven,
+    // keep arrival_time (shifted to tomorrow); only fall back to a departure time
+    // when there was no deadline — otherwise we'd silently drop the "be there by" goal.
+    if (input.arrival_time) {
+      input.arrival_time = withTomorrow(input.arrival_time);
+      delete input.departure_time;
+    } else {
+      input.departure_time = withTomorrow(input.departure_time);
     }
-    input.departure_time = input.departure_time || 'tomorrow';
-    input.preference = input.preference || 'balanced';
+    const isDirections = latestRoute.suggestedAction === 'get_directions';
+    if (!isDirections) input.preference = input.preference || 'balanced';
     return {
-      reason: 'contextual_trip_tomorrow',
-      spoken: "I'll plan that for tomorrow.",
-      actions: [{ type: 'plan_trip', input }],
-      resolvedContext: { ...latestRoute, suggestedAction: 'plan_trip' }
+      reason: isDirections ? 'contextual_route_tomorrow' : 'contextual_trip_tomorrow',
+      spoken: isDirections ? "I'll check that for tomorrow." : "I'll plan that for tomorrow.",
+      actions: [{ type: isDirections ? 'get_directions' : 'plan_trip', input }],
+      resolvedContext: { ...latestRoute, suggestedAction: isDirections ? 'get_directions' : 'plan_trip' }
     };
   }
 
