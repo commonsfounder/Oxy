@@ -198,6 +198,13 @@ function routeTransitSteps(route) {
   return (leg?.steps || []).map(formatTransitStep).filter(Boolean);
 }
 
+// A mild nudge toward rail (in seconds, comparable to duration) so trains are
+// preferred over an equal-ish coach — but NOT a blunt override. The old flat
+// -200000 made ANY route containing rail beat ANY non-rail route regardless of
+// duration, so a multi-hour Eurostar detour won "directions to Apsley". Keeping
+// the bonus duration-comparable means a route that's wildly longer still loses.
+const RAIL_PREFERENCE_SECONDS = 1800;
+
 function scoreTripRoute(route, preference = '') {
   const leg = route?.legs?.[0];
   const steps = routeTransitSteps(route);
@@ -213,7 +220,7 @@ function scoreTripRoute(route, preference = '') {
     ? transitCount * 1400
     : transitCount * 700;
   const waitPenalty = waits.reduce((sum, wait) => sum + (wait > 45 ? wait * 80 : wait * 20), 0);
-  return (railCount ? -200000 : 0) + changePenalty + waitPenalty + duration;
+  return (railCount ? -RAIL_PREFERENCE_SECONDS : 0) + changePenalty + waitPenalty + duration;
 }
 
 function chooseBestTripRoute(routes = [], preference = '') {
@@ -234,6 +241,9 @@ function buildTransitRequestParams(destination, params = {}, railFirst = false) 
     destination: cleanPlaceSearchQuery(destination),
     mode: 'transit',
     alternatives: true,
+    // Bias geocoding to Great Britain so an ambiguous name ("Apsley") resolves to
+    // the UK town near the user, not a foreign match that routes via Eurostar.
+    region: 'gb',
     key
   };
   if (railFirst) requestParams.transit_mode = 'train|rail';
@@ -357,11 +367,22 @@ async function planTrip(destination, params = {}) {
       }
     };
   }
-  const railRoutes = await fetchTransitRoutes(cleanedDestination, params, true).catch(err => {
+  // Resolve the destination to a GB-biased, location-aware address first (same as
+  // get_directions) so the routing request gets a precise place instead of raw text
+  // that Google can geocode to the wrong "Apsley". Fall back to the cleaned text if
+  // Places isn't configured or finds nothing.
+  let routeDestination = cleanedDestination;
+  try {
+    const place = await resolvePlaceDestination(destination, { location: params.location });
+    if (place?.formattedAddress) routeDestination = place.formattedAddress;
+  } catch (err) {
+    console.warn('[maps] plan_trip destination resolve failed, using raw text:', err.message);
+  }
+  const railRoutes = await fetchTransitRoutes(routeDestination, params, true).catch(err => {
     console.warn('[maps] Rail-first Directions failed:', err.message);
     return null;
   });
-  const allRoutes = railRoutes || await fetchTransitRoutes(cleanedDestination, params, false).catch(err => {
+  const allRoutes = railRoutes || await fetchTransitRoutes(routeDestination, params, false).catch(err => {
     console.warn('[maps] Transit Directions failed:', err.message);
     return null;
   });
@@ -498,6 +519,7 @@ async function getGoogleDirections(destination, place, params = {}) {
     destination: place?.formattedAddress || cleanPlaceSearchQuery(destination),
     mode,
     alternatives: true,
+    region: 'gb',
     key
   };
   const arrival = parseDirectionTime(params.arrival_time);
@@ -604,4 +626,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { SUPPORTED_ACTIONS, execute, chooseBestTripRoute, scoreTripRoute };
