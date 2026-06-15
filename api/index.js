@@ -2757,12 +2757,20 @@ async function extractMemoryFact(userId, text) {
   try {
     const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const result = await model.generateContent(
-      `Extract one short personal fact worth remembering from this message. Write it as a concise note.
+      `Extract one short, DURABLE personal fact worth remembering long-term from this message. Write it as a concise note.
+
+Only save facts that stay true and identify the person: relationships and who people are, lasting preferences, where they study / work / live, ongoing commitments or health conditions, names of their school / employer / partner / pet.
+
+Return an EMPTY STRING for anything transient or low-signal — do not save:
+- one-off events, meetings, appointments, or schedules ("has a meeting with Hardik", "seeing Alisa Wednesday")
+- vague relational noise ("has conversations with Hardik", "talked to someone")
+- generic states that say nothing specific ("is a student", "takes the bus", "is busy")
+- moods or momentary feelings.
 
 CRITICAL: keep specific proper nouns exactly as stated — names of schools, colleges, employers, places, people, teams. NEVER generalise a name away. "I go to Cadbury Sixth Form College" → "School is Cadbury Sixth Form College" (NOT "Goes to school"). "I work at KPMG" → "Works at KPMG". For a school/college/work/home location, phrase it as "School is <name>" / "Work is <name>" / "Home is <address>" so it can be looked up later.
 
-Other examples: "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham".
-Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
+Good examples: "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham", "Partner is Alisa".
+Return only the fact with no explanation. If there is nothing durable and personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
     const fact = result.response.text().trim().replace(/^["']|["']$/g, '');
     if (!fact) return null;
@@ -4310,7 +4318,20 @@ app.get('/briefings/:userId', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    const visible = (data || []).filter(briefing => briefing.kind !== 'failed_action_followup');
+    // Strip any markdown the model slipped into the body (so "**Calendar**" / "* item"
+    // never render as raw asterisks), then collapse the daily interval briefings
+    // (wake/midday/evening/now) to only the most recent — otherwise the Today feed
+    // stacks 3-4 near-identical cards. Non-briefing kinds (health alerts) are each kept.
+    let keptIntervalBriefing = false;
+    const visible = (data || [])
+      .filter(briefing => briefing.kind !== 'failed_action_followup')
+      .map(briefing => ({ ...briefing, body: stripMarkdownEmphasis(briefing.body || '') }))
+      .filter(briefing => {
+        if (!/_briefing$/.test(briefing.kind || '')) return true;
+        if (keptIntervalBriefing) return false;
+        keptIntervalBriefing = true;
+        return true;
+      });
     res.json({ briefings: visible });
   } catch (err) {
     return sendServerError(res, err, 'server.error');
