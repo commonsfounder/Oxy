@@ -12,10 +12,6 @@ const ACTION_CONNECTOR = {
   get_telegram_contacts: 'telegram',
   search_trains: 'trainline',
   station_board: 'trainline',
-  order_uber_eats: 'ubereats',
-  order_deliveroo: 'deliveroo',
-  search_netflix_title: 'netflix',
-  add_to_netflix_list: 'netflix',
   search_github: 'github',
   get_github_notifications: 'github',
   create_github_issue: 'github',
@@ -100,11 +96,8 @@ function humanConnectorName(connectorId) {
     case 'google': return 'Google';
     case 'maps': return 'Maps';
     case 'uber': return 'Uber';
-    case 'ubereats': return 'Uber Eats';
-    case 'deliveroo': return 'Deliveroo';
     case 'telegram': return 'Telegram';
     case 'trainline': return 'Trainline';
-    case 'netflix': return 'Netflix';
     case 'github': return 'GitHub';
     case 'microsoft': return 'Outlook';
     case 'notion': return 'Notion';

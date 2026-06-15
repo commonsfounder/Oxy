@@ -63,15 +63,24 @@ Then run `npm run smoke` (the contract test sweeps every entry).
   design-literate, ~$400 buyer — not a cheap gadget. The aesthetic *is* the marketing. Bias every UI
   call toward restraint + visible competence over feature density.
 - **Aesthetic = "silent luxury":** pure black `#000000`, hairline `~#222` dividers, high negative space,
-  flat lists (no boxed card groupings), Title Case labels, elegant tracking-spaced **sans** (monospace
-  ONLY for raw telemetry — battery/latency/IDs). Sharp 90° corners everywhere **except** the one
-  signature: the liquid-glass bottom tab bar + circular header controls keep their curve.
+  flat lists (no boxed card groupings), Title Case labels. Sharp 90° corners everywhere **except** the
+  signatures: the liquid-glass bottom tab bar + circular header controls + a soft radius on chat bubbles.
+  **Not "techbro":** the buyer skews design-literate/feminine-leaning, and black minimalism is the
+  *inclusive*-luxury register (The Row, Celine, Aesop) — the fix for "too masculine" is **de-gadgeting**
+  (kill spec-sheet signifiers), NOT lightening/softening into a feminine cliché (that pivot was tried in
+  `edcc0dd` and **reverted** in `7f85cd4` — it added light-mode/cream and nuked the black canvas).
+- **Type system:** `Font.nmlDisplay` = **Fraunces** (editorial serif, the soul — titles/hero only);
+  `Font.nmlBody` = **Inter** (running text + labels); `Font.nmlMono` = monospace, reserved **strictly**
+  for raw telemetry (battery/latency/version/IDs) — never labels/chips/buttons/timestamps. Fonts ship in
+  `Resources/Fonts/` (OFL) via `UIAppFonts`. No `[ bracketed ]` button labels (CLI cosplay — removed).
 - **Theme tokens live in `OxyApp/.../Extensions/NamelessTheme.swift`.** Every view reads the `nml*`
   `Color` tokens (`nmlInk`, `nmlMuted`, `nmlTitanium` = accent, `nmlHairline`/`nmlCardBorder` = border,
   `nmlGlow`, `nmlSurface`). These are **computed from the active finish** — change them here, the whole
   app re-skins. Don't hardcode colors in views.
-- **Customization engine = 3 finishes** (`OxyTheme` in the same file): Raw Obsidian, **Brushed Titanium
-  (default)**, Warm Gold. Pure black is invariant; only accent/detail/border shift. Selection persists to
+- **Customization engine = 3 finishes** (`OxyTheme` in the same file): Onyx, **Moonstone (default)**,
+  Champagne — gemstone names, not spec-sheet metal. (Their `id`s stay `obsidian`/`titanium`/`gold` so
+  saved selections survive; only the display `name` is evocative.) Pure black is invariant; only
+  accent/detail/border shift, and the default neutrals carry a touch of warmth (not cold steel grey). Selection persists to
   `@AppStorage("oxy_theme_profile")`; `MainTabView` re-keys its `.id(...)` on it so a change repaints the
   tree. There is no longer a 9-accent picker — don't reintroduce one.
 - **More-tab IA = one home per domain** (`MainTabView.MoreView` → fullScreenCover): **Profile** = account

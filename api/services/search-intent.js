@@ -50,7 +50,7 @@ const CHANGEABLE_QUESTION_PATTERNS = [
 const NON_SEARCH_PATTERNS = [
   /\b(send|text|message|email|call|ring|telegram|whatsapp|imessage)\b/i,
   /\b(remind|reminder|calendar|event|schedule me|add to calendar)\b/i,
-  /\b(book|order|get me|take me|uber|ubereats|deliveroo|train|trainline)\b/i,
+  /\b(book|order|get me|take me|uber|train|trainline)\b/i,
   /\b(play|pause|skip|spotify|music)\b/i,
   /\b(forget|delete from memory|wipe memory|remember)\b/i,
   /\bmy\b.+\b(email|calendar|memory|reminder|messages?|settings|preferences)\b/i

@@ -525,8 +525,10 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
   return data;
 }
 
-const OXCY_SYSTEM_PROMPT = `You are Oxy — a dry, sharp, slightly cynical friend.
-Not a servant, not "an AI assistant".
+const OXCY_SYSTEM_PROMPT = `You are a dry, sharp, slightly cynical friend.
+Not a servant, not "an AI assistant". You have no name — if asked what you're
+called, you don't have a name and don't make one up; deflect dryly and move on.
+If the user gives you a name, wear it without comment.
 
 Be direct, grounded, useful. You are not a command router that maps keywords to
 tools — you are a capable assistant who reads what the user actually means using
@@ -1767,10 +1769,6 @@ const ACTION_STATUS_LABELS = {
   send_telegram: 'Sending Telegram message',
   get_telegram_contacts: 'Checking Telegram contacts',
   search_trains: 'Checking train times',
-  order_uber_eats: 'Opening Uber Eats',
-  order_deliveroo: 'Opening Deliveroo',
-  search_netflix_title: 'Searching Netflix',
-  add_to_netflix_list: 'Opening Netflix list',
   search_github: 'Searching GitHub',
   get_github_notifications: 'Checking GitHub notifications',
   create_github_issue: 'Creating GitHub issue',
@@ -3159,10 +3157,7 @@ function buildAvailableActions(enabled) {
     homekit: ['homekit_control'],
     maps: ['find_place', 'get_directions', 'plan_trip'],
     uber: ['book_uber'],
-    ubereats: ['order_uber_eats'],
-    netflix: ['search_netflix_title', 'add_to_netflix_list'],
     telegram: ['send_telegram', 'get_telegram_contacts'],
-    deliveroo: ['order_deliveroo'],
     monzo: ['check_balance'],
     betfair: ['place_bet'],
     notion: ['search_notion', 'create_notion_page', 'append_notion_page'],
@@ -4016,9 +4011,6 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
 
 const CONNECTORS = [
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
-  { id: 'netflix',   name: 'Netflix',                   icon: 'netflix', category: 'Entertainment', implemented: true },
-  { id: 'deliveroo', name: 'Deliveroo',                 icon: 'deliveroo', category: 'Food',          implemented: true },
-  { id: 'ubereats',  name: 'Uber Eats',                 icon: 'ubereats', category: 'Food',          implemented: true },
   { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
   { id: 'maps',      name: 'Maps',                      icon: 'maps', category: 'Travel',        implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
@@ -4702,7 +4694,7 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
 
   const health = ctx.health;
   const location = ctx.location;
-  const systemPrompt = `You are Oxy writing a useful, concise ${window.label.toLowerCase()} for the user.
+  const systemPrompt = `You are writing a useful, concise ${window.label.toLowerCase()} for the user.
 
 Report only concrete, real items: actual calendar events and emails shown below, plus genuinely useful current info from Google Search grounding (weather for their location, relevant news). Use their location for weather.
 
@@ -4932,7 +4924,7 @@ async function buildScheduledTaskResponse(userId, task, now = new Date()) {
 
   const health = ctx.health;
   const location = ctx.location;
-  const systemPrompt = `You are Oxy. The user previously asked you to do this on a schedule:
+  const systemPrompt = `The user previously asked you to do this on a schedule:
 "${task.instruction}"
 
 Fulfil it now. Use the real calendar events, emails, and context below, and Google Search

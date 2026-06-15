@@ -207,40 +207,6 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Station board failed',
     confirmation: 'none'
   },
-  order_uber_eats: {
-    risk: 'high',
-    required: ['query'],
-    inputExample: { query: 'food or restaurant', restaurant: 'optional restaurant name', item: 'optional dish' },
-    successSummary: 'Uber Eats opened',
-    failureSummary: 'Uber Eats failed',
-    confirmation: 'review_required',
-    executionMode: 'review'
-  },
-  order_deliveroo: {
-    risk: 'high',
-    required: ['query'],
-    inputExample: { query: 'food or restaurant', restaurant: 'optional restaurant name', item: 'optional dish' },
-    successSummary: 'Deliveroo opened',
-    failureSummary: 'Deliveroo failed',
-    confirmation: 'review_required',
-    executionMode: 'review'
-  },
-  search_netflix_title: {
-    risk: 'low',
-    required: ['title'],
-    inputExample: { title: 'show or film title' },
-    successSummary: 'Netflix searched',
-    failureSummary: 'Netflix search failed',
-    confirmation: 'none'
-  },
-  add_to_netflix_list: {
-    risk: 'medium',
-    required: ['title'],
-    inputExample: { title: 'show or film title' },
-    successSummary: 'Netflix opened',
-    failureSummary: 'Netflix failed',
-    confirmation: 'external_app'
-  },
   forget_memory: {
     risk: 'medium',
     required: ['scope'],

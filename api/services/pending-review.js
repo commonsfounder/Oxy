@@ -45,8 +45,6 @@ function reviewTitleForAction(action) {
     case 'send_message': return 'Review message';
     case 'send_telegram': return 'Review Telegram';
     case 'book_uber': return 'Review Uber';
-    case 'order_uber_eats': return 'Review Uber Eats';
-    case 'order_deliveroo': return 'Review Deliveroo';
     case 'make_call': return 'Review call';
     case 'send_outlook_email': return 'Review email';
     case 'create_github_issue': return 'Review GitHub issue';
@@ -76,9 +74,6 @@ function reviewDetailForAction(action) {
       return [input.contact, input.message].filter(Boolean).join(' · ');
     case 'book_uber':
       return input.destination ? `Destination: ${input.destination}` : '';
-    case 'order_uber_eats':
-    case 'order_deliveroo':
-      return [input.restaurant, input.item, input.query].filter(Boolean).join(' · ');
     case 'make_call':
       return input.contact ? `Contact: ${input.contact}` : '';
     default:
