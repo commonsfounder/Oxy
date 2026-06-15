@@ -557,6 +557,13 @@ async function execute(userId, action, params) {
     if (action === 'get_directions') {
       const destination = String(params?.destination || params?.query || '').trim();
       if (!destination) return { success: false, error: 'get_directions requires a destination' };
+      // Transit/bus journeys go through the robust multi-leg planner — the single-route
+      // directions path returns degenerate summaries like "7 mins by transit" for a
+      // 1-hour bus trip (it falls back to a tiny walking leg). plan_trip does rail/bus
+      // alternatives + sane scoring, so a bus ask gets the real itinerary first time.
+      if (directionModeFlag(params.mode) === 'r') {
+        return await planTrip(destination, params || {});
+      }
       let place = null;
       try {
         place = await resolvePlaceDestination(destination, { location: params.location });

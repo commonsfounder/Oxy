@@ -1399,10 +1399,6 @@ function lastActionOfType(actions, types) {
   return actions.find(action => wanted.includes(action.type));
 }
 
-function isClarificationRequest(message) {
-  return /^(huh|what|what\?|wdym|what do you mean|what does that mean|i don'?t get it)$/i.test(String(message || '').trim());
-}
-
 async function inferContextualDeterministicTurn(userId, message, settings, trace = null, options = {}) {
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
@@ -1435,17 +1431,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
     }
   }
 
-  if (isClarificationRequest(text)) {
-    const history = await getHistory(userId, trace, 10, historyOptions);
-    const lastAssistant = [...history].reverse().find(row => row.role === 'assistant' && String(row.content || '').trim());
-    if (lastAssistant?.content) {
-      return {
-        reason: 'clarify_previous_turn',
-        spokenOnly: true,
-        spoken: `I meant: ${String(lastAssistant.content).trim()}`
-      };
-    }
-  }
+  // "huh" / "what" used to short-circuit to `I meant: <verbatim repeat>`, which just
+  // parrots the previous answer — useless when that answer was wrong. Let it fall through
+  // to the model so it can actually re-examine or own the confusion.
 
   const isCalendarCorrection = /\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text);
   const isDatedCalendarAdd = /\b(add|put|create)\b.+\b(today|tomorrow|all day|at\s+\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i.test(text) &&
