@@ -79,14 +79,8 @@ private struct LoginFormPage: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer().frame(height: 96)
 
-                Text("NAMELESS")
-                    .font(.system(size: 13, weight: .medium))
-                    .tracking(7)
-                    .foregroundStyle(Color.nmlMuted)
-                    .padding(.bottom, 8)
-
                 Text(isRegistering ? "Create your account." : "Welcome back.")
-                    .font(.system(size: 26, weight: .light, design: .serif))
+                    .font(.nmlDisplay(30, weight: .light))
                     .foregroundStyle(Color.nmlInk)
                     .padding(.bottom, 44)
 
@@ -97,7 +91,7 @@ private struct LoginFormPage: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.nmlMono(11, weight: .medium))
+                        .font(.nmlBody(12, weight: .medium))
                         .foregroundStyle(Color.nmlDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)
@@ -111,9 +105,9 @@ private struct LoginFormPage: View {
                                 .tint(.black)
                                 .scaleEffect(0.8)
                         }
-                        Text("[ \(isRegistering ? "CREATE ACCOUNT" : "SIGN IN") ]")
+                        Text(isRegistering ? "Create Account" : "Sign In")
                             .font(.system(size: 14, weight: .semibold))
-                            .tracking(2)
+                            .tracking(1.5)
                     }
                     .foregroundStyle(Color.black)
                     .frame(maxWidth: .infinity)

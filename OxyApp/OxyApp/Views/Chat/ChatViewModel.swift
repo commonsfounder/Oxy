@@ -53,8 +53,7 @@ final class ChatViewModel {
     }
 
     private static let autoOpenActions: Set<String> = [
-        "book_uber", "order_deliveroo", "order_uber_eats",
-        "search_netflix_title", "add_to_netflix_list",
+        "book_uber",
         "make_call", "add_to_music_playlist", "open_app"
     ]
 
@@ -666,7 +665,7 @@ final class ChatViewModel {
                 message.isStreaming = false
             }
             statusLabel = nil
-            networkError = "Oxy got stuck waiting for the network. Try again."
+            networkError = "Got stuck waiting on the network. Try again."
             lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
         }

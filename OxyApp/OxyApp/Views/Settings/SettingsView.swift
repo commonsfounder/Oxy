@@ -195,7 +195,7 @@ struct SettingsView: View {
     }
 
     private var currentFinishName: String {
-        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Brushed Titanium"
+        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Moonstone"
     }
 
     private func previewVoice(_ voice: String) {
@@ -272,9 +272,9 @@ struct SettingsView: View {
             Button {
                 previewVoice(settings.voice)
             } label: {
-                Text(voicePreview.isLoading ? "…" : (voicePreview.isPlaying ? "PLAYING" : "PREVIEW"))
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(1.4)
+                Text(voicePreview.isLoading ? "…" : (voicePreview.isPlaying ? "Playing" : "Preview"))
+                    .font(.nmlBody(12, weight: .medium))
+                    .tracking(0.4)
                     .foregroundStyle(Color.nmlMuted)
             }
             .buttonStyle(.plain)
@@ -294,9 +294,9 @@ struct SettingsView: View {
                     }
                 }
             } label: {
-                Text(selectedVoiceLabel.uppercased())
-                    .font(.nmlMono(12, weight: .medium))
-                    .tracking(1.2)
+                Text(selectedVoiceLabel)
+                    .font(.nmlBody(13, weight: .medium))
+                    .tracking(0.2)
                     .foregroundStyle(Color.nmlTitanium)
             }
             .buttonStyle(.plain)
@@ -524,9 +524,9 @@ private struct InitiativeScroller: View {
                         .foregroundStyle(Color.nmlMuted)
                 }
                 Spacer()
-                Text(selection.uppercased())
-                    .font(.nmlMono(12, weight: .medium))
-                    .tracking(1.2)
+                Text(selection)
+                    .font(.nmlBody(13, weight: .medium))
+                    .tracking(0.2)
                     .foregroundStyle(Color.nmlTitanium)
             }
 
@@ -534,14 +534,14 @@ private struct InitiativeScroller: View {
                 .tint(Color.nmlTitanium)
 
             HStack {
-                Text("QUIET")
+                Text("Quiet")
                 Spacer()
-                Text("STEADY")
+                Text("Steady")
                 Spacer()
-                Text("ACTIVE")
+                Text("Active")
             }
-            .font(.nmlMono(9, weight: .medium))
-            .tracking(1.0)
+            .font(.nmlBody(10, weight: .medium))
+            .tracking(0.3)
             .foregroundStyle(Color.nmlMuted)
         }
         .padding(.vertical, 16)
@@ -561,7 +561,7 @@ private struct InitiativeScroller: View {
 // MARK: - Settings Model
 
 struct OxySettings: Codable {
-    var name: String = "Nameless"
+    var name: String = ""
     var voice: String = "Aoede"
     var voiceOn: Bool = true
     var voiceEngine: String = "current"
@@ -593,7 +593,7 @@ struct OxySettings: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Nameless"
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
         voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
         voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"

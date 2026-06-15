@@ -11,9 +11,9 @@ struct SetupPendantView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                Text("[ CONNECTING DEVICE ]")
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(2)
+                Text("CONNECTING DEVICE")
+                    .font(.nmlBody(11, weight: .semibold))
+                    .tracking(2.4)
                     .foregroundStyle(Color.nmlMuted)
 
                 PendantGlyph()

@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 // Connector IDs that are not yet meaningfully integrated
-private let hiddenConnectorIDs: Set<String> = ["netflix", "deliveroo", "trainline", "ubereats", "uber_eats"]
+private let hiddenConnectorIDs: Set<String> = ["trainline"]
 
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
@@ -453,8 +453,8 @@ private struct NativeCapabilityRow: View {
                 Task { await onAction() }
             } label: {
                 Text(statusLabel)
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(1.2)
+                    .font(.nmlBody(12, weight: .semibold))
+                    .tracking(0.3)
                     .foregroundStyle(Color.nmlTitanium)
             }
             .buttonStyle(.plain)
@@ -464,9 +464,9 @@ private struct NativeCapabilityRow: View {
 
     private var statusLabel: String {
         switch item.status {
-        case .granted:       return "ENABLED"
-        case .denied:        return "SETTINGS"
-        case .notDetermined: return "ENABLE"
+        case .granted:       return "Enabled"
+        case .denied:        return "Settings"
+        case .notDetermined: return "Enable"
         }
     }
 }
@@ -491,8 +491,7 @@ private struct IntegrationRow: View {
                     .font(.system(size: 16, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                 Text(detail)
-                    .font(.nmlMono(10, weight: .medium))
-                    .tracking(1.0)
+                    .font(.nmlBody(12, weight: .regular))
                     .foregroundStyle(Color.nmlMuted)
             }
 

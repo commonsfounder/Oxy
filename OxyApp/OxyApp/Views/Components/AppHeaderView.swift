@@ -10,8 +10,6 @@ struct AppHeaderView: View {
     /// Invoked when the left menu icon is tapped (open history/sidebar).
     var onLeading: () -> Void = {}
 
-    private let muted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255) // #8E8E93
-
     private let circle: CGFloat = 38
 
     var body: some View {

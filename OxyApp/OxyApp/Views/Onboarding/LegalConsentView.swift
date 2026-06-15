@@ -18,17 +18,17 @@ struct LegalConsentView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
 
-                Text("[ AGREEMENT ]")
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(2)
+                Text("AGREEMENT")
+                    .font(.nmlBody(11, weight: .semibold))
+                    .tracking(2.4)
                     .foregroundStyle(Color.nmlMuted)
 
                 Text("Before we begin.")
-                    .font(.system(size: 34, weight: .regular, design: .serif))
+                    .font(.nmlDisplay(36, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                     .padding(.top, 18)
 
-                Text("Nameless works for you alone. Confirm you've read how it handles your data before continuing.")
+                Text("Yours alone. Confirm you've read how your data is handled before continuing.")
                     .font(.system(size: 15, weight: .light))
                     .foregroundStyle(Color.nmlMuted)
                     .lineSpacing(4)

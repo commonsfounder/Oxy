@@ -35,7 +35,7 @@ struct ProfileView: View {
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(Color.nmlInk)
                                     Spacer(minLength: 16)
-                                    TextField("Nameless", text: $settings.name)
+                                    TextField("Unnamed", text: $settings.name)
                                         .font(.system(size: 15, weight: .light))
                                         .foregroundStyle(Color.nmlInk)
                                         .tint(Color.nmlTitanium)

@@ -48,7 +48,7 @@ struct MessageBubble: View {
                             )
                         } else {
                             Text(message.content)
-                                .font(.system(size: isCompact ? 14 : 15))
+                                .font(.nmlBody(isCompact ? 14 : 15))
                                 .foregroundStyle(Color.nmlInk)
                                 .lineSpacing(isCompact ? 3 : 5)
                         }
@@ -62,7 +62,7 @@ struct MessageBubble: View {
                     .padding(.vertical, isUser ? 9 : 0)
                     .background {
                         if isUser {
-                            Rectangle()
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .fill(Color.white.opacity(0.12))
                         }
                     }
@@ -106,7 +106,7 @@ struct MessageBubble: View {
                 HStack(spacing: 4) {
                     if isUser { Spacer() }
                     Text(message.timestamp, style: .time)
-                        .font(.nmlMono(9))
+                        .font(.nmlBody(10))
                         .foregroundStyle(Color.nmlMuted)
                     if !isUser { Spacer() }
                 }
@@ -130,7 +130,7 @@ private struct StreamingWordText: View {
 
     var body: some View {
         Text(attributedText)
-            .font(.system(size: fontSize))
+            .font(.nmlBody(fontSize))
             .foregroundStyle(Color.nmlInk)
             .lineSpacing(lineSpacing)
             .animation(.easeOut(duration: 0.28), value: words.count)

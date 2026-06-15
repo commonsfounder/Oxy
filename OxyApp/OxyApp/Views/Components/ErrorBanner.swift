@@ -15,17 +15,17 @@ struct ErrorBanner: View {
             Spacer(minLength: 8)
 
             if let onRetry {
-                Button("RETRY", action: onRetry)
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(1.2)
+                Button("Retry", action: onRetry)
+                    .font(.nmlBody(12, weight: .semibold))
+                    .tracking(0.3)
                     .foregroundStyle(Color.nmlTitanium)
                     .buttonStyle(.plain)
             }
 
             if let onDismiss {
-                Button("DISMISS", action: onDismiss)
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(1.2)
+                Button("Dismiss", action: onDismiss)
+                    .font(.nmlBody(12, weight: .semibold))
+                    .tracking(0.3)
                     .foregroundStyle(Color.nmlMuted)
                     .buttonStyle(.plain)
             }

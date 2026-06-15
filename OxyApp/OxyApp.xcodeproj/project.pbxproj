@@ -26,6 +26,8 @@
 		A10000010000000000000018 /* ConnectorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000018 /* ConnectorsView.swift */; };
 		A10000010000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019 /* SettingsView.swift */; };
 		A10000010000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000020 /* Assets.xcassets */; };
+		A10000010000000000000F03 /* Fraunces.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F01 /* Fraunces.ttf */; };
+		A10000010000000000000F04 /* Inter.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F02 /* Inter.ttf */; };
 		A10000010000000000000021 /* LocationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000021 /* LocationManager.swift */; };
 		A10000010000000000000022 /* VoiceInputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000022 /* VoiceInputManager.swift */; };
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
@@ -50,7 +52,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		96C2E2002FDEA5C400917877 /* AVAudioSession+Async.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AVAudioSession+Async.swift"; sourceTree = "<group>"; };
 		A20000010000000000000001 /* OxyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OxyApp.swift; sourceTree = "<group>"; };
 		A20000010000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		A20000010000000000000003 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
@@ -70,6 +71,8 @@
 		A20000010000000000000018 /* ConnectorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A20000010000000000000F01 /* Fraunces.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Fraunces.ttf; sourceTree = "<group>"; };
+		A20000010000000000000F02 /* Inter.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Inter.ttf; sourceTree = "<group>"; };
 		A20000010000000000000021 /* LocationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000022 /* VoiceInputManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInputManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000023 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -112,7 +115,6 @@
 			children = (
 				A50000010000000000000002 /* OxyApp */,
 				A50000010000000000000099 /* Products */,
-				96C2E2002FDEA5C400917877 /* AVAudioSession+Async.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -223,6 +225,8 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000020 /* Assets.xcassets */,
+				A20000010000000000000F01 /* Fraunces.ttf */,
+				A20000010000000000000F02 /* Inter.ttf */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -336,6 +340,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000010000000000000020 /* Assets.xcassets in Resources */,
+				A10000010000000000000F03 /* Fraunces.ttf in Resources */,
+				A10000010000000000000F04 /* Inter.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

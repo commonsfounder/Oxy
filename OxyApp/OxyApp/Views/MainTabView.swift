@@ -130,7 +130,6 @@ struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
     @State private var showSignOutConfirm = false
-    @State private var assistantName = "Nameless"
 
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
 
@@ -151,7 +150,7 @@ struct MoreView: View {
                             accountHeader
 
                             group(title: "Assistant") {
-                                moreRow(title: "Memory", subtitle: "What \(assistantName) remembers about you") {
+                                moreRow(title: "Memory", subtitle: "What's remembered about you") {
                                     destination = .memory
                                 }
                                 NamelessDivider()
@@ -202,7 +201,6 @@ struct MoreView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-            .onAppear(perform: loadAssistantName)
         }
     }
 
@@ -224,10 +222,10 @@ struct MoreView: View {
                     .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(assistantName)
+                    Text("Account")
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(Color.nmlInk)
-                    Text("Profile · account · sign out")
+                    Text("Identity, export, sign out")
                         .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                 }
@@ -245,8 +243,10 @@ struct MoreView: View {
     }
 
     private var monogram: String {
-        let trimmed = assistantName.trimmingCharacters(in: .whitespaces)
-        return String(trimmed.first ?? "O").uppercased()
+        // Derive the account monogram from the signed-in user's id (the product itself
+        // is nameless), falling back to a neutral dash.
+        let trimmed = appState.userId.trimmingCharacters(in: .whitespaces)
+        return String(trimmed.first ?? "—").uppercased()
     }
 
     private var pendantStatusText: String? {
@@ -296,9 +296,9 @@ struct MoreView: View {
                         if trailingLive {
                             NamelessStatusDot(isLive: true, diameter: 5)
                         }
-                        Text(trailing.uppercased())
-                            .font(.nmlMono(10, weight: .medium))
-                            .tracking(1.0)
+                        Text(trailing)
+                            .font(.nmlBody(11, weight: .medium))
+                            .tracking(0.2)
                             .foregroundStyle(Color.nmlMuted)
                     }
                 }
@@ -326,14 +326,6 @@ struct MoreView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func loadAssistantName() {
-        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
-           let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
-           !saved.name.trimmingCharacters(in: .whitespaces).isEmpty {
-            assistantName = saved.name
-        }
     }
 }
 

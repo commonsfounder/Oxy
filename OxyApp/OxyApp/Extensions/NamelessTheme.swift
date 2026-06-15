@@ -34,26 +34,29 @@ struct OxyThemeProfile: Identifiable, Equatable {
         Color(red: r / 255, green: g / 255, blue: b / 255)
     }
 
-    /// Raw Obsidian — pure black, dark-grey accents, near-white text.
+    /// Onyx — the cool, raw finish: neutral graphite accents, near-white text.
+    /// (id stays "obsidian" so saved selections survive the rename.)
     static let obsidian = OxyThemeProfile(
-        id: "obsidian", name: "Raw Obsidian",
+        id: "obsidian", name: "Onyx",
         ink: rgb(250, 250, 250), muted: rgb(110, 110, 115),
         accent: rgb(124, 124, 130), glow: rgb(184, 184, 190),
         border: rgb(34, 34, 34), surface: rgb(12, 12, 13), surface2: rgb(22, 22, 24)
     )
 
-    /// Brushed Titanium — pure black, muted steel-grey accents, cool silver detail.
+    /// Moonstone — the default finish: a warm silver-white that reads like polished
+    /// stone rather than brushed metal. Neutrals carry a touch of warmth so the UI
+    /// feels like jewelry, not a spec sheet. (id stays "titanium".)
     static let titanium = OxyThemeProfile(
-        id: "titanium", name: "Brushed Titanium",
-        ink: rgb(240, 239, 235), muted: rgb(142, 142, 147),
-        accent: rgb(199, 202, 206), glow: rgb(214, 217, 220),
-        border: rgb(34, 34, 34), surface: rgb(14, 14, 16), surface2: rgb(21, 21, 23)
+        id: "titanium", name: "Moonstone",
+        ink: rgb(243, 239, 232), muted: rgb(151, 146, 138),
+        accent: rgb(208, 203, 196), glow: rgb(222, 217, 209),
+        border: rgb(37, 36, 33), surface: rgb(16, 15, 13), surface2: rgb(24, 22, 20)
     )
 
-    /// Warm Gold — pure black, deep champagne accents, soft gold detail.
+    /// Champagne — deep champagne shine, soft gold detail. (id stays "gold".)
     static let gold = OxyThemeProfile(
-        id: "gold", name: "Warm Gold",
-        ink: rgb(244, 239, 230), muted: rgb(140, 131, 120),
+        id: "gold", name: "Champagne",
+        ink: rgb(244, 239, 230), muted: rgb(150, 139, 126),
         accent: rgb(200, 168, 118), glow: rgb(224, 207, 168),
         border: rgb(41, 35, 26), surface: rgb(16, 14, 10), surface2: rgb(24, 21, 15)
     )
@@ -94,6 +97,17 @@ extension Color {
 }
 
 extension Font {
+    /// Editorial display face (Fraunces) — high-contrast serif with real personality.
+    /// Reserved for titles and hero copy: the one place the type gets to have a voice.
+    static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .custom("Fraunces", size: size).weight(weight)
+    }
+
+    /// Body / UI face (Inter) — a clean, even grotesque for running text and labels.
+    static func nmlBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .custom("Inter", size: size).weight(weight)
+    }
+
     /// Clean monospace for technical readouts — battery, latency, connection state.
     static func nmlMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
@@ -245,9 +259,9 @@ struct NamelessPrimaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text("[ \(title) ]")
+            Text(title)
                 .font(.system(size: 14, weight: .semibold))
-                .tracking(2)
+                .tracking(1.5)
                 .foregroundStyle(Color.black)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
@@ -392,9 +406,9 @@ struct NamelessOutlineButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text("[ \(title) ]")
+            Text(title)
                 .font(.system(size: 14, weight: .medium))
-                .tracking(2)
+                .tracking(1.5)
                 .foregroundStyle(Color.nmlMuted)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)

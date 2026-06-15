@@ -458,7 +458,9 @@ private struct SidebarSearchResultRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
-                Text(result.role == "user" ? "You" : "Nameless")
+                // The assistant is nameless — only the user's turns are labelled; the
+                // reply is just a presence (no author stamp).
+                Text(result.role == "user" ? "You" : "")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Color.nmlMuted)
                 Spacer()

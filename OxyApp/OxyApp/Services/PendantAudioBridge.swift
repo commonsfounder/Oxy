@@ -263,7 +263,7 @@ final class PendantAudioBridge {
         } catch {
             print("[PendantBridge] Transcription error: \(error.localizedDescription)")
             errorMessage = "Transcription failed"
-            showNotice("Couldn't reach Oxy — check connection")
+            showNotice("Couldn't reach the server — check your connection")
             state = .listening
         }
     }

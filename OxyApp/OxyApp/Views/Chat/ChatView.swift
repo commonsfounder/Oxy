@@ -883,7 +883,7 @@ private struct WelcomeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             Text("Where should we begin?")
-                .font(.system(size: 22, weight: .light))
+                .font(.nmlDisplay(25, weight: .light))
                 .foregroundStyle(Color.nmlInk)
 
             VStack(alignment: .leading, spacing: 16) {

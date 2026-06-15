@@ -91,8 +91,9 @@ struct PendantStatusView: View {
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { selection.wrappedValue = option }
                     } label: {
-                        Text("[ \(option) ]")
-                            .font(.nmlMono(11, weight: .medium))
+                        Text(option)
+                            .font(.nmlBody(12, weight: .medium))
+                            .tracking(0.3)
                             .foregroundStyle(selection.wrappedValue == option ? Color.nmlInk : Color(white: 0.27))
                     }
                     .buttonStyle(.plain)

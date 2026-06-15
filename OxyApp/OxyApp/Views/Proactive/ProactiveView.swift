@@ -120,7 +120,7 @@ private struct ProactiveHeader: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Today")
-                    .font(.system(size: 30, weight: .regular, design: .serif))
+                    .font(.nmlDisplay(32, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                 Spacer()
                 Button(action: onCheckNow) {
@@ -129,9 +129,9 @@ private struct ProactiveHeader: View {
                             .scaleEffect(0.7)
                             .tint(Color.nmlMuted)
                     } else {
-                        Text("REFRESH")
-                            .font(.nmlMono(11, weight: .medium))
-                            .tracking(1.4)
+                        Text("Refresh")
+                            .font(.nmlBody(12, weight: .medium))
+                            .tracking(0.6)
                             .foregroundStyle(Color.nmlTitanium)
                     }
                 }
@@ -145,8 +145,7 @@ private struct ProactiveHeader: View {
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(Color.nmlTitanium)
                     Text(weather.shortLine)
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(0.5)
+                        .font(.nmlBody(12, weight: .regular))
                         .foregroundStyle(Color.nmlMuted)
                 }
             }
@@ -166,7 +165,7 @@ private struct BriefingRow: View {
                     .foregroundStyle(Color.nmlInk)
                 Spacer(minLength: 12)
                 Text(timeLabel)
-                    .font(.nmlMono(10))
+                    .font(.nmlBody(11))
                     .foregroundStyle(Color.nmlMuted)
             }
 
@@ -178,15 +177,15 @@ private struct BriefingRow: View {
 
             HStack {
                 if let sourceLabel {
-                    Text(sourceLabel.uppercased())
-                        .font(.nmlMono(10, weight: .medium))
-                        .tracking(1.0)
+                    Text(sourceLabel)
+                        .font(.nmlBody(11, weight: .medium))
+                        .tracking(0.3)
                         .foregroundStyle(Color.nmlMuted)
                 }
                 Spacer()
-                Button("DISMISS", action: onDismiss)
-                    .font(.nmlMono(10, weight: .medium))
-                    .tracking(1.0)
+                Button("Dismiss", action: onDismiss)
+                    .font(.nmlBody(11, weight: .medium))
+                    .tracking(0.3)
                     .foregroundStyle(Color.nmlTitanium)
                     .buttonStyle(.plain)
             }
@@ -232,7 +231,7 @@ private struct EmptyProactiveState: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Nothing needs you right now.")
-                .font(.system(size: 17, weight: .regular, design: .serif))
+                .font(.nmlDisplay(21, weight: .regular))
                 .foregroundStyle(Color.nmlInk)
             Text("Nameless will only interrupt when there's something actually useful.")
                 .font(.system(size: 13, weight: .light))

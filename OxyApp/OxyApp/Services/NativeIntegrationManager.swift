@@ -312,10 +312,6 @@ final class NativeIntegrationManager: NSObject {
             return result
         }
 
-        if let result = await answerNativeHealthRequest(normalized) {
-            return result
-        }
-
         if let result = await createNativeReminder(from: normalized) {
             return result
         }

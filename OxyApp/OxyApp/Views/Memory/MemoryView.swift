@@ -63,7 +63,7 @@ struct MemoryView: View {
                                 Spacer()
                                 if !items.isEmpty {
                                     Text("\(items.count)")
-                                        .font(.nmlMono(12))
+                                        .font(.nmlBody(13))
                                         .foregroundStyle(Color.nmlMuted)
                                 }
                             }
@@ -75,7 +75,7 @@ struct MemoryView: View {
                                     NamelessDivider()
                                 }
                             } else if items.isEmpty {
-                                Text("Nothing remembered yet. Add something above, or just talk to Oxy and it'll learn as you go.")
+                                Text("Nothing remembered yet. Add something above, or just talk — it picks things up as you go.")
                                     .font(.system(size: 14, weight: .light))
                                     .foregroundStyle(Color.nmlMuted)
                                     .padding(.vertical, 20)
@@ -115,7 +115,7 @@ struct MemoryView: View {
             Button("Clear all", role: .destructive) { Task { await clearAll() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This permanently deletes everything Oxy remembers about you.")
+            Text("This permanently deletes everything remembered about you.")
         }
     }
 
@@ -197,7 +197,7 @@ private struct MemoryRow: View {
                     .foregroundStyle(Color.nmlInk)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(item.sourceLabel)
-                    .font(.nmlMono(10))
+                    .font(.nmlBody(11))
                     .foregroundStyle(Color.nmlMuted)
             }
             Spacer(minLength: 8)
@@ -226,8 +226,8 @@ private struct MemoryDropBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Add it once. Oxy keeps it for later.")
-                .font(.system(size: 19, weight: .light))
+            Text("Add it once. It's kept for later.")
+                .font(.nmlDisplay(21, weight: .light))
                 .foregroundStyle(Color.nmlInk)
 
             NamelessLineField(
@@ -240,7 +240,7 @@ private struct MemoryDropBox: View {
             HStack {
                 if let message {
                     Text(message)
-                        .font(.nmlMono(11, weight: .medium))
+                        .font(.nmlBody(12, weight: .medium))
                         .foregroundStyle(message == "Saved." ? Color.nmlTitanium : Color.nmlDanger)
                 }
                 Spacer()

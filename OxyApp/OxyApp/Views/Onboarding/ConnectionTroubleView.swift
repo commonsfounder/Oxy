@@ -20,9 +20,9 @@ struct ConnectionTroubleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
 
-                Text("[ NO DEVICE FOUND ]")
-                    .font(.nmlMono(11, weight: .medium))
-                    .tracking(2)
+                Text("NO DEVICE FOUND")
+                    .font(.nmlBody(11, weight: .semibold))
+                    .tracking(2.4)
                     .foregroundStyle(Color.nmlMuted)
 
                 Text("We couldn't reach your pendant.")
