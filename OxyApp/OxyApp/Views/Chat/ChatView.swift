@@ -385,7 +385,7 @@ struct ChatView: View {
                         showFileImporter = true
                     }
                 }
-                .background(Color.black)
+                .background(Color.nmlObsidian)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)

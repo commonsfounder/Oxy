@@ -20,13 +20,45 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
+                            settingRow(label: "Appearance", description: "Light, dark, or follow the system") {
+                                Menu {
+                                    ForEach(["light", "dark", "system"], id: \.self) { mode in
+                                        Button {
+                                            settings.appTheme = mode
+                                            saveSettings()
+                                            HapticManager.shared.impact(.light)
+                                        } label: {
+                                            HStack {
+                                                Text(mode.capitalized)
+                                                if settings.appTheme == mode {
+                                                    Spacer()
+                                                    Image(systemName: "checkmark")
+                                                }
+                                            }
+                                        }
+                                    }
+                                } label: {
+                                    HStack(spacing: 9) {
+                                        Text(settings.appTheme.capitalized)
+                                            .font(.system(size: 13, weight: .regular))
+                                            .tracking(0.6)
+                                        Text("›")
+                                            .font(.system(size: 15, weight: .light))
+                                    }
+                                    .foregroundStyle(Color.nmlTitanium)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            NamelessDivider()
+
                             settingRow(label: "Finish", description: "Same structure, three luxury colorways") {
                                 Menu {
                                     ForEach(OxyTheme.profiles) { profile in
@@ -375,7 +407,7 @@ private struct BackendURLEditorSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
                     NamelessSectionHeader(title: "Custom Backend URL")
 

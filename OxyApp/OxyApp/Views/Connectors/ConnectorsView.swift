@@ -25,7 +25,7 @@ struct ConnectorsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Connectors", onBack: { dismiss() })

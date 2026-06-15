@@ -36,7 +36,7 @@ struct ScreenHeaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.black)
+        .background(Color.nmlObsidian)
     }
 }
 
@@ -46,5 +46,5 @@ struct ScreenHeaderView: View {
         ScreenHeaderView(title: "More")
         Spacer()
     }
-    .background(Color.black)
+    .background(Color.nmlObsidian)
 }

@@ -17,7 +17,7 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -60,7 +60,7 @@ struct ProactiveView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.black, for: .navigationBar)
+            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .task {

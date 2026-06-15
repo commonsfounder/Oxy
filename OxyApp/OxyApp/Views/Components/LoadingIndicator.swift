@@ -13,7 +13,7 @@ struct LoadingIndicator: View {
                 .foregroundStyle(Color.nmlMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(Color.nmlObsidian)
     }
 }
 
@@ -82,5 +82,5 @@ struct OxySkeletonCard: View {
         OxyThinkingIndicator()
         OxyThinkingIndicator(label: "Thinking")
     }
-    .background(Color.black)
+    .background(Color.nmlObsidian)
 }

@@ -49,7 +49,7 @@ struct DeviceStatusCard: View {
 
 #Preview {
     ZStack(alignment: .top) {
-        Color.black.ignoresSafeArea()
+        Color.nmlObsidian.ignoresSafeArea()
         DeviceStatusCard(telemetry: {
             let monitor = PendantTelemetryMonitor()
             monitor.start()

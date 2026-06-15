@@ -12,7 +12,7 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlObsidian.ignoresSafeArea()
 
             // Straight to the sign-in form — no intro carousel, no mic slide.
             LoginFormPage(
@@ -102,17 +102,17 @@ private struct LoginFormPage: View {
                     HStack(spacing: 8) {
                         if isLoading {
                             ProgressView()
-                                .tint(.black)
+                                .tint(Color.nmlObsidian)
                                 .scaleEffect(0.8)
                         }
                         Text(isRegistering ? "Create Account" : "Sign In")
                             .font(.system(size: 14, weight: .semibold))
                             .tracking(1.5)
                     }
-                    .foregroundStyle(Color.black)
+                    .foregroundStyle(Color.nmlObsidian)
                     .frame(maxWidth: .infinity)
                     .frame(height: 58)
-                    .background(Color.white)
+                    .background(Color.nmlInk)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)

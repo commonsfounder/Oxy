@@ -96,5 +96,5 @@ private struct GhostShape: Shape {
         AppHeaderView(isIncognito: .constant(false), isEmptyChat: false)
         Spacer()
     }
-    .background(Color.black)
+    .background(Color.nmlObsidian)
 }

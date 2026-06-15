@@ -141,7 +141,7 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
                 // No fixed "More" header — the tab bar already labels this screen, and a sticky
                 // title here read as inconsistent next to Chat/Today. Let the account header lead,
                 // matching Today's scrolling feel.

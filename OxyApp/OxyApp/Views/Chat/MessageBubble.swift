@@ -316,7 +316,7 @@ struct ActionCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black)
+        .background(Color.nmlObsidian)
         .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
     }
 
@@ -427,7 +427,7 @@ struct UberHandoffCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.black)
+        .background(Color.nmlObsidian)
         .border(Color.nmlCardBorder, width: 0.5)
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
@@ -510,5 +510,5 @@ private struct CheckPath: Shape {
             MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
         }
     }
-    .background(Color.black)
+    .background(Color.nmlObsidian)
 }

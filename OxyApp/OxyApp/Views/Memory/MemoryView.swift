@@ -37,7 +37,7 @@ struct MemoryView: View {
 
     private var memoryContent: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if !embedded {

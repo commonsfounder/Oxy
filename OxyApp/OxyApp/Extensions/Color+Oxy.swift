@@ -74,7 +74,7 @@ extension Color {
         guard let data = UserDefaults.standard.data(forKey: "oxy_settings") else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
-    private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+    static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
         Color(UIColor { traits in
             isLightMode(traits) ? light : dark
         })

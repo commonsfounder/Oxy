@@ -32,7 +32,7 @@ struct ErrorBanner: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.black)
+        .background(Color.nmlObsidian)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
         }
@@ -41,5 +41,5 @@ struct ErrorBanner: View {
 
 #Preview {
     ErrorBanner(message: "Network connection lost", onRetry: {}, onDismiss: {})
-        .background(Color.black)
+        .background(Color.nmlObsidian)
 }

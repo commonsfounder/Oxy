@@ -37,7 +37,7 @@ struct RootView: View {
                 // Hold on a plain black screen until the keychain session check
                 // finishes, so a returning user never sees a flash of the login
                 // screen on cold launch.
-                Color.black.ignoresSafeArea()
+                Color.nmlObsidian.ignoresSafeArea()
             } else if appState.isAuthenticated {
                 MainTabView()
             } else {
