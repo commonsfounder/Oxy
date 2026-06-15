@@ -80,11 +80,18 @@ struct MemoryView: View {
                                     .foregroundStyle(Color.nmlMuted)
                                     .padding(.vertical, 20)
                             } else {
-                                ForEach(items) { item in
-                                    MemoryRow(item: item) {
-                                        Task { await deleteItem(item) }
+                                ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
+                                    Text(group.title)
+                                        .font(.nmlDisplay(18, weight: .regular))
+                                        .foregroundStyle(Color.nmlInk)
+                                        .padding(.top, index == 0 ? 16 : 30)
+                                        .padding(.bottom, 4)
+                                    ForEach(group.items) { item in
+                                        MemoryRow(item: item) {
+                                            Task { await deleteItem(item) }
+                                        }
+                                        NamelessDivider()
                                     }
-                                    NamelessDivider()
                                 }
 
                                 Button {
@@ -116,6 +123,17 @@ struct MemoryView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently deletes everything remembered about you.")
+        }
+    }
+
+    // Group memories into a few editorial buckets so the screen reads as a curated
+    // index rather than one long flat list. "Notes" is the catch-all — nothing is lost.
+    private var groupedItems: [(title: String, items: [MemoryItem])] {
+        let order = ["People", "Places", "Work & Study", "Tastes", "Notes"]
+        let grouped = Dictionary(grouping: items, by: { $0.category })
+        return order.compactMap { title in
+            guard let group = grouped[title], !group.isEmpty else { return nil }
+            return (title, group)
         }
     }
 
@@ -191,15 +209,12 @@ private struct MemoryRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.content)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(item.sourceLabel)
-                    .font(.nmlBody(11))
-                    .foregroundStyle(Color.nmlMuted)
-            }
+            Text(item.content)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(Color.nmlInk)
+                .lineLimit(4)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Button(action: onDelete) {
                 Image(systemName: "xmark")
@@ -251,9 +266,9 @@ private struct MemoryDropBox: View {
                                 .scaleEffect(0.6)
                                 .tint(Color.nmlMuted)
                         }
-                        Text(isSaving ? "SAVING" : "SAVE")
-                            .font(.system(size: 11, weight: .semibold))
-                            .tracking(1.6)
+                        Text(isSaving ? "Saving" : "Save")
+                            .font(.nmlBody(12, weight: .semibold))
+                            .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.nmlTitanium : Color.nmlMuted)
                 }
@@ -281,6 +296,19 @@ struct MemoryItem: Codable, Identifiable, Equatable {
         case "manual", "manual_profile": return "Saved"
         default: return "Learned"
         }
+    }
+
+    // Lightweight client-side bucket for the grouped Memory layout. First match wins,
+    // so the order matters (a "partner" who "lives in X" reads as People, not Places).
+    var category: String {
+        if content.count > 180 { return "Notes" }
+        let t = " \(content.lowercased()) "
+        func has(_ keys: [String]) -> Bool { keys.contains { t.contains($0) } }
+        if has(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "loved one", "pookie", "name is", "named", "son", "daughter"]) { return "People" }
+        if has(["school", "college", "university", "student", "study", "studie", "work", "job", "employer", "a-level", "degree"]) { return "Work & Study" }
+        if has(["lives", "live ", "lived", "home", "address", "based in", "moved to", "commute"]) { return "Places" }
+        if has(["like", "love", "hate", "prefer", "favourite", "favorite", "watch", "eat", "drink", "listen", "read", "fan of"]) { return "Tastes" }
+        return "Notes"
     }
 }
 
