@@ -1016,10 +1016,11 @@ private struct ChatInputBar: View {
                         .onSubmit {
                             if canSend { onSend() }
                         }
-                        // Visible cue that this turn won't be saved while shadow mode is on.
+                        // Placeholder so the empty composer reads as a real input, not a
+                        // blank gap — and doubles as the shadow-mode cue when incognito.
                         .overlay(alignment: .leading) {
-                            if incognito && text.isEmpty {
-                                Text("Shadow chat — not saved")
+                            if text.isEmpty {
+                                Text(incognito ? "Shadow chat — not saved" : "Message")
                                     .font(.system(size: 15, weight: .light))
                                     .foregroundStyle(Color.nmlMuted)
                                     .allowsHitTesting(false)
