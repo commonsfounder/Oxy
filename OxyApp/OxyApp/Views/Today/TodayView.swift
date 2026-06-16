@@ -106,6 +106,7 @@ struct TodayView: View {
     @State private var loadFailed = false
     @State private var appeared = false
     @State private var showProfile = false
+    @State private var stage = AgentStage()
 
     private let weatherService = OxyWeatherService()
 
@@ -117,6 +118,15 @@ struct TodayView: View {
                 VStack(alignment: .leading, spacing: 30) {
                     header
 
+                    // The agent orb: pulsing when thinking, expands while mic is live.
+                    // Tapping focuses the input bar (keyboard) as a secondary affordance.
+                    AgentOrb(active: stage.isThinking, diameter: 92) {
+                        HapticManager.shared.impact(.medium)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.05), value: appeared)
+
                     if let route = feed.route { card(0) { routeSection(route) } }
                     if !feed.events.isEmpty { card(1) { calendarSection } }
                     if !feed.emails.isEmpty { card(2) { mailSection } }
@@ -126,9 +136,21 @@ struct TodayView: View {
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 14)
-                .padding(.bottom, 52)
+                .padding(.bottom, 110)  // clear floating input bar
             }
             .refreshable { await load() }
+
+            // The agent's summoned card floats over everything.
+            AgentCardOverlay(stage: stage)
+
+            // Floating glass input bar — voice + text, drives the orb + generative cards.
+            VStack {
+                Spacer()
+                TodayInputBar(stage: stage, userId: appState.userId)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+            }
+            .ignoresSafeArea(.keyboard)
         }
         .environment(\.colorScheme, .dark)
         .fullScreenCover(isPresented: $showProfile) {

@@ -34,6 +34,7 @@
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
 		A10000010000000000000025 /* ProactiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000027 /* ProactiveView.swift */; };
 		A10000010000000000000099 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000099 /* TodayView.swift */; };
+		A10000010000000000000098 /* AgentGenUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000098 /* AgentGenUI.swift */; };
 		A10000010000000000000026 /* PendantAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000028 /* PendantAudioBridge.swift */; };
 		A10000010000000000000028 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000030 /* HapticManager.swift */; };
 		A10000010000000000000029 /* ChatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000031 /* ChatHomeView.swift */; };
@@ -82,6 +83,7 @@
 		A20000010000000000000026 /* OxyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OxyApp.entitlements; sourceTree = "<group>"; };
 		A20000010000000000000027 /* ProactiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveView.swift; sourceTree = "<group>"; };
 		A20000010000000000000099 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		A20000010000000000000098 /* AgentGenUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentGenUI.swift; sourceTree = "<group>"; };
 		A20000010000000000000028 /* PendantAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantAudioBridge.swift; sourceTree = "<group>"; };
 		A20000010000000000000030 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000031 /* ChatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHomeView.swift; sourceTree = "<group>"; };
@@ -270,6 +272,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000099 /* TodayView.swift */,
+				A20000010000000000000098 /* AgentGenUI.swift */,
 			);
 			path = Today;
 			sourceTree = "<group>";
@@ -392,6 +395,7 @@
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,
 				A10000010000000000000025 /* ProactiveView.swift in Sources */,
 				A10000010000000000000099 /* TodayView.swift in Sources */,
+				A10000010000000000000098 /* AgentGenUI.swift in Sources */,
 				A10000010000000000000026 /* PendantAudioBridge.swift in Sources */,
 				A10000010000000000000033 /* PendantTelemetryMonitor.swift in Sources */,
 				A10000010000000000000028 /* HapticManager.swift in Sources */,
