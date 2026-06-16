@@ -64,7 +64,8 @@ Then run `npm run smoke` (the contract test sweeps every entry).
   call toward restraint + visible competence over feature density.
 - **Aesthetic = "silent luxury":** pure black `#000000`, hairline `~#222` dividers, high negative space,
   flat lists (no boxed card groupings), Title Case labels. Sharp 90° corners everywhere **except** the
-  signatures: the liquid-glass bottom tab bar + circular header controls + a soft radius on chat bubbles.
+  signatures: circular header controls + a soft radius on chat bubbles. (The liquid-glass bottom tab bar
+  was **removed** with the move to two surfaces — see the IA note below; don't reintroduce it.)
   **Not "techbro":** the buyer skews design-literate/feminine-leaning, and black minimalism is the
   *inclusive*-luxury register (The Row, Celine, Aesop) — the fix for "too masculine" is **de-gadgeting**
   (kill spec-sheet signifiers), NOT lightening/softening into a feminine cliché (that pivot was tried in
@@ -83,10 +84,20 @@ Then run `npm run smoke` (the contract test sweeps every entry).
   accent/detail/border shift, and the default neutrals carry a touch of warmth (not cold steel grey). Selection persists to
   `@AppStorage("oxy_theme_profile")`; `MainTabView` re-keys its `.id(...)` on it so a change repaints the
   tree. There is no longer a 9-accent picker — don't reintroduce one.
-- **More-tab IA = one home per domain** (`MainTabView.MoreView` → fullScreenCover): **Profile** = account
-  (identity + export/sign-out/delete), **Pendant** = pairing + live status + hardware, **Connectors**,
-  **Memory** (single entry point), **Settings** = cross-cutting prefs only (Appearance/Voice/Assistant/
-  Action Defaults/About). Do NOT re-duplicate a domain into Settings.
+- **App IA = two surfaces, no tab bar** (`MainTabView`): a paged `TabView` of **Today** (home, default)
+  and **Chat** — order = page order, so swiping left off Today opens Chat; two hairline dots hint the swipe.
+  Everything else folds behind the **profile icon** on Today (ChatGPT/Claude-style), which presents
+  `MoreView` as a `fullScreenCover`. Don't reintroduce a bottom tab bar.
+- **Today = structured dashboard, not a prose feed.** `Views/Today/TodayView.swift` renders the
+  `GET /today/:userId` payload — weather (client-side WeatherKit) + commute/traffic + calendar + inbox +
+  news, every item a real tappable link out to the **native app** (Gmail/Calendar/Maps). The endpoint
+  (`api/index.js`) reuses the connectors' structured `events`/`emails`, Reddit's public JSON for news, and
+  Maps Directions (live traffic) with the work address pulled from memory. (The old LLM-prose briefings
+  feed `ProactiveView` still exists but is no longer wired into the tabs.)
+- **More-tab IA = one home per domain** (`MainTabView.MoreView` → fullScreenCover, reached via the profile
+  icon): **Profile** = account (identity + export/sign-out/delete), **Pendant** = pairing + live status +
+  hardware, **Connectors**, **Memory** (single entry point), **Settings** = cross-cutting prefs only
+  (Appearance/Voice/Assistant/Action Defaults/About). Do NOT re-duplicate a domain into Settings.
 - **Persona/voice** lives in `OXCY_SYSTEM_PROMPT` (`api/index.js`): dry, terse friend; lowercase casual
   one-liners; anti-sycophancy; banned chatbot phrases ("As an AI", "Here is", "Let me know if"…); mirrors
   the user. Governs spoken/chat replies only — drafted emails/messages and action JSON keep their own rules.

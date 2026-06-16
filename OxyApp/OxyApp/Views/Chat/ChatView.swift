@@ -38,7 +38,7 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            BloomBackground(intensity: 0.32)
 
             VStack(spacing: 0) {
                 // Offline banner

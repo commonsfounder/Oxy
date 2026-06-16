@@ -71,38 +71,38 @@ extension Color {
                 blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 
-    /// Canvas — warm bone in light, warm near-black in dark.
-    static var nmlObsidian: Color { dynamicColor(light: nmlHex(0xEDE7DB), dark: nmlHex(0x0D0B09)) }
+    /// Canvas — obsidian. (Light kept for the resolver, but the app is dark-by-design now.)
+    static var nmlObsidian: Color { dynamicColor(light: nmlHex(0xEDE7DB), dark: nmlHex(0x0A0A0F)) }
     /// Slightly raised surface for cards and rows.
-    static var nmlSurface: Color { dynamicColor(light: nmlHex(0xF6F1E8), dark: nmlHex(0x17120D)) }
+    static var nmlSurface: Color { dynamicColor(light: nmlHex(0xF6F1E8), dark: nmlHex(0x16161F)) }
     /// One step lighter still — fields, pills nested inside a surface.
-    static var nmlSurface2: Color { dynamicColor(light: nmlHex(0xEFE9DD), dark: nmlHex(0x211B14)) }
+    static var nmlSurface2: Color { dynamicColor(light: nmlHex(0xEFE9DD), dark: nmlHex(0x1E1E28)) }
     /// Hairline / container border.
-    static var nmlHairline: Color { dynamicColor(light: nmlHex(0xD9D2C5), dark: nmlHex(0x262019)) }
+    static var nmlHairline: Color { dynamicColor(light: nmlHex(0xD9D2C5), dark: nmlHex(0x2A2A36)) }
     /// Flat solid container border — same source as the hairline.
     static var nmlCardBorder: Color { nmlHairline }
     /// The finish accent — icons, dots, interactive text, quiet emphasis.
     static var nmlTitanium: Color {
         dynamicColor(light: UIColor(OxyTheme.current.accentLight), dark: UIColor(OxyTheme.current.accent))
     }
-    /// Primary editorial type — ink on light, warm white on dark.
-    static var nmlInk: Color { dynamicColor(light: nmlHex(0x1B1712), dark: nmlHex(0xEFE8DA)) }
+    /// Primary type — luminous white on the obsidian canvas.
+    static var nmlInk: Color { dynamicColor(light: nmlHex(0x1B1712), dark: nmlHex(0xF5F5F8)) }
     /// Muted secondary detail.
-    static var nmlMuted: Color { dynamicColor(light: nmlHex(0x8A8076), dark: nmlHex(0x8C8275)) }
+    static var nmlMuted: Color { dynamicColor(light: nmlHex(0x8A8076), dark: nmlHex(0x9A9AA8)) }
     /// Faint halo behind a live-status dot.
     static var nmlGlow: Color { OxyTheme.current.glow }
 }
 
 extension Font {
-    /// Editorial display face (Fraunces) — high-contrast serif with real personality.
-    /// Reserved for titles and hero copy: the one place the type gets to have a voice.
-    static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Fraunces", size: size).weight(weight)
+    /// Display type — SF Pro, tight and luminous. (Was Fraunces; unified to system SF Pro
+    /// for the generative aesthetic.)
+    static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        .system(size: size, weight: weight)
     }
 
-    /// Body / UI face (Inter) — a clean, even grotesque for running text and labels.
+    /// Body / UI type — SF Pro. (Was Inter.)
     static func nmlBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Inter", size: size).weight(weight)
+        .system(size: size, weight: weight)
     }
 
     /// Clean monospace for technical readouts — battery, latency, connection state.

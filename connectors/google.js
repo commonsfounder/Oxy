@@ -468,7 +468,8 @@ async function execute(userId, action, params) {
           timeout: 15000
         });
         const events = (resp.data.items || []).map(e => ({
-          id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
+          id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date,
+          htmlLink: e.htmlLink
         }));
         return { success: true, events, text: summarizeCalendarEvents(events) };
       }
