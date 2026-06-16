@@ -206,9 +206,9 @@ async function execute(userId, action, params) {
       const station = String(params?.station || params?.origin || '').trim();
       if (!station) return { success: false, error: 'station_board requires a station' };
       return {
-        success: true,
-        text: `I can't give a reliable live station board for ${station} yet because the TransportAPI rail feed is disabled. Ask for a train route with an origin and destination and I'll return the best itinerary I can from route data.`,
-        trains: [],
+        success: false,
+        error: 'Live station boards are unavailable — the TransportAPI rail feed is disabled.',
+        text: `I can't show a live station board for ${station} right now. Ask for a train route with an origin and destination instead.`,
         cardText: 'Live station board unavailable',
         actionSummary: 'Live rail unavailable'
       };

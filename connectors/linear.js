@@ -152,10 +152,16 @@ async function execute(userId, action, params = {}) {
       }
 
       case 'comment_linear_issue': {
-        const issueId = String(params?.issue || '').trim();
+        const identifier = String(params?.issue || '').trim();
         const body = String(params?.body || '').trim();
-        if (!issueId) return { success: false, error: 'comment_linear_issue requires an issue identifier (e.g. ENG-123)' };
+        if (!identifier) return { success: false, error: 'comment_linear_issue requires an issue identifier (e.g. ENG-123)' };
         if (!body) return { success: false, error: 'comment_linear_issue requires a body' };
+        // Resolve human identifier (e.g. "ENG-123") → internal UUID; commentCreate requires UUID.
+        const resolveData = await linearGraphQL(userId, `
+          query($id: String!) { issue(id: $id) { id } }
+        `, { id: identifier });
+        const issueUuid = resolveData.issue?.id;
+        if (!issueUuid) return { success: false, error: `Issue ${identifier} not found in Linear.` };
         const data = await linearGraphQL(userId, `
           mutation($input: CommentCreateInput!) {
             commentCreate(input: $input) {
@@ -163,9 +169,9 @@ async function execute(userId, action, params = {}) {
               comment { url }
             }
           }
-        `, { input: { issueId, body } });
-        if (!data.commentCreate?.success) return { success: false, error: `Failed to comment on ${issueId}.` };
-        return { success: true, text: `Commented on ${issueId}.`, url: data.commentCreate.comment?.url };
+        `, { input: { issueId: issueUuid, body } });
+        if (!data.commentCreate?.success) return { success: false, error: `Failed to comment on ${identifier}.` };
+        return { success: true, text: `Commented on ${identifier}.`, url: data.commentCreate.comment?.url };
       }
 
       default:

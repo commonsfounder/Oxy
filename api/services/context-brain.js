@@ -35,7 +35,8 @@ function unwrapAction(entry) {
     type: entry.action || entry.type || '',
     input: entry.input || {},
     result: entry,
-    status: entry.success === false ? 'failed' : 'executed',
+    // Prefer the explicit DB status column; fall back to the inline success flag.
+    status: entry.status || (entry.success === false ? 'failed' : 'executed'),
     created_at: entry.created_at
   };
 }
@@ -60,7 +61,7 @@ function contextFromAction(action, source = 'action_result') {
   const type = action?.type || '';
   const input = action?.input || {};
   const label = actionLabel(action);
-  if (!type || action?.status === 'failed') return null;
+  if (!type || action?.status === 'failed' || action?.status === 'pending') return null;
 
   if (type === 'find_place' || type === 'book_uber') {
     return {

@@ -1466,24 +1466,6 @@ async function recoverEmptyModelResponse({ model, initialRequest, message, trace
   }
 }
 
-async function runActions(userId, actions) {
-  const results = [];
-  for (const action of actions) {
-    console.log('[action] executing:', action.type, action.input);
-    const result = await dispatch(userId, action.type, action.input || {});
-    console.log('[action] result:', action.type, JSON.stringify(result));
-    results.push({ action: action.type, result });
-    await supabase.from('action_log').insert({
-      user_id: userId,
-      action: serializeLoggedAction(action, result),
-      status: result.success ? 'executed' : 'failed',
-      error: result.success ? null : (result.error || null),
-      created_at: new Date().toISOString()
-    });
-  }
-  invalidateUserContextCache(userId);
-  return results;
-}
 
 const GEMINI_TTS_MODELS = [
   'gemini-3.1-flash-tts-preview',
@@ -2955,12 +2937,9 @@ function buildAvailableActions(enabled) {
     imessage: ['send_message'],
     whatsapp: ['send_message'],
     spotify: ['search_spotify', 'play_spotify', 'control_spotify_playback', 'add_to_spotify_queue', 'add_to_spotify_playlist', 'get_now_playing_spotify'],
-    homekit: ['homekit_control'],
     maps: ['find_place', 'get_directions', 'plan_trip'],
     uber: ['book_uber'],
     telegram: ['send_telegram', 'get_telegram_contacts'],
-    monzo: ['check_balance'],
-    betfair: ['place_bet'],
     notion: ['search_notion', 'create_notion_page', 'append_notion_page'],
     trainline: ['search_trains', 'station_board'],
     github: ['search_github', 'get_github_notifications', 'create_github_issue', 'comment_github_issue'],

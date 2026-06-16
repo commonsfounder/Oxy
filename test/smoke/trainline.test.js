@@ -67,8 +67,8 @@ test('station board explains live rail is unavailable without opening Trainline'
   const result = await trainline.execute('test-user', 'station_board', {
     station: 'Milton Keynes Central'
   });
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
   assert.equal(result.actionSummary, 'Live rail unavailable');
   assert.equal(result.webLink, undefined);
-  assert.match(result.text, /TransportAPI rail feed is disabled/i);
+  assert.match(result.text, /can't show a live station board/i);
 });
