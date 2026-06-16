@@ -12,26 +12,42 @@ struct MainTabView: View {
     // natural "swipe near that area to bring it back" gesture.
     @State private var keyboardUp = false
 
-    // Two surfaces only: Chat and Today (home). Everything else folds into the profile
-    // icon on Today. Order = page order: Chat sits on the LEFT, so swiping right off
-    // Today reveals Chat. Today is the default landing page.
     enum Tab: String, CaseIterable {
-        case chat, today
+        case chat, today, more
+
+        var icon: String {
+            switch self {
+            case .chat: return "bubble.left"
+            case .today: return "sun.max"
+            case .more: return "square.grid.2x2"
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .chat: return "Chat"
+            case .today: return "Today"
+            case .more: return "More"
+            }
+        }
     }
 
     var body: some View {
-        // A true paged TabView for buttery 1:1 horizontal swiping. No bottom bar —
-        // with only two surfaces, navigation is the swipe itself plus the profile
-        // icon on Today (ChatGPT/Claude-style). A pair of hairline dots hints at the swipe.
+        // A true paged TabView for buttery 1:1 horizontal swiping. The native
+        // page style hides the system tab bar, so a slim custom bar is added via
+        // safeAreaInset (which also keeps page content clear of it).
         TabView(selection: $selectedTab) {
             ChatHomeView().tag(Tab.chat)
-            TodayView().tag(Tab.today)
+            ProactiveView().tag(Tab.today)
+            MoreView().tag(Tab.more)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .animation(.easeInOut(duration: 0.25), value: selectedTab)
-        .overlay(alignment: .bottom) {
-            pageDots
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            bottomBar
+                .offset(y: keyboardUp ? 130 : 0)
                 .opacity(keyboardUp ? 0 : 1)
+                .allowsHitTesting(!keyboardUp)
                 .animation(.easeInOut(duration: 0.22), value: keyboardUp)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -56,19 +72,55 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
             withAnimation { selectedTab = .chat }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
+            withAnimation { selectedTab = .more }
+        }
     }
 
-    // MARK: - Swipe affordance
+    // MARK: - Custom bottom bar
 
-    private var pageDots: some View {
-        HStack(spacing: 7) {
-            ForEach(Tab.allCases, id: \.self) { tab in
-                Circle()
-                    .fill(selectedTab == tab ? Color.nmlInk : Color.nmlMuted.opacity(0.35))
-                    .frame(width: 6, height: 6)
+    // A floating Liquid Glass bar (Apple iOS 26 style): the whole bar is one
+    // refractive glass surface that hovers above the bottom edge, with a soft
+    // highlight capsule marking the active tab.
+    private var bottomBar: some View {
+        nmlGlassContainer(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(Tab.allCases, id: \.self) { tab in
+                    tabButton(tab)
+                }
             }
+            .padding(6)
+            // Passive glass: an `interactive` surface here captures presses for the whole bar
+            // and starves the individual tab Buttons (the "tap 50 times" bug). The buttons own
+            // their own gesture + highlight.
+            .nmlGlass(Capsule(), interactive: false)
         }
-        .padding(.bottom, 8)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 4)
+    }
+
+    private func tabButton(_ tab: Tab) -> some View {
+        let selected = selectedTab == tab
+        return Button {
+            withAnimation(.easeInOut(duration: 0.25)) { selectedTab = tab }
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
+                    .font(.system(size: 18, weight: .regular))
+                Text(tab.label)
+                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
+            }
+            .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background {
+                if selected {
+                    Capsule().fill(Color.white.opacity(0.12))
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -76,7 +128,6 @@ struct MainTabView: View {
 
 struct MoreView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
     @State private var destination: MoreDestination?
     @State private var showSignOutConfirm = false
 
@@ -90,13 +141,12 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                BloomBackground(intensity: 0.4)
-                // No fixed "More" header — let the account header lead, matching Today's
-                // scrolling feel. Same breathing obsidian canvas as the rest of the app.
+                Color.nmlObsidian.ignoresSafeArea()
+                // No fixed "More" header — the tab bar already labels this screen, and a sticky
+                // title here read as inconsistent next to Chat/Today. Let the account header lead,
+                // matching Today's scrolling feel.
                 ScrollView {
                         VStack(alignment: .leading, spacing: 34) {
-                            closeButton
-
                             accountHeader
 
                             group(title: "Assistant") {
@@ -151,26 +201,6 @@ struct MoreView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
-        }
-    }
-
-    // A visible way out — the sheet has swipe-to-dismiss, but a tappable close is
-    // not optional. Top-right chevron, the way ChatGPT/Claude let you leave a sheet.
-    private var closeButton: some View {
-        HStack {
-            Spacer()
-            Button {
-                HapticManager.shared.impact(.light)
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.nmlInk)
-                    .frame(width: 38, height: 38)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
-                    .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
-            }
-            .buttonStyle(.plain)
         }
     }
 

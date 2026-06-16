@@ -38,7 +38,7 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            BloomBackground(intensity: 0.32)
+            Color.nmlObsidian.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Offline banner
@@ -1016,11 +1016,10 @@ private struct ChatInputBar: View {
                         .onSubmit {
                             if canSend { onSend() }
                         }
-                        // Placeholder so the empty composer reads as a real input, not a
-                        // blank gap — and doubles as the shadow-mode cue when incognito.
+                        // Visible cue that this turn won't be saved while shadow mode is on.
                         .overlay(alignment: .leading) {
-                            if text.isEmpty {
-                                Text(incognito ? "Shadow chat — not saved" : "Message")
+                            if incognito && text.isEmpty {
+                                Text("Shadow chat — not saved")
                                     .font(.system(size: 15, weight: .light))
                                     .foregroundStyle(Color.nmlMuted)
                                     .allowsHitTesting(false)

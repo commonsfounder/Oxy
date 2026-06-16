@@ -80,9 +80,12 @@ extension Color {
         })
     }
     private static func isLightMode(_ traits: UITraitCollection) -> Bool {
-        // Dark-by-design: the generative aesthetic (obsidian + colour glows) only works on
-        // black, so light/system are retired. Always resolve the dark colourway.
-        false
+        let theme = UserDefaults.standard.string(forKey: "oxy_appTheme")
+            ?? (oxySettingsObject?["appTheme"] as? String)
+            ?? "dark"
+        if theme == "light" { return true }
+        if theme == "system" { return traits.userInterfaceStyle == .light }
+        return false
     }
     /// Green — #4CAF82
     static let oxyGreen = Color(red: 76/255, green: 175/255, blue: 130/255)
