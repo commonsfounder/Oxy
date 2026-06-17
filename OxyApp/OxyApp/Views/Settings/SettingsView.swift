@@ -8,14 +8,12 @@ import UIKit
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("oxy_appTheme") private var appTheme = "dark"
     @State private var settings = OxySettings()
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     @State private var voicePreview = VoicePreviewPlayer()
     @State private var backendVersionText = "Checking backend..."
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
-    @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
 
     var body: some View {
         NavigationStack {
@@ -27,75 +25,6 @@ struct SettingsView: View {
                     ScrollView {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
-                            settingRow(label: "Appearance", description: "Light, dark, or follow the system") {
-                                Menu {
-                                    ForEach(["light", "dark", "system"], id: \.self) { mode in
-                                        Button {
-                                            settings.appTheme = mode
-                                            saveSettings()
-                                            HapticManager.shared.impact(.light)
-                                        } label: {
-                                            HStack {
-                                                Text(mode.capitalized)
-                                                if settings.appTheme == mode {
-                                                    Spacer()
-                                                    Image(systemName: "checkmark")
-                                                }
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 9) {
-                                        Text(settings.appTheme.capitalized)
-                                            .font(.system(size: 13, weight: .regular))
-                                            .tracking(0.6)
-                                        Text("›")
-                                            .font(.system(size: 15, weight: .light))
-                                    }
-                                    .foregroundStyle(Color.nmlTitanium)
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            NamelessDivider()
-
-                            settingRow(label: "Finish", description: "Same structure, three luxury colorways") {
-                                Menu {
-                                    ForEach(OxyTheme.profiles) { profile in
-                                        Button {
-                                            themeProfile = profile.id
-                                            HapticManager.shared.impact(.light)
-                                        } label: {
-                                            HStack {
-                                                Circle()
-                                                    .fill(profile.accent)
-                                                    .frame(width: 10, height: 10)
-                                                Text(profile.name)
-                                                if themeProfile == profile.id {
-                                                    Spacer()
-                                                    Image(systemName: "checkmark")
-                                                }
-                                            }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 9) {
-                                        Circle()
-                                            .fill(OxyTheme.current.accent)
-                                            .frame(width: 9, height: 9)
-                                        Text(currentFinishName)
-                                            .font(.system(size: 13, weight: .regular))
-                                            .tracking(0.6)
-                                        Text("›")
-                                            .font(.system(size: 15, weight: .light))
-                                    }
-                                    .foregroundStyle(Color.nmlTitanium)
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            NamelessDivider()
-
                             settingRow(label: "Bubbles", description: nil) {
                                 Picker("Bubbles", selection: $settings.bubbleStyle) {
                                     Text("Comfort").tag("comfort")
@@ -224,10 +153,6 @@ struct SettingsView: View {
 
     private var selectedVoiceLabel: String {
         OxySettings.voiceOptions.first(where: { $0.value == settings.voice })?.label ?? settings.voice
-    }
-
-    private var currentFinishName: String {
-        OxyTheme.profiles.first(where: { $0.id == themeProfile })?.name ?? "Moonstone"
     }
 
     private func previewVoice(_ voice: String) {
@@ -362,13 +287,11 @@ struct SettingsView: View {
             settings = saved
         }
         normalizeSettings()
-        appTheme = settings.appTheme
         UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
     }
 
     private func saveSettings() {
         normalizeSettings()
-        appTheme = settings.appTheme
         UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: "oxy_settings")
@@ -387,7 +310,6 @@ struct SettingsView: View {
     }
 
     private func normalizeSettings() {
-        settings.appTheme = OxySettings.normalizedTheme(settings.appTheme)
         settings.autonomy = OxySettings.normalizedAutonomy(settings.autonomy)
         if !OxySettings.voiceOptions.contains(where: { $0.value == settings.voice }) {
             settings.voice = "Aoede"

@@ -4424,14 +4424,24 @@ async function gatherProactiveContext(userId, now = new Date()) {
     tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_outlook_emails', { max_results: 5 }) });
   }
 
-  const context = { calendarText: '', emailText: '' };
+  const context = { calendarText: '', emailText: '', emails: [] };
   const settled = await Promise.allSettled(
     tasks.map(task => withTimeout(task.run(), 12000, task.key))
   );
   settled.forEach((outcome, i) => {
     const { key } = tasks[i];
-    if (outcome.status === 'fulfilled' && outcome.value?.success && outcome.value?.text) {
-      context[key] = String(outcome.value.text).trim();
+    if (outcome.status === 'fulfilled' && outcome.value?.success) {
+      if (outcome.value.text) context[key] = String(outcome.value.text).trim();
+      // Keep the structured Primary-inbox emails so the Today tab can show a real Inbox
+      // card instead of only the prose summary. Already filtered to INBOX/CATEGORY_PERSONAL.
+      if (key === 'emailText' && Array.isArray(outcome.value.emails)) {
+        context.emails = outcome.value.emails.slice(0, 3).map(email => ({
+          from: email.senderName || email.senderAddress || email.from || 'Unknown',
+          subject: email.subject || '(no subject)',
+          snippet: String(email.snippet || '').slice(0, 140),
+          date: email.date || null
+        }));
+      }
     } else if (outcome.status === 'rejected') {
       console.warn(`[proactive] context ${key} failed:`, outcome.reason?.message || outcome.reason);
     }
@@ -4439,6 +4449,9 @@ async function gatherProactiveContext(userId, now = new Date()) {
 
   context.location = parseJsonObject(nativeContext?.location);
   context.health = parseJsonObject(nativeContext?.health);
+  // Pending errands ride in the settings blob from the iOS native sync.
+  const nativeSettings = parseJsonObject(nativeContext?.settings);
+  context.reminders = Array.isArray(nativeSettings.reminders) ? nativeSettings.reminders : [];
   return context;
 }
 
@@ -4487,23 +4500,35 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
 
   const health = ctx.health;
   const location = ctx.location;
+  const place = location?.place || null;
+  const placeLabel = place
+    ? [place.name, place.street, place.area, place.city].filter(Boolean).join(', ')
+    : formatLocationForPrompt(location);
+  const remindersText = (ctx.reminders || []).length
+    ? ctx.reminders.map(r => `- ${r.title}${r.due ? ` (due ${r.due})` : ''}`).join('\n')
+    : 'none';
   const systemPrompt = `You are writing a useful, concise ${window.label.toLowerCase()} for the user.
 
 Report only concrete, real items: actual calendar events and emails shown below, plus genuinely useful current info from Google Search grounding (weather for their location, relevant news). Use their location for weather.
+
+Location opportunities: The user's current place is shown below. If they're out (not at home) and something nearby is genuinely relevant, surface ONE specific, useful nudge — examples (not limits): a shop near them that covers a pending reminder/errand, a place tied to an upcoming event, notably different weather where they're heading, or when to leave for their next event. Use search to confirm what's actually near their place. Never invent shops, distances, or facts; if nothing nearby is clearly relevant, say nothing about location. Never nag.
 
 Hard rules:
 - State facts plainly. Do NOT give unsolicited advice, pep talks, or life-coaching ("stick to your goals", "stay sharp", "get a study session in", "hope you have a chill evening"). No motivational filler.
 - Plain text only. No markdown, no asterisks, no bullet characters, no headings.
 - Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
 - Refer to calendar events by their literal title and time. Do NOT guess who a meeting is "with" unless the event explicitly names another attendee — and never name the user themselves as the other party.
-- Emails shown are the user's Primary inbox. Don't treat marketing/automated mail as important.
-- If there is no real calendar event, email, or useful current info, reply with exactly: NOTHING
+- Emails shown are the user's Primary inbox and are ALSO displayed to them separately as their own list. Do NOT enumerate them — mention an email only if it's genuinely urgent or time-sensitive, otherwise skip email entirely and focus on weather and relevant news.
+- If there is no real calendar event, urgent email, or useful current info, reply with exactly: NOTHING
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}
 
 Recent inbox (Primary):
 ${ctx.emailText || 'No email data available.'}
+
+Pending reminders / errands:
+${remindersText}
 
 Memory:
 ${memory || 'none'}
@@ -4515,7 +4540,8 @@ Recent conversation:
 ${history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none'}
 
 Native context:
-Location: ${formatLocationForPrompt(location)}
+Location: ${placeLabel}
+Coordinates: ${formatLocationForPrompt(location)}
 Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
@@ -4549,7 +4575,12 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
   // Gather context up front and fingerprint it. Regenerate when the underlying calendar/email
   // changed, when the last briefing is older than the max age, or when the user forced a refresh.
   const ctx = await gatherProactiveContext(userId, now);
-  const sig = crypto.createHash('sha256').update(`${ctx.calendarText}\n--\n${ctx.emailText}`).digest('hex').slice(0, 16);
+  // Fold place + errands into the fingerprint so moving somewhere new (or adding a reminder)
+  // regenerates the briefing with a fresh location-aware nudge, not a stale morning card.
+  const placeSig = ctx.location?.place ? JSON.stringify(ctx.location.place) : '';
+  const sig = crypto.createHash('sha256')
+    .update(`${ctx.calendarText}\n--\n${ctx.emailText}\n--\n${placeSig}\n--\n${JSON.stringify(ctx.reminders || [])}`)
+    .digest('hex').slice(0, 16);
   const fresh = state.at && (now.getTime() - new Date(state.at).getTime()) < BRIEFING_MAX_AGE_MS;
   if (!force && state.sig === sig && fresh) return null;
 
@@ -4568,7 +4599,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
     // window with current content, rather than stacking a new card on every change.
     const { data, error } = await supabase
       .from('briefings')
-      .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey } })
+      .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey, emails: ctx.emails } })
       .eq('id', state.id)
       .eq('user_id', userId)
       .select('id, body')
@@ -4581,7 +4612,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
       title: window.label,
       body: text,
       source: 'schedule',
-      metadata: { window: window.id, date: todayKey }
+      metadata: { window: window.id, date: todayKey, emails: ctx.emails }
     });
   }
   await setPreferenceValue(userId, key, JSON.stringify({ id: briefing.id, sig, at: now.toISOString() }));

@@ -253,15 +253,33 @@ struct Briefing: Codable, Identifiable, Equatable {
     let source: String?
     let read: Bool?
     let createdAt: String?
+    let metadata: BriefingMetadata?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, title, body, source, read
+        case id, kind, title, body, source, read, metadata
         case createdAt = "created_at"
     }
 
     var isUnread: Bool {
         read == false
     }
+
+    var emails: [BriefingEmail] {
+        metadata?.emails ?? []
+    }
+}
+
+struct BriefingMetadata: Codable, Equatable {
+    let emails: [BriefingEmail]?
+}
+
+struct BriefingEmail: Codable, Equatable, Identifiable {
+    let from: String
+    let subject: String
+    let snippet: String?
+    let date: String?
+
+    var id: String { from + "|" + subject }
 }
 
 struct BriefingsResponse: Codable {

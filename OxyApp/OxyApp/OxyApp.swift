@@ -4,25 +4,13 @@ import SwiftUI
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    @AppStorage("oxy_appTheme") private var appTheme = "dark"
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .preferredColorScheme(preferredColorScheme)
+                .preferredColorScheme(.dark)
                 .tint(Color.oxyStone)
-        }
-    }
-
-    private var preferredColorScheme: ColorScheme? {
-        switch appTheme {
-        case "light":
-            return .light
-        case "system":
-            return nil
-        default:
-            return .dark
         }
     }
 }

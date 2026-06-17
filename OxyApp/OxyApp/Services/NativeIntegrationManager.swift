@@ -76,6 +76,24 @@ struct NativeWorkoutSummary: Codable, Equatable {
     let endedAt: Date
 }
 
+// MARK: - Today dashboard models
+
+struct TodayEvent: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let start: Date
+    let end: Date
+    let isAllDay: Bool
+    let location: String?
+}
+
+struct TodayReminder: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let due: Date?
+    let overdue: Bool
+}
+
 private struct ITunesSongResult: Decodable {
     let resultCount: Int
     let results: [ITunesSong]
@@ -167,8 +185,23 @@ final class NativeIntegrationManager: NSObject {
         super.init()
     }
 
+    private var lastContextSyncAt: Date?
+    private var locationObserver: NSObjectProtocol?
+
     func bootstrap(userId: String) {
         guard !userId.isEmpty else { return }
+        LocationManager.shared.startMonitoringSignificantChanges()
+        // Keep the server's location fresh as the user moves, so a proactive sweep knows where
+        // they are. Debounced so the geocode/upsert can't churn on rapid fixes.
+        if let locationObserver { NotificationCenter.default.removeObserver(locationObserver) }
+        locationObserver = NotificationCenter.default.addObserver(forName: LocationManager.didChangeLocation, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if let last = self.lastContextSyncAt, Date().timeIntervalSince(last) < 60 { return }
+                self.lastContextSyncAt = Date()
+                await self.syncNativeContext(userId: userId)
+            }
+        }
         Task {
             await requestNotificationPermission(userId: userId)
             await syncNativeContext(userId: userId)
@@ -219,22 +252,48 @@ final class NativeIntegrationManager: NSObject {
         let settings = loadSettings()
         let health = await healthSnapshot()
         let capabilities = await nativeCapabilities()
+        // Pending errands ride in the settings blob (no schema change) so the proactive brain
+        // can cross-reference them against where the user is — "near Aldi, grab those tomatoes".
+        var settingsDict = settings.nativeDictionary
+        let reminders = await pendingReminders()
+        if !reminders.isEmpty { settingsDict["reminders"] = reminders }
+
         var body: [String: Any] = [
             "userId": userId,
             "health": health.dictionary,
             "capabilities": capabilities.dictionary,
-            "settings": settings.nativeDictionary
+            "settings": settingsDict
         ]
         // Actively fetch a fresh fix (requests one-shot location + awaits with timeout) rather
         // than reading a cached value that is almost always nil at sync time — otherwise the
         // server never receives location and proactive briefings can't do weather/places.
         if let location = await LocationManager.shared.currentLocationForLocalRequest() {
-            body["location"] = location
+            var locationPayload: [String: Any] = location
+            // A reverse-geocoded label lets the brain reason about real places, not coordinates.
+            if let place = await LocationManager.shared.placeLabel() { locationPayload["place"] = place }
+            body["location"] = locationPayload
         }
         do {
             _ = try await APIClient.shared.request(path: "/native/context", method: "POST", body: body)
         } catch {
             print("[Native] Context sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Incomplete reminders (errands) for the proactive brain — title + optional due, capped.
+    private func pendingReminders(limit: Int = 10) async -> [[String: String]] {
+        guard remindersAuthorized else { return [] }
+        let predicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+        let reminders: [EKReminder] = await withCheckedContinuation { cont in
+            eventStore.fetchReminders(matching: predicate) { cont.resume(returning: $0 ?? []) }
+        }
+        let cal = Calendar.current
+        return reminders.prefix(limit).map { reminder in
+            var entry: [String: String] = ["title": reminder.title ?? "Reminder"]
+            if let comps = reminder.dueDateComponents, let due = cal.date(from: comps) {
+                entry["due"] = ISO8601DateFormatter().string(from: due)
+            }
+            return entry
         }
     }
 
@@ -2009,6 +2068,68 @@ final class NativeIntegrationManager: NSObject {
 
     func requestMusicAccess() async {
         _ = await requestMusicPermission()
+    }
+
+    // MARK: - Today dashboard
+
+    /// Request the permissions the Today dashboard reads, only when still undetermined so we
+    /// don't re-prompt. Health read status isn't reliably queryable, so it's gated by a flag.
+    func prepareTodayAccess() async {
+        if EKEventStore.authorizationStatus(for: .event) == .notDetermined { await requestCalendarPermission() }
+        if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined { await requestReminderPermission() }
+        if !UserDefaults.standard.bool(forKey: "oxy_today_health_asked") {
+            await requestHealthPermission()
+            UserDefaults.standard.set(true, forKey: "oxy_today_health_asked")
+        }
+    }
+
+    /// Today's remaining calendar events (all-day events plus anything not yet finished), soonest first.
+    func todaysEvents() async -> [TodayEvent] {
+        guard calendarAuthorized else { return [] }
+        let cal = Calendar.current
+        let now = Date()
+        let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        let predicate = eventStore.predicateForEvents(withStart: cal.startOfDay(for: now), end: endOfDay, calendars: nil)
+        return eventStore.events(matching: predicate)
+            .filter { $0.isAllDay || $0.endDate > now }
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(6)
+            .map { event in
+                let location = (event.location?.isEmpty == false) ? event.location : nil
+                return TodayEvent(
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    title: event.title ?? "Untitled",
+                    start: event.startDate, end: event.endDate,
+                    isAllDay: event.isAllDay, location: location
+                )
+            }
+    }
+
+    /// Incomplete reminders due today or overdue, soonest first.
+    func todaysReminders() async -> [TodayReminder] {
+        guard remindersAuthorized else { return [] }
+        let predicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+        let reminders: [EKReminder] = await withCheckedContinuation { cont in
+            eventStore.fetchReminders(matching: predicate) { cont.resume(returning: $0 ?? []) }
+        }
+        let now = Date()
+        let cal = Calendar.current
+        let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        return reminders
+            .compactMap { reminder -> TodayReminder? in
+                guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps), due <= endOfDay else { return nil }
+                return TodayReminder(id: reminder.calendarItemIdentifier, title: reminder.title ?? "Reminder", due: due, overdue: due < now)
+            }
+            .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    /// Step count since midnight, or nil if unavailable.
+    func todaysSteps() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let value = await stepCount(start: Calendar.current.startOfDay(for: Date()), end: Date()) else { return nil }
+        return Int(value.rounded())
     }
 
     private func nativeCapabilities() async -> NativeCapabilities {

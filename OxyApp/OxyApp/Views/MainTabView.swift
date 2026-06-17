@@ -4,8 +4,6 @@ import UIKit
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
-    @AppStorage("oxy_appTheme") private var appTheme = "dark"
-    @AppStorage("oxy_theme_profile") private var themeProfile = "titanium"
     @State private var selectedTab = Tab.today
     // The bar slides out of the way while the keyboard is up (e.g. composing in chat) and
     // returns when the keyboard dismisses — which the interactive scroll-to-dismiss makes a
@@ -56,7 +54,7 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
             keyboardUp = false
         }
-        .id(accentColor + appTheme + themeProfile)
+        .id(accentColor)
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
         }

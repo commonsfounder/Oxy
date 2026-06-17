@@ -5,92 +5,31 @@ import UIKit
 /// deep obsidian, titanium hairlines, soft white editorial type. Intentionally
 /// fixed rather than light/dark-adaptive: this aesthetic doesn't bend to system
 /// appearance, the same way a well-made object looks the same in any room.
-// MARK: - Customization engine
+// MARK: - Fixed pure-black palette
 //
-// One luxury aesthetic, three finishes. The background is always pure black and
-// the *structure* never changes — only the subtle accent/detail/border colourway
-// shifts between profiles. Every view reads the `nml*` colour tokens below, so
-// switching the finish re-skins the entire app from this one place.
-
-/// A finish is a colourway — it paints the accent on top of the active appearance
-/// (light or dark). The neutrals (canvas, ink, surfaces, hairlines) come from the
-/// appearance; the finish only shifts the accent + glow.
-struct OxyThemeProfile: Identifiable, Equatable {
-    let id: String
-    let name: String
-    /// Accent on a dark canvas — interactive text, active states, quiet emphasis.
-    let accent: Color
-    /// Accent on a light canvas — darker so it stays legible on bone.
-    let accentLight: Color
-    /// Halo behind a live-status dot.
-    let glow: Color
-
-    private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
-        Color(red: r / 255, green: g / 255, blue: b / 255)
-    }
-
-    /// Onyx — neutral graphite. (id stays "obsidian" so saved selections survive.)
-    static let obsidian = OxyThemeProfile(
-        id: "obsidian", name: "Onyx",
-        accent: rgb(124, 124, 130), accentLight: rgb(86, 86, 92), glow: rgb(184, 184, 190)
-    )
-
-    /// Moonstone — warm silver (default). (id stays "titanium".)
-    static let titanium = OxyThemeProfile(
-        id: "titanium", name: "Moonstone",
-        accent: rgb(208, 203, 196), accentLight: rgb(110, 101, 90), glow: rgb(222, 217, 209)
-    )
-
-    /// Champagne — soft gold. (id stays "gold".)
-    static let gold = OxyThemeProfile(
-        id: "gold", name: "Champagne",
-        accent: rgb(200, 168, 118), accentLight: rgb(150, 120, 62), glow: rgb(224, 207, 168)
-    )
-}
-
-/// The finish engine. The selection lives in UserDefaults so the plain `static`
-/// colour tokens can read it synchronously; the app root re-keys its identity on
-/// the same value so a change re-skins every screen at once.
-enum OxyTheme {
-    static let storageKey = "oxy_theme_profile"
-    static let profiles: [OxyThemeProfile] = [.obsidian, .titanium, .gold]
-
-    static var current: OxyThemeProfile {
-        let id = UserDefaults.standard.string(forKey: storageKey) ?? OxyThemeProfile.titanium.id
-        return profiles.first { $0.id == id } ?? .titanium
-    }
-}
+// One aesthetic, no finishes, no accents. Pure black canvas, titanium/silver
+// hairlines, soft-white editorial type. Every view reads the `nml*` tokens
+// below; there's nothing to switch.
 
 extension Color {
-    // Neutrals adapt to the active appearance (oxy_appTheme: light/dark/system) via the
-    // same trait-aware resolver the rest of the app uses. Dark = warm near-black; light =
-    // warm bone. The finish only shifts the accent on top.
-    private static func nmlHex(_ hex: UInt) -> UIColor {
-        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255,
-                green: CGFloat((hex >> 8) & 0xFF) / 255,
-                blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
-    }
-
-    /// Canvas — warm bone in light, warm near-black in dark.
-    static var nmlObsidian: Color { dynamicColor(light: nmlHex(0xEDE7DB), dark: nmlHex(0x0D0B09)) }
-    /// Slightly raised surface for cards and rows.
-    static var nmlSurface: Color { dynamicColor(light: nmlHex(0xF6F1E8), dark: nmlHex(0x17120D)) }
-    /// One step lighter still — fields, pills nested inside a surface.
-    static var nmlSurface2: Color { dynamicColor(light: nmlHex(0xEFE9DD), dark: nmlHex(0x211B14)) }
-    /// Hairline / container border.
-    static var nmlHairline: Color { dynamicColor(light: nmlHex(0xD9D2C5), dark: nmlHex(0x262019)) }
-    /// Flat solid container border — same source as the hairline.
-    static var nmlCardBorder: Color { nmlHairline }
-    /// The finish accent — icons, dots, interactive text, quiet emphasis.
-    static var nmlTitanium: Color {
-        dynamicColor(light: UIColor(OxyTheme.current.accentLight), dark: UIColor(OxyTheme.current.accent))
-    }
-    /// Primary editorial type — ink on light, warm white on dark.
-    static var nmlInk: Color { dynamicColor(light: nmlHex(0x1B1712), dark: nmlHex(0xEFE8DA)) }
-    /// Muted secondary detail.
-    static var nmlMuted: Color { dynamicColor(light: nmlHex(0x8A8076), dark: nmlHex(0x8C8275)) }
+    /// Pure black background — the single canvas colour across the app.
+    static let nmlObsidian = Color.black
+    /// Slightly raised obsidian surface for cards and rows.
+    static let nmlSurface = Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255)
+    /// One step lighter still — for elements nested inside a surface (input fields, pills).
+    static let nmlSurface2 = Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255)
+    /// Titanium/silver hairline — always drawn at 0.5pt.
+    static let nmlHairline = Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16)
+    /// Flat solid card border (#222222) for raw monospace telemetry cards.
+    static let nmlCardBorder = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
+    /// Soft titanium for icons, dots, and quiet emphasis.
+    static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
+    /// Soft white for primary editorial type — intentionally never pure white.
+    static let nmlInk = Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255)
+    /// Muted secondary gray (#8E8E93) for captions, eyebrows, and secondary detail.
+    static let nmlMuted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
     /// Faint halo behind a live-status dot.
-    static var nmlGlow: Color { OxyTheme.current.glow }
+    static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
 }
 
 extension Font {
