@@ -174,6 +174,7 @@ struct ProactiveView: View {
                                 Text(event.title)
                                     .font(.nmlBody(14))
                                     .foregroundStyle(Color.nmlInk)
+                                    .lineLimit(2)
                                 if let location = event.location {
                                     Text(location)
                                         .font(.nmlBody(11))

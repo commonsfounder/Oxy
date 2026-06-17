@@ -288,13 +288,17 @@ final class NativeIntegrationManager: NSObject {
             eventStore.fetchReminders(matching: predicate) { cont.resume(returning: $0 ?? []) }
         }
         let cal = Calendar.current
-        return reminders.prefix(limit).map { reminder in
-            var entry: [String: String] = ["title": reminder.title ?? "Reminder"]
-            if let comps = reminder.dueDateComponents, let due = cal.date(from: comps) {
-                entry["due"] = ISO8601DateFormatter().string(from: due)
+        var seen = Set<String>()
+        return reminders
+            .filter { seen.insert(($0.title ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)).inserted }
+            .prefix(limit)
+            .map { reminder in
+                var entry: [String: String] = ["title": reminder.title ?? "Reminder"]
+                if let comps = reminder.dueDateComponents, let due = cal.date(from: comps) {
+                    entry["due"] = ISO8601DateFormatter().string(from: due)
+                }
+                return entry
             }
-            return entry
-        }
     }
 
     func markCurrentLocationAsHome(userId: String) async {
@@ -2090,9 +2094,16 @@ final class NativeIntegrationManager: NSObject {
         let now = Date()
         let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
         let predicate = eventStore.predicateForEvents(withStart: cal.startOfDay(for: now), end: endOfDay, calendars: nil)
+        var seen = Set<String>()
         return eventStore.events(matching: predicate)
             .filter { $0.isAllDay || $0.endDate > now }
             .sorted { $0.startDate < $1.startDate }
+            // Same event synced across calendars (or double-booked by the brain) shows once.
+            .filter { event in
+                let key = (event.title ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    + "|" + String(event.startDate.timeIntervalSinceReferenceDate)
+                return seen.insert(key).inserted
+            }
             .prefix(6)
             .map { event in
                 let location = (event.location?.isEmpty == false) ? event.location : nil
@@ -2115,10 +2126,13 @@ final class NativeIntegrationManager: NSObject {
         let now = Date()
         let cal = Calendar.current
         let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        var seen = Set<String>()
         return reminders
             .compactMap { reminder -> TodayReminder? in
                 guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps), due <= endOfDay else { return nil }
-                return TodayReminder(id: reminder.calendarItemIdentifier, title: reminder.title ?? "Reminder", due: due, overdue: due < now)
+                let title = reminder.title ?? "Reminder"
+                guard seen.insert(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)).inserted else { return nil }
+                return TodayReminder(id: reminder.calendarItemIdentifier, title: title, due: due, overdue: due < now)
             }
             .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
             .prefix(5)

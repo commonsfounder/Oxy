@@ -1,18 +1,15 @@
 import Foundation
 import CoreLocation
-import WeatherKit
 
-/// Real local weather via Apple's WeatherKit, for the Today briefing. Named
-/// `OxyWeatherService` to avoid colliding with WeatherKit's own `WeatherService`.
-///
-/// Requires the `com.apple.developer.weatherkit` entitlement (added in
-/// OxyApp.entitlements). On simulators or when location/entitlement is missing
-/// it simply returns `nil`, and the Today view falls back to its existing copy.
+/// Real local weather for the Today dashboard via Open-Meteo — a free, key-less,
+/// entitlement-free API. (We deliberately do NOT use WeatherKit: it needs a paid
+/// Apple Developer account + the `com.apple.developer.weatherkit` entitlement,
+/// neither of which this app has, so it would always return nil on-device.)
+/// Named `OxyWeatherService` for backwards-compat with existing call sites.
 @MainActor
 final class OxyWeatherService {
     static let shared = OxyWeatherService()
 
-    private let service = WeatherKit.WeatherService.shared
     private var cached: (snapshot: OxyWeatherSnapshot, at: Date)?
     private let cacheTTL: TimeInterval = 30 * 60
 
@@ -31,26 +28,35 @@ final class OxyWeatherService {
         }
     }
 
-    /// Returns the current snapshot for the device location, or `nil` if it
-    /// can't be resolved (no location permission, simulator, network/entitlement
-    /// failure). Cached for 30 minutes to avoid hammering WeatherKit.
+    /// Current snapshot for the device location, or `nil` if location/network is unavailable.
+    /// Cached for 30 minutes to avoid hammering the API.
     func currentWeather() async -> OxyWeatherSnapshot? {
         if let cached, Date().timeIntervalSince(cached.at) < cacheTTL {
             return cached.snapshot
         }
         guard let location = await resolveLocation() else { return nil }
 
+        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")
+        components?.queryItems = [
+            URLQueryItem(name: "latitude", value: String(location.coordinate.latitude)),
+            URLQueryItem(name: "longitude", value: String(location.coordinate.longitude)),
+            URLQueryItem(name: "current", value: "temperature_2m,apparent_temperature,weather_code"),
+            URLQueryItem(name: "daily", value: "temperature_2m_max,temperature_2m_min"),
+            URLQueryItem(name: "timezone", value: "auto")
+        ]
+        guard let url = components?.url else { return nil }
+
         do {
-            let weather = try await service.weather(for: location)
-            let current = weather.currentWeather
-            let today = weather.dailyForecast.forecast.first
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(OpenMeteoResponse.self, from: data)
+            let code = response.current.weather_code
             let snapshot = OxyWeatherSnapshot(
-                temperatureC: current.temperature.converted(to: .celsius).value,
-                apparentC: current.apparentTemperature.converted(to: .celsius).value,
-                conditionDescription: current.condition.description,
-                symbolName: current.symbolName,
-                highC: today?.highTemperature.converted(to: .celsius).value,
-                lowC: today?.lowTemperature.converted(to: .celsius).value
+                temperatureC: response.current.temperature_2m,
+                apparentC: response.current.apparent_temperature,
+                conditionDescription: Self.condition(for: code),
+                symbolName: Self.symbol(for: code),
+                highC: response.daily.temperature_2m_max.first,
+                lowC: response.daily.temperature_2m_min.first
             )
             cached = (snapshot, Date())
             return snapshot
@@ -73,5 +79,61 @@ final class OxyWeatherService {
             if let last = manager.lastLocation { return last }
         }
         return manager.lastLocation
+    }
+
+    // MARK: - WMO weather code mapping
+
+    /// WMO weather interpretation codes → human condition text.
+    private static func condition(for code: Int) -> String {
+        switch code {
+        case 0: return "Clear"
+        case 1: return "Mainly Clear"
+        case 2: return "Partly Cloudy"
+        case 3: return "Overcast"
+        case 45, 48: return "Fog"
+        case 51, 53, 55: return "Drizzle"
+        case 56, 57: return "Freezing Drizzle"
+        case 61, 63, 65: return "Rain"
+        case 66, 67: return "Freezing Rain"
+        case 71, 73, 75, 77: return "Snow"
+        case 80, 81, 82: return "Rain Showers"
+        case 85, 86: return "Snow Showers"
+        case 95: return "Thunderstorm"
+        case 96, 99: return "Thunderstorm, Hail"
+        default: return "—"
+        }
+    }
+
+    /// WMO weather interpretation codes → SF Symbol name.
+    private static func symbol(for code: Int) -> String {
+        switch code {
+        case 0, 1: return "sun.max"
+        case 2: return "cloud.sun"
+        case 3: return "cloud"
+        case 45, 48: return "cloud.fog"
+        case 51, 53, 55, 56, 57: return "cloud.drizzle"
+        case 61, 63, 65, 66, 67, 80, 81, 82: return "cloud.rain"
+        case 71, 73, 75, 77, 85, 86: return "cloud.snow"
+        case 95, 96, 99: return "cloud.bolt.rain"
+        default: return "cloud"
+        }
+    }
+}
+
+// MARK: - Open-Meteo response
+
+private struct OpenMeteoResponse: Decodable {
+    let current: Current
+    let daily: Daily
+
+    struct Current: Decodable {
+        let temperature_2m: Double
+        let apparent_temperature: Double
+        let weather_code: Int
+    }
+
+    struct Daily: Decodable {
+        let temperature_2m_max: [Double]
+        let temperature_2m_min: [Double]
     }
 }
