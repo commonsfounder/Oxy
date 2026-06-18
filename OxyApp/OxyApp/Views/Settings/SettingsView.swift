@@ -271,8 +271,8 @@ struct SettingsView: View {
                 Text(label)
                     .font(.system(size: 15, weight: .regular))
                 Spacer()
-                Text("↗")
-                    .font(.system(size: 14, weight: .light))
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Color.nmlMuted)
             }
             .foregroundStyle(Color.nmlInk)

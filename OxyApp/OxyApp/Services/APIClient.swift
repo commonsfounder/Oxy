@@ -8,6 +8,9 @@ extension Notification.Name {
     /// into the *currently visible* ChatView — userInfo["text"]. This replaces
     /// presenting a second ChatView, which caused a duplicate-screen overlay.
     static let oxyVoiceMessage = Notification.Name("oxy.voiceMessage")
+    /// Pre-fills the chat composer with a draft (userInfo["text"]) WITHOUT sending —
+    /// e.g. tapping a Today item to start a message about it. The user edits and sends.
+    static let oxyDraftMessage = Notification.Name("oxy.draftMessage")
 }
 
 final class APIClient: @unchecked Sendable {

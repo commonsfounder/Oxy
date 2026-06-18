@@ -62,7 +62,7 @@ struct MessageBubble: View {
                     .padding(.vertical, isUser ? 9 : 0)
                     .background {
                         if isUser {
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
                                 .fill(Color.white.opacity(0.12))
                         }
                     }

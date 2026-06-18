@@ -12,22 +12,17 @@ struct DeviceStatusCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(telemetry.isStreaming ? liveGreen : Color.nmlMuted.opacity(0.5))
-                        .frame(width: 6, height: 6)
-                    Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
-                        .font(.nmlMono(10, weight: .medium))
-                        .tracking(0.6)
-                        .foregroundStyle(telemetry.isStreaming ? Color.nmlInk : Color.nmlMuted)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    liveState
+                    Spacer(minLength: 8)
+                    metrics
                 }
 
-                Spacer(minLength: 8)
-
-                metric(String(format: "%.1fMS", telemetry.routingLatencyMillis))
-                metric("CORE \(telemetry.coreBatteryPercent)%")
-                metric("CLASP \(telemetry.claspBatteryPercent)%")
+                VStack(alignment: .leading, spacing: 9) {
+                    liveState
+                    metrics
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 11)
@@ -35,6 +30,27 @@ struct DeviceStatusCard: View {
             Rectangle()
                 .fill(Color.nmlHairline)
                 .frame(height: 0.5)
+        }
+    }
+
+    private var liveState: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(telemetry.isStreaming ? liveGreen : Color.nmlMuted.opacity(0.5))
+                .frame(width: 6, height: 6)
+            Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
+                .font(.nmlMono(10, weight: .medium))
+                .tracking(0.6)
+                .foregroundStyle(telemetry.isStreaming ? Color.nmlInk : Color.nmlMuted)
+                .fixedSize()
+        }
+    }
+
+    private var metrics: some View {
+        HStack(spacing: 12) {
+            metric(String(format: "%.1fMS", telemetry.routingLatencyMillis))
+            metric("CORE \(telemetry.coreBatteryPercent)%")
+            metric("CLASP \(telemetry.claspBatteryPercent)%")
         }
     }
 

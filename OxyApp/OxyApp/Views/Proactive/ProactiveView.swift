@@ -367,12 +367,19 @@ struct ProactiveView: View {
         }
     }
 
-    /// Hands a briefing to chat as a prompt so the agent can act on it (e.g. turn a
-    /// surfaced grocery list into a real task). ChatView consumes the pending query.
-    private func actOn(_ briefing: Briefing) {
-        let body = cleanBody(briefing)
-        SiriRequestBus.shared.pendingQuery = "About this from my briefing: \"\(body)\" — help me act on it."
+    /// Opens chat with the composer pre-filled — a *draft*, not an auto-sent command.
+    /// A briefing is multi-topic, so we never guess an action; the user types what they
+    /// actually want and sends it themselves.
+    private func discuss(_ briefing: Briefing) {
         NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
+        // Slight delay so the chat view is mounted to receive the draft.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            NotificationCenter.default.post(
+                name: .oxyDraftMessage,
+                object: nil,
+                userInfo: ["text": "About my briefing: "]
+            )
+        }
     }
 
     @ViewBuilder private var activityCard: some View {
@@ -452,23 +459,16 @@ struct ProactiveView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(visibleBriefings) { briefing in
                         VStack(alignment: .leading, spacing: 8) {
-                            Button {
-                                HapticManager.shared.impact(.light)
-                                actOn(briefing)
-                            } label: {
-                                Text(cleanBody(briefing))
-                                    .font(.nmlBody(14, weight: .light))
-                                    .foregroundStyle(Color.nmlInk)
-                                    .lineSpacing(3)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                            Text(cleanBody(briefing))
+                                .font(.nmlBody(14, weight: .light))
+                                .foregroundStyle(Color.nmlInk)
+                                .lineSpacing(3)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             HStack(spacing: 18) {
-                                Button("Act on this") {
+                                Button("Ask about this") {
                                     HapticManager.shared.impact(.light)
-                                    actOn(briefing)
+                                    discuss(briefing)
                                 }
                                 .foregroundStyle(Color.nmlTitanium)
                                 Button("Dismiss") { Task { await markRead(briefing) } }
@@ -579,11 +579,11 @@ private struct TodayCard<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
+        .padding(16)
         .background(Color.nmlSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
         )
     }

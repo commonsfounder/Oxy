@@ -26,7 +26,7 @@ struct ConnectionTroubleView: View {
                     .foregroundStyle(Color.nmlMuted)
 
                 Text("We couldn't reach your pendant.")
-                    .font(.system(size: 30, weight: .regular, design: .serif))
+                    .font(.nmlDisplay(30, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)

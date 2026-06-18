@@ -193,8 +193,8 @@ struct ProfileView: View {
                 Text(label)
                     .font(.system(size: 15, weight: .regular))
                 Spacer()
-                Text("›")
-                    .font(.system(size: 18, weight: .light))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .light))
                     .foregroundStyle(Color.nmlMuted)
             }
             .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)

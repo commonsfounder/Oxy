@@ -98,16 +98,26 @@ struct PendantStatusView: View {
     }
 
     private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
-        HStack(alignment: .center, spacing: 16) {
-            Text(label)
-                .font(.nmlMono(11, weight: .medium))
-                .tracking(1.0)
-                .foregroundStyle(Color.nmlMuted)
-                .fixedSize()
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 16) {
+                configLabel(label)
+                NamelessSegmentedControl(options: options, selection: selection)
+            }
 
-            NamelessSegmentedControl(options: options, selection: selection)
+            VStack(alignment: .leading, spacing: 10) {
+                configLabel(label)
+                NamelessSegmentedControl(options: options, selection: selection)
+            }
         }
         .padding(.vertical, 14)
+    }
+
+    private func configLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.nmlMono(11, weight: .medium))
+            .tracking(1.0)
+            .foregroundStyle(Color.nmlMuted)
+            .fixedSize()
     }
 }
 

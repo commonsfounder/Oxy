@@ -144,44 +144,41 @@ struct MoreView: View {
                 // title here read as inconsistent next to Chat/Today. Let the account header lead,
                 // matching Today's scrolling feel.
                 ScrollView {
-                        VStack(alignment: .leading, spacing: 34) {
+                        VStack(alignment: .leading, spacing: 18) {
                             accountHeader
 
-                            group(title: "Assistant") {
-                                moreRow(icon: "brain", title: "Memory", subtitle: "What's remembered about you") {
-                                    destination = .memory
-                                }
-                                NamelessDivider()
-                                moreRow(icon: "powerplug", title: "Connectors", subtitle: "Accounts, services, device access") {
-                                    destination = .connectors
-                                }
-                                NamelessDivider()
-                                moreRow(icon: "gearshape", title: "Settings", subtitle: "Voice, appearance, behaviour") {
-                                    destination = .settings
-                                }
-                            }
-
-                            group(title: "Device") {
+                            menuCard {
+                                moreRow(icon: "brain", title: "Memory") { destination = .memory }
+                                rowDivider
+                                moreRow(icon: "link", title: "Connectors") { destination = .connectors }
+                                rowDivider
+                                moreRow(icon: "slider.horizontal.3", title: "Settings") { destination = .settings }
+                                rowDivider
                                 moreRow(
                                     icon: "dot.radiowave.left.and.right",
                                     title: "Pendant",
-                                    subtitle: "Pairing, status, hardware",
                                     trailing: pendantStatusText,
                                     trailingLive: pendant.isConnected
-                                ) {
-                                    destination = .pendant
-                                }
+                                ) { destination = .pendant }
                             }
 
-                            NamelessOutlineButton(title: "Sign Out") {
+                            Button {
                                 HapticManager.shared.impact(.light)
                                 showSignOutConfirm = true
+                            } label: {
+                                Text("Sign Out")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundStyle(Color.nmlMuted)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 14)
+                                    .contentShape(Rectangle())
                             }
-                            .padding(.top, 22)
+                            .buttonStyle(.plain)
+                            .padding(.top, 4)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.top, 12)
-                        .padding(.bottom, 32)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 24)
+                        .padding(.bottom, 40)
                     }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -214,40 +211,59 @@ struct MoreView: View {
             destination = .profile
         } label: {
             HStack(spacing: 14) {
-                // A quiet monogram instead of a colourful avatar — first letter of
-                // the assistant name in a hairline ring.
+                // A quiet monogram in a hairline ring — initial of the user's name.
                 Text(monogram)
-                    .font(.system(size: 19, weight: .light))
+                    .font(.system(size: 20, weight: .light))
                     .foregroundStyle(Color.nmlInk)
-                    .frame(width: 46, height: 46)
+                    .frame(width: 48, height: 48)
                     .background(Circle().fill(Color.white.opacity(0.05)))
                     .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Account")
-                        .font(.system(size: 18, weight: .regular))
+                    Text(displayName)
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(Color.nmlInk)
-                    Text("Identity, export, sign out")
+                        .lineLimit(1)
+                    Text(accountSubtitle)
                         .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Spacer()
 
-                Text("›")
-                    .font(.system(size: 18, weight: .light))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.nmlMuted)
             }
-            .padding(.vertical, 14)
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(cardBackground)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
+    /// The user's name from Profile, or a quiet prompt to set it up.
+    private var displayName: String {
+        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+           let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
+           !saved.userName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return saved.userName.trimmingCharacters(in: .whitespaces)
+        }
+        return "Set up your profile"
+    }
+
+    private var accountSubtitle: String {
+        let id = appState.userId.trimmingCharacters(in: .whitespaces)
+        return id.isEmpty ? "Profile · data · sign out" : id
+    }
+
     private var monogram: String {
-        // Derive the account monogram from the signed-in user's id (the product itself
-        // is nameless), falling back to a neutral dash.
-        let trimmed = appState.userId.trimmingCharacters(in: .whitespaces)
+        let name = displayName
+        let source = name == "Set up your profile" ? appState.userId : name
+        let trimmed = source.trimmingCharacters(in: .whitespaces)
         return String(trimmed.first ?? "—").uppercased()
     }
 
@@ -256,24 +272,37 @@ struct MoreView: View {
         case .connected: return "Connected"
         case .scanning, .connecting: return "Pairing…"
         case .error: return "Error"
-        case .disconnected: return "Not connected"
+        case .disconnected: return nil
         }
     }
 
-    // MARK: - Grouped rows
+    // MARK: - Menu card
 
-    private func group<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: title)
-                .padding(.bottom, 6)
-            VStack(spacing: 0) { content() }
-        }
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.nmlSurface)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+            )
+    }
+
+    private func menuCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) { content() }
+            .background(cardBackground)
+    }
+
+    /// Hairline between rows, inset to clear the glyph column so it reads as a list.
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color.nmlHairline)
+            .frame(height: 0.5)
+            .padding(.leading, 54)
     }
 
     private func moreRow(
         icon: String,
         title: String,
-        subtitle: String,
         trailing: String? = nil,
         trailingLive: Bool = false,
         action: @escaping () -> Void
@@ -282,23 +311,14 @@ struct MoreView: View {
             HapticManager.shared.impact(.light)
             action()
         } label: {
-            HStack(spacing: 12) {
-                // Thin titanium glyph, not a colourful tile — keeps the row scannable
-                // without breaking the de-gadgeted, raw-typography language.
+            HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.system(size: 17, weight: .light))
+                    .font(.system(size: 16, weight: .light))
                     .foregroundStyle(Color.nmlTitanium)
-                    .frame(width: 26, alignment: .center)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .regular))
-                        .foregroundStyle(Color.nmlInk)
-                    Text(subtitle)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .layoutPriority(1)
+                    .frame(width: 24, alignment: .center)
+                Text(title)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
                 Spacer()
                 if let trailing {
                     HStack(spacing: 7) {
@@ -308,14 +328,16 @@ struct MoreView: View {
                         Text(trailing)
                             .font(.nmlBody(11, weight: .medium))
                             .tracking(0.2)
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(trailingLive ? Color.nmlLive : Color.nmlMuted)
                     }
                 }
-                Text("›")
-                    .font(.system(size: 18, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
             }
-            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 15)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

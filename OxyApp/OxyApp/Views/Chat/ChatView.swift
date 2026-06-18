@@ -330,6 +330,11 @@ struct ChatView: View {
                 SiriRequestBus.shared.pendingQuery = nil
                 injectVoiceMessage(text)
             }
+            // Draft handoff (e.g. from a Today card) — fill the composer, don't send.
+            .onReceive(NotificationCenter.default.publisher(for: .oxyDraftMessage)) { note in
+                guard let text = note.userInfo?["text"] as? String else { return }
+                viewModel.inputText = text
+            }
         .task {
             if let session = initialSession {
                 await viewModel.loadHistoryAround(
@@ -386,9 +391,9 @@ struct ChatView: View {
                     }
                 }
                 .background(Color.nmlObsidian)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
                 )
                 .padding(.horizontal, 14)
@@ -657,9 +662,9 @@ private struct ActionReviewSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .background(Color.nmlSurface.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.nmlHairline, lineWidth: 0.5)
                 )
 
@@ -673,7 +678,7 @@ private struct ActionReviewSheet: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.nmlMuted)
                 .background(Color.nmlSurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 Button(action: onConfirm) {
                     Label("Send", systemImage: "arrow.up")
@@ -684,7 +689,7 @@ private struct ActionReviewSheet: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(Color.nmlObsidian)
                 .background(Color.nmlTitanium)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding(18)
@@ -992,7 +997,7 @@ private struct ChatInputBar: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(Color.nmlSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             }
