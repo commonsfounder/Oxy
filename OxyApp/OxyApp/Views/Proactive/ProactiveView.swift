@@ -377,7 +377,7 @@ struct ProactiveView: View {
             NotificationCenter.default.post(
                 name: .oxyDraftMessage,
                 object: nil,
-                userInfo: ["text": "About my briefing: "]
+                userInfo: ["text": "About this briefing: \(cleanBody(briefing))\n\n"]
             )
         }
     }

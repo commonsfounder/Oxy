@@ -146,9 +146,9 @@ struct ChatView: View {
                             }
                         }
                         .scrollDismissesKeyboard(.interactively)
-                        // Floating glass header: messages scroll cleanly underneath it,
-                        // matching the bottom tab bar's .safeAreaInset(.bottom). No opaque
-                        // bar, no content bleeding behind the menu button.
+                        // The header uses glass controls, but the region itself must be
+                        // opaque. Otherwise history text ghosts under the menu button while
+                        // scrolling, which makes the first visible message unreadable.
                         .safeAreaInset(edge: .top, spacing: 0) {
                             AppHeaderView(
                                 isIncognito: $isIncognito,
@@ -161,6 +161,7 @@ struct ChatView: View {
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
                             }
+                            .background(Color.nmlObsidian.ignoresSafeArea(edges: .top))
                         }
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }

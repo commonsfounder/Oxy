@@ -358,7 +358,9 @@ async function planTrip(destination, params = {}) {
       success: true,
       text: `I couldn't get a rail route summary to ${cleanedDestination} because the server is missing a Google Directions key.`,
       actionSummary: 'Route unavailable',
-      cardText: 'No route summary available',
+      cardText: 'Open transit directions in Maps',
+      deepLink: fallbackLink,
+      webLink: fallbackLink,
       routeContext: {
         origin: params.origin || 'current location',
         destination: cleanedDestination,
@@ -392,7 +394,9 @@ async function planTrip(destination, params = {}) {
       success: true,
       text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
       actionSummary: 'Route unavailable',
-      cardText: 'No route summary available',
+      cardText: 'Open transit directions in Maps',
+      deepLink: fallbackLink,
+      webLink: fallbackLink,
       routeContext: {
         origin: params.origin || 'current location',
         destination: cleanedDestination,

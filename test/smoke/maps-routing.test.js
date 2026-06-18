@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { chooseBestTripRoute } = require('../../connectors/maps');
+const { chooseBestTripRoute, execute } = require('../../connectors/maps');
 
 // Build a minimal Google Directions "route" the scorer understands: it reads
 // legs[0].duration.value and each step's transit_details.line.vehicle.type
@@ -37,4 +37,32 @@ test('rail still wins when timings are comparable', () => {
 
   const best = chooseBestTripRoute([bus, train]);
   assert.equal(best, train, 'rail keeps a mild preference over an equal-ish coach');
+});
+
+test('transit fallback still hands off to Maps when route summary is unavailable', async () => {
+  const saved = {
+    GOOGLE_DIRECTIONS_API_KEY: process.env.GOOGLE_DIRECTIONS_API_KEY,
+    GOOGLE_ROUTES_API_KEY: process.env.GOOGLE_ROUTES_API_KEY,
+    GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY,
+    GOOGLE_PLACES_API_KEY: process.env.GOOGLE_PLACES_API_KEY
+  };
+  delete process.env.GOOGLE_DIRECTIONS_API_KEY;
+  delete process.env.GOOGLE_ROUTES_API_KEY;
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  delete process.env.GOOGLE_PLACES_API_KEY;
+  try {
+    const result = await execute('user123', 'get_directions', {
+      destination: 'Swan Shopping Centre',
+      mode: 'transit'
+    });
+    assert.equal(result.actionSummary, 'Route unavailable');
+    assert.match(result.deepLink, /^https:\/\/maps\.apple\.com\/\?/);
+    assert.match(result.deepLink, /dirflg=r/);
+    assert.equal(result.cardText, 'Open transit directions in Maps');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

@@ -2044,22 +2044,32 @@ function extractDestinationPhrase(message) {
   return null;
 }
 
-// Find the user's most recent real directions request so a mode-change follow-up
-// can reuse its destination and timing instead of losing them.
+function looksLikeInvalidRouteDestination(destination) {
+  const text = String(destination || '').trim();
+  if (!text) return true;
+  if (/^\d+\s*°?\s*[cf]\b/i.test(text)) return true;
+  if (/^\d+\s*degrees?\b/i.test(text)) return true;
+  if (/^(right now|today|tomorrow|the bus|bus|transit|directions)$/i.test(text)) return true;
+  return false;
+}
+
+// Find the most recent real directions target so a mode-change follow-up
+// ("yes directions please, I'm taking the bus") can reuse its destination and
+// timing instead of letting the model grab a random token like "32°C".
 async function findRecentDirectionsRequest(userId, excludeText) {
   try {
     const { data } = await supabase
       .from('conversations')
       .select('content, role, created_at')
       .eq('user_id', userId)
-      .eq('role', 'user')
+      .in('role', ['user', 'assistant'])
       .order('created_at', { ascending: false })
-      .limit(12);
+      .limit(18);
     for (const row of data || []) {
       const text = conversationFallbackText(row);
       if (!text || text === excludeText || isModeChangeFollowup(text)) continue;
       const destination = extractDestinationPhrase(text);
-      if (destination) {
+      if (destination && !looksLikeInvalidRouteDestination(destination)) {
         return { destination, ...deriveDirectionTimes(text) };
       }
     }
@@ -2137,6 +2147,27 @@ async function executeAction(userId, action, params, context = {}) {
       }
       const mode = deriveDirectionMode(context.userMessage);
       if (mode) enrichedParams.mode = mode;
+    }
+
+    if (looksLikeInvalidRouteDestination(enrichedParams.destination)) {
+      const currentDestination = extractDestinationPhrase(context.userMessage);
+      if (currentDestination && !looksLikeInvalidRouteDestination(currentDestination)) {
+        enrichedParams.destination = currentDestination;
+      } else {
+        const prev = await findRecentDirectionsRequest(userId, context.userMessage);
+        if (prev?.destination) {
+        enrichedParams.destination = prev.destination;
+        if (prev.arrival_time && !enrichedParams.arrival_time) enrichedParams.arrival_time = prev.arrival_time;
+        if (prev.departure_time && !enrichedParams.departure_time) enrichedParams.departure_time = prev.departure_time;
+        } else {
+          return {
+            success: false,
+            text: "I don't have a real destination for directions yet. Where are you heading?",
+            actionSummary: 'Need destination',
+            cardText: 'Destination required'
+          };
+        }
+      }
     }
 
     // Recover a missing arrival/departure time from the raw message.
