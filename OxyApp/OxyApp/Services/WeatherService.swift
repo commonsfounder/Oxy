@@ -21,10 +21,26 @@ final class OxyWeatherService {
         let symbolName: String
         let highC: Double?
         let lowC: Double?
+        let humidity: Int?            // %
+        let windSpeed: Double?        // km/h
+        let uvIndex: Double?
+        let precipProbability: Int?   // %
 
         /// e.g. "12° · Partly Cloudy" — rounded, unit-light for the briefing rail.
         var shortLine: String {
             "\(Int(temperatureC.rounded()))° · \(conditionDescription)"
+        }
+
+        /// Human UV band for the detail grid.
+        var uvBand: String? {
+            guard let uv = uvIndex else { return nil }
+            switch uv {
+            case ..<3: return "Low"
+            case ..<6: return "Moderate"
+            case ..<8: return "High"
+            case ..<11: return "Very High"
+            default: return "Extreme"
+            }
         }
     }
 
@@ -40,8 +56,8 @@ final class OxyWeatherService {
         components?.queryItems = [
             URLQueryItem(name: "latitude", value: String(location.coordinate.latitude)),
             URLQueryItem(name: "longitude", value: String(location.coordinate.longitude)),
-            URLQueryItem(name: "current", value: "temperature_2m,apparent_temperature,weather_code"),
-            URLQueryItem(name: "daily", value: "temperature_2m_max,temperature_2m_min"),
+            URLQueryItem(name: "current", value: "temperature_2m,apparent_temperature,weather_code,relative_humidity_2m,wind_speed_10m"),
+            URLQueryItem(name: "daily", value: "temperature_2m_max,temperature_2m_min,uv_index_max,precipitation_probability_max"),
             URLQueryItem(name: "timezone", value: "auto")
         ]
         guard let url = components?.url else { return nil }
@@ -56,7 +72,11 @@ final class OxyWeatherService {
                 conditionDescription: Self.condition(for: code),
                 symbolName: Self.symbol(for: code),
                 highC: response.daily.temperature_2m_max.first,
-                lowC: response.daily.temperature_2m_min.first
+                lowC: response.daily.temperature_2m_min.first,
+                humidity: response.current.relative_humidity_2m,
+                windSpeed: response.current.wind_speed_10m,
+                uvIndex: response.daily.uv_index_max.first ?? nil,
+                precipProbability: response.daily.precipitation_probability_max.first ?? nil
             )
             cached = (snapshot, Date())
             return snapshot
@@ -130,10 +150,14 @@ private struct OpenMeteoResponse: Decodable {
         let temperature_2m: Double
         let apparent_temperature: Double
         let weather_code: Int
+        let relative_humidity_2m: Int?
+        let wind_speed_10m: Double?
     }
 
     struct Daily: Decodable {
         let temperature_2m_max: [Double]
         let temperature_2m_min: [Double]
+        let uv_index_max: [Double?]
+        let precipitation_probability_max: [Int?]
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TripsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var trips: [TravelSession] = []
     @State private var isLoading = false
     @State private var error: String?
@@ -23,6 +24,19 @@ struct TripsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    HapticManager.shared.impact(.light)
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.nmlTitanium)
+                }
+                .accessibilityLabel("Back")
+            }
+        }
         .task { await loadTrips() }
         .refreshable { await loadTrips() }
         .alert("Delete Trip?", isPresented: Binding(
@@ -35,7 +49,7 @@ struct TripsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if let trip = showDeleteConfirm {
-                Text(""\(trip.title ?? trip.requirements?.destination ?? "Trip")" will be permanently deleted.")
+                Text("\(trip.title ?? trip.requirements?.destination ?? "Trip") will be permanently deleted.")
             }
         }
     }

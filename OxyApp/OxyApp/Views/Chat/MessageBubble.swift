@@ -510,9 +510,9 @@ struct TravelResultCard: View {
 
     private var eyebrow: String {
         switch kind {
-        case .flights:    return "FLIGHTS · AMADEUS"
-        case .hotels:     return "HOTELS · AMADEUS"
-        case .activities: return "ACTIVITIES · VIATOR"
+        case .flights:    return "FLIGHTS"
+        case .hotels:     return "HOTELS"
+        case .activities: return "ACTIVITIES"
         case .trip:       return "TRIP SAVED"
         }
     }

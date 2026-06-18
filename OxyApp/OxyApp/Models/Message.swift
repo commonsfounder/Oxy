@@ -280,6 +280,57 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     let date: String?
 
     var id: String { from + "|" + subject }
+
+    // Inbox snippets arrive as raw HTML-ish text (&#39; &amp; &lt; …). Decode for display.
+    var cleanFrom: String { from.decodingHTMLEntities() }
+    var cleanSubject: String { subject.decodingHTMLEntities() }
+    var cleanSnippet: String? { snippet?.decodingHTMLEntities() }
+
+    /// Marketing / bulk mail the dashboard shouldn't surface as something that needs you.
+    /// ponytail: keyword heuristic; move to a server-side classifier if it misfires.
+    var isLikelyPromotional: Bool {
+        let haystack = "\(from) \(subject) \(snippet ?? "")".lowercased()
+        let signals = [
+            "% off", " off ", "sale", "deal", "discount", "coupon", "promo", "offer",
+            "unsubscribe", "newsletter", "no-reply", "noreply", "do-not-reply",
+            "free costume", "free gift", "streak", "festival", "limited time",
+            "shop now", "buy now", "save up", "win ", "prize", "pool is closing",
+            "premium", "upgrade now", "flash", "clearance", "lowest price", "best price"
+        ]
+        return signals.contains { haystack.contains($0) }
+    }
+}
+
+extension String {
+    /// Lightweight HTML entity decode covering what inbox snippets actually contain
+    /// (numeric &#NN; / &#xNN; plus the handful of common named entities). Avoids
+    /// NSAttributedString's slow per-call HTML parse.
+    func decodingHTMLEntities() -> String {
+        guard contains("&") else { return self }
+        var result = self
+        let named = [
+            "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+            "&apos;": "'", "&nbsp;": " ", "&hellip;": "…", "&mdash;": "—", "&ndash;": "–"
+        ]
+        for (entity, char) in named {
+            result = result.replacingOccurrences(of: entity, with: char)
+        }
+        // Numeric entities: &#39; and &#x27;
+        if let regex = try? NSRegularExpression(pattern: "&#(x?)([0-9a-fA-F]+);") {
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed()
+            for m in matches {
+                guard let full = Range(m.range, in: result),
+                      let hexFlag = Range(m.range(at: 1), in: result),
+                      let codeRange = Range(m.range(at: 2), in: result) else { continue }
+                let isHex = !result[hexFlag].isEmpty
+                let code = String(result[codeRange])
+                guard let value = UInt32(code, radix: isHex ? 16 : 10),
+                      let scalar = Unicode.Scalar(value) else { continue }
+                result.replaceSubrange(full, with: String(Character(scalar)))
+            }
+        }
+        return result
+    }
 }
 
 struct BriefingsResponse: Codable {

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ProactiveView: View {
     @Environment(AppState.self) private var appState
@@ -12,6 +13,7 @@ struct ProactiveView: View {
     @State private var isLoading = false
     @State private var isChecking = false
     @State private var errorMessage: String?
+    @State private var weatherExpanded = false
     // Throttle for the auto proactive run below.
     @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
 
@@ -42,8 +44,9 @@ struct ProactiveView: View {
                                 .padding(.top, 48)
                         } else {
                             weatherCard
-                            // A blank agenda recedes instead of holding prime space.
-                            agendaCard.opacity(events.isEmpty ? 0.55 : 1)
+                            // Agenda only earns space when there's something on it — an empty
+                            // "Nothing scheduled" card is dead weight.
+                            if !events.isEmpty { agendaCard }
                             inboxCard
                             activityCard
                             remindersCard
@@ -121,12 +124,28 @@ struct ProactiveView: View {
     }
 
     private var greeting: String {
+        let base: String
         switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Good evening"
+        case 5..<12: base = "Good morning"
+        case 12..<17: base = "Good afternoon"
+        default: base = "Good evening"
         }
+        let name = userName
+        return name.isEmpty ? base : "\(base), \(name)"
+    }
+
+    /// The user's first name, from Profile. Falls back to deriving a name from the
+    /// account id (email local-part) so the greeting isn't anonymous before it's set.
+    private var userName: String {
+        if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+           let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
+           !saved.userName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return saved.userName.trimmingCharacters(in: .whitespaces)
+        }
+        let local = appState.userId.split(separator: "@").first.map(String.init) ?? appState.userId
+        let firstToken = local.split(whereSeparator: { ".-_0123456789".contains($0) }).first.map(String.init) ?? ""
+        guard firstToken.count >= 2, firstToken.count <= 14 else { return "" }
+        return firstToken.prefix(1).uppercased() + firstToken.dropFirst().lowercased()
     }
 
     private var dateLine: String {
@@ -140,26 +159,77 @@ struct ProactiveView: View {
     @ViewBuilder private var weatherCard: some View {
         if let weather {
             TodayCard {
-                cardLabel("Weather")
-                HStack(alignment: .center, spacing: 14) {
-                    Image(systemName: weather.symbolName)
-                        .font(.system(size: 26, weight: .light))
-                        .foregroundStyle(Color.nmlTitanium)
-                        .frame(width: 34)
-                    Text("\(Int(weather.temperatureC.rounded()))°")
-                        .font(.nmlMono(40, weight: .ultraLight))
-                        .foregroundStyle(Color.nmlInk)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(weather.conditionDescription)
-                            .font(.nmlBody(13))
-                            .foregroundStyle(Color.nmlInk)
-                        Text(weatherDetail(weather))
-                            .font(.nmlMono(11))
-                            .foregroundStyle(Color.nmlMuted)
+                Button {
+                    HapticManager.shared.impact(.light)
+                    withAnimation(.easeInOut(duration: 0.22)) { weatherExpanded.toggle() }
+                } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            cardLabel("Weather")
+                            Spacer()
+                            Image(systemName: weatherExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.nmlMuted)
+                        }
+                        HStack(alignment: .center, spacing: 14) {
+                            Image(systemName: weather.symbolName)
+                                .font(.system(size: 26, weight: .light))
+                                .foregroundStyle(Color.nmlTitanium)
+                                .frame(width: 34)
+                            Text("\(Int(weather.temperatureC.rounded()))°")
+                                .font(.nmlMono(40, weight: .ultraLight))
+                                .foregroundStyle(Color.nmlInk)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(weather.conditionDescription)
+                                    .font(.nmlBody(13))
+                                    .foregroundStyle(Color.nmlInk)
+                                Text(weatherDetail(weather))
+                                    .font(.nmlMono(11))
+                                    .foregroundStyle(Color.nmlMuted)
+                            }
+                            Spacer()
+                        }
                     }
-                    Spacer()
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if weatherExpanded {
+                    weatherDetailGrid(weather)
+                        .padding(.top, 16)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+        }
+    }
+
+    @ViewBuilder private func weatherDetailGrid(_ w: OxyWeatherService.OxyWeatherSnapshot) -> some View {
+        let cells: [(String, String)] = [
+            w.precipProbability.map { ("Rain", "\($0)%") },
+            w.uvBand.map { ("UV", $0) },
+            w.humidity.map { ("Humidity", "\($0)%") },
+            w.windSpeed.map { ("Wind", "\(Int($0.rounded())) km/h") },
+            (w.highC).map { ("High", "\(Int($0.rounded()))°") },
+            (w.lowC).map { ("Low", "\(Int($0.rounded()))°") }
+        ].compactMap { $0 }
+
+        VStack(spacing: 0) {
+            Divider().background(Color.nmlHairline)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
+                ForEach(cells, id: \.0) { cell in
+                    VStack(spacing: 4) {
+                        Text(cell.0.uppercased())
+                            .font(.nmlMono(9))
+                            .tracking(0.8)
+                            .foregroundStyle(Color.nmlMuted)
+                        Text(cell.1)
+                            .font(.nmlMono(15, weight: .regular))
+                            .foregroundStyle(Color.nmlInk)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.top, 16)
         }
     }
 
@@ -182,24 +252,35 @@ struct ProactiveView: View {
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(events) { event in
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(event.isAllDay ? "all-day" : timeString(event.start))
-                                .font(.nmlMono(12))
-                                .foregroundStyle(Color.nmlTitanium)
-                                .frame(width: 62, alignment: .leading)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(event.title)
-                                    .font(.nmlBody(14))
-                                    .foregroundStyle(Color.nmlInk)
-                                    .lineLimit(2)
-                                if let location = event.location {
-                                    Text(location)
-                                        .font(.nmlBody(11))
-                                        .foregroundStyle(Color.nmlMuted)
+                        Button {
+                            HapticManager.shared.impact(.light)
+                            openCalendar(at: event.start)
+                        } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                Text(event.isAllDay ? "all-day" : timeString(event.start))
+                                    .font(.nmlMono(12))
+                                    .foregroundStyle(Color.nmlTitanium)
+                                    .frame(width: 62, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(event.title)
+                                        .font(.nmlBody(14))
+                                        .foregroundStyle(Color.nmlInk)
+                                        .lineLimit(2)
+                                    if let location = event.location {
+                                        Text(location)
+                                            .font(.nmlBody(11))
+                                            .foregroundStyle(Color.nmlMuted)
+                                    }
                                 }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Color.nmlMuted)
+                                    .offset(y: 2)
                             }
-                            Spacer(minLength: 0)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -207,10 +288,12 @@ struct ProactiveView: View {
     }
 
     private var inboxEmails: [BriefingEmail] {
-        // Emails ride along on the most recent briefing's metadata. Dedup by id in case
-        // multiple briefings carry overlapping inbox snapshots.
+        // Emails ride along on the most recent briefing's metadata. Dedup by id, and drop
+        // marketing/bulk mail — the dashboard is for things that actually need you.
         var seen = Set<String>()
-        return visibleBriefings.flatMap(\.emails).filter { seen.insert($0.id).inserted }
+        return visibleBriefings
+            .flatMap(\.emails)
+            .filter { seen.insert($0.id).inserted && !$0.isLikelyPromotional }
     }
 
     @ViewBuilder private var inboxCard: some View {
@@ -218,26 +301,41 @@ struct ProactiveView: View {
         if !emails.isEmpty {
             TodayCard {
                 cardLabel("Inbox")
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(emails) { email in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text(email.from)
-                                    .font(.nmlBody(13, weight: .medium))
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(emails.enumerated()), id: \.element.id) { index, email in
+                        Button {
+                            HapticManager.shared.impact(.light)
+                            openMail()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(email.cleanFrom)
+                                        .font(.nmlBody(13, weight: .medium))
+                                        .foregroundStyle(Color.nmlInk)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(Color.nmlMuted)
+                                }
+                                Text(email.cleanSubject)
+                                    .font(.nmlBody(13))
                                     .foregroundStyle(Color.nmlInk)
                                     .lineLimit(1)
-                                Spacer(minLength: 8)
+                                if let snippet = email.cleanSnippet, !snippet.isEmpty {
+                                    Text(snippet)
+                                        .font(.nmlBody(12, weight: .light))
+                                        .foregroundStyle(Color.nmlMuted)
+                                        .lineLimit(2)
+                                }
                             }
-                            Text(email.subject)
-                                .font(.nmlBody(13))
-                                .foregroundStyle(Color.nmlInk)
-                                .lineLimit(1)
-                            if let snippet = email.snippet, !snippet.isEmpty {
-                                Text(snippet)
-                                    .font(.nmlBody(12, weight: .light))
-                                    .foregroundStyle(Color.nmlMuted)
-                                    .lineLimit(2)
-                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 7)
+                        }
+                        .buttonStyle(.plain)
+                        if index < emails.count - 1 {
+                            Divider().background(Color.nmlHairline)
                         }
                     }
                 }
@@ -245,23 +343,70 @@ struct ProactiveView: View {
         }
     }
 
+    /// Opens the system Mail app. ponytail: generic deep link, not a per-message jump
+    /// (the briefing payload carries no message ids); good enough to get the user to their inbox.
+    private func openMail() {
+        if let url = URL(string: "message://"), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Opens the Calendar app at the event's date. `calshow:` takes seconds since the
+    /// 2001 reference date.
+    private func openCalendar(at date: Date) {
+        let seconds = Int(date.timeIntervalSinceReferenceDate)
+        if let url = URL(string: "calshow:\(seconds)"), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Opens the Health app to the activity summary.
+    private func openHealth() {
+        if let url = URL(string: "x-apple-health://"), UIApplication.shared.canOpenURL(url) {
+            UIApplication.shared.open(url)
+        }
+    }
+
+    /// Hands a briefing to chat as a prompt so the agent can act on it (e.g. turn a
+    /// surfaced grocery list into a real task). ChatView consumes the pending query.
+    private func actOn(_ briefing: Briefing) {
+        let body = cleanBody(briefing)
+        SiriRequestBus.shared.pendingQuery = "About this from my briefing: \"\(body)\" — help me act on it."
+        NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
+    }
+
     @ViewBuilder private var activityCard: some View {
         if let steps {
             TodayCard {
-                cardLabel("Activity")
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(steps.formatted())
-                        .font(.nmlMono(32, weight: .ultraLight))
-                        .foregroundStyle(Color.nmlInk)
-                    Text("steps")
-                        .font(.nmlBody(13))
-                        .foregroundStyle(Color.nmlMuted)
+                Button {
+                    HapticManager.shared.impact(.light)
+                    openHealth()
+                } label: {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            cardLabel("Activity")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.nmlMuted)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(steps.formatted())
+                                .font(.nmlMono(32, weight: .ultraLight))
+                                .foregroundStyle(Color.nmlInk)
+                            Text("steps")
+                                .font(.nmlBody(13))
+                                .foregroundStyle(Color.nmlMuted)
+                        }
+                        .padding(.bottom, 4)
+                        // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
+                        ProgressView(value: min(Double(steps) / 10_000, 1))
+                            .tint(Color.nmlTitanium)
+                            .scaleEffect(x: 1, y: 0.6, anchor: .center)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .padding(.bottom, 4)
-                // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
-                ProgressView(value: min(Double(steps) / 10_000, 1))
-                    .tint(Color.nmlTitanium)
-                    .scaleEffect(x: 1, y: 0.6, anchor: .center)
+                .buttonStyle(.plain)
             }
         }
     }
@@ -272,22 +417,28 @@ struct ProactiveView: View {
                 cardLabel("Reminders")
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(reminders) { reminder in
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Circle()
-                                .strokeBorder(Color.nmlMuted, lineWidth: 1)
-                                .frame(width: 7, height: 7)
-                                .offset(y: 2)
-                            Text(reminder.title)
-                                .font(.nmlBody(14))
-                                .foregroundStyle(Color.nmlInk)
-                            Spacer(minLength: 8)
-                            if let due = reminder.due {
-                                Text(reminder.overdue ? "overdue" : timeString(due))
-                                    .font(.nmlMono(11, weight: reminder.overdue ? .semibold : .regular))
-                                    // Amber = attention-needed; red is reserved for destructive actions.
-                                    .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.nmlMuted)
+                        Button {
+                            complete(reminder)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Circle()
+                                    .strokeBorder(Color.nmlMuted, lineWidth: 1)
+                                    .frame(width: 16, height: 16)
+                                    .offset(y: 1)
+                                Text(reminder.title)
+                                    .font(.nmlBody(14))
+                                    .foregroundStyle(Color.nmlInk)
+                                Spacer(minLength: 8)
+                                if let due = reminder.due {
+                                    Text(reminder.overdue ? "overdue" : timeString(due))
+                                        .font(.nmlMono(11, weight: reminder.overdue ? .semibold : .regular))
+                                        // Amber = attention-needed; red is reserved for destructive actions.
+                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.nmlMuted)
+                                }
                             }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -300,17 +451,32 @@ struct ProactiveView: View {
                 cardLabel("Briefing")
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(visibleBriefings) { briefing in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(cleanBody(briefing))
-                                .font(.nmlBody(14, weight: .light))
-                                .foregroundStyle(Color.nmlMuted)
-                                .lineSpacing(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Button("Dismiss") { Task { await markRead(briefing) } }
-                                .font(.nmlBody(11, weight: .medium))
-                                .tracking(0.3)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button {
+                                HapticManager.shared.impact(.light)
+                                actOn(briefing)
+                            } label: {
+                                Text(cleanBody(briefing))
+                                    .font(.nmlBody(14, weight: .light))
+                                    .foregroundStyle(Color.nmlInk)
+                                    .lineSpacing(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            HStack(spacing: 18) {
+                                Button("Act on this") {
+                                    HapticManager.shared.impact(.light)
+                                    actOn(briefing)
+                                }
                                 .foregroundStyle(Color.nmlTitanium)
-                                .buttonStyle(.plain)
+                                Button("Dismiss") { Task { await markRead(briefing) } }
+                                    .foregroundStyle(Color.nmlMuted)
+                            }
+                            .font(.nmlBody(11, weight: .medium))
+                            .tracking(0.3)
+                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -391,6 +557,15 @@ struct ProactiveView: View {
     private func markRead(_ briefing: Briefing) async {
         await service.markBriefingRead(userId: appState.userId, briefingId: briefing.id)
         briefings.removeAll { $0.id == briefing.id }
+    }
+
+    private func complete(_ reminder: TodayReminder) {
+        HapticManager.shared.impact(.light)
+        // Optimistic removal — drop it from the card immediately, then persist.
+        withAnimation(.easeInOut(duration: 0.2)) {
+            reminders.removeAll { $0.id == reminder.id }
+        }
+        Task { await native.completeReminder(id: reminder.id) }
     }
 }
 

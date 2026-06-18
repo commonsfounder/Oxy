@@ -33,6 +33,23 @@ struct ProfileView: View {
                             // monospace and middle-truncated so it reads as an identifier, not a stray label.
                             section(title: "Identity") {
                                 HStack {
+                                    Text("Your Name")
+                                        .font(.system(size: 15, weight: .regular))
+                                        .foregroundStyle(Color.nmlInk)
+                                    Spacer(minLength: 16)
+                                    TextField("Not set — tap to add", text: $settings.userName)
+                                        .font(.system(size: 15, weight: .light))
+                                        .foregroundStyle(Color.nmlInk)
+                                        .tint(Color.nmlTitanium)
+                                        .multilineTextAlignment(.trailing)
+                                        .textContentType(.givenName)
+                                        .onChange(of: settings.userName) { _, _ in saveSettings() }
+                                }
+                                .padding(.vertical, 18)
+
+                                NamelessDivider()
+
+                                HStack {
                                     Text("Assistant Name")
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(Color.nmlInk)

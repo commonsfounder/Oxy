@@ -18,6 +18,9 @@
 		<string>comgooglemaps</string>
 		<string>maps</string>
 		<string>music</string>
+		<string>message</string>
+		<string>calshow</string>
+		<string>x-apple-health</string>
 	</array>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Oxy uses Apple Music to play songs and add music to your library or playlists when you ask.</string>

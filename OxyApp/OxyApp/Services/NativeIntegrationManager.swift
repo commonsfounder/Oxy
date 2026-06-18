@@ -2126,10 +2126,15 @@ final class NativeIntegrationManager: NSObject {
         let now = Date()
         let cal = Calendar.current
         let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        // A reminder from months ago is stale noise, not "today". Only surface things due
+        // today/upcoming, or overdue within a short grace window. ponytail: 2-day floor,
+        // make it a setting if users want a longer overdue tail.
+        let overdueFloor = cal.date(byAdding: .day, value: -2, to: now) ?? now
         var seen = Set<String>()
         return reminders
             .compactMap { reminder -> TodayReminder? in
-                guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps), due <= endOfDay else { return nil }
+                guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps),
+                      due <= endOfDay, due >= overdueFloor else { return nil }
                 // Reminders created elsewhere (or by an older path) can carry a dangling
                 // time preposition with no object — "call mum at". Trim a trailing
                 // at/on/by/for so the card never shows a sentence missing its tail.
@@ -2143,6 +2148,20 @@ final class NativeIntegrationManager: NSObject {
             .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
             .prefix(5)
             .map { $0 }
+    }
+
+    /// Marks a reminder complete by its calendar item identifier. Returns true on success.
+    @discardableResult
+    func completeReminder(id: String) async -> Bool {
+        guard remindersAuthorized,
+              let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else { return false }
+        reminder.isCompleted = true
+        do {
+            try eventStore.save(reminder, commit: true)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Step count since midnight, or nil if unavailable.

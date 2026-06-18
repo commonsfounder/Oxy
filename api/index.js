@@ -4067,9 +4067,9 @@ const CONNECTORS = [
   { id: 'linkedin',  name: 'LinkedIn',                  icon: 'linkedin', category: 'Jobs',           implemented: true },
   { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Entertainment', implemented: true, auth: 'oauth' },
   { id: 'linear',    name: 'Linear',                    icon: 'linear', category: 'Developer',      implemented: true, auth: 'oauth' },
-  { id: 'flights',   name: 'Flight Search (Amadeus)',    icon: 'flights', category: 'Travel',       implemented: true },
-  { id: 'hotels',    name: 'Hotel Search (Amadeus)',     icon: 'hotels', category: 'Travel',        implemented: true },
-  { id: 'activities', name: 'Activities (Viator)',       icon: 'activities', category: 'Travel',    implemented: true },
+  // Travel search (flights/hotels/activities) is a built-in agent capability, not a
+  // user-configurable connector — the assistant dispatches it internally. The provider
+  // (Amadeus/Viator) is an implementation detail and deliberately never surfaced.
 ];
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);

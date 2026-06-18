@@ -516,6 +516,7 @@ private struct InitiativeScroller: View {
 
 struct OxySettings: Codable {
     var name: String = ""
+    var userName: String = ""
     var voice: String = "Aoede"
     var voiceOn: Bool = true
     var voiceEngine: String = "current"
@@ -537,7 +538,7 @@ struct OxySettings: Codable {
     var confirmSensitiveAppOpens: Bool = true
 
     enum CodingKeys: String, CodingKey {
-        case name, voice, voiceOn, voiceEngine, autonomy, proactiveBriefings, healthAlerts, locationReminders
+        case name, userName, voice, voiceOn, voiceEngine, autonomy, proactiveBriefings, healthAlerts, locationReminders
         case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
         case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
         case confirmSensitiveAppOpens
@@ -548,6 +549,7 @@ struct OxySettings: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        userName = try container.decodeIfPresent(String.self, forKey: .userName) ?? ""
         voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
         voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
         voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"
