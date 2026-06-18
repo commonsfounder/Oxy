@@ -2130,7 +2130,13 @@ final class NativeIntegrationManager: NSObject {
         return reminders
             .compactMap { reminder -> TodayReminder? in
                 guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps), due <= endOfDay else { return nil }
-                let title = reminder.title ?? "Reminder"
+                // Reminders created elsewhere (or by an older path) can carry a dangling
+                // time preposition with no object — "call mum at". Trim a trailing
+                // at/on/by/for so the card never shows a sentence missing its tail.
+                let rawTitle = reminder.title ?? "Reminder"
+                let title = rawTitle
+                    .replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespaces)
                 guard seen.insert(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)).inserted else { return nil }
                 return TodayReminder(id: reminder.calendarItemIdentifier, title: title, due: due, overdue: due < now)
             }

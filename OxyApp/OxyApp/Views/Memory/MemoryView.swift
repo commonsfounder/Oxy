@@ -242,7 +242,7 @@ private struct MemoryDropBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Add it once. It's kept for later.")
-                .font(.nmlDisplay(21, weight: .light))
+                .font(.nmlBody(18, weight: .regular))
                 .foregroundStyle(Color.nmlInk)
 
             NamelessLineField(

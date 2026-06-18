@@ -9,6 +9,12 @@ struct PendantStatusView: View {
 
     @State private var telemetry = PendantTelemetryMonitor()
 
+    /// The single source of truth for connection state: the BLE manager. Both the
+    /// Status row and the Live section derive from this — telemetry is only allowed
+    /// to stream while the manager reports `.connected`, so "Not connected" and live
+    /// numbers can never render at the same time.
+    private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
+
     // Persisted hardware configuration.
     @AppStorage("nml_hw_wakeword") private var wakeword = "CHIN TILT"
     @AppStorage("nml_hw_audio") private var audioOutput = "BLE BUDS"
@@ -30,7 +36,14 @@ struct PendantStatusView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 NamelessSectionHeader(title: "Live")
                                     .padding(.bottom, 12)
-                                DeviceStatusCard(telemetry: telemetry)
+                                if pendant.isConnected {
+                                    DeviceStatusCard(telemetry: telemetry)
+                                } else {
+                                    Text("No live data — pendant not connected.")
+                                        .font(.nmlBody(13))
+                                        .foregroundStyle(Color.nmlMuted)
+                                        .padding(.vertical, 11)
+                                }
                             }
 
                             // Hardware behaviour.
@@ -56,8 +69,15 @@ struct PendantStatusView: View {
                     }
             )
         }
-        .onAppear { telemetry.start() }
+        .onAppear { syncTelemetry() }
         .onDisappear { telemetry.stop() }
+        .onChange(of: pendant.connectionState) { _, _ in syncTelemetry() }
+    }
+
+    /// Telemetry streams only while the BLE link is up, so the Live section can
+    /// never show numbers for a disconnected pendant.
+    private func syncTelemetry() {
+        if pendant.isConnected { telemetry.start() } else { telemetry.stop() }
     }
 
     // MARK: - Hardware config
@@ -78,29 +98,16 @@ struct PendantStatusView: View {
     }
 
     private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 16) {
             Text(label)
                 .font(.nmlMono(11, weight: .medium))
                 .tracking(1.0)
                 .foregroundStyle(Color.nmlMuted)
+                .fixedSize()
 
-            Spacer(minLength: 12)
-
-            HStack(spacing: 12) {
-                ForEach(options, id: \.self) { option in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { selection.wrappedValue = option }
-                    } label: {
-                        Text(option)
-                            .font(.nmlBody(12, weight: .medium))
-                            .tracking(0.3)
-                            .foregroundStyle(selection.wrappedValue == option ? Color.nmlInk : Color(white: 0.27))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            NamelessSegmentedControl(options: options, selection: selection)
         }
-        .padding(.vertical, 18)
+        .padding(.vertical, 14)
     }
 }
 
@@ -226,13 +233,13 @@ private struct PendantPairingSection: View {
     private var statusIndicator: some View {
         switch pendant.connectionState {
         case .connected:
-            NamelessStatusDot(isLive: true, diameter: 6)
+            NamelessStatusDot(kind: .live, diameter: 6)
         case .scanning, .connecting:
             ScanPulseView()
         case .error:
-            NamelessStatusDot(isLive: false, diameter: 6)
+            NamelessStatusDot(kind: .error, diameter: 6)
         case .disconnected:
-            NamelessStatusDot(isLive: false, diameter: 6)
+            NamelessStatusDot(kind: .off, diameter: 6)
         }
     }
 }

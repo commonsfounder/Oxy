@@ -1066,6 +1066,8 @@ private struct ChatInputBar: View {
                         tint: canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : nil,
                         interactive: false
                     )
+                    // Lift the button off whatever scrolls beneath it (chat text, the drawer).
+                    .shadow(color: Color.black.opacity(0.45), radius: 6, y: 2)
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())

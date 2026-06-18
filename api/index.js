@@ -63,6 +63,10 @@ const {
   isContextualReference
 } = require('./services/context-brain');
 const {
+  buildTravelConciergeState,
+  buildTravelContextBlock
+} = require('./services/travel-concierge');
+const {
   createSessionToken,
   getAuthenticatedUserId,
   hashPassword,
@@ -3789,6 +3793,24 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
   res.json({ actions: ACTION_CONTRACTS });
 });
 
+app.post('/travel-concierge/parse', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, message, context } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ error: 'message is required.' });
+    }
+    const previous = context && typeof context === 'object'
+      ? context
+      : parseStoredTravelContext(await getPreferenceMap(userId));
+    const state = buildTravelConciergeState(message, previous, { maxQuestions: 3 });
+    await saveTravelContext(userId, state);
+    res.json(state);
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 const CONNECTORS = [
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
   { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
@@ -3808,6 +3830,28 @@ const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 const PENDING_ACTION_PREF = 'pending.action';
 const PENDING_PLACE_PREF = 'pending.place';
+const TRAVEL_CONTEXT_PREF = 'travel.concierge.context';
+
+function parseStoredTravelContext(preferences = {}) {
+  const raw = preferences[TRAVEL_CONTEXT_PREF];
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed;
+  } catch {
+    return {};
+  }
+}
+
+async function saveTravelContext(userId, state, trace = null) {
+  if (!state?.active) return;
+  try {
+    await setPreferenceValue(userId, TRAVEL_CONTEXT_PREF, JSON.stringify(state));
+  } catch (err) {
+    if (trace) trace.log('supabase.preferences.travel_context_save_failed', err.message);
+  }
+}
 
 async function setPendingPlace(userId, payload) {
   await setPreferenceValue(userId, PENDING_PLACE_PREF, JSON.stringify({ ...payload, createdAt: new Date().toISOString() }));
@@ -4352,6 +4396,18 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const emailReplyContext = quickTurn
     ? ''
     : await buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace);
+  const travelConciergeState = quickTurn
+    ? null
+    : buildTravelConciergeState(message, parseStoredTravelContext(preferences), { resolvedContext });
+  if (travelConciergeState?.active) {
+    saveTravelContext(userId, travelConciergeState, trace);
+    if (trace) {
+      trace.log('travel_concierge.state', JSON.stringify({
+        missing: travelConciergeState.missing,
+        known: Object.keys(travelConciergeState.requirements || {})
+      }));
+    }
+  }
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
     : buildDynamicSystemPrompt(
@@ -4364,6 +4420,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         buildNativeHintsContext(requestContext.nativeHints),
         buildPendingActionContext(requestContext.pendingAction),
         emailReplyContext,
+        buildTravelContextBlock(travelConciergeState),
         buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),
       statedContext
@@ -4507,19 +4564,23 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
   const remindersText = (ctx.reminders || []).length
     ? ctx.reminders.map(r => `- ${r.title}${r.due ? ` (due ${r.due})` : ''}`).join('\n')
     : 'none';
-  const systemPrompt = `You are writing a useful, concise ${window.label.toLowerCase()} for the user.
+  const systemPrompt = `You are writing a brief, genuinely useful ${window.label.toLowerCase()} for someone you know well. Speak to them directly — warm but unfussy, like a sharp assistant who remembers what matters to them, not a notifications feed.
 
-Report only concrete, real items: actual calendar events and emails shown below, plus genuinely useful current info from Google Search grounding (weather for their location, relevant news). Use their location for weather.
+Ground everything in what's actually real: the calendar, reminders, emails, location, health and weather shown or found via Google Search grounding (use their coordinates for weather). You SHOULD draw on Memory and recent conversation to make this personal and relevant — connect today to what you know about them (the people, plans, tastes, where they live and work) — but only when it genuinely adds something. Never invent facts, events, or emails to do it.
 
-Location opportunities: The user's current place is shown below. If they're out (not at home) and something nearby is genuinely relevant, surface ONE specific, useful nudge — examples (not limits): a shop near them that covers a pending reminder/errand, a place tied to an upcoming event, notably different weather where they're heading, or when to leave for their next event. Use search to confirm what's actually near their place. Never invent shops, distances, or facts; if nothing nearby is clearly relevant, say nothing about location. Never nag.
+Aim for one short, flowing paragraph that does at least one of these well, best first:
+- Frame the day: the next real calendar event and when to leave for it; or plainly note an open day if there's nothing on.
+- Weather that means something: they already have a separate weather card, so don't just restate the forecast — say what it means for them today (what to bring, impact on a known plan, their commute, an event they're heading to).
+- A pending reminder or errand that fits this moment or where they are right now.
+- A genuinely useful, personal note grounded in Memory or current context — relevant, never generic pep talk.
 
 Hard rules:
-- State facts plainly. Do NOT give unsolicited advice, pep talks, or life-coaching ("stick to your goals", "stay sharp", "get a study session in", "hope you have a chill evening"). No motivational filler.
 - Plain text only. No markdown, no asterisks, no bullet characters, no headings.
-- Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
+- Be specific and real. Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
+- No life-coaching, no motivational filler, no "make the most of your day" / "stay sharp" / "hope you have a chill evening". Useful and personal, never preachy.
 - Refer to calendar events by their literal title and time. Do NOT guess who a meeting is "with" unless the event explicitly names another attendee — and never name the user themselves as the other party.
-- Emails shown are the user's Primary inbox and are ALSO displayed to them separately as their own list. Do NOT enumerate them — mention an email only if it's genuinely urgent or time-sensitive, otherwise skip email entirely and focus on weather and relevant news.
-- If there is no real calendar event, urgent email, or useful current info, reply with exactly: NOTHING
+- Emails shown are the user's Primary inbox and are ALSO displayed to them separately as their own list. Do NOT enumerate them — mention an email only if it's genuinely urgent or time-sensitive.
+- Only if there is truly nothing real to say — no events, no reminders, no usable location or weather, and nothing in memory or context worth connecting to today — reply with exactly: NOTHING
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}

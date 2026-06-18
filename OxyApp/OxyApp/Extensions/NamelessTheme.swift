@@ -30,8 +30,41 @@ extension Color {
     static let nmlMuted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
     /// Faint halo behind a live-status dot.
     static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
+
+    // MARK: - Semantic status colours
+    //
+    // The one place hue is allowed to carry meaning in this otherwise monochrome
+    // language: status indicators. A user should be able to read device/connector
+    // state from colour alone. Reserved strictly for the `NamelessStatusDot` token
+    // table below — not for decoration.
+    //
+    //   nmlLive       green   — active / live / streaming
+    //   nmlGlow       silver  — enabled-and-idle (available, not currently live)
+    //   nmlMuted      gray    — disabled / off
+    //   nmlDanger     coral   — error / disconnected-with-a-problem / destructive
+    //   nmlAttention  amber   — degraded / attention-needed (e.g. overdue)
+
+    /// Green for a live/streaming link.
+    static let nmlLive = Color(red: 0.30, green: 0.80, blue: 0.46)
+    /// Amber for attention-needed / degraded states (overdue, needs-reconnect).
+    static let nmlAttention = Color(red: 232 / 255, green: 176 / 255, blue: 84 / 255)
 }
 
+// MARK: - Typography rule (serif vs sans)
+//
+// Decide which face a new label takes by its SEMANTIC ROLE, not by taste:
+//
+//   • nmlDisplay (Fraunces, serif) — warm / identity / emotional moments ONLY:
+//     greetings ("Good afternoon", "Welcome back."), empty-state prompts, and
+//     Memory content category headers ("People", "Places"). The voice of the app.
+//
+//   • nmlBody (Inter, sans) — ALL functional/navigational/control UI: screen and
+//     nav titles, settings rows, buttons, field labels, status text, captions.
+//
+//   • nmlMono — technical readouts only (battery, latency, ids, timestamps).
+//
+// If a label is something the user operates (a control, a title, a status), it's
+// sans. If it's the product speaking to the user, it's serif. No other use of serif.
 extension Font {
     /// Editorial display face (Fraunces) — high-contrast serif with real personality.
     /// Reserved for titles and hero copy: the one place the type gets to have a voice.
@@ -68,22 +101,53 @@ extension View {
     }
 }
 
-/// A small glowing dot used in place of loud status badges — silver when live,
-/// dim titanium when idle. No neon, no pulsing rings; the glow is a soft halo.
+/// A small status dot whose colour carries meaning (see the token table in the
+/// semantic-status section above). A soft halo only appears for the `.live` state,
+/// so "live" reads differently from a merely "enabled" row at a glance.
 struct NamelessStatusDot: View {
-    var isLive: Bool
+    enum Kind {
+        case live      // green — active / streaming
+        case enabled   // silver — enabled, idle
+        case off       // gray — disabled / off
+        case error     // coral — error / disconnected-with-a-problem
+        case degraded  // amber — attention-needed
+
+        var color: Color {
+            switch self {
+            case .live:     return .nmlLive
+            case .enabled:  return .nmlGlow
+            case .off:      return .nmlMuted.opacity(0.4)
+            case .error:    return .nmlDanger
+            case .degraded: return .nmlAttention
+            }
+        }
+        var halo: Bool { self == .live }
+    }
+
+    var kind: Kind
     var diameter: CGFloat = 6
+
+    /// Back-compat shorthand: live link vs. idle. Prefer `kind:` for full semantics.
+    init(isLive: Bool, diameter: CGFloat = 6) {
+        self.kind = isLive ? .live : .off
+        self.diameter = diameter
+    }
+
+    init(kind: Kind, diameter: CGFloat = 6) {
+        self.kind = kind
+        self.diameter = diameter
+    }
 
     var body: some View {
         ZStack {
-            if isLive {
+            if kind.halo {
                 Circle()
-                    .fill(Color.nmlGlow.opacity(0.35))
+                    .fill(kind.color.opacity(0.35))
                     .frame(width: diameter * 2.4, height: diameter * 2.4)
                     .blur(radius: diameter * 0.5)
             }
             Circle()
-                .fill(isLive ? Color.nmlGlow : Color.nmlMuted.opacity(0.4))
+                .fill(kind.color)
                 .frame(width: diameter, height: diameter)
         }
         .frame(width: diameter * 2.4, height: diameter * 2.4)
@@ -98,8 +162,9 @@ struct NamelessStatusDot: View {
 // typography instead of colourful SF-symbol tiles.
 
 extension Color {
-    /// Muted clay red for destructive actions — desaturated so it never reads neon.
-    static let nmlDanger = Color(red: 196 / 255, green: 104 / 255, blue: 92 / 255)
+    /// Luminous coral for destructive actions and overdue states — warm rather than
+    /// neon, but bright enough to clear contrast against the pure-black canvas.
+    static let nmlDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
 }
 
 /// An ultra-thin, low-opacity horizontal divider — the only separator the
@@ -152,6 +217,43 @@ struct NamelessToggle: View {
         .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
         // A precise, mechanical-switch pulse on every state change.
         .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
+    }
+}
+
+/// One reusable multi-option control: a shared hairline-bordered track with the
+/// options sitting *inside* it, the selected one filled with a soft capsule. The
+/// single source of truth for every segmented toggle (Wakeword, Haptic Force, …)
+/// so they all read as one grouped control instead of loose floating labels.
+struct NamelessSegmentedControl: View {
+    let options: [String]
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.self) { option in
+                let isSelected = selection == option
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { selection = option }
+                } label: {
+                    Text(option)
+                        .font(.nmlBody(12, weight: .medium))
+                        .tracking(0.3)
+                        .foregroundStyle(isSelected ? Color.nmlInk : Color.nmlMuted.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background {
+                            if isSelected {
+                                Capsule().fill(Color.white.opacity(0.12))
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.white.opacity(0.04)))
+        .overlay(Capsule().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
     }
 }
 
@@ -313,20 +415,30 @@ private struct SwipeToDismissModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .offset(x: offset)
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 12)
-                    .onChanged { value in
-                        guard value.startLocation.x < edgeWidth, value.translation.width > 0 else { return }
-                        offset = value.translation.width
-                    }
-                    .onEnded { value in
-                        if value.startLocation.x < edgeWidth, value.translation.width > dismissThreshold {
-                            dismiss()
-                        } else {
-                            withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
-                        }
-                    }
-            )
+            // The drag lives on a narrow leading-edge strip only — a whole-screen
+            // highPriorityGesture starves the inner ScrollViews and blocks vertical
+            // scrolling (Connectors/Settings/etc. couldn't scroll). This mirrors the
+            // native back-swipe and leaves the rest of the screen to the scroll views.
+            .overlay(alignment: .leading) {
+                Color.clear
+                    .frame(width: edgeWidth)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                guard value.translation.width > 0 else { return }
+                                offset = value.translation.width
+                            }
+                            .onEnded { value in
+                                if value.translation.width > dismissThreshold {
+                                    dismiss()
+                                } else {
+                                    withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
+                                }
+                            }
+                    )
+            }
     }
 }
 

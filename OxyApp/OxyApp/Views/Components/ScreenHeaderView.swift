@@ -36,7 +36,9 @@ struct ScreenHeaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.nmlObsidian)
+        // Opaque, and extended up through the status-bar inset, so scrolled content
+        // can never ghost above or behind the header at the very top of the screen.
+        .background(Color.nmlObsidian.ignoresSafeArea(edges: .top))
     }
 }
 

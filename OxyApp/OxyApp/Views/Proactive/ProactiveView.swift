@@ -12,6 +12,8 @@ struct ProactiveView: View {
     @State private var isLoading = false
     @State private var isChecking = false
     @State private var errorMessage: String?
+    // Throttle for the auto proactive run below.
+    @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
 
     private let service = ChatService()
     private let native = NativeIntegrationManager.shared
@@ -40,7 +42,8 @@ struct ProactiveView: View {
                                 .padding(.top, 48)
                         } else {
                             weatherCard
-                            agendaCard
+                            // A blank agenda recedes instead of holding prime space.
+                            agendaCard.opacity(events.isEmpty ? 0.55 : 1)
                             inboxCard
                             activityCard
                             remindersCard
@@ -56,6 +59,17 @@ struct ProactiveView: View {
                     .padding(.bottom, 36)
                 }
                 .refreshable { await loadDashboard() }
+
+                // Opaque cap over the status-bar inset. Today has no fixed header — an
+                // empty inline nav bar doesn't reliably paint its background, so without
+                // this the scrolling hero copy ghosts up under the clock.
+                .overlay(alignment: .top) {
+                    Color.clear
+                        .frame(height: 0)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.nmlObsidian, ignoresSafeAreaEdges: .top)
+                        .allowsHitTesting(false)
+                }
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
@@ -88,14 +102,16 @@ struct ProactiveView: View {
                     if isChecking {
                         ProgressView().scaleEffect(0.7).tint(Color.nmlMuted)
                     } else {
-                        Text("Refresh")
-                            .font(.nmlBody(12, weight: .medium))
-                            .tracking(0.6)
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 16, weight: .regular))
                             .foregroundStyle(Color.nmlTitanium)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
                     }
                 }
                 .buttonStyle(.plain)
                 .disabled(isChecking)
+                .accessibilityLabel("Refresh")
             }
             Text(dateLine)
                 .font(.nmlBody(13, weight: .regular))
@@ -162,6 +178,7 @@ struct ProactiveView: View {
                 Text("Nothing scheduled today.")
                     .font(.nmlBody(13))
                     .foregroundStyle(Color.nmlMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(events) { event in
@@ -266,8 +283,9 @@ struct ProactiveView: View {
                             Spacer(minLength: 8)
                             if let due = reminder.due {
                                 Text(reminder.overdue ? "overdue" : timeString(due))
-                                    .font(.nmlMono(11))
-                                    .foregroundStyle(reminder.overdue ? Color.nmlDanger : Color.nmlMuted)
+                                    .font(.nmlMono(11, weight: reminder.overdue ? .semibold : .regular))
+                                    // Amber = attention-needed; red is reserved for destructive actions.
+                                    .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.nmlMuted)
                             }
                         }
                     }
@@ -332,6 +350,19 @@ struct ProactiveView: View {
         reminders = await remindersResult
         steps = await stepsResult
         isLoading = false
+        await maybeAutoProactive()
+    }
+
+    /// Today's rich content (the briefing/inbox cards) is generated server-side by the
+    /// proactive job — but it was only ever *loaded*, never *triggered*, so a user with no
+    /// scheduled run saw an empty screen until they hit Refresh. Kick off a check on open
+    /// when there's nothing to show, throttled so foregrounding doesn't hammer the backend.
+    private func maybeAutoProactive() async {
+        guard visibleBriefings.isEmpty, !isChecking else { return }
+        let now = Date().timeIntervalSince1970
+        guard now - lastAutoProactive > 2 * 60 * 60 else { return }
+        lastAutoProactive = now
+        await checkNow()
     }
 
     private func loadBriefingsSafely() async -> [Briefing] {

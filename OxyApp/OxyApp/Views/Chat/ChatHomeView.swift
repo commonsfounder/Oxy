@@ -119,7 +119,7 @@ struct ChatHomeView: View {
                 .foregroundStyle(Color.nmlInk)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
-                .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
@@ -148,8 +148,8 @@ struct ChatHomeView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .background(Color.nmlSurface)
-            .clipShape(Rectangle())
-            .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 8)
@@ -418,9 +418,10 @@ private struct SidebarRow: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(title)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.nmlInk)
                 .lineLimit(1)
+                .truncationMode(.tail)
             Spacer(minLength: 12)
             Text(trailing)
                 .font(.system(size: 12))

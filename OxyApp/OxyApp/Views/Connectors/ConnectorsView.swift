@@ -165,11 +165,20 @@ struct ConnectorsView: View {
         IntegrationRow(
             name: "Google",
             detail: googleDetail,
-            isConnected: googleStatus == .connected,
+            dotKind: googleDotKind,
             actionLabel: googleButtonLabel,
             isBusy: googleStatus == .connecting,
             action: handleGoogleAction
         )
+    }
+
+    private var googleDotKind: NamelessStatusDot.Kind {
+        switch googleStatus {
+        case .connected:      return .enabled
+        case .needsReconnect: return .degraded
+        case .error:          return .error
+        case .idle, .connecting: return .off
+        }
     }
 
     private var googleButtonLabel: String {
@@ -201,11 +210,20 @@ struct ConnectorsView: View {
         IntegrationRow(
             name: connector.name,
             detail: connector.statusText.uppercased(),
-            isConnected: connector.connectionState == "connected",
+            dotKind: connectorDotKind(connector),
             actionLabel: connector.actionLabel,
             isBusy: false,
             action: { handleConnectorAction(connector) }
         )
+    }
+
+    private func connectorDotKind(_ connector: Connector) -> NamelessStatusDot.Kind {
+        switch connector.connectionState {
+        case "connected":                   return .enabled
+        case "needs_reconnect", "degraded", "needs_setup": return .degraded
+        case "error":                       return .error
+        default:                            return .off
+        }
     }
 
     // MARK: - Actions
@@ -434,9 +452,17 @@ private struct NativeCapabilityRow: View {
     let item: NativeCapabilityItem
     let onAction: () async -> Void
 
+    private var dotKind: NamelessStatusDot.Kind {
+        switch item.status {
+        case .granted:       return .enabled
+        case .denied:        return .error
+        case .notDetermined: return .off
+        }
+    }
+
     var body: some View {
         HStack(spacing: 16) {
-            NamelessStatusDot(isLive: item.status == .granted)
+            NamelessStatusDot(kind: dotKind)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
@@ -479,7 +505,7 @@ private struct NativeCapabilityRow: View {
 private struct IntegrationRow: View {
     let name: String
     let detail: String
-    let isConnected: Bool
+    let dotKind: NamelessStatusDot.Kind
     let actionLabel: String
     let isBusy: Bool
     let action: () -> Void
@@ -497,7 +523,7 @@ private struct IntegrationRow: View {
 
             Spacer()
 
-            NamelessStatusDot(isLive: isConnected, diameter: 5)
+            NamelessStatusDot(kind: dotKind, diameter: 5)
 
             Button(action: action) {
                 if isBusy {
@@ -505,10 +531,13 @@ private struct IntegrationRow: View {
                         .scaleEffect(0.6)
                         .tint(Color.nmlMuted)
                 } else {
+                    // Destructive actions (Disconnect / Disable) read in coral so they're
+                    // visually distinct from the neutral Connect / Reconnect affordances.
+                    let isDestructive = ["DISCONNECT", "DISABLE"].contains(actionLabel.uppercased())
                     Text(actionLabel.uppercased())
                         .font(.system(size: 11, weight: .medium))
                         .tracking(1.2)
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(isDestructive ? Color.nmlDanger : Color.nmlTitanium)
                 }
             }
             .buttonStyle(.plain)

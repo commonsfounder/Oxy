@@ -28,14 +28,16 @@ struct ProfileView: View {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
                     ScrollView {
                         VStack(alignment: .leading, spacing: 36) {
-                            // Identity
+                            // Identity. The hardcoded "Status: Active" row was a fixture and is
+                            // gone; the account id stays (it's real account data) but is shown
+                            // monospace and middle-truncated so it reads as an identifier, not a stray label.
                             section(title: "Identity") {
                                 HStack {
                                     Text("Assistant Name")
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(Color.nmlInk)
                                     Spacer(minLength: 16)
-                                    TextField("Unnamed", text: $settings.name)
+                                    TextField("Not set — tap to name", text: $settings.name)
                                         .font(.system(size: 15, weight: .light))
                                         .foregroundStyle(Color.nmlInk)
                                         .tint(Color.nmlTitanium)
@@ -47,22 +49,20 @@ struct ProfileView: View {
                                 NamelessDivider()
 
                                 identityRow(label: "Account ID", value: appState.userId)
-
-                                NamelessDivider()
-
-                                identityRow(label: "Status", value: "Active")
                             }
 
-                            // Account lifecycle
-                            section(title: "Account") {
+                            // Benign data action, kept clear of the destructive group below.
+                            section(title: "Your Data") {
                                 actionRow(
                                     label: isExportingData ? "Preparing Export…" : "Export My Data",
                                     action: exportMyData
                                 )
                                 .disabled(isExportingData || isDeletingAccount)
+                            }
 
-                                NamelessDivider()
-
+                            // Destructive account lifecycle — grouped on its own so a sign-out
+                            // or deletion is never one slip away from a routine tap.
+                            section(title: "Sign Out & Deletion") {
                                 actionRow(
                                     label: "Sign Out",
                                     destructive: true,

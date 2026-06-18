@@ -113,7 +113,7 @@ struct MainTabView: View {
             .padding(.vertical, 9)
             .background {
                 if selected {
-                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Color.white.opacity(0.08))
                 }
             }
             .contentShape(Capsule())
@@ -148,21 +148,22 @@ struct MoreView: View {
                             accountHeader
 
                             group(title: "Assistant") {
-                                moreRow(title: "Memory", subtitle: "What's remembered about you") {
+                                moreRow(icon: "brain", title: "Memory", subtitle: "What's remembered about you") {
                                     destination = .memory
                                 }
                                 NamelessDivider()
-                                moreRow(title: "Connectors", subtitle: "Accounts, services, device access") {
+                                moreRow(icon: "powerplug", title: "Connectors", subtitle: "Accounts, services, device access") {
                                     destination = .connectors
                                 }
                                 NamelessDivider()
-                                moreRow(title: "Settings", subtitle: "Voice, appearance, behaviour") {
+                                moreRow(icon: "gearshape", title: "Settings", subtitle: "Voice, appearance, behaviour") {
                                     destination = .settings
                                 }
                             }
 
                             group(title: "Device") {
                                 moreRow(
+                                    icon: "dot.radiowave.left.and.right",
                                     title: "Pendant",
                                     subtitle: "Pairing, status, hardware",
                                     trailing: pendantStatusText,
@@ -172,8 +173,11 @@ struct MoreView: View {
                                 }
                             }
 
-                            signOutRow
-                                .padding(.top, 22)
+                            NamelessOutlineButton(title: "Sign Out") {
+                                HapticManager.shared.impact(.light)
+                                showSignOutConfirm = true
+                            }
+                            .padding(.top, 22)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
@@ -267,6 +271,7 @@ struct MoreView: View {
     }
 
     private func moreRow(
+        icon: String,
         title: String,
         subtitle: String,
         trailing: String? = nil,
@@ -278,6 +283,12 @@ struct MoreView: View {
             action()
         } label: {
             HStack(spacing: 12) {
+                // Thin titanium glyph, not a colourful tile — keeps the row scannable
+                // without breaking the de-gadgeted, raw-typography language.
+                Image(systemName: icon)
+                    .font(.system(size: 17, weight: .light))
+                    .foregroundStyle(Color.nmlTitanium)
+                    .frame(width: 26, alignment: .center)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.system(size: 16, weight: .regular))
@@ -309,22 +320,6 @@ struct MoreView: View {
         .buttonStyle(.plain)
     }
 
-    private var signOutRow: some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            showSignOutConfirm = true
-        } label: {
-            HStack {
-                Text("Sign Out")
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(Color.nmlMuted)
-                Spacer()
-            }
-            .padding(.vertical, 18)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 #Preview {
