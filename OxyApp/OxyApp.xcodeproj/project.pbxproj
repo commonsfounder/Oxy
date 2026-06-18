@@ -49,11 +49,6 @@
 		A10000010000000000000042 /* WeatherService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000042 /* WeatherService.swift */; };
 		A10000010000000000000043 /* PendantLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000043 /* PendantLiveActivity.swift */; };
 		A10000010000000000000044 /* ScreenHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000044 /* ScreenHeaderView.swift */; };
-		A10000010000000000000050 /* TravelSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000050 /* TravelSession.swift */; };
-		A10000010000000000000051 /* TravelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000051 /* TravelService.swift */; };
-		A10000010000000000000052 /* ItineraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000052 /* ItineraryView.swift */; };
-		A10000010000000000000053 /* TripDayCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000053 /* TripDayCard.swift */; };
-		A10000010000000000000054 /* TripView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000054 /* TripView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -101,11 +96,6 @@
 		A20000010000000000000042 /* WeatherService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherService.swift; sourceTree = "<group>"; };
 		A20000010000000000000043 /* PendantLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantLiveActivity.swift; sourceTree = "<group>"; };
 		A20000010000000000000044 /* ScreenHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenHeaderView.swift; sourceTree = "<group>"; };
-		A20000010000000000000050 /* TravelSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelSession.swift; sourceTree = "<group>"; };
-		A20000010000000000000051 /* TravelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelService.swift; sourceTree = "<group>"; };
-		A20000010000000000000052 /* ItineraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ItineraryView.swift; sourceTree = "<group>"; };
-		A20000010000000000000053 /* TripDayCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDayCard.swift; sourceTree = "<group>"; };
-		A20000010000000000000054 /* TripView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripView.swift; sourceTree = "<group>"; };
 		A30000010000000000000001 /* OxyApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -148,7 +138,6 @@
 			children = (
 				A20000010000000000000002 /* AppState.swift */,
 				A20000010000000000000003 /* Message.swift */,
-				A20000010000000000000050 /* TravelSession.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -170,7 +159,6 @@
 				A20000010000000000000033 /* PendantTelemetryMonitor.swift */,
 				A20000010000000000000030 /* HapticManager.swift */,
 				A20000010000000000000025 /* AppDelegate.swift */,
-				A20000010000000000000051 /* TravelService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -188,7 +176,6 @@
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
 				A50000010000000000000016 /* Onboarding */,
-				A50000010000000000000017 /* Travel */,
 				A50000010000000000000008 /* Components */,
 			);
 			path = Views;
@@ -284,16 +271,6 @@
 				A20000010000000000000037 /* ConnectionTroubleView.swift */,
 			);
 			path = Onboarding;
-			sourceTree = "<group>";
-		};
-		A50000010000000000000017 /* Travel */ = {
-			isa = PBXGroup;
-			children = (
-				A20000010000000000000052 /* ItineraryView.swift */,
-				A20000010000000000000053 /* TripDayCard.swift */,
-				A20000010000000000000054 /* TripView.swift */,
-			);
-			path = Travel;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000099 /* Products */ = {
@@ -414,11 +391,6 @@
 				A10000010000000000000038 /* ProfileView.swift in Sources */,
 				A10000010000000000000039 /* PendantStatusView.swift in Sources */,
 				A10000010000000000000040 /* AppHeaderView.swift in Sources */,
-				A10000010000000000000050 /* TravelSession.swift in Sources */,
-				A10000010000000000000051 /* TravelService.swift in Sources */,
-				A10000010000000000000052 /* ItineraryView.swift in Sources */,
-				A10000010000000000000053 /* TripDayCard.swift in Sources */,
-				A10000010000000000000054 /* TripView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
