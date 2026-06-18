@@ -132,7 +132,7 @@ struct MoreView: View {
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
 
     enum MoreDestination: Identifiable {
-        case profile, pendant, connectors, memory, settings
+        case profile, pendant, connectors, memory, settings, trips
         var id: String { "\(self)" }
     }
 
@@ -146,6 +146,12 @@ struct MoreView: View {
                 ScrollView {
                         VStack(alignment: .leading, spacing: 34) {
                             accountHeader
+
+                            group(title: "Travel") {
+                                moreRow(icon: "airplane", title: "Trips", subtitle: "Planned and upcoming journeys") {
+                                    destination = .trips
+                                }
+                            }
 
                             group(title: "Assistant") {
                                 moreRow(icon: "brain", title: "Memory", subtitle: "What's remembered about you") {
@@ -193,6 +199,7 @@ struct MoreView: View {
                     case .connectors: ConnectorsView()
                     case .memory: MemoryView()
                     case .settings: SettingsView()
+                    case .trips: NavigationStack { TripsView() }
                     }
                 }
                 .swipeToDismiss()

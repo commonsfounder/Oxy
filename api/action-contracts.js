@@ -537,6 +537,92 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Comment failed',
     confirmation: 'review_required',
     executionMode: 'review'
+  },
+
+  // --- Travel actions ---
+
+  search_flights: {
+    risk: 'low',
+    required: ['origin', 'destination', 'date'],
+    optional: ['returnDate', 'partySize', 'cabinClass', 'maxPrice'],
+    aliases: { origin: ['from', 'departure'], destination: ['to', 'arrival'], date: ['departureDate'] },
+    inputExample: { origin: 'London Heathrow', destination: 'Tokyo', date: '2027-04-10', returnDate: '2027-04-20', partySize: 2, cabinClass: 'economy', maxPrice: 800 },
+    guidance: 'Use when the user wants to find or compare flights. origin and destination should be city names or IATA airport codes. date is the outbound departure date (ISO format preferred). Include returnDate for round trips. Do not invent prices or availability — results come from the flights connector.',
+    successSummary: 'Flights found',
+    failureSummary: 'Flight search failed',
+    confirmation: 'none'
+  },
+
+  search_hotels: {
+    risk: 'low',
+    required: ['destination', 'checkIn', 'checkOut'],
+    optional: ['guests', 'maxPrice', 'style', 'amenities'],
+    aliases: { destination: ['city', 'location'], guests: ['partySize', 'people'] },
+    inputExample: { destination: 'Tokyo', checkIn: '2027-04-10', checkOut: '2027-04-20', guests: 2, maxPrice: 200, style: 'boutique' },
+    guidance: 'Use when the user wants to find accommodation. style is one of: budget | mid | luxury | boutique | apartment. maxPrice is per night. checkIn/checkOut should be ISO dates. Do not invent availability or prices — results come from the hotels connector.',
+    successSummary: 'Hotels found',
+    failureSummary: 'Hotel search failed',
+    confirmation: 'none'
+  },
+
+  search_activities: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['date', 'interests', 'budget', 'partySize', 'duration'],
+    aliases: { destination: ['city', 'location'] },
+    inputExample: { destination: 'Tokyo', date: '2027-04-12', interests: ['culture', 'food'], budget: 100, partySize: 2 },
+    guidance: 'Use when the user wants to find things to do, tours, or experiences. interests maps to activity types: culture | adventure | food | nightlife | beach | nature | shopping | wellness. budget is per person. Do not invent availability — results come from the activities connector.',
+    successSummary: 'Activities found',
+    failureSummary: 'Activity search failed',
+    confirmation: 'none'
+  },
+
+  get_destination_weather: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['date'],
+    aliases: { destination: ['city', 'location'] },
+    inputExample: { destination: 'Tokyo', date: '2027-04-10' },
+    guidance: 'Use when the user asks about weather at a travel destination, or when building an itinerary and weather context is relevant. date is the travel date (ISO preferred). Returns a forecast summary.',
+    successSummary: 'Weather checked',
+    failureSummary: 'Weather check failed',
+    confirmation: 'none'
+  },
+
+  estimate_trip_budget: {
+    risk: 'low',
+    required: ['destination', 'duration', 'partySize'],
+    optional: ['style', 'includeFlights', 'includeHotels', 'includeActivities', 'origin'],
+    aliases: { destination: ['city', 'location'] },
+    inputExample: { destination: 'Tokyo', duration: 10, partySize: 2, style: 'mid', includeFlights: true, origin: 'London' },
+    guidance: 'Use when the user asks how much a trip might cost, or when a budget estimate would help planning. style is budget | mid | luxury. Returns a rough breakdown by category. This is an estimate — not a booking.',
+    successSummary: 'Budget estimated',
+    failureSummary: 'Budget estimation failed',
+    confirmation: 'none'
+  },
+
+  save_trip: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['title', 'requirements', 'itinerary', 'budget'],
+    aliases: { destination: ['city', 'location'] },
+    inputExample: { destination: 'Tokyo', title: 'Tokyo April 2027', requirements: {}, itinerary: {} },
+    guidance: 'Use to save the current travel plan to the user\'s trips list. Call this when the user says "save this trip", "keep this plan", or when a plan is complete enough to persist. title is auto-generated from destination + date if not provided.',
+    successSummary: 'Trip saved',
+    failureSummary: 'Trip save failed',
+    confirmation: 'none'
+  },
+
+  modify_trip: {
+    risk: 'medium',
+    required: ['tripId', 'instruction'],
+    optional: ['aspect'],
+    aliases: { instruction: ['change', 'request', 'modification'] },
+    inputExample: { tripId: 'uuid', instruction: 'Make it cheaper and add more outdoor activities', aspect: 'budget' },
+    guidance: 'Use when the user wants to change an existing saved trip. instruction is the natural language modification request ("make it cheaper", "add nightlife", "replace museums with outdoor activities"). aspect hints at the primary dimension: budget | accommodation | activities | pace | dining. The AI modifies the existing plan rather than regenerating from scratch.',
+    successSummary: 'Trip updated',
+    failureSummary: 'Trip modification failed',
+    confirmation: 'none'
   }
 };
 

@@ -11,12 +11,16 @@ const indeed = require('./indeed');
 const linkedin = require('./linkedin');
 const spotify = require('./spotify');
 const linear = require('./linear');
+const flights = require('./flights');
+const hotels = require('./hotels');
+const activities = require('./activities');
 
 // Registry: action name → connector module
 // To add a new connector: create connectors/myservice.js and add it to this list.
 const MODULES = {
   google, uber, telegram, trainline, maps,
-  github, microsoft, notion, youtube, indeed, linkedin, spotify, linear
+  github, microsoft, notion, youtube, indeed, linkedin, spotify, linear,
+  flights, hotels, activities
 };
 
 const registry = {};

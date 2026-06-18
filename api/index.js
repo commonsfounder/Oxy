@@ -64,8 +64,11 @@ const {
 } = require('./services/context-brain');
 const {
   buildTravelConciergeState,
-  buildTravelContextBlock
+  buildTravelContextBlock,
+  isTravelPlanningRequest
 } = require('./services/travel-concierge');
+const { generateItinerary, modifyItinerary, itineraryToText } = require('./services/itinerary-engine');
+const { rankHotels, rankActivities, rankFlights } = require('./services/travel-ranking');
 const {
   createSessionToken,
   getAuthenticatedUserId,
@@ -3803,13 +3806,252 @@ app.post('/travel-concierge/parse', requireSessionAuth, async (req, res) => {
     const previous = context && typeof context === 'object'
       ? context
       : parseStoredTravelContext(await getPreferenceMap(userId));
-    const state = buildTravelConciergeState(message, previous, { maxQuestions: 3 });
+    const state = await buildTravelConciergeState(message, previous, { maxQuestions: 3, callModel: callTravelModel });
     await saveTravelContext(userId, state);
     res.json(state);
   } catch (err) {
     return sendServerError(res, err, 'server.error');
   }
 });
+
+// --- Trip CRUD endpoints ---
+
+app.post('/trips', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, destination, title, requirements, itinerary, budget } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!destination) return res.status(400).json({ error: 'destination is required.' });
+    const tripTitle = title || [destination, requirements?.date].filter(Boolean).join(' ');
+    const { data, error } = await supabase.from('travel_sessions').insert({
+      user_id: userId,
+      title: tripTitle,
+      status: 'planning',
+      requirements: requirements || {},
+      itinerary: itinerary || {},
+      budget: budget || {}
+    }).select('id, title, status, created_at').single();
+    if (error) return sendServerError(res, error, 'trips.create.error');
+    res.json(data);
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+app.get('/trips/:userId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { data, error } = await supabase
+      .from('travel_sessions')
+      .select('id, title, status, requirements, created_at, updated_at')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    if (error) return sendServerError(res, error, 'trips.list.error');
+    res.json({ trips: data || [] });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+app.get('/trips/:userId/:tripId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, tripId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { data, error } = await supabase
+      .from('travel_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('id', tripId)
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Trip not found.' });
+    res.json(data);
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+app.put('/trips/:userId/:tripId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, tripId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { title, status, requirements, itinerary, budget } = req.body || {};
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (status !== undefined) updates.status = status;
+    if (requirements !== undefined) updates.requirements = requirements;
+    if (itinerary !== undefined) updates.itinerary = itinerary;
+    if (budget !== undefined) updates.budget = budget;
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'No fields to update.' });
+    const { data, error } = await supabase
+      .from('travel_sessions')
+      .update(updates)
+      .eq('user_id', userId)
+      .eq('id', tripId)
+      .select('id, title, status, updated_at')
+      .single();
+    if (error || !data) return res.status(404).json({ error: 'Trip not found.' });
+    res.json(data);
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+app.delete('/trips/:userId/:tripId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, tripId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { error } = await supabase
+      .from('travel_sessions')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', tripId);
+    if (error) return sendServerError(res, error, 'trips.delete.error');
+    res.json({ deleted: true });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
+// --- Itinerary generation & modification ---
+
+// Shared callModel wrapper for itinerary engine (system + user prompt, JSON output)
+async function callItineraryModel(systemPrompt, userPrompt) {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: PRIMARY_CHAT_MODEL,
+      systemInstruction: systemPrompt,
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const result = await model.generateContent(userPrompt);
+    return result.response.text();
+  } catch {
+    return null;
+  }
+}
+
+app.post('/trips/:userId/:tripId/generate-itinerary', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, tripId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+
+    const { data: trip, error: tripErr } = await supabase
+      .from('travel_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('id', tripId)
+      .single();
+    if (tripErr || !trip) return res.status(404).json({ error: 'Trip not found.' });
+
+    const requirements = trip.requirements || {};
+    if (!requirements.destination) return res.status(400).json({ error: 'Trip has no destination in requirements.' });
+
+    const [travelProfile, hotelsResult, activitiesResult, flightsResult] = await Promise.all([
+      getTravelProfile(userId),
+      requirements.destination
+        ? dispatch(userId, 'search_hotels', {
+            destination: requirements.destination,
+            checkIn: requirements.date,
+            checkOut: requirements.endDate,
+            guests: requirements.partySize,
+            style: requirements.accommodationPreference || travelProfile?.hotel_style
+          }).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] }),
+      dispatch(userId, 'search_activities', {
+        destination: requirements.destination,
+        interests: requirements.activityPreferences
+      }).catch(() => ({ data: [] })),
+      requirements.origin && requirements.date
+        ? dispatch(userId, 'search_flights', {
+            origin: requirements.origin,
+            destination: requirements.destination,
+            date: requirements.date,
+            returnDate: requirements.endDate,
+            partySize: requirements.partySize
+          }).catch(() => ({ data: [] }))
+        : Promise.resolve({ data: [] })
+    ]);
+
+    const rankedSearch = {
+      hotels:     rankHotels(hotelsResult?.data || [], travelProfile, requirements),
+      activities: rankActivities(activitiesResult?.data || [], travelProfile, requirements),
+      flights:    rankFlights(flightsResult?.data || [], travelProfile, requirements)
+    };
+
+    const itinerary = await generateItinerary(requirements, rankedSearch, travelProfile, callItineraryModel);
+
+    // Save itinerary back to the trip
+    await supabase
+      .from('travel_sessions')
+      .update({ itinerary, status: 'planning' })
+      .eq('id', tripId)
+      .eq('user_id', userId);
+
+    res.json({ itinerary, text: itineraryToText(itinerary) });
+  } catch (err) {
+    return sendServerError(res, err, 'itinerary.generate.error');
+  }
+});
+
+app.post('/trips/:userId/:tripId/modify', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId, tripId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { instruction } = req.body || {};
+    if (!instruction) return res.status(400).json({ error: 'instruction is required.' });
+
+    const { data: trip, error: tripErr } = await supabase
+      .from('travel_sessions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('id', tripId)
+      .single();
+    if (tripErr || !trip) return res.status(404).json({ error: 'Trip not found.' });
+    if (!trip.itinerary?.days?.length) return res.status(400).json({ error: 'Trip has no itinerary to modify. Generate one first.' });
+
+    const modified = await modifyItinerary(trip.itinerary, instruction, trip.requirements || {}, callItineraryModel);
+
+    await supabase
+      .from('travel_sessions')
+      .update({ itinerary: modified })
+      .eq('id', tripId)
+      .eq('user_id', userId);
+
+    res.json({ itinerary: modified, summary: modified.lastModification?.summary });
+  } catch (err) {
+    return sendServerError(res, err, 'itinerary.modify.error');
+  }
+});
+
+// Update the user's long-term travel preference profile
+app.post('/travel-profile/:userId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const allowed = ['hotel_style', 'activity_types', 'travel_style', 'dietary_requirements',
+      'accessibility_needs', 'budget_tier', 'preferred_airlines', 'past_destinations', 'disliked_destinations'];
+    const updates = Object.fromEntries(
+      Object.entries(req.body || {}).filter(([k]) => allowed.includes(k))
+    );
+    if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields provided.' });
+    await upsertTravelProfile(userId, updates);
+    res.json({ updated: true });
+  } catch (err) {
+    return sendServerError(res, err, 'travel.profile.update.error');
+  }
+});
+
+app.get('/travel-profile/:userId', requireSessionAuth, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!requireMatchingUser(req, res, userId)) return;
+    const profile = await getTravelProfile(userId);
+    res.json(profile || {});
+  } catch (err) {
+    return sendServerError(res, err, 'travel.profile.get.error');
+  }
+});
+
+// --- End itinerary & profile ---
 
 const CONNECTORS = [
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
@@ -3825,6 +4067,9 @@ const CONNECTORS = [
   { id: 'linkedin',  name: 'LinkedIn',                  icon: 'linkedin', category: 'Jobs',           implemented: true },
   { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Entertainment', implemented: true, auth: 'oauth' },
   { id: 'linear',    name: 'Linear',                    icon: 'linear', category: 'Developer',      implemented: true, auth: 'oauth' },
+  { id: 'flights',   name: 'Flight Search (Amadeus)',    icon: 'flights', category: 'Travel',       implemented: true },
+  { id: 'hotels',    name: 'Hotel Search (Amadeus)',     icon: 'hotels', category: 'Travel',        implemented: true },
+  { id: 'activities', name: 'Activities (Viator)',       icon: 'activities', category: 'Travel',    implemented: true },
 ];
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
@@ -3852,6 +4097,65 @@ async function saveTravelContext(userId, state, trace = null) {
     if (trace) trace.log('supabase.preferences.travel_context_save_failed', err.message);
   }
 }
+
+// --- Travel profile (long-term user travel preferences) ---
+
+async function getTravelProfile(userId, trace) {
+  try {
+    const { data, error } = await supabase
+      .from('travel_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error && trace) trace.log('supabase.travel_preferences.error', error.message);
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+async function upsertTravelProfile(userId, updates = {}, trace) {
+  if (!userId || !Object.keys(updates).length) return;
+  try {
+    await supabase
+      .from('travel_preferences')
+      .upsert({ user_id: userId, ...updates, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  } catch (err) {
+    if (trace) trace.log('supabase.travel_preferences.upsert_failed', err.message);
+  }
+}
+
+function buildTravelProfileBlock(profile) {
+  if (!profile) return '';
+  const parts = [];
+  if (profile.hotel_style) parts.push(`Hotel preference: ${profile.hotel_style}`);
+  if (profile.activity_types?.length) parts.push(`Activity interests: ${profile.activity_types.join(', ')}`);
+  if (profile.travel_style) parts.push(`Travel style: ${profile.travel_style}`);
+  if (profile.dietary_requirements?.length) parts.push(`Dietary requirements: ${profile.dietary_requirements.join(', ')}`);
+  if (profile.accessibility_needs?.length) parts.push(`Accessibility needs: ${profile.accessibility_needs.join(', ')}`);
+  if (profile.budget_tier) parts.push(`Budget tier: ${profile.budget_tier}`);
+  if (profile.preferred_airlines?.length) parts.push(`Preferred airlines: ${profile.preferred_airlines.join(', ')}`);
+  if (profile.past_destinations?.length) parts.push(`Past destinations: ${profile.past_destinations.join(', ')}`);
+  if (profile.disliked_destinations?.length) parts.push(`Avoid: ${profile.disliked_destinations.join(', ')}`);
+  if (!parts.length) return '';
+  return `User travel profile:\n${parts.map(p => `- ${p}`).join('\n')}`;
+}
+
+// Thin wrapper: calls FAST_MODEL with JSON response mime — used as callModel for travel extraction
+async function callTravelModel(prompt) {
+  try {
+    const model = genAI.getGenerativeModel({
+      model: FAST_MODEL,
+      generationConfig: { responseMimeType: 'application/json' }
+    });
+    const result = await model.generateContent(prompt);
+    return result.response.text();
+  } catch {
+    return null;
+  }
+}
+
+// --- End travel helpers ---
 
 async function setPendingPlace(userId, payload) {
   await setPreferenceValue(userId, PENDING_PLACE_PREF, JSON.stringify({ ...payload, createdAt: new Date().toISOString() }));
@@ -4379,14 +4683,15 @@ app.get('/history/:userId/date', async (req, res) => {
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
   const historyOptions = { since: requestContext.chatStartedAt };
-  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
+  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions, travelProfile] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace),
     getHistory(userId, trace, 24, historyOptions),
     getPreferences(userId, trace),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
     getPromptCacheName(trace, modelName),
-    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 12, historyOptions)
+    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 12, historyOptions),
+    quickTurn ? Promise.resolve(null) : getTravelProfile(userId, trace)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   const statedContext = extractAlreadyStatedContext(history);
@@ -4398,7 +4703,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     : await buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace);
   const travelConciergeState = quickTurn
     ? null
-    : buildTravelConciergeState(message, parseStoredTravelContext(preferences), { resolvedContext });
+    : await buildTravelConciergeState(message, parseStoredTravelContext(preferences), { resolvedContext, callModel: callTravelModel });
   if (travelConciergeState?.active) {
     saveTravelContext(userId, travelConciergeState, trace);
     if (trace) {
@@ -4420,6 +4725,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         buildNativeHintsContext(requestContext.nativeHints),
         buildPendingActionContext(requestContext.pendingAction),
         emailReplyContext,
+        buildTravelProfileBlock(travelProfile),
         buildTravelContextBlock(travelConciergeState),
         buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),

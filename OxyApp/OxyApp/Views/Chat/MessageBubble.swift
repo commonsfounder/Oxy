@@ -86,6 +86,14 @@ struct MessageBubble: View {
                     ForEach(visibleActions) { action in
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
+                        } else if ["search_flights", "get_flight_prices"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .flights)
+                        } else if ["search_hotels", "check_hotel_availability"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .hotels)
+                        } else if ["search_activities", "get_activity_details"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .activities)
+                        } else if action.action == "save_trip" {
+                            TravelResultCard(action: action, kind: .trip)
                         } else {
                             ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                         }
@@ -489,6 +497,68 @@ private struct CheckPath: Shape {
         path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
         return path
+    }
+}
+
+// MARK: - Travel Result Card
+
+struct TravelResultCard: View {
+    enum Kind { case flights, hotels, activities, trip }
+
+    let action: ActionResult
+    let kind: Kind
+
+    private var eyebrow: String {
+        switch kind {
+        case .flights:    return "FLIGHTS · AMADEUS"
+        case .hotels:     return "HOTELS · AMADEUS"
+        case .activities: return "ACTIVITIES · VIATOR"
+        case .trip:       return "TRIP SAVED"
+        }
+    }
+
+    private var icon: String {
+        switch kind {
+        case .flights:    return "airplane"
+        case .hotels:     return "bed.double"
+        case .activities: return "ticket"
+        case .trip:       return "suitcase"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(Color.nmlTitanium)
+                Text(eyebrow)
+                    .font(.system(.caption2, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.nmlMuted)
+                Spacer()
+                if action.success {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.nmlTitanium)
+                } else {
+                    Image(systemName: "exclamationmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.nmlMuted)
+                }
+            }
+
+            if let text = action.text, !text.isEmpty {
+                Text(text)
+                    .font(.system(.footnote))
+                    .foregroundStyle(action.success ? Color.nmlInk : Color.nmlMuted)
+                    .lineLimit(6)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.nmlSurface)
+        .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
     }
 }
 
