@@ -29,7 +29,7 @@ async function searchActivities({ destination, interests, budget, date }) {
   return {
     success: true,
     data,
-    text: `Found ${data.length} activity results in ${destination}. Sources: ${sources}. Share the links with the user so they can explore and book.`
+    text: `Found ${data.length} activities in ${destination} from: ${sources}.`
   };
 }
 

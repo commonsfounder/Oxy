@@ -4787,7 +4787,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   };
 }
 
-const DATA_ACTIONS = new Set(['search_trains', 'station_board', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+const DATA_ACTIONS = new Set(['search_trains', 'station_board', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts', 'search_flights', 'get_flight_prices', 'search_hotels', 'get_hotel_details', 'check_hotel_availability', 'search_activities', 'get_activity_details']);
 const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains', 'station_board']);
 
 function withTimeout(promise, ms, label) {

@@ -30,7 +30,7 @@ async function searchHotels({ destination, checkIn, checkOut, guests, maxPrice, 
   return {
     success: true,
     data,
-    text: `Found ${data.length} hotel results in ${destination} (${checkIn} → ${checkOut}). Sources: ${sources}. Share the links with the user so they can compare and book.`
+    text: `Found ${data.length} hotel options in ${destination} (${checkIn} → ${checkOut}) from: ${sources}.`
   };
 }
 

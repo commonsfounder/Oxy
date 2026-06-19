@@ -31,7 +31,7 @@ async function searchFlights({ origin, destination, date, returnDate, partySize,
   return {
     success: true,
     data,
-    text: `Found ${data.length} flight search results for ${origin} → ${destination} on ${date}. Sources: ${sources}. Share the links with the user so they can compare and book.`
+    text: `Found ${data.length} flight options for ${origin} → ${destination} on ${date} from: ${sources}.`
   };
 }
 
