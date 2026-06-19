@@ -118,11 +118,11 @@ private struct LoginFormPage: View {
                 .buttonStyle(.plain)
                 .disabled(isLoading || userId.isEmpty || password.isEmpty)
                 .opacity(userId.isEmpty || password.isEmpty ? 0.4 : 1)
-                .animation(.easeInOut(duration: 0.2), value: userId.isEmpty || password.isEmpty)
+                .animation(.nmlFast, value: userId.isEmpty || password.isEmpty)
                 .padding(.top, 36)
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { isRegistering.toggle() }
+                    withAnimation(.nmlFast) { isRegistering.toggle() }
                 } label: {
                     Text(isRegistering ? "Already have an account? Sign in" : "New here? Create account")
                         .font(.system(size: 13, weight: .light))
@@ -156,9 +156,9 @@ private struct LoginFormPage: View {
             .focused($focusedField, equals: field)
 
             Rectangle()
-                .fill(focusedField == field ? Color.nmlInk.opacity(0.55) : Color.white.opacity(0.08))
+                .fill(focusedField == field ? Color.nmlInk.opacity(0.55) : Color.nmlFillSubtle)
                 .frame(height: focusedField == field ? 1 : 0.5)
-                .animation(.easeInOut(duration: 0.2), value: focusedField)
+                .animation(.nmlFast, value: focusedField)
         }
     }
 }

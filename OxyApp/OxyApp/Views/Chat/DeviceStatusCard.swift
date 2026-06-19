@@ -7,9 +7,6 @@ import SwiftUI
 struct DeviceStatusCard: View {
     var telemetry: PendantTelemetryMonitor
 
-    /// The one permitted spot of colour: a micro indicator for a live link.
-    private let liveGreen = Color(red: 0.30, green: 0.80, blue: 0.46)
-
     var body: some View {
         VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
@@ -36,7 +33,7 @@ struct DeviceStatusCard: View {
     private var liveState: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(telemetry.isStreaming ? liveGreen : Color.nmlMuted.opacity(0.5))
+                .fill(telemetry.isStreaming ? Color.nmlLive : Color.nmlMuted.opacity(0.5))
                 .frame(width: 6, height: 6)
             Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
                 .font(.nmlMono(10, weight: .medium))

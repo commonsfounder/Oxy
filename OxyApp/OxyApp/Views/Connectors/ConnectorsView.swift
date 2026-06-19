@@ -57,7 +57,7 @@ struct ConnectorsView: View {
                                 }
                                 .opacity(cardsVisible ? 1 : 0)
                                 .offset(y: cardsVisible ? 0 : 18)
-                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.0), value: cardsVisible)
+                                .animation(.nmlSpring.delay(0.0), value: cardsVisible)
                             }
 
                             // Third-party integrations
@@ -78,7 +78,7 @@ struct ConnectorsView: View {
                             }
                             .opacity(cardsVisible ? 1 : 0)
                             .offset(y: cardsVisible ? 0 : 18)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.08), value: cardsVisible)
+                            .animation(.nmlSpring.delay(0.08), value: cardsVisible)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 12)

@@ -32,42 +32,51 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.pending }
     }
 
+    // Outer corners (trailing edge) stay fully round; inner corners (leading edge)
+    // tighten when this message is adjacent to another in the same run.
+    private var userBubbleShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: isGroupStart ? NMLRadius.bubble : NMLRadius.sm,
+            bottomLeadingRadius: isGroupEnd  ? NMLRadius.bubble : NMLRadius.sm,
+            bottomTrailingRadius: NMLRadius.bubble,
+            topTrailingRadius: NMLRadius.bubble,
+            style: .continuous
+        )
+    }
+
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 3) {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
             // Message content
             if !message.content.isEmpty && uberAction == nil {
                 HStack(alignment: .bottom, spacing: 0) {
-                    if isUser { Spacer(minLength: 56) }
+                    if isUser { Spacer(minLength: 64) }
 
-                    VStack(alignment: .leading, spacing: 0) {
+                    Group {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
                                 fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 3 : 5
+                                lineSpacing: isCompact ? 4 : 6
                             )
                         } else {
                             Text(message.content)
                                 .font(.nmlBody(isCompact ? 14 : 15))
                                 .foregroundStyle(Color.nmlInk)
-                                .lineSpacing(isCompact ? 3 : 5)
+                                .lineSpacing(isCompact ? 4 : 6)
                         }
                     }
-                    // User messages get an ultra-subtle fill in a small-radius
-                    // container; assistant replies stay transparent and flush so
-                    // the conversation reads as one continuous column of text.
-                    // The rounded shape is drawn as a *background* (never a
-                    // clipShape) so the assistant's text is never sliced at (0,0).
-                    .padding(.horizontal, isUser ? 14 : 0)
-                    .padding(.vertical, isUser ? 9 : 0)
+                    .padding(.horizontal, isUser ? 15 : 0)
+                    .padding(.vertical, isUser ? 11 : 0)
                     .background {
                         if isUser {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.white.opacity(0.12))
+                            // Shaped bubble: more rounded toward the exterior of the run,
+                            // gently squared where messages sit flush against each other.
+                            userBubbleShape
+                                .fill(Color.nmlFillBubble)
                         }
                     }
 
-                    if !isUser { Spacer(minLength: 56) }
+                    if !isUser { Spacer(minLength: 64) }
                 }
             }
 
@@ -76,13 +85,13 @@ struct MessageBubble: View {
                 HStack {
                     OxyThinkingIndicator()
                         .padding(.vertical, 4)
-                    Spacer(minLength: 56)
+                    Spacer(minLength: 64)
                 }
             }
 
             // Action cards
             if !visibleActions.isEmpty {
-                VStack(spacing: 5) {
+                VStack(spacing: 6) {
                     ForEach(visibleActions) { action in
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
@@ -94,36 +103,38 @@ struct MessageBubble: View {
                             TravelResultCard(action: action, kind: .activities)
                         } else if action.action == "save_trip" {
                             TravelResultCard(action: action, kind: .trip)
+                        } else if ["get_directions", "plan_trip"].contains(action.action) && action.success {
+                            if action.deepLink != nil || action.webLink != nil {
+                                DirectionsLink(action: action)
+                            }
                         } else {
                             ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
                         }
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, 3)
             }
 
-            // Sources — quiet proof that a grounded answer came from a real lookup.
+            // Sources
             if !isUser, !message.sources.isEmpty {
                 MessageSourceChips(sources: message.sources)
-                    .padding(.top, 7)
-                    .padding(.trailing, 56)
+                    .padding(.top, 8)
+                    .padding(.trailing, 64)
             }
 
-            // Timestamp — only shown on the last message in each group run.
+            // Timestamp — group-end only, very quiet
             if isGroupEnd {
-                HStack(spacing: 4) {
-                    if isUser { Spacer() }
-                    Text(message.timestamp, style: .time)
-                        .font(.nmlBody(10))
-                        .foregroundStyle(Color.nmlMuted)
-                    if !isUser { Spacer() }
-                }
+                Text(message.timestamp, style: .time)
+                    .font(.nmlBody(10))
+                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
+                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                    .padding(.top, 1)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, isCompact ? 1 : 2)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: message.content)
+        .animation(.nmlSpring, value: message.content)
     }
 }
 
@@ -141,7 +152,7 @@ private struct StreamingWordText: View {
             .font(.nmlBody(fontSize))
             .foregroundStyle(Color.nmlInk)
             .lineSpacing(lineSpacing)
-            .animation(.easeOut(duration: 0.28), value: words.count)
+            .animation(.nmlRelax, value: words.count)
     }
 
     private var attributedText: AttributedString {
@@ -153,6 +164,41 @@ private struct StreamingWordText: View {
             output += part
         }
         return output
+    }
+}
+
+// MARK: - Directions Link
+
+/// A flat, minimal tap target that opens a route in Maps. Replaces the full
+/// ActionCard for directions/transit results — the text is already the answer.
+private struct DirectionsLink: View {
+    let action: ActionResult
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 6) {
+                Text("Open in Maps")
+                    .font(.nmlBody(13, weight: .light))
+                    .foregroundStyle(Color.nmlTitanium)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.nmlMuted)
+            }
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+            }
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+    }
+
+    private func open() {
+        let urlString = action.deepLink ?? action.webLink
+        guard let urlString, let url = URL(string: urlString) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
@@ -168,8 +214,7 @@ private struct MessageSourceChips: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Text("Sources")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(1.4)
+                    .nmlEyebrow()
                     .foregroundStyle(Color.nmlMuted)
 
                 ForEach(sources) { source in
@@ -179,7 +224,7 @@ private struct MessageSourceChips: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(source.title)
-                                .font(.system(size: 11, weight: .regular))
+                                .font(.nmlBody(11))
                                 .lineLimit(1)
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 8, weight: .semibold))
@@ -252,11 +297,11 @@ struct ActionCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(headline)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.nmlBody(14))
                     .foregroundStyle(action.success ? Color.nmlInk : Color.nmlDanger)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.system(size: 13, weight: .light))
+                        .font(.nmlBody(13, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
@@ -269,7 +314,7 @@ struct ActionCard: View {
             if hasLink {
                 HStack(spacing: 3) {
                     Text("Open")
-                        .font(.system(size: 13, weight: .regular))
+                        .font(.nmlBody(13))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                 }
@@ -303,11 +348,11 @@ struct ActionCard: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(headline)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.nmlBody(14))
                     .foregroundStyle(Color.nmlInk)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.system(size: 13, weight: .light))
+                        .font(.nmlBody(13, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -331,7 +376,7 @@ struct ActionCard: View {
     private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 13, weight: .medium))
+                .font(.nmlBody(13, weight: .medium))
                 .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
@@ -420,7 +465,7 @@ struct UberHandoffCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("RIDE · UBER")
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.nmlMono(11))
                     .tracking(1.4)
                     .foregroundStyle(Color.nmlMuted)
                 Spacer()
@@ -440,7 +485,7 @@ struct UberHandoffCard: View {
         .contentShape(Rectangle())
         .onTapGesture { onOpen() }
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.6).delay(0.15)) { confirmed = true }
+            withAnimation(.nmlRelax.delay(0.15)) { confirmed = true }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
@@ -449,11 +494,11 @@ struct UberHandoffCard: View {
     private func handoffRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 12) {
             Text(label)
-                .font(.system(.caption2, design: .monospaced))
+                .font(.nmlMono(11))
                 .foregroundStyle(Color.nmlMuted)
                 .frame(width: 38, alignment: .leading)
             Text(value)
-                .font(.system(.caption2, design: .monospaced))
+                .font(.nmlMono(11))
                 .foregroundStyle(Color.nmlInk)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -533,7 +578,7 @@ struct TravelResultCard: View {
                     .font(.system(size: 11, weight: .light))
                     .foregroundStyle(Color.nmlTitanium)
                 Text(eyebrow)
-                    .font(.system(.caption2, design: .monospaced))
+                    .font(.nmlMono(11))
                     .tracking(0.8)
                     .foregroundStyle(Color.nmlMuted)
                 Spacer()
@@ -550,7 +595,7 @@ struct TravelResultCard: View {
 
             if let text = action.text, !text.isEmpty {
                 Text(text)
-                    .font(.system(.footnote))
+                    .font(.nmlBody(13, weight: .light))
                     .foregroundStyle(action.success ? Color.nmlInk : Color.nmlMuted)
                     .lineLimit(6)
             }

@@ -40,13 +40,13 @@ struct MainTabView: View {
             MoreView().tag(Tab.more)
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(.easeInOut(duration: 0.25), value: selectedTab)
+        .animation(.nmlStandard, value: selectedTab)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             bottomBar
                 .offset(y: keyboardUp ? 130 : 0)
                 .opacity(keyboardUp ? 0 : 1)
                 .allowsHitTesting(!keyboardUp)
-                .animation(.easeInOut(duration: 0.22), value: keyboardUp)
+                .animation(.nmlStandard, value: keyboardUp)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             keyboardUp = true
@@ -100,7 +100,7 @@ struct MainTabView: View {
     private func tabButton(_ tab: Tab) -> some View {
         let selected = selectedTab == tab
         return Button {
-            withAnimation(.easeInOut(duration: 0.25)) { selectedTab = tab }
+            withAnimation(.nmlStandard) { selectedTab = tab }
         } label: {
             VStack(spacing: 3) {
                 Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
@@ -113,7 +113,7 @@ struct MainTabView: View {
             .padding(.vertical, 9)
             .background {
                 if selected {
-                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule().fill(Color.nmlFillSubtle)
                 }
             }
             .contentShape(Capsule())
@@ -140,46 +140,16 @@ struct MoreView: View {
         NavigationStack {
             ZStack {
                 Color.nmlObsidian.ignoresSafeArea()
-                // No fixed "More" header — the tab bar already labels this screen, and a sticky
-                // title here read as inconsistent next to Chat/Today. Let the account header lead,
-                // matching Today's scrolling feel.
                 ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
-                            accountHeader
-
-                            menuCard {
-                                moreRow(icon: "brain", title: "Memory") { destination = .memory }
-                                rowDivider
-                                moreRow(icon: "link", title: "Connectors") { destination = .connectors }
-                                rowDivider
-                                moreRow(icon: "slider.horizontal.3", title: "Settings") { destination = .settings }
-                                rowDivider
-                                moreRow(
-                                    icon: "dot.radiowave.left.and.right",
-                                    title: "Pendant",
-                                    trailing: pendantStatusText,
-                                    trailingLive: pendant.isConnected
-                                ) { destination = .pendant }
-                            }
-
-                            Button {
-                                HapticManager.shared.impact(.light)
-                                showSignOutConfirm = true
-                            } label: {
-                                Text("Sign Out")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundStyle(Color.nmlMuted)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 14)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.top, 4)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 24)
-                        .padding(.bottom, 40)
+                    VStack(alignment: .leading, spacing: 0) {
+                        identityHeader
+                        menuSection
+                        signOutButton
                     }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 32)
+                    .padding(.bottom, 48)
+                }
             }
             .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in
@@ -203,68 +173,63 @@ struct MoreView: View {
         }
     }
 
-    // MARK: - Account header
+    // MARK: - Identity header (Milgrain editorial)
 
-    private var accountHeader: some View {
+    private var identityHeader: some View {
         Button {
             HapticManager.shared.impact(.light)
             destination = .profile
         } label: {
-            HStack(spacing: 14) {
-                // A quiet monogram in a hairline ring — initial of the user's name.
-                Text(monogram)
-                    .font(.system(size: 20, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
-                    .frame(width: 48, height: 48)
-                    .background(Circle().fill(Color.white.opacity(0.05)))
-                    .overlay(Circle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+            VStack(alignment: .leading, spacing: 0) {
+                BrandWordmark()
+                    .padding(.bottom, 28)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(displayName)
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(Color.nmlInk)
-                        .lineLimit(1)
-                    Text(accountSubtitle)
-                        .font(.system(size: 12, weight: .light))
+                Text(displayName)
+                    .font(.nmlDisplay(38, weight: .regular))
+                    .foregroundStyle(Color.nmlInk)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+
+                if !accountEmail.isEmpty {
+                    Text(accountEmail)
+                        .font(.nmlBody(12, weight: .light))
                         .foregroundStyle(Color.nmlMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .padding(.top, 6)
                 }
 
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.nmlMuted)
+                // Hairline rule separating identity from navigation
+                Rectangle()
+                    .fill(Color.nmlHairline)
+                    .frame(height: 0.5)
+                    .padding(.top, 28)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity)
-            .background(cardBackground)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// The user's name from Profile, or a quiet prompt to set it up.
     private var displayName: String {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
            !saved.userName.trimmingCharacters(in: .whitespaces).isEmpty {
             return saved.userName.trimmingCharacters(in: .whitespaces)
         }
-        return "Set up your profile"
+        // Derive a readable first name from the account id (email local-part)
+        let local = appState.userId.split(separator: "@").first.map(String.init) ?? appState.userId
+        let first = local.split(whereSeparator: { ".-_0123456789".contains($0) }).first.map(String.init) ?? ""
+        if first.count >= 2, first.count <= 20 {
+            return first.prefix(1).uppercased() + first.dropFirst().lowercased()
+        }
+        return "Your Account"
     }
 
-    private var accountSubtitle: String {
+    /// Shows the email portion of the account id, or nothing if it doesn't look like one.
+    private var accountEmail: String {
         let id = appState.userId.trimmingCharacters(in: .whitespaces)
-        return id.isEmpty ? "Profile · data · sign out" : id
-    }
-
-    private var monogram: String {
-        let name = displayName
-        let source = name == "Set up your profile" ? appState.userId : name
-        let trimmed = source.trimmingCharacters(in: .whitespaces)
-        return String(trimmed.first ?? "—").uppercased()
+        return id.contains("@") ? id : ""
     }
 
     private var pendantStatusText: String? {
@@ -276,33 +241,33 @@ struct MoreView: View {
         }
     }
 
-    // MARK: - Menu card
+    // MARK: - Menu (no icons — typographic rows)
 
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color.nmlSurface)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
-            )
+    private var menuSection: some View {
+        VStack(spacing: 0) {
+            editorialRow("Memory") { destination = .memory }
+            rowDivider
+            editorialRow("Connectors") { destination = .connectors }
+            rowDivider
+            editorialRow("Settings") { destination = .settings }
+            rowDivider
+            editorialRow(
+                "Pendant",
+                trailing: pendantStatusText,
+                trailingLive: pendant.isConnected
+            ) { destination = .pendant }
+        }
+        .padding(.top, 4)
     }
 
-    private func menuCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) { content() }
-            .background(cardBackground)
-    }
-
-    /// Hairline between rows, inset to clear the glyph column so it reads as a list.
     private var rowDivider: some View {
         Rectangle()
             .fill(Color.nmlHairline)
             .frame(height: 0.5)
-            .padding(.leading, 54)
     }
 
-    private func moreRow(
-        icon: String,
-        title: String,
+    private func editorialRow(
+        _ title: String,
         trailing: String? = nil,
         trailingLive: Bool = false,
         action: @escaping () -> Void
@@ -311,35 +276,48 @@ struct MoreView: View {
             HapticManager.shared.impact(.light)
             action()
         } label: {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .light))
-                    .foregroundStyle(Color.nmlTitanium)
-                    .frame(width: 24, alignment: .center)
+            HStack(spacing: 0) {
                 Text(title)
-                    .font(.system(size: 16, weight: .regular))
+                    .font(.nmlBody(17, weight: .regular))
                     .foregroundStyle(Color.nmlInk)
                 Spacer()
                 if let trailing {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 6) {
                         if trailingLive {
                             NamelessStatusDot(isLive: true, diameter: 5)
                         }
                         Text(trailing)
-                            .font(.nmlBody(11, weight: .medium))
-                            .tracking(0.2)
+                            .font(.nmlBody(12, weight: .regular))
                             .foregroundStyle(trailingLive ? Color.nmlLive : Color.nmlMuted)
                     }
+                    .padding(.trailing, 10)
                 }
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(Color.nmlMuted.opacity(0.5))
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 15)
+            .padding(.vertical, 20)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Sign out
+
+    private var signOutButton: some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            showSignOutConfirm = true
+        } label: {
+            Text("Sign Out")
+                .font(.nmlBody(13, weight: .regular))
+                .foregroundStyle(Color.nmlMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 16)
     }
 
 }

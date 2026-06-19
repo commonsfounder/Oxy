@@ -66,7 +66,7 @@ struct ChatHomeView: View {
 
             // Dim backdrop
             if sidebarOpen {
-                Color.black.opacity(0.45)
+                Color.nmlFillScrim
                     .ignoresSafeArea()
                     .onTapGesture { closeSidebar() }
                     .transition(.opacity)
@@ -80,7 +80,7 @@ struct ChatHomeView: View {
                 .offset(x: sidebarOpen ? dragOffset : -sidebarWidth)
                 .gesture(drawerCloseGesture)
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: sidebarOpen)
+        .animation(.nmlSpring, value: sidebarOpen)
         .task { await loadSessions() }
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
@@ -119,7 +119,7 @@ struct ChatHomeView: View {
                 .foregroundStyle(Color.nmlInk)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
@@ -148,8 +148,8 @@ struct ChatHomeView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
             .background(Color.nmlSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+            .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 8)

@@ -52,7 +52,7 @@ struct ChatView: View {
                         .foregroundStyle(Color.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
-                        .background(Color(red: 0.85, green: 0.62, blue: 0.22))
+                        .background(Color.nmlAttention)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -132,7 +132,7 @@ struct ChatView: View {
                                 }
                             }
                             .padding(.vertical, 12)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.messages.count)
+                            .animation(.nmlSpring, value: viewModel.messages.count)
                         }
                         .overlay(alignment: .bottomLeading) {
                             if viewModel.messages.isEmpty && !viewModel.isSending {
@@ -165,7 +165,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(.nmlSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -175,7 +175,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages.last?.content) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(.nmlSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -187,7 +187,7 @@ struct ChatView: View {
                             guard let targetID else { return }
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(150))
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(.nmlStandard) {
                                     proxy.scrollTo(targetID, anchor: .center)
                                 }
                                 try? await Task.sleep(for: .milliseconds(700))
@@ -376,7 +376,7 @@ struct ChatView: View {
     private var attachmentSheetOverlay: some View {
         if showAttachMenu {
             ZStack(alignment: .bottom) {
-                Color.black.opacity(0.45)
+                Color.nmlFillScrim
                     .ignoresSafeArea()
                     .onTapGesture { dismissAttachMenu() }
 
@@ -392,9 +392,9 @@ struct ChatView: View {
                     }
                 }
                 .background(Color.nmlObsidian)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
                         .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
                 )
                 .padding(.horizontal, 14)
@@ -419,7 +419,7 @@ struct ChatView: View {
     }
 
     private func dismissAttachMenu() {
-        withAnimation(.easeOut(duration: 0.18)) { showAttachMenu = false }
+        withAnimation(.nmlFast) { showAttachMenu = false }
     }
 
     /// Send a spoken transcript as a message into this conversation. De-dupes
@@ -960,9 +960,7 @@ private struct ChatInputBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Divider()
-                .overlay(Color.nmlHairline)
-
+            // Attachment strip
             if let attachmentLabel {
                 HStack(spacing: 10) {
                     if attachmentIsImage, let attachmentData, let uiImage = UIImage(data: attachmentData) {
@@ -995,48 +993,44 @@ private struct ChatInputBar: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
                 .background(Color.nmlSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
+                .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
+                // Attach
                 Button(action: onAttach) {
                     Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(Color.nmlMuted)
                         .frame(width: 36, height: 36)
                         .nmlGlass(Circle(), interactive: true)
                 }
                 .disabled(isSending)
 
-                VStack(spacing: 8) {
-                    TextField("", text: $text, axis: .vertical)
-                        .font(.system(size: 15, weight: .light))
-                        .foregroundStyle(Color.nmlInk)
-                        .lineLimit(1...5)
-                        .focused(isFocused)
-                        .onSubmit {
-                            if canSend { onSend() }
-                        }
-                        // Visible cue that this turn won't be saved while shadow mode is on.
-                        .overlay(alignment: .leading) {
-                            if incognito && text.isEmpty {
-                                Text("Shadow chat — not saved")
-                                    .font(.system(size: 15, weight: .light))
-                                    .foregroundStyle(Color.nmlMuted)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    Rectangle()
-                        .fill(Color.nmlHairline)
-                        .frame(height: 0.5)
-                }
-                .padding(.horizontal, 2)
+                // Text field in a rounded container — the chat surface
+                TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
+                    .font(.system(size: 15, weight: .light))
+                    .foregroundStyle(Color.nmlInk)
+                    .tint(Color.nmlTitanium)
+                    .lineLimit(1...6)
+                    .focused(isFocused)
+                    .onSubmit { if canSend { onSend() } }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.nmlSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous)
+                            .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                    )
 
+                // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
                         if isRecording && !canSend {
@@ -1063,25 +1057,22 @@ private struct ChatInputBar: View {
                     }
                     .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
                     .frame(width: 36, height: 36)
-                    // Pin the hit area to the 36pt circle so the overflowing pulse rings (50–62pt)
-                    // don't create dead/erratic tap zones, and keep the glass passive so it doesn't
-                    // compete with ScaleButtonStyle's gesture.
                     .contentShape(Circle())
                     .nmlGlass(
                         Circle(),
                         tint: canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : nil,
                         interactive: false
                     )
-                    // Lift the button off whatever scrolls beneath it (chat text, the drawer).
-                    .shadow(color: Color.black.opacity(0.45), radius: 6, y: 2)
+                    .shadow(color: Color.nmlFillScrim, radius: 6, y: 2)
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
-                .animation(.easeInOut(duration: 0.15), value: canAct)
+                .animation(.nmlFast, value: canAct)
                 .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
             .background(Color.nmlObsidian)
         }
         .onAppear { voicePulse = true }
@@ -1133,7 +1124,7 @@ struct PendantOverlay: View {
             if let notice {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(Color(red: 0.85, green: 0.62, blue: 0.22))
+                    .foregroundStyle(Color.nmlAttention)
                 Text(notice)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.primary)
@@ -1150,7 +1141,7 @@ struct PendantOverlay: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .animation(.easeInOut(duration: 0.2), value: t)
+                        .animation(.nmlFast, value: t)
                 }
             } else {
                 Image(systemName: "waveform")
@@ -1172,7 +1163,7 @@ struct PendantOverlay: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
         .nmlGlass(Capsule())
-        .animation(.easeInOut(duration: 0.2), value: state)
+        .animation(.nmlFast, value: state)
     }
 }
 
@@ -1204,7 +1195,7 @@ struct PendantWaveform: View {
                 .animation(
                     active
                         ? .easeInOut(duration: dur).repeatForever(autoreverses: true).delay(delay)
-                        : .easeInOut(duration: 0.2),
+                        : .nmlFast,
                     value: on
                 )
                 .onAppear { if active { on = true } }

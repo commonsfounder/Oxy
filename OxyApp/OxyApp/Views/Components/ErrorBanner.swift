@@ -34,7 +34,7 @@ struct ErrorBanner: View {
         .padding(.vertical, 14)
         .background(Color.nmlObsidian)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.white.opacity(0.08)).frame(height: 0.5)
+            Rectangle().fill(Color.nmlFillSubtle).frame(height: 0.5)
         }
     }
 }

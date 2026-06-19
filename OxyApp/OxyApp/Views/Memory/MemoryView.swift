@@ -110,8 +110,8 @@ struct MemoryView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 12)
                     .padding(.bottom, 40)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isLoading)
-                    .animation(.easeInOut(duration: 0.2), value: items)
+                    .animation(.nmlSpring, value: isLoading)
+                    .animation(.nmlFast, value: items)
                 }
             }
         }

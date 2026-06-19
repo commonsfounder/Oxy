@@ -55,7 +55,7 @@ struct LegalConsentView: View {
                 NamelessPrimaryButton(title: "AGREE AND CONTINUE", action: onContinue)
                     .disabled(!canContinue)
                     .opacity(canContinue ? 1 : 0.4)
-                    .animation(.easeInOut(duration: 0.2), value: canContinue)
+                    .animation(.nmlFast, value: canContinue)
             }
             .padding(.horizontal, 28)
             .padding(.top, 80)

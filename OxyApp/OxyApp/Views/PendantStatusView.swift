@@ -147,7 +147,7 @@ private struct PendantPairingSection: View {
                             .contentTransition(.numericText())
                             .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                         statusIndicator
-                            .animation(.spring(response: 0.4, dampingFraction: 0.7), value: pendant.connectionState)
+                            .animation(.nmlSpring, value: pendant.connectionState)
                     }
                 }
                 .padding(.vertical, 16)
@@ -208,10 +208,10 @@ private struct PendantPairingSection: View {
                     Spacer()
                 }
                 .padding(.vertical, 16)
-                .animation(.easeInOut(duration: 0.25), value: pendant.connectionState)
+                .animation(.nmlStandard, value: pendant.connectionState)
             }
         }
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: pendant.connectionState)
+        .animation(.nmlSpring, value: pendant.connectionState)
         .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { pendant.unpair() }
             Button("Cancel", role: .cancel) {}

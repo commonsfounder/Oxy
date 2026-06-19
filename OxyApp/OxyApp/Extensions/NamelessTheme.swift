@@ -31,6 +31,21 @@ extension Color {
     /// Faint halo behind a live-status dot.
     static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
 
+    // MARK: - Named surface fills
+    //
+    // White overlays on obsidian. Use these instead of inline Color.white.opacity(N)
+    // so every surface lift has a consistent, auditable name.
+    //
+    //   ghost  — barely-there tint: inactive tabs, glass base
+    //   subtle — slightly raised: button backgrounds, segmented control track
+    //   bubble — user chat bubble fill
+    //   scrim  — modal/sheet backdrop over the full screen
+
+    static let nmlFillGhost  = Color.white.opacity(0.04)
+    static let nmlFillSubtle = Color.white.opacity(0.08)
+    static let nmlFillBubble = Color.white.opacity(0.13)
+    static let nmlFillScrim  = Color.black.opacity(0.45)
+
     // MARK: - Semantic status colours
     //
     // The one place hue is allowed to carry meaning in this otherwise monochrome
@@ -48,6 +63,38 @@ extension Color {
     static let nmlLive = Color(red: 0.30, green: 0.80, blue: 0.46)
     /// Amber for attention-needed / degraded states (overdue, needs-reconnect).
     static let nmlAttention = Color(red: 232 / 255, green: 176 / 255, blue: 84 / 255)
+}
+
+// MARK: - Radius scale
+//
+// Four named steps cover every shape in the product. Prefer these over raw literals.
+//
+//   sm     — 5pt  : status dots, small pill badges
+//   card   — 8pt  : cards, rows, action chips, attachment strips
+//   bubble — 20pt : chat bubble outer corners
+//   input  — 22pt : text input container (near-capsule)
+
+enum NMLRadius {
+    static let sm:     CGFloat = 5
+    static let card:   CGFloat = 8
+    static let bubble: CGFloat = 20
+    static let input:  CGFloat = 22
+}
+
+// MARK: - Animation tokens
+//
+// Three speed steps + one standard spring. Use these instead of inline duration literals.
+//
+//   nmlFast     — 0.15 s : micro-interactions, icon transitions
+//   nmlStandard — 0.22 s : most UI state changes (modals, tab switching)
+//   nmlRelax    — 0.40 s : content reveals, loading transitions
+//   nmlSpring   — response 0.34 / damping 0.86 : nav slides, drawer open/close
+
+extension Animation {
+    static let nmlFast     = Animation.easeInOut(duration: 0.15)
+    static let nmlStandard = Animation.easeInOut(duration: 0.22)
+    static let nmlRelax    = Animation.easeInOut(duration: 0.4)
+    static let nmlSpring   = Animation.spring(response: 0.34, dampingFraction: 0.86)
 }
 
 // MARK: - Typography rule (serif vs sans)
@@ -84,10 +131,10 @@ extension Font {
 }
 
 extension View {
-    /// Editorial eyebrow: small, tracked-out, small-caps in muted titanium.
+    /// Editorial eyebrow: small Inter, tracked-out, in muted titanium.
     /// Use above a title to let the layout breathe instead of stacking bold labels.
     func nmlEyebrow() -> some View {
-        font(.system(size: 11, weight: .semibold))
+        font(.nmlBody(11, weight: .semibold))
             .tracking(2.6)
             .foregroundStyle(Color.nmlMuted)
     }
@@ -400,6 +447,50 @@ func nmlGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder conten
         GlassEffectContainer(spacing: spacing, content: content)
     } else {
         content()
+    }
+}
+
+// MARK: - NMLCard
+//
+// The single shared card surface. Every raised container in the product (Today cards,
+// More menu, action rows, attachment strips) should use this instead of defining its own
+// background + border + radius triple. The content is left-aligned by default; pass a
+// different alignment via the view modifier if needed.
+
+struct NMLCard<Content: View>: View {
+    var padding: CGFloat = 16
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(padding)
+            .background(Color.nmlSurface)
+            .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
+                    .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+            )
+    }
+}
+
+// MARK: - BrandWordmark
+//
+// The Milgrain wordmark asset, template-rendered so it adapts to any tint on the
+// obsidian canvas. Default: muted titanium at 14pt height (as used in the More tab
+// identity header). Pass a different height or color for alternate contexts.
+
+struct BrandWordmark: View {
+    var height: CGFloat = 14
+    var color: Color = .nmlMuted
+
+    var body: some View {
+        Image("wordmark")
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(height: height)
+            .foregroundStyle(color)
     }
 }
 

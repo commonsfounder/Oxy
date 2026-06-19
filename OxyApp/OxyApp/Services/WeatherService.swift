@@ -93,8 +93,8 @@ final class OxyWeatherService {
         }
         guard manager.isAuthorized else { return nil }
         manager.requestLocation()
-        // Give the one-shot fix a brief window to land.
-        for _ in 0..<10 {
+        // Give the one-shot fix up to 4 s to land.
+        for _ in 0..<20 {
             try? await Task.sleep(for: .milliseconds(200))
             if let last = manager.lastLocation { return last }
         }

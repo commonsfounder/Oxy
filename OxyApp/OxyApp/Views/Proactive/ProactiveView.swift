@@ -157,11 +157,31 @@ struct ProactiveView: View {
     // MARK: - Cards
 
     @ViewBuilder private var weatherCard: some View {
-        if let weather {
-            TodayCard {
+        if weather == nil && !isLoading && !LocationManager.shared.isAuthorized {
+            NMLCard {
+                HStack {
+                    cardLabel("Weather")
+                    Spacer()
+                    Image(systemName: "location.slash")
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(Color.nmlMuted)
+                }
                 Button {
                     HapticManager.shared.impact(.light)
-                    withAnimation(.easeInOut(duration: 0.22)) { weatherExpanded.toggle() }
+                    LocationManager.shared.requestPermission()
+                } label: {
+                    Text("Allow location to see weather.")
+                        .font(.nmlBody(13, weight: .light))
+                        .foregroundStyle(Color.nmlMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+            }
+        } else if let weather {
+            NMLCard {
+                Button {
+                    HapticManager.shared.impact(.light)
+                    withAnimation(.nmlStandard) { weatherExpanded.toggle() }
                 } label: {
                     VStack(alignment: .leading, spacing: 0) {
                         HStack {
@@ -214,7 +234,7 @@ struct ProactiveView: View {
         ].compactMap { $0 }
 
         VStack(spacing: 0) {
-            Divider().background(Color.nmlHairline)
+            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                 ForEach(cells, id: \.0) { cell in
                     VStack(spacing: 4) {
@@ -242,7 +262,7 @@ struct ProactiveView: View {
     }
 
     private var agendaCard: some View {
-        TodayCard {
+        NMLCard {
             cardLabel("Agenda")
             if events.isEmpty {
                 Text("Nothing scheduled today.")
@@ -299,7 +319,7 @@ struct ProactiveView: View {
     @ViewBuilder private var inboxCard: some View {
         let emails = inboxEmails
         if !emails.isEmpty {
-            TodayCard {
+            NMLCard {
                 cardLabel("Inbox")
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(emails.enumerated()), id: \.element.id) { index, email in
@@ -307,31 +327,25 @@ struct ProactiveView: View {
                             HapticManager.shared.impact(.light)
                             openMail()
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            HStack(alignment: .center, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 3) {
                                     Text(email.cleanFrom)
                                         .font(.nmlBody(13, weight: .medium))
                                         .foregroundStyle(Color.nmlInk)
                                         .lineLimit(1)
-                                    Spacer(minLength: 8)
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 10, weight: .medium))
+                                    Text(email.cleanSubject)
+                                        .font(.nmlBody(13, weight: .light))
                                         .foregroundStyle(Color.nmlMuted)
+                                        .lineLimit(1)
                                 }
-                                Text(email.cleanSubject)
-                                    .font(.nmlBody(13))
-                                    .foregroundStyle(Color.nmlInk)
-                                    .lineLimit(1)
-                                if let snippet = email.cleanSnippet, !snippet.isEmpty {
-                                    Text(snippet)
-                                        .font(.nmlBody(12, weight: .light))
-                                        .foregroundStyle(Color.nmlMuted)
-                                        .lineLimit(2)
-                                }
+                                Spacer(minLength: 8)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Color.nmlMuted)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
-                            .padding(.vertical, 7)
+                            .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
                         if index < emails.count - 1 {
@@ -384,7 +398,7 @@ struct ProactiveView: View {
 
     @ViewBuilder private var activityCard: some View {
         if let steps {
-            TodayCard {
+            NMLCard {
                 Button {
                     HapticManager.shared.impact(.light)
                     openHealth()
@@ -407,9 +421,14 @@ struct ProactiveView: View {
                         }
                         .padding(.bottom, 4)
                         // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
-                        ProgressView(value: min(Double(steps) / 10_000, 1))
-                            .tint(Color.nmlTitanium)
-                            .scaleEffect(x: 1, y: 0.6, anchor: .center)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color.nmlHairline)
+                                Capsule().fill(Color.nmlTitanium)
+                                    .frame(width: geo.size.width * min(Double(steps) / 10_000, 1))
+                            }
+                        }
+                        .frame(height: 1.5)
                     }
                     .contentShape(Rectangle())
                 }
@@ -420,7 +439,7 @@ struct ProactiveView: View {
 
     @ViewBuilder private var remindersCard: some View {
         if !reminders.isEmpty {
-            TodayCard {
+            NMLCard {
                 cardLabel("Reminders")
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(reminders) { reminder in
@@ -454,7 +473,7 @@ struct ProactiveView: View {
 
     @ViewBuilder private var briefingCard: some View {
         if !visibleBriefings.isEmpty {
-            TodayCard {
+            NMLCard {
                 cardLabel("Briefing")
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(visibleBriefings) { briefing in
@@ -474,7 +493,7 @@ struct ProactiveView: View {
                                 Button("Dismiss") { Task { await markRead(briefing) } }
                                     .foregroundStyle(Color.nmlMuted)
                             }
-                            .font(.nmlBody(11, weight: .medium))
+                            .font(.nmlBody(13, weight: .medium))
                             .tracking(0.3)
                             .buttonStyle(.plain)
                         }
@@ -485,7 +504,7 @@ struct ProactiveView: View {
     }
 
     private func cardLabel(_ text: String) -> some View {
-        Text(text).nmlEyebrow().padding(.bottom, 10)
+        Text(text).nmlEyebrow().padding(.bottom, 14)
     }
 
     private func timeString(_ date: Date) -> String {
@@ -524,7 +543,14 @@ struct ProactiveView: View {
     /// scheduled run saw an empty screen until they hit Refresh. Kick off a check on open
     /// when there's nothing to show, throttled so foregrounding doesn't hammer the backend.
     private func maybeAutoProactive() async {
-        guard visibleBriefings.isEmpty, !isChecking else { return }
+        guard !isChecking else { return }
+        let newestBriefingAge: TimeInterval = visibleBriefings
+            .compactMap { Date.oxyParse($0.createdAt) }
+            .map { Date().timeIntervalSince($0) }
+            .min() ?? .infinity
+        // Trigger when there's nothing to show OR when the freshest briefing is > 6 h old.
+        let isStale = visibleBriefings.isEmpty || newestBriefingAge > 6 * 3600
+        guard isStale else { return }
         let now = Date().timeIntervalSince1970
         guard now - lastAutoProactive > 2 * 60 * 60 else { return }
         lastAutoProactive = now
@@ -562,30 +588,10 @@ struct ProactiveView: View {
     private func complete(_ reminder: TodayReminder) {
         HapticManager.shared.impact(.light)
         // Optimistic removal — drop it from the card immediately, then persist.
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(.nmlFast) {
             reminders.removeAll { $0.id == reminder.id }
         }
         Task { await native.completeReminder(id: reminder.id) }
-    }
-}
-
-// MARK: - Card container
-
-private struct TodayCard<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(Color.nmlSurface)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
-        )
     }
 }
 
