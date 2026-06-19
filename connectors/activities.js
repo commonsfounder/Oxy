@@ -24,11 +24,12 @@ async function searchActivities({ destination, interests, budget, date }) {
   const results = await firecrawlSearch(query, 6);
   if (!results.length) return { success: true, data: [], text: `No activities found in ${destination}.` };
 
-  const text = results.map(r => `**${r.metadata?.title || r.url}**\n${r.metadata?.description || ''}\n${r.url}`).join('\n\n');
+  const data = results.map(r => ({ title: r.metadata?.title, url: r.url, snippet: r.metadata?.description }));
+  const sources = data.map(r => r.title || r.url).filter(Boolean).slice(0, 3).join(', ');
   return {
     success: true,
-    data: results.map(r => ({ title: r.metadata?.title, url: r.url, snippet: r.metadata?.description })),
-    text: `Activities in ${destination}:\n\n${text}`
+    data,
+    text: `Found ${data.length} activity results in ${destination}. Sources: ${sources}. Share the links with the user so they can explore and book.`
   };
 }
 

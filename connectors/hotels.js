@@ -25,11 +25,12 @@ async function searchHotels({ destination, checkIn, checkOut, guests, maxPrice, 
   const results = await firecrawlSearch(query, 6);
   if (!results.length) return { success: true, data: [], text: `No hotels found in ${destination} for those dates.` };
 
-  const text = results.map(r => `**${r.metadata?.title || r.url}**\n${r.metadata?.description || ''}\n${r.url}`).join('\n\n');
+  const data = results.map(r => ({ title: r.metadata?.title, url: r.url, snippet: r.metadata?.description }));
+  const sources = data.map(r => r.title || r.url).filter(Boolean).slice(0, 3).join(', ');
   return {
     success: true,
-    data: results.map(r => ({ title: r.metadata?.title, url: r.url, snippet: r.metadata?.description })),
-    text: `Hotels in ${destination} (${checkIn} → ${checkOut}):\n\n${text}`
+    data,
+    text: `Found ${data.length} hotel results in ${destination} (${checkIn} → ${checkOut}). Sources: ${sources}. Share the links with the user so they can compare and book.`
   };
 }
 
