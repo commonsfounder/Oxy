@@ -909,7 +909,10 @@ private struct WelcomeCard: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale(0.97))
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 6)
+                    .animation(.nmlSpring.delay(0.1 + Double(index) * 0.07), value: appeared)
                     // Long-press to swap this slot to a different starter action.
                     .contextMenu {
                         ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
@@ -924,10 +927,8 @@ private struct WelcomeCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .opacity(appeared ? 1 : 0)
-        .offset(y: appeared ? 0 : 8)
         .onAppear {
-            withAnimation(.easeOut(duration: 0.5)) { appeared = true }
+            withAnimation(.nmlSpring) { appeared = true }
         }
     }
 }
@@ -986,7 +987,7 @@ private struct ChatInputBar: View {
                             .font(.system(size: 16))
                             .foregroundStyle(Color.nmlMuted)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -1006,6 +1007,7 @@ private struct ChatInputBar: View {
                         .frame(width: 36, height: 36)
                         .nmlGlass(Circle(), interactive: true)
                 }
+                .buttonStyle(.nmlScale)
                 .disabled(isSending)
 
                 // Text field in a rounded container — the chat surface

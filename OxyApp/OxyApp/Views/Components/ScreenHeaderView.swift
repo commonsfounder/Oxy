@@ -23,7 +23,7 @@ struct ScreenHeaderView: View {
                             .frame(width: circle, height: circle)
                             .nmlGlass(Circle(), interactive: true)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale)
                     .accessibilityLabel("Back")
                 }
 

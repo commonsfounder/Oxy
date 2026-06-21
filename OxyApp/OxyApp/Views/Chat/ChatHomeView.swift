@@ -121,7 +121,7 @@ struct ChatHomeView: View {
                 .padding(.vertical, 13)
                 .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale(0.97))
             .padding(.horizontal, 16)
 
             // Search
@@ -142,7 +142,7 @@ struct ChatHomeView: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Color.nmlMuted)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale)
                 }
             }
             .padding(.horizontal, 14)
@@ -183,7 +183,7 @@ struct ChatHomeView: View {
                                 } label: {
                                     SidebarRow(title: session.title, trailing: session.relativeTime)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.nmlScale(0.98))
                             }
                         } header: {
                             SidebarSectionHeader(label: group.label)
@@ -212,7 +212,7 @@ struct ChatHomeView: View {
                         } label: {
                             SidebarSearchResultRow(result: result)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.nmlScale(0.98))
                         Divider().overlay(Color.nmlHairline).padding(.leading, 16)
                     }
                 }

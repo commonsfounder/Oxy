@@ -115,7 +115,7 @@ struct SettingsView: View {
                                 }
                                 .padding(.vertical, 16)
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.nmlScale(0.98))
                         }
 
                         Spacer().frame(height: 32)
@@ -234,7 +234,7 @@ struct SettingsView: View {
                     .tracking(0.4)
                     .foregroundStyle(Color.nmlMuted)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale)
             .disabled(voicePreview.isLoading)
 
             Menu {
@@ -278,7 +278,7 @@ struct SettingsView: View {
             .foregroundStyle(Color.nmlInk)
             .padding(.vertical, 16)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
     }
 
     private func loadSettings() {

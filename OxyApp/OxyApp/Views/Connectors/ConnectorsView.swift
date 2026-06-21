@@ -483,7 +483,7 @@ private struct NativeCapabilityRow: View {
                     .tracking(0.3)
                     .foregroundStyle(Color.nmlTitanium)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale)
         }
         .padding(.vertical, 18)
     }
@@ -540,7 +540,7 @@ private struct IntegrationRow: View {
                         .foregroundStyle(isDestructive ? Color.nmlDanger : Color.nmlTitanium)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale)
             .disabled(isBusy)
         }
         .padding(.vertical, 18)

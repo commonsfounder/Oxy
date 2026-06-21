@@ -175,7 +175,7 @@ struct ProactiveView: View {
                         .foregroundStyle(Color.nmlMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale(0.98))
             }
         } else if let weather {
             NMLCard {
@@ -300,7 +300,7 @@ struct ProactiveView: View {
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.nmlScale(0.98))
                     }
                 }
             }
@@ -347,7 +347,7 @@ struct ProactiveView: View {
                             .contentShape(Rectangle())
                             .padding(.vertical, 12)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.nmlScale(0.98))
                         if index < emails.count - 1 {
                             Divider().background(Color.nmlHairline)
                         }
@@ -432,7 +432,7 @@ struct ProactiveView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale(0.98))
             }
         }
     }
@@ -464,7 +464,7 @@ struct ProactiveView: View {
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.nmlScale(0.98))
                     }
                 }
             }
@@ -495,7 +495,7 @@ struct ProactiveView: View {
                             }
                             .font(.nmlBody(13, weight: .medium))
                             .tracking(0.3)
-                            .buttonStyle(.plain)
+                            .buttonStyle(.nmlScale(0.98))
                         }
                     }
                 }
