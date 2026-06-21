@@ -35,8 +35,6 @@
 	<string>Oxy uses Calendar to create native events when you ask.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Oxy uses contacts to prepare native message and FaceTime handoffs.</string>
-	<key>NSHomeKitUsageDescription</key>
-	<string>Oxy uses HomeKit to control your smart home accessories like lights, locks, and scenes when you ask.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Oxy reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

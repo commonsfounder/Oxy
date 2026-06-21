@@ -111,10 +111,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let pending: Bool
     let connectorId: String?
     let healthStatus: String?
-    let pkpassBase64: String?
 
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus, pkpassBase64
+        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
     }
 
     init(
@@ -131,7 +130,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
         pending: Bool = false,
         connectorId: String? = nil,
         healthStatus: String? = nil,
-        pkpassBase64: String? = nil
     ) {
         self.action = action
         self.success = success
@@ -146,7 +144,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.pending = pending
         self.connectorId = connectorId
         self.healthStatus = healthStatus
-        self.pkpassBase64 = pkpassBase64
     }
 
     init(native result: NativeLocalActionResult) {
@@ -181,7 +178,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
             pending = try result.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try result.decodeIfPresent(String.self, forKey: .connectorId)
             healthStatus = try result.decodeIfPresent(String.self, forKey: .healthStatus)
-            pkpassBase64 = try result.decodeIfPresent(String.self, forKey: .pkpassBase64)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -195,7 +191,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
             pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try container.decodeIfPresent(String.self, forKey: .connectorId)
             healthStatus = try container.decodeIfPresent(String.self, forKey: .healthStatus)
-            pkpassBase64 = try container.decodeIfPresent(String.self, forKey: .pkpassBase64)
         }
     }
 
@@ -214,7 +209,6 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encode(pending, forKey: .pending)
         try container.encodeIfPresent(connectorId, forKey: .connectorId)
         try container.encodeIfPresent(healthStatus, forKey: .healthStatus)
-        try container.encodeIfPresent(pkpassBase64, forKey: .pkpassBase64)
     }
 }
 
