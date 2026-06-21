@@ -115,7 +115,7 @@ private struct LoginFormPage: View {
                     .background(Color.nmlInk)
                     .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .disabled(isLoading || userId.isEmpty || password.isEmpty)
                 .opacity(userId.isEmpty || password.isEmpty ? 0.4 : 1)
                 .animation(.nmlFast, value: userId.isEmpty || password.isEmpty)

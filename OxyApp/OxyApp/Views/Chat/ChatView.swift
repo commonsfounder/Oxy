@@ -415,7 +415,7 @@ struct ChatView: View {
                 .padding(.vertical, 17)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
     }
 
     private func dismissAttachMenu() {
@@ -676,7 +676,7 @@ private struct ActionReviewSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .foregroundStyle(Color.nmlMuted)
                 .background(Color.nmlSurface2)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -687,7 +687,7 @@ private struct ActionReviewSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 13)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .foregroundStyle(Color.nmlObsidian)
                 .background(Color.nmlTitanium)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -932,13 +932,8 @@ private struct WelcomeCard: View {
     }
 }
 
-private struct ScaleButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
-            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
-    }
-}
+// ScaleButtonStyle kept for local usage — delegates to NMLScaleButtonStyle at 0.96
+private typealias ScaleButtonStyle = NMLScaleButtonStyle
 
 // MARK: - Chat Input Bar
 

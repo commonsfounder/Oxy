@@ -112,7 +112,7 @@ struct ProactiveView: View {
                             .contentShape(Rectangle())
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .disabled(isChecking)
                 .accessibilityLabel("Refresh")
             }
@@ -212,7 +212,7 @@ struct ProactiveView: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale(0.98))
 
                 if weatherExpanded {
                     weatherDetailGrid(weather)

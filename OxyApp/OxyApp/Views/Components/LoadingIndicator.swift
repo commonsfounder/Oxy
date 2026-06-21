@@ -29,11 +29,12 @@ struct OxyThinkingIndicator: View {
                 Circle()
                     .fill(Color.nmlMuted)
                     .frame(width: 5, height: 5)
-                    .opacity(active ? 1 : 0.3)
+                    .scaleEffect(active ? 1.0 : 0.65)
+                    .opacity(active ? 1 : 0.25)
                     .animation(
-                        .easeInOut(duration: 0.7)
+                        .easeInOut(duration: 0.55)
                             .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.18),
+                            .delay(Double(index) * 0.15),
                         value: active
                     )
             }

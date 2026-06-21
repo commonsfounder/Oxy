@@ -126,6 +126,7 @@ struct MessageBubble: View {
             if isGroupEnd {
                 Text(message.timestamp, style: .time)
                     .font(.nmlBody(10))
+                    .monospacedDigit()
                     .foregroundStyle(Color.nmlMuted.opacity(0.6))
                     .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
                     .padding(.top, 1)
@@ -191,7 +192,7 @@ private struct DirectionsLink: View {
                 Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
         .contentShape(Rectangle())
     }
 
@@ -234,7 +235,7 @@ private struct MessageSourceChips: View {
                         .padding(.vertical, 4)
                         .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale)
                 }
             }
         }
@@ -283,7 +284,7 @@ struct ActionCard: View {
             Button(action: openLink) {
                 confirmationRow
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale(0.98))
             .disabled(!hasLink)
         }
     }
@@ -382,7 +383,7 @@ struct ActionCard: View {
                 .frame(height: 42)
                 .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale)
     }
 
     private func openLink() {
@@ -462,28 +463,30 @@ struct UberHandoffCard: View {
     private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#, in: metricSource) ?? "—" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("RIDE · UBER")
-                    .font(.nmlMono(11))
-                    .tracking(1.4)
-                    .foregroundStyle(Color.nmlMuted)
-                Spacer()
-                ConfirmTick(active: confirmed)
-            }
+        Button(action: onOpen) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("RIDE · UBER")
+                        .font(.nmlMono(11))
+                        .tracking(1.4)
+                        .foregroundStyle(Color.nmlMuted)
+                    Spacer()
+                    ConfirmTick(active: confirmed)
+                }
 
-            VStack(alignment: .leading, spacing: 6) {
-                handoffRow("DEST", destination)
-                handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
-                handoffRow("EST", estimate)
+                VStack(alignment: .leading, spacing: 6) {
+                    handoffRow("DEST", destination)
+                    handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
+                    handoffRow("EST", estimate)
+                }
             }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.nmlObsidian)
+            .border(Color.nmlCardBorder, width: 0.5)
+            .contentShape(Rectangle())
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.nmlObsidian)
-        .border(Color.nmlCardBorder, width: 0.5)
-        .contentShape(Rectangle())
-        .onTapGesture { onOpen() }
+        .buttonStyle(.nmlScale(0.98))
         .onAppear {
             withAnimation(.nmlRelax.delay(0.15)) { confirmed = true }
         }

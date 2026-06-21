@@ -259,6 +259,9 @@ struct NamelessToggle: View {
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
                 )
+                // Extend hit area to 44×44 without growing the visual
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
@@ -336,6 +339,25 @@ struct NamelessLineField: View {
     }
 }
 
+// MARK: - Scale-on-press button style
+//
+// 0.96 is the calibrated value: tactile without feeling exaggerated.
+// Apply to every tappable element that isn't a full-width navigation row.
+
+struct NMLScaleButtonStyle: ButtonStyle {
+    var scale: CGFloat = 0.96
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1.0)
+            .animation(.nmlFast, value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == NMLScaleButtonStyle {
+    static var nmlScale: NMLScaleButtonStyle { .init() }
+    static func nmlScale(_ scale: CGFloat) -> NMLScaleButtonStyle { .init(scale: scale) }
+}
+
 /// The one loud gesture this language permits: a thick, full-width pill in stark
 /// solid white with black text. Labels are bracketed and tracked-out.
 struct NamelessPrimaryButton: View {
@@ -353,7 +375,7 @@ struct NamelessPrimaryButton: View {
                 .background(Color.nmlInk)
                 .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale)
     }
 }
 
@@ -553,6 +575,6 @@ struct NamelessOutlineButton: View {
                 .frame(height: 58)
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale)
     }
 }

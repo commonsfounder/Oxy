@@ -118,7 +118,7 @@ struct MainTabView: View {
             }
             .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.93))
     }
 }
 
@@ -208,7 +208,7 @@ struct MoreView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.99))
     }
 
     private var displayName: String {
@@ -299,7 +299,7 @@ struct MoreView: View {
             .padding(.vertical, 20)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
     }
 
     // MARK: - Sign out
@@ -316,7 +316,7 @@ struct MoreView: View {
                 .padding(.vertical, 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
         .padding(.top, 16)
     }
 
