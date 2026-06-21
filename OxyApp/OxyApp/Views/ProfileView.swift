@@ -200,7 +200,7 @@ struct ProfileView: View {
             .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
             .padding(.vertical, 16)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.nmlScale(0.98))
     }
 
     // MARK: - Settings persistence

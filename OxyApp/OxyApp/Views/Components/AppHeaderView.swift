@@ -24,7 +24,7 @@ struct AppHeaderView: View {
                         .frame(width: circle, height: circle)
                         .nmlGlass(Circle(), interactive: true)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .accessibilityLabel("History")
 
                 Spacer()
@@ -41,7 +41,7 @@ struct AppHeaderView: View {
                             .frame(width: circle, height: circle)
                             .nmlGlass(Circle(), tint: isIncognito ? Color.white : nil, interactive: true)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.nmlScale)
                     .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
                 }
             }

@@ -16,6 +16,7 @@ struct ProactiveView: View {
     @State private var weatherExpanded = false
     // Throttle for the auto proactive run below.
     @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
+    @State private var contentAppeared = false
 
     private let service = ChatService()
     private let native = NativeIntegrationManager.shared
@@ -44,16 +45,39 @@ struct ProactiveView: View {
                                 .padding(.top, 48)
                         } else {
                             weatherCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.06), value: contentAppeared)
                             // Agenda only earns space when there's something on it — an empty
                             // "Nothing scheduled" card is dead weight.
-                            if !events.isEmpty { agendaCard }
+                            if !events.isEmpty {
+                                agendaCard
+                                    .opacity(contentAppeared ? 1 : 0)
+                                    .offset(y: contentAppeared ? 0 : 14)
+                                    .animation(.nmlSpring.delay(0.12), value: contentAppeared)
+                            }
                             inboxCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.18), value: contentAppeared)
                             activityCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.24), value: contentAppeared)
                             remindersCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.28), value: contentAppeared)
                             briefingCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.32), value: contentAppeared)
 
                             if !hasAnyContent {
                                 EmptyProactiveState()
+                                    .opacity(contentAppeared ? 1 : 0)
+                                    .offset(y: contentAppeared ? 0 : 14)
+                                    .animation(.nmlSpring.delay(0.06), value: contentAppeared)
                             }
                         }
                     }
@@ -98,7 +122,7 @@ struct ProactiveView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
                 Text(greeting)
-                    .font(.nmlDisplay(32, weight: .regular))
+                    .font(.nmlDisplay(40, weight: .light))
                     .foregroundStyle(Color.nmlInk)
                 Spacer()
                 Button(action: { Task { await checkNow() } }) {
@@ -117,8 +141,14 @@ struct ProactiveView: View {
                 .accessibilityLabel("Refresh")
             }
             Text(dateLine)
-                .font(.nmlBody(13, weight: .regular))
+                .font(.nmlBody(12, weight: .regular))
+                .tracking(0.5)
                 .foregroundStyle(Color.nmlMuted)
+                .padding(.bottom, 16)
+
+            Rectangle()
+                .fill(Color.nmlHairline)
+                .frame(height: 0.5)
         }
         .padding(.bottom, 4)
     }
@@ -535,6 +565,8 @@ struct ProactiveView: View {
         reminders = await remindersResult
         steps = await stepsResult
         isLoading = false
+        contentAppeared = false
+        withAnimation(.nmlSpring.delay(0.04)) { contentAppeared = true }
         await maybeAutoProactive()
     }
 

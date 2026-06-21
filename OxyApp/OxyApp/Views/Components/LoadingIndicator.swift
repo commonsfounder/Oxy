@@ -29,8 +29,9 @@ struct OxyThinkingIndicator: View {
                 Circle()
                     .fill(Color.nmlMuted)
                     .frame(width: 5, height: 5)
-                    .scaleEffect(active ? 1.0 : 0.65)
+                    .scaleEffect(active ? (index == 1 ? 1.12 : 1.0) : 0.65)
                     .opacity(active ? 1 : 0.25)
+                    .offset(y: active ? -1.5 : 0)
                     .animation(
                         .easeInOut(duration: 0.55)
                             .repeatForever(autoreverses: true)

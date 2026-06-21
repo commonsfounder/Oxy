@@ -9,6 +9,7 @@ struct MemoryView: View {
     @State private var draft = ""
     @State private var saveMessage: String?
     @State private var showClearAllConfirm = false
+    @State private var memoryAppeared = false
     private let embedded: Bool
 
     init(embedded: Bool = false) {
@@ -81,17 +82,22 @@ struct MemoryView: View {
                                     .padding(.vertical, 20)
                             } else {
                                 ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
-                                    Text(group.title)
-                                        .font(.nmlDisplay(18, weight: .regular))
-                                        .foregroundStyle(Color.nmlInk)
-                                        .padding(.top, index == 0 ? 16 : 30)
-                                        .padding(.bottom, 4)
-                                    ForEach(group.items) { item in
-                                        MemoryRow(item: item) {
-                                            Task { await deleteItem(item) }
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        Text(group.title)
+                                            .font(.nmlDisplay(18, weight: .regular))
+                                            .foregroundStyle(Color.nmlInk)
+                                            .padding(.top, index == 0 ? 16 : 30)
+                                            .padding(.bottom, 4)
+                                        ForEach(group.items) { item in
+                                            MemoryRow(item: item) {
+                                                Task { await deleteItem(item) }
+                                            }
+                                            NamelessDivider()
                                         }
-                                        NamelessDivider()
                                     }
+                                    .opacity(memoryAppeared ? 1 : 0)
+                                    .offset(y: memoryAppeared ? 0 : 12)
+                                    .animation(.nmlSpring.delay(0.06 + Double(index) * 0.08), value: memoryAppeared)
                                 }
 
                                 Button {
@@ -103,7 +109,7 @@ struct MemoryView: View {
                                         .foregroundStyle(Color.nmlDanger)
                                         .padding(.vertical, 18)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.nmlScale(0.98))
                             }
                         }
                     }
@@ -145,6 +151,8 @@ struct MemoryView: View {
             await MainActor.run {
                 items = response.items
                 isLoading = false
+                memoryAppeared = false
+                withAnimation(.nmlSpring.delay(0.04)) { memoryAppeared = true }
             }
         } catch {
             await MainActor.run { items = []; isLoading = false }
@@ -210,7 +218,7 @@ private struct MemoryRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(item.content)
-                .font(.system(size: 15, weight: .regular))
+                .font(.nmlBody(15, weight: .light))
                 .foregroundStyle(Color.nmlInk)
                 .lineLimit(4)
                 .truncationMode(.tail)
@@ -223,7 +231,7 @@ private struct MemoryRow: View {
                     .frame(width: 30, height: 30)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.nmlScale)
         }
         .padding(.vertical, 16)
     }

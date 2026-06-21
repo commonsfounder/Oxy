@@ -134,7 +134,12 @@ struct MessageBubble: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, isCompact ? 1 : 2)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
+        .transition(.asymmetric(
+            insertion: .opacity
+                .combined(with: .move(edge: .bottom))
+                .combined(with: .scale(scale: 0.97, anchor: isUser ? .bottomTrailing : .bottomLeading)),
+            removal: .opacity
+        ))
         .animation(.nmlSpring, value: message.content)
     }
 }

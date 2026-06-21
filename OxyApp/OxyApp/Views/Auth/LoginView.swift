@@ -129,7 +129,7 @@ private struct LoginFormPage: View {
                         .foregroundStyle(Color.nmlMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .padding(.top, 20)
 
                 Spacer().frame(height: 60)

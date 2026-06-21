@@ -185,10 +185,10 @@ struct MoreView: View {
                     .padding(.bottom, 28)
 
                 Text(displayName)
-                    .font(.nmlDisplay(38, weight: .regular))
+                    .font(.nmlDisplay(46, weight: .light))
                     .foregroundStyle(Color.nmlInk)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
 
                 if !accountEmail.isEmpty {
                     Text(accountEmail)

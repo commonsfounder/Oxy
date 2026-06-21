@@ -134,14 +134,12 @@ struct ChatView: View {
                             .padding(.vertical, 12)
                             .animation(.nmlSpring, value: viewModel.messages.count)
                         }
-                        .overlay(alignment: .bottomLeading) {
+                        .overlay {
                             if viewModel.messages.isEmpty && !viewModel.isSending {
                                 WelcomeCard { prompt in
                                     viewModel.inputText = prompt
                                     sendCurrentDraft()
                                 }
-                                .padding(.horizontal, 20)
-                                .padding(.bottom, 12)
                                 .transition(.opacity)
                             }
                         }
@@ -847,16 +845,14 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
-/// The empty-conversation state, anchored bottom-left just above the input: a
-/// quiet prompt over three high-leverage starter actions. Naked ultra-light
-/// icons, muted grey type, 0.5px rules — nothing filled or coloured.
+/// Full-screen editorial welcome state. Fraunces title in the upper portion,
+/// hairline-separated action rows in the lower portion. Silent luxury: generous
+/// space, no fills, nothing decorated.
 private struct WelcomeCard: View {
     var onAction: (String) -> Void
     @State private var appeared = false
-    // The three starter actions are user-swappable and persisted (newline-joined labels).
     @AppStorage("oxy_starter_actions") private var storedActions = "Send an email\nPlay some music\nBook a ride"
 
-    // The pool a user can long-press to swap a slot to.
     private static let pool: [(icon: String, label: String)] = [
         ("envelope", "Send an email"),
         ("music.note", "Play some music"),
@@ -887,49 +883,73 @@ private struct WelcomeCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Where should we begin?")
-                .font(.nmlDisplay(25, weight: .light))
-                .foregroundStyle(Color.nmlInk)
+        VStack(alignment: .leading, spacing: 0) {
+            // ── Editorial title ─────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 20) {
+                BrandWordmark(height: 11)
+                    .opacity(appeared ? 0.55 : 0)
+                    .animation(.nmlRelax.delay(0.06), value: appeared)
 
-            VStack(alignment: .leading, spacing: 16) {
+                Text("Where should\nwe begin?")
+                    .font(.nmlDisplay(42, weight: .light))
+                    .foregroundStyle(Color.nmlInk)
+                    .lineSpacing(8)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 18)
+                    .animation(.nmlSpring.delay(0.1), value: appeared)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 52)
+
+            Spacer()
+
+            // ── Action rows ─────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 0) {
+                Rectangle()
+                    .fill(Color.nmlHairline)
+                    .frame(height: 0.5)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(.nmlSpring.delay(0.18), value: appeared)
+
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
-                    Button {
-                        onAction(label)
-                    } label: {
+                    Button { onAction(label) } label: {
                         HStack(spacing: 14) {
                             Image(systemName: icon(for: label))
-                                .font(.system(size: 18, weight: .ultraLight))
-                                .foregroundStyle(Color.nmlMuted)
-                                .frame(width: 22, alignment: .leading)
+                                .font(.system(size: 14, weight: .ultraLight))
+                                .foregroundStyle(Color.nmlMuted.opacity(0.5))
+                                .frame(width: 18, alignment: .center)
                             Text(label)
-                                .font(.system(size: 16, weight: .regular))
+                                .font(.nmlBody(16, weight: .light))
                                 .foregroundStyle(Color.nmlMuted)
-                            Spacer()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .light))
+                                .foregroundStyle(Color.nmlMuted.opacity(0.3))
                         }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 20)
                         .contentShape(Rectangle())
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+                        }
                     }
                     .buttonStyle(.nmlScale(0.97))
                     .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 6)
-                    .animation(.nmlSpring.delay(0.1 + Double(index) * 0.07), value: appeared)
-                    // Long-press to swap this slot to a different starter action.
+                    .offset(y: appeared ? 0 : 10)
+                    .animation(.nmlSpring.delay(0.22 + Double(index) * 0.07), value: appeared)
                     .contextMenu {
                         ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
-                            Button {
-                                replace(slot: index, with: option.label)
-                            } label: {
+                            Button { replace(slot: index, with: option.label) } label: {
                                 Label(option.label, systemImage: option.icon)
                             }
                         }
                     }
                 }
             }
+            .padding(.bottom, 16)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear {
-            withAnimation(.nmlSpring) { appeared = true }
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .onAppear { withAnimation { appeared = true } }
     }
 }
 

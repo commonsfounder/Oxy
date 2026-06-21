@@ -92,16 +92,17 @@ struct ChatHomeView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // Header
-            HStack {
+            // Header — Milgrain wordmark above the label for editorial weight
+            VStack(alignment: .leading, spacing: 10) {
+                BrandWordmark(height: 12)
                 Text("CONVERSATIONS")
-                    .font(.system(size: 12, weight: .semibold))
-                    .tracking(3)
-                    .foregroundStyle(Color.nmlMuted)
-                Spacer()
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(3.5)
+                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
-            .padding(.top, 20)
+            .padding(.top, 52)
             .padding(.bottom, 16)
 
             // New Chat
@@ -418,18 +419,19 @@ private struct SidebarRow: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.nmlBody(14, weight: .light))
                 .foregroundStyle(Color.nmlInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 12)
             Text(trailing)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.nmlMuted)
+                .font(.nmlMono(11))
+                .monospacedDigit()
+                .foregroundStyle(Color.nmlMuted.opacity(0.7))
                 .fixedSize()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 13)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
@@ -440,15 +442,14 @@ private struct SidebarSectionHeader: View {
 
     var body: some View {
         HStack {
-            Text(label)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.nmlMuted)
-                .textCase(.uppercase)
-                .tracking(0.5)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .regular))
+                .tracking(2.8)
+                .foregroundStyle(Color.nmlMuted.opacity(0.5))
             Spacer()
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .background(Color.nmlObsidian)
     }
 }
