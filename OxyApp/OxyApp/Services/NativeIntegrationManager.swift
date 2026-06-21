@@ -380,6 +380,10 @@ final class NativeIntegrationManager: NSObject {
             return result
         }
 
+        if let result = await prepareWhatsAppMessage(from: normalized) {
+            return result
+        }
+
         if let result = await prepareNativeMessage(from: normalized) {
             return result
         }
@@ -636,6 +640,56 @@ final class NativeIntegrationManager: NSObject {
             actionSummary: "Message ready",
             deepLink: "sms:\(encodedRecipient)?&body=\(encodedBody)"
         )
+    }
+
+    private func prepareWhatsAppMessage(from message: String) async -> NativeLocalActionResult? {
+        guard let parsed = parseWhatsAppRequest(message) else { return nil }
+        let contacts = await contactHints(in: parsed.contact)
+        let matched = contacts.first
+        let rawPhone = matched?.phone ?? normalizedMessageAddress(parsed.contact)
+        guard let rawPhone, !rawPhone.isEmpty else {
+            return NativeLocalActionResult(
+                action: "send_whatsapp",
+                text: "I need a phone number for \(parsed.contact) to send a WhatsApp message.",
+                cardText: "No number found for \(parsed.contact)",
+                actionSummary: "WhatsApp needs contact",
+                deepLink: nil,
+                success: false,
+                error: "No phone number found."
+            )
+        }
+        // WhatsApp requires E.164 — strip non-digits, keep leading +
+        let phone = rawPhone.hasPrefix("+")
+            ? "+" + rawPhone.dropFirst().filter(\.isNumber)
+            : rawPhone.filter(\.isNumber)
+        let label = matched?.displayName ?? parsed.contact
+        let encodedText = parsed.body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? parsed.body
+        return NativeLocalActionResult(
+            action: "send_whatsapp",
+            text: "WhatsApp ready for \(label). Review and tap Send.",
+            cardText: "To \(label) · \(parsed.body)",
+            actionSummary: "WhatsApp ready",
+            deepLink: "whatsapp://send?phone=\(phone)&text=\(encodedText)"
+        )
+    }
+
+    private func parseWhatsAppRequest(_ message: String) -> (contact: String, body: String)? {
+        let patterns = [
+            #"(?i)^(?:please\s+)?(?:send\s+)?(?:a\s+)?whatsapp(?:\s+message)?\s+to\s+(.+?)\s+(?:saying|that says|and say|say)\s+(.+)$"#,
+            #"(?i)^(?:please\s+)?whatsapp\s+(.+?)\s+(?:saying|that says|and say|say)\s+(.+)$"#,
+            #"(?i)^(?:please\s+)?send\s+(.+?)\s+a\s+whatsapp(?:\s+message)?\s+(?:saying|that says|and say|say)\s+(.+)$"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(message.startIndex..<message.endIndex, in: message)
+            guard let match = regex.firstMatch(in: message, range: range), match.numberOfRanges >= 3,
+                  let contactRange = Range(match.range(at: 1), in: message),
+                  let bodyRange = Range(match.range(at: 2), in: message) else { continue }
+            let contact = String(message[contactRange]).trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            let body = String(message[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !contact.isEmpty, !body.isEmpty { return (contact, body) }
+        }
+        return nil
     }
 
     private func parseMessageRequest(_ message: String) -> (contact: String, body: String)? {
