@@ -247,6 +247,7 @@ function buildTransitRequestParams(destination, params = {}, railFirst = false) 
     key
   };
   if (railFirst) requestParams.transit_mode = 'train|rail';
+  else if (/^bus$/i.test(params.mode)) requestParams.transit_mode = 'bus';
   const arrival = parseDirectionTime(params.arrival_time);
   const departure = parseDirectionTime(params.departure_time);
   if (arrival) requestParams.arrival_time = arrival;
@@ -296,9 +297,10 @@ function summarizeTripRoute(route, destination, params = {}, usedRailFirst = fal
     ? `First get to ${mainRail?.from || 'the station'}${mainRail?.departure ? ` before ${mainRail.departure}` : ''}.`
     : '';
   const directText = directRail ? 'direct train' : `${railSteps.length || steps.length} transit legs`;
+  const nonRailLabel = steps.some(s => /BUS/i.test(s.vehicle || '')) ? 'bus' : 'transit';
   const opener = hasRail
     ? `Best move: ${accessSteps.length ? `get to ${mainRail?.from || 'the station'}, then ` : ''}take the ${directText} to ${cleanDestination}.`
-    : `Best move: take the transit route to ${cleanDestination}.`;
+    : `Best move: take the ${nonRailLabel} to ${cleanDestination}.`;
   const timing = departure && arrival
     ? `Leave around ${departure}; you should arrive around ${arrival}${duration ? ` (${duration})` : ''}.`
     : duration ? `It takes about ${duration}.` : '';
@@ -380,7 +382,8 @@ async function planTrip(destination, params = {}) {
   } catch (err) {
     console.warn('[maps] plan_trip destination resolve failed, using raw text:', err.message);
   }
-  const railRoutes = await fetchTransitRoutes(routeDestination, params, true).catch(err => {
+  const busPreferred = /^bus$/i.test(String(params.mode || ''));
+  const railRoutes = busPreferred ? null : await fetchTransitRoutes(routeDestination, params, true).catch(err => {
     console.warn('[maps] Rail-first Directions failed:', err.message);
     return null;
   });
@@ -566,7 +569,11 @@ async function execute(userId, action, params) {
       // 1-hour bus trip (it falls back to a tiny walking leg). plan_trip does rail/bus
       // alternatives + sane scoring, so a bus ask gets the real itinerary first time.
       if (directionModeFlag(params.mode) === 'r') {
-        return await planTrip(destination, params || {});
+        const result = await planTrip(destination, params || {});
+        // planTrip is an implementation detail here — relabel so the card reads
+        // "Directions ready" not "Trip planned" for a simple commute query.
+        if (result.actionSummary === 'Trip planned') result.actionSummary = 'Directions ready';
+        return result;
       }
       let place = null;
       try {

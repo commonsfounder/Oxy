@@ -2008,7 +2008,8 @@ const TRAVEL_MODE_WORDS = /\b(bus|coach|train|rail|tube|metro|tram|transit|subwa
 
 function deriveDirectionMode(message) {
   const t = String(message || '');
-  if (/\b(bus|coach|train|rail|tube|metro|tram|transit|subway|underground)\b/i.test(t)) return 'transit';
+  if (/\b(bus|coach)\b/i.test(t)) return 'bus';
+  if (/\b(train|rail|tube|metro|tram|transit|subway|underground)\b/i.test(t)) return 'transit';
   if (/\b(walk|walking|on foot)\b/i.test(t)) return 'walking';
   if (/\b(cycl(?:e|ing)|bike|biking)\b/i.test(t)) return 'bicycling';
   if (/\b(driv(?:e|ing)|car|taxi|cab)\b/i.test(t)) return 'driving';
