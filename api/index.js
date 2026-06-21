@@ -531,9 +531,7 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
 }
 
 const OXCY_SYSTEM_PROMPT = `You are a dry, sharp, slightly cynical friend.
-Not a servant, not "an AI assistant". You have no name — if asked what you're
-called, you don't have a name and don't make one up; deflect dryly and move on.
-If the user gives you a name, wear it without comment.
+Not a servant, not "an AI assistant". Your name is Millie.
 
 Be direct, grounded, useful. You are not a command router that maps keywords to
 tools — you are a capable assistant who reads what the user actually means using
@@ -4476,18 +4474,17 @@ app.get('/briefings/:userId', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    // Strip any markdown the model slipped into the body (so "**Calendar**" / "* item"
-    // never render as raw asterisks), then collapse the daily interval briefings
-    // (wake/midday/evening/now) to only the most recent — otherwise the Today feed
-    // stacks 3-4 near-identical cards. Non-briefing kinds (health alerts) are each kept.
-    let keptIntervalBriefing = false;
+    // Strip markdown, then deduplicate: keep only the most recent briefing per window kind
+    // (data is newest-first, so first-seen wins). Health alerts and other non-_briefing
+    // kinds are each kept as-is.
+    const seenKinds = new Set();
     const visible = (data || [])
       .filter(briefing => briefing.kind !== 'failed_action_followup')
       .map(briefing => ({ ...briefing, body: stripMarkdownEmphasis(briefing.body || '') }))
       .filter(briefing => {
         if (!/_briefing$/.test(briefing.kind || '')) return true;
-        if (keptIntervalBriefing) return false;
-        keptIntervalBriefing = true;
+        if (seenKinds.has(briefing.kind)) return false;
+        seenKinds.add(briefing.kind);
         return true;
       });
     res.json({ briefings: visible });
@@ -5012,13 +5009,35 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
     briefing = error ? null : data;
   }
   if (!briefing) {
-    briefing = await createBriefing(userId, {
-      kind: `${window.id}_briefing`,
-      title: window.label,
-      body: text,
-      source: 'schedule',
-      metadata: { window: window.id, date: todayKey, emails: ctx.emails }
-    });
+    // Before creating, check if a same-kind briefing from today already exists (handles
+    // stale pref IDs and concurrent sweep calls — upsert into the existing row instead).
+    const { data: existing } = await supabase
+      .from('briefings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('kind', `${window.id}_briefing`)
+      .gte('created_at', new Date(`${todayKey}T00:00:00.000Z`).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    if (existing?.id) {
+      const { data: updated } = await supabase
+        .from('briefings')
+        .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey, emails: ctx.emails } })
+        .eq('id', existing.id)
+        .select('id, body')
+        .single();
+      briefing = updated || null;
+    }
+    if (!briefing) {
+      briefing = await createBriefing(userId, {
+        kind: `${window.id}_briefing`,
+        title: window.label,
+        body: text,
+        source: 'schedule',
+        metadata: { window: window.id, date: todayKey, emails: ctx.emails }
+      });
+    }
   }
   await setPreferenceValue(userId, key, JSON.stringify({ id: briefing.id, sig, at: now.toISOString() }));
   return { type: `${window.id}_briefing`, text: briefing.body };
