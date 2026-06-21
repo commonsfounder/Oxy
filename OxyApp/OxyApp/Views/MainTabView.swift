@@ -128,6 +128,7 @@ struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
     @State private var showSignOutConfirm = false
+    @State private var appeared = false
 
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
 
@@ -143,12 +144,24 @@ struct MoreView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         identityHeader
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 16)
+                            .animation(.nmlSpring.delay(0.04), value: appeared)
                         menuSection
+                            .opacity(appeared ? 1 : 0)
+                            .offset(y: appeared ? 0 : 12)
+                            .animation(.nmlSpring.delay(0.14), value: appeared)
                         signOutButton
+                            .opacity(appeared ? 1 : 0)
+                            .animation(.nmlSpring.delay(0.22), value: appeared)
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 32)
                     .padding(.bottom, 48)
+                }
+                .onAppear {
+                    appeared = false
+                    withAnimation { appeared = true }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)

@@ -4,7 +4,6 @@ import CoreLocation
 import EventKit
 import Foundation
 import HealthKit
-import HomeKit
 import MapKit
 import MediaPlayer
 import MessageUI
@@ -172,7 +171,6 @@ final class NativeIntegrationManager: NSObject {
     private let healthStore = HKHealthStore()
     private let contactStore = CNContactStore()
     private let eventStore = EKEventStore()
-    let homeManager = HMHomeManager()
     private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
     private var lastMusicQuery: String?
     private var lastMusicArtist: String?
@@ -192,7 +190,6 @@ final class NativeIntegrationManager: NSObject {
 
     func bootstrap(userId: String) {
         guard !userId.isEmpty else { return }
-        setupHomeKit()
         LocationManager.shared.startMonitoringSignificantChanges()
         // Keep the server's location fresh as the user moves, so a proactive sweep knows where
         // they are. Debounced so the geocode/upsert can't churn on rapid fixes.
@@ -276,8 +273,6 @@ final class NativeIntegrationManager: NSObject {
             if let place = await LocationManager.shared.placeLabel() { locationPayload["place"] = place }
             body["location"] = locationPayload
         }
-        let homekitDevices = homeKitDeviceList()
-        if !homekitDevices.isEmpty { body["homekitDevices"] = homekitDevices }
         do {
             _ = try await APIClient.shared.request(path: "/native/context", method: "POST", body: body)
         } catch {
@@ -374,10 +369,6 @@ final class NativeIntegrationManager: NSObject {
         }
         if lower.contains("uber") || lower.contains("taxi") || lower.contains("ride") {
             return nil
-        }
-
-        if isHomeKitRequest(normalized), let result = await executeHomeKitCommand(normalized) {
-            return result
         }
 
         if let result = await prepareWhatsAppMessage(from: normalized) {

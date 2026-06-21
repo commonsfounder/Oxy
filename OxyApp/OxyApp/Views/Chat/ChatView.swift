@@ -1044,7 +1044,13 @@ private struct ChatInputBar: View {
                     .clipShape(RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous)
-                            .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                            .strokeBorder(
+                                isFocused.wrappedValue
+                                    ? Color.nmlTitanium.opacity(0.28)
+                                    : Color.nmlHairline,
+                                lineWidth: isFocused.wrappedValue ? 1.0 : 0.5
+                            )
+                            .animation(.nmlFast, value: isFocused.wrappedValue)
                     )
 
                 // Send / voice

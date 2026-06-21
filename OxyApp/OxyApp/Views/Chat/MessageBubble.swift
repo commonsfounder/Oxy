@@ -166,7 +166,16 @@ private struct StreamingWordText: View {
         for (index, word) in words.enumerated() {
             var part = AttributedString(index == words.count - 1 ? word : "\(word) ")
             let distanceFromEnd = words.count - index
-            part.foregroundColor = Color.nmlInk.opacity(distanceFromEnd <= 4 ? 1 : 0.7)
+            // Five-step fade: trailing words glow up to 1.0, farthest recede to 0.55.
+            let opacity: Double = switch distanceFromEnd {
+            case 1:       1.00
+            case 2:       0.95
+            case 3:       0.85
+            case 4:       0.72
+            case 5:       0.62
+            default:      0.55
+            }
+            part.foregroundColor = Color.nmlInk.opacity(opacity)
             output += part
         }
         return output
