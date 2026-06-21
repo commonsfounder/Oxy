@@ -1545,6 +1545,8 @@ const ACTION_STATUS_LABELS = {
   create_calendar_event: 'Creating calendar event',
   get_calendar_events: 'Checking calendar',
   book_uber: 'Booking Uber',
+  book_bolt: 'Booking Bolt',
+  add_to_wallet: 'Adding to Wallet',
   find_place: 'Finding place',
   get_directions: 'Checking directions',
   plan_trip: 'Planning trip',
@@ -2181,7 +2183,7 @@ async function executeAction(userId, action, params, context = {}) {
 
   // Resolve personal-place destinations from the user's saved memory, or ask
   // instead of geocoding "school"/"work"/"home" to the nearest random match.
-  const placeField = { get_directions: 'destination', plan_trip: 'destination', book_uber: 'destination', find_place: 'query' }[action];
+  const placeField = { get_directions: 'destination', plan_trip: 'destination', book_uber: 'destination', book_bolt: 'destination', find_place: 'query' }[action];
   if (placeField) {
     const keyword = personalPlaceKeyword(enrichedParams[placeField]);
     if (keyword) {
@@ -2212,7 +2214,7 @@ async function executeAction(userId, action, params, context = {}) {
 
   // Uber pickup that names a personal place ("from home"): use the saved address,
   // or fall back to device GPS — never geocode the bare word "home".
-  if (action === 'book_uber') {
+  if (action === 'book_uber' || action === 'book_bolt') {
     const pickupKeyword = personalPlaceKeyword(enrichedParams.pickup);
     if (pickupKeyword) {
       const saved = await resolveSavedPlace(userId, pickupKeyword);
@@ -2978,6 +2980,8 @@ function buildAvailableActions(enabled) {
     spotify: ['search_spotify', 'play_spotify', 'control_spotify_playback', 'add_to_spotify_queue', 'add_to_spotify_playlist', 'get_now_playing_spotify'],
     maps: ['find_place', 'get_directions', 'plan_trip'],
     uber: ['book_uber'],
+    bolt: ['book_bolt'],
+    wallet: ['add_to_wallet'],
     telegram: ['send_telegram', 'get_telegram_contacts'],
     notion: ['search_notion', 'create_notion_page', 'append_notion_page'],
     trainline: ['search_trains', 'station_board'],
@@ -4088,6 +4092,8 @@ app.get('/travel-profile/:userId', requireSessionAuth, async (req, res) => {
 const CONNECTORS = [
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
   { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
+  { id: 'bolt',      name: 'Bolt',                      icon: 'bolt', category: 'Transport',     implemented: true },
+  { id: 'wallet',    name: 'Apple Wallet',               icon: 'wallet', category: 'System',      implemented: true },
   { id: 'maps',      name: 'Maps',                      icon: 'maps', category: 'Travel',        implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
   { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
@@ -5296,9 +5302,9 @@ function normalizeActionResultsForClient(actionResults) {
 function userFacingActionFailure(entry) {
   const action = entry?.action || '';
   const rawError = String(entry?.result?.error || '').trim();
-  if (action === 'book_uber' || action === 'find_place') {
+  if (action === 'book_uber' || action === 'book_bolt' || action === 'find_place') {
     if (/Google Places is not ready|Places API|Google Places is not configured/i.test(rawError)) {
-      return 'Nearby place ranking needs Google Places enabled on the server. Uber itself does not need an API key.';
+      return 'Nearby place ranking needs Google Places enabled on the server. Uber and Bolt do not need an API key.';
     }
     if (/need your current location|enable location/i.test(rawError)) {
       return 'I need your current location to find that nearby place. Enable location and try again.';

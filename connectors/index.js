@@ -1,5 +1,7 @@
 const google = require('./google');
 const uber = require('./uber');
+const bolt = require('./bolt');
+const wallet = require('./wallet');
 const telegram = require('./telegram');
 const trainline = require('./trainline');
 const maps = require('./maps');
@@ -18,7 +20,7 @@ const activities = require('./activities');
 // Registry: action name → connector module
 // To add a new connector: create connectors/myservice.js and add it to this list.
 const MODULES = {
-  google, uber, telegram, trainline, maps,
+  google, uber, bolt, telegram, trainline, maps, wallet,
   github, microsoft, notion, youtube, indeed, linkedin, spotify, linear,
   flights, hotels, activities
 };

@@ -907,6 +907,16 @@ final class ChatViewModel {
     }
 
     func openActionLink(_ result: ActionResult) {
+        if let pkpass = result.pkpassBase64 {
+            Task { @MainActor in
+                guard let vc = UIApplication.shared.connectedScenes
+                    .compactMap({ $0 as? UIWindowScene })
+                    .first?.windows.first(where: \.isKeyWindow)?
+                    .rootViewController else { return }
+                NativeIntegrationManager.shared.presentWalletPass(pkpassBase64: pkpass, from: vc)
+            }
+            return
+        }
         if let link = result.deepLink, let url = URL(string: link) {
             if url.scheme == "oxy-open-app" {
                 Task { @MainActor in
