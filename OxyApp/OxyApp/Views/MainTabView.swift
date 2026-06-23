@@ -16,8 +16,8 @@ struct MainTabView: View {
     // Tucked away either while typing (keyboard up) or while scrolling down into content.
     private var barTucked: Bool { keyboardUp || tabBar.hidden }
 
-    // Today/Chat carry the chosen finish; More stays fixed-dark.
-    private var canvasIsLight: Bool { lightMode && selectedTab != .more }
+    // The whole app carries the chosen finish, including More and its sub-screens.
+    private var canvasIsLight: Bool { lightMode }
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -44,12 +44,9 @@ struct MainTabView: View {
         // areas, so it bleeds edge-to-edge — under the status bar and behind the floating
         // tab bar. The pages themselves are transparent (More paints its own dark canvas).
         ZStack {
-            // More keeps a flat dark canvas; Today/Chat show the aurora in the chosen finish.
-            if selectedTab == .more {
-                Color.black.ignoresSafeArea()
-            } else {
-                TodayAuroraBackground(light: lightMode)
-            }
+            // One canvas for every tab — the aurora in the chosen finish, so More shares
+            // the same light-by-day / dark-by-night language as Today and Chat.
+            TodayAuroraBackground(light: lightMode)
 
             // A true paged TabView for buttery 1:1 horizontal swiping. The native
             // page style hides the system tab bar, so a slim custom bar is added via
@@ -158,6 +155,7 @@ struct MoreView: View {
     @State private var appeared = false
 
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
+    private var lightMode: Bool { TodayFinish.isLight }
 
     enum MoreDestination: Identifiable {
         case profile, pendant, connectors, memory, settings
@@ -167,7 +165,9 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                // Transparent over the shared aurora canvas (like Today/Chat) so More
+                // takes the same finish instead of its own flat black.
+                Color.clear.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         identityHeader
@@ -204,6 +204,8 @@ struct MoreView: View {
                     }
                 }
                 .swipeToDismiss()
+                // fullScreenCover starts a fresh environment, so carry the finish into it.
+                .environment(\.colorScheme, lightMode ? .light : .dark)
             }
             .alert("Sign Out", isPresented: $showSignOutConfirm) {
                 Button("Sign Out", role: .destructive) { appState.logout() }
@@ -212,6 +214,7 @@ struct MoreView: View {
                 Text("Are you sure you want to sign out?")
             }
         }
+        .environment(\.colorScheme, lightMode ? .light : .dark)
     }
 
     // MARK: - Identity header (Milgrain editorial)

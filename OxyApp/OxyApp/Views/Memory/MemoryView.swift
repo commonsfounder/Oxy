@@ -9,7 +9,8 @@ struct MemoryView: View {
     @State private var draft = ""
     @State private var saveMessage: String?
     @State private var showClearAllConfirm = false
-    @State private var memoryAppeared = false
+    @State private var pendingDeleteItem: MemoryItem?
+    @State private var search = ""
     private let embedded: Bool
 
     init(embedded: Bool = false) {
@@ -38,17 +39,19 @@ struct MemoryView: View {
 
     private var memoryContent: some View {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            Color.mgBg.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if !embedded {
                     ScreenHeaderView(title: "Memory", onBack: { dismiss() })
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 36) {
-                        // Capture
+                // A real List, not a hand-rolled ScrollView, so swipe-to-delete is the
+                // native, reliable gesture instead of a custom drag (which rendered a
+                // visible red sliver behind every row — not worth re-fighting SwiftUI for).
+                List {
+                    Group {
                         VStack(alignment: .leading, spacing: 20) {
-                            NamelessSectionHeader(title: "Remember")
+                            MilgrainSectionHeader(title: "Remember")
                             MemoryDropBox(
                                 draft: $draft,
                                 isSaving: isSaving,
@@ -56,69 +59,99 @@ struct MemoryView: View {
                                 onSave: { Task { await saveMemory() } }
                             )
                         }
+                        .padding(.top, 12)
+                        .padding(.bottom, 36)
 
-                        // The actual memories — view and delete each, like ChatGPT/Claude.
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack {
-                                NamelessSectionHeader(title: "Saved Memories")
-                                Spacer()
-                                if !items.isEmpty {
-                                    Text("\(items.count)")
-                                        .font(.nmlBody(13))
-                                        .foregroundStyle(Color.nmlMuted)
-                                }
-                            }
-                            .padding(.bottom, 12)
-
-                            if isLoading {
-                                ForEach(0..<4, id: \.self) { _ in
-                                    OxySkeletonCard(height: 44, cornerRadius: 0)
-                                    NamelessDivider()
-                                }
-                            } else if items.isEmpty {
-                                Text("Nothing remembered yet. Add something above, or just talk — it picks things up as you go.")
-                                    .font(.system(size: 14, weight: .light))
-                                    .foregroundStyle(Color.nmlMuted)
-                                    .padding(.vertical, 20)
-                            } else {
-                                ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
-                                    VStack(alignment: .leading, spacing: 0) {
-                                        Text(group.title)
-                                            .font(.nmlDisplay(18, weight: .regular))
-                                            .foregroundStyle(Color.nmlInk)
-                                            .padding(.top, index == 0 ? 16 : 30)
-                                            .padding(.bottom, 4)
-                                        ForEach(group.items) { item in
-                                            MemoryRow(item: item) {
-                                                Task { await deleteItem(item) }
-                                            }
-                                            NamelessDivider()
-                                        }
-                                    }
-                                    .opacity(memoryAppeared ? 1 : 0)
-                                    .offset(y: memoryAppeared ? 0 : 12)
-                                    .animation(.nmlSpring.delay(0.06 + Double(index) * 0.08), value: memoryAppeared)
-                                }
-
-                                Button {
-                                    HapticManager.shared.impact(.light)
-                                    showClearAllConfirm = true
-                                } label: {
-                                    Text("Clear all memories")
-                                        .font(.system(size: 13, weight: .regular))
-                                        .foregroundStyle(Color.nmlDanger)
-                                        .padding(.vertical, 18)
-                                }
-                                .buttonStyle(.nmlScale(0.98))
+                        HStack {
+                            MilgrainSectionHeader(title: "Saved Memories")
+                            Spacer()
+                            if !items.isEmpty {
+                                Text("\(items.count)")
+                                    .font(.nmlBody(13))
+                                    .foregroundStyle(Color.mgSecondary)
                             }
                         }
+                        .padding(.bottom, 12)
+
+                        if !isLoading && !items.isEmpty {
+                            NamelessLineField(placeholder: "Search memories…", text: $search)
+                                .padding(.bottom, 20)
+                        }
+
+                        if isLoading {
+                            ForEach(0..<4, id: \.self) { _ in
+                                OxySkeletonCard(height: 44, cornerRadius: 0)
+                                MilgrainDivider()
+                            }
+                        } else if items.isEmpty {
+                            Text("Nothing remembered yet. Add something above, or just talk — it picks things up as you go.")
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundStyle(Color.mgSecondary)
+                                .padding(.vertical, 20)
+                        } else if groupedItems.isEmpty {
+                            Text("No memories match \"\(search)\".")
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundStyle(Color.mgSecondary)
+                                .padding(.vertical, 20)
+                        }
                     }
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
-                    .padding(.bottom, 40)
-                    .animation(.nmlSpring, value: isLoading)
-                    .animation(.nmlFast, value: items)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+
+                    ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
+                        Text(group.title)
+                            .font(.nmlBody(18, weight: .semibold))
+                            .foregroundStyle(Color.mgHeading)
+                            .padding(.top, index == 0 ? 16 : 30)
+                            .padding(.bottom, 4)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+
+                        ForEach(group.items) { item in
+                            MemoryRow(item: item)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 0))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        pendingDeleteItem = item
+                                    } label: {
+                                        Label("Delete", systemImage: "trash.fill")
+                                    }
+                                    // The app's accent tint (mint/etc.) otherwise bleeds into
+                                    // swipe actions, overriding the system's destructive red.
+                                    .tint(Color.mgDestructive)
+                                }
+
+                            MilgrainDivider()
+                                .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                        }
+                    }
+
+                    if !groupedItems.isEmpty, search.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button {
+                            HapticManager.shared.impact(.light)
+                            showClearAllConfirm = true
+                        } label: {
+                            Text("Clear all memories")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Color.mgDestructive)
+                                .padding(.vertical, 18)
+                        }
+                        .buttonStyle(.nmlScale(0.98))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 0)
+                .animation(.nmlSpring, value: isLoading)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -130,13 +163,27 @@ struct MemoryView: View {
         } message: {
             Text("This permanently deletes everything remembered about you.")
         }
+        .alert(
+            "Delete this memory?",
+            isPresented: Binding(get: { pendingDeleteItem != nil }, set: { if !$0 { pendingDeleteItem = nil } }),
+            presenting: pendingDeleteItem
+        ) { item in
+            Button("Delete", role: .destructive) { Task { await deleteItem(item) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text(item.content)
+        }
     }
 
     // Group memories into a few editorial buckets so the screen reads as a curated
     // index rather than one long flat list. "Notes" is the catch-all — nothing is lost.
     private var groupedItems: [(title: String, items: [MemoryItem])] {
-        let order = ["People", "Places", "Work & Study", "Tastes", "Notes"]
-        let grouped = Dictionary(grouping: items, by: { $0.category })
+        let query = search.trimmingCharacters(in: .whitespaces)
+        let visible = query.isEmpty
+            ? items
+            : items.filter { $0.content.localizedCaseInsensitiveContains(query) }
+        let order = ["People", "Places", "Work & Study", "Preferences", "Notes"]
+        let grouped = Dictionary(grouping: visible, by: { $0.category })
         return order.compactMap { title in
             guard let group = grouped[title], !group.isEmpty else { return nil }
             return (title, group)
@@ -151,8 +198,6 @@ struct MemoryView: View {
             await MainActor.run {
                 items = response.items
                 isLoading = false
-                memoryAppeared = false
-                withAnimation(.nmlSpring.delay(0.04)) { memoryAppeared = true }
             }
         } catch {
             await MainActor.run { items = []; isLoading = false }
@@ -213,27 +258,14 @@ struct MemoryView: View {
 
 private struct MemoryRow: View {
     let item: MemoryItem
-    let onDelete: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(item.content)
-                .font(.nmlBody(15, weight: .light))
-                .foregroundStyle(Color.nmlInk)
-                .lineLimit(4)
-                .truncationMode(.tail)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button(action: onDelete) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.nmlMuted)
-                    .frame(width: 30, height: 30)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.nmlScale)
-        }
-        .padding(.vertical, 16)
+        Text(item.content)
+            .font(.nmlBody(15, weight: .light))
+            .foregroundStyle(Color.mgHeading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 16)
     }
 }
 
@@ -250,8 +282,8 @@ private struct MemoryDropBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Add it once. It's kept for later.")
-                .font(.nmlBody(18, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
+                .font(.mgDidot(18, weight: .bold))
+                .foregroundStyle(Color.mgHeading)
 
             NamelessLineField(
                 placeholder: "Remember that…",
@@ -264,7 +296,7 @@ private struct MemoryDropBox: View {
                 if let message {
                     Text(message)
                         .font(.nmlBody(12, weight: .medium))
-                        .foregroundStyle(message == "Saved." ? Color.nmlTitanium : Color.nmlDanger)
+                        .foregroundStyle(message == "Saved." ? Color.mgHeading : Color.mgDestructive)
                 }
                 Spacer()
                 Button(action: onSave) {
@@ -272,13 +304,13 @@ private struct MemoryDropBox: View {
                         if isSaving {
                             ProgressView()
                                 .scaleEffect(0.6)
-                                .tint(Color.nmlMuted)
+                                .tint(Color.mgSecondary)
                         }
                         Text(isSaving ? "Saving" : "Save")
                             .font(.nmlBody(12, weight: .semibold))
                             .tracking(0.4)
                     }
-                    .foregroundStyle(canSave ? Color.nmlTitanium : Color.nmlMuted)
+                    .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSave)
@@ -315,7 +347,7 @@ struct MemoryItem: Codable, Identifiable, Equatable {
         if has(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "loved one", "pookie", "name is", "named", "son", "daughter"]) { return "People" }
         if has(["school", "college", "university", "student", "study", "studie", "work", "job", "employer", "a-level", "degree"]) { return "Work & Study" }
         if has(["lives", "live ", "lived", "home", "address", "based in", "moved to", "commute"]) { return "Places" }
-        if has(["like", "love", "hate", "prefer", "favourite", "favorite", "watch", "eat", "drink", "listen", "read", "fan of"]) { return "Tastes" }
+        if has(["like", "love", "hate", "prefer", "favourite", "favorite", "watch", "eat", "drink", "listen", "read", "fan of"]) { return "Preferences" }
         return "Notes"
     }
 }

@@ -13,32 +13,31 @@ struct ScreenHeaderView: View {
     private let circle: CGFloat = 38
 
     var body: some View {
-        nmlGlassContainer(spacing: 16) {
-            HStack(spacing: 10) {
-                if let onBack {
-                    Button(action: onBack) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(.white.opacity(0.85))
-                            .frame(width: circle, height: circle)
-                            .nmlGlass(Circle(), interactive: true)
-                    }
-                    .buttonStyle(.nmlScale)
-                    .accessibilityLabel("Back")
+        HStack(spacing: 10) {
+            if let onBack {
+                // Raw chevron — no frosted glass, no circular chrome (Milgrain spec).
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Color.mgHeading)
+                        .frame(width: circle, height: circle)
+                        .contentShape(Rectangle())
                 }
-
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Color.nmlInk)
-
-                Spacer()
+                .buttonStyle(.nmlScale)
+                .accessibilityLabel("Back")
             }
+
+            Text(title)
+                .font(.nmlBody(17, weight: .semibold))
+                .foregroundStyle(Color.mgHeading)
+
+            Spacer()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         // Opaque, and extended up through the status-bar inset, so scrolled content
         // can never ghost above or behind the header at the very top of the screen.
-        .background(Color.nmlObsidian.ignoresSafeArea(edges: .top))
+        .background(Color.mgBg.ignoresSafeArea(edges: .top))
     }
 }
 
@@ -48,5 +47,5 @@ struct ScreenHeaderView: View {
         ScreenHeaderView(title: "More")
         Spacer()
     }
-    .background(Color.nmlObsidian)
+    .background(Color.mgBg)
 }

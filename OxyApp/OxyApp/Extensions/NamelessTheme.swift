@@ -587,13 +587,24 @@ extension View {
 // titanium hairlines) so Chat / Today / Onboarding are left untouched.
 
 extension Color {
-    static let mgBg          = Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255)   // #0A0A0A
-    static let mgDivider     = Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255)   // #1A1A1A
-    static let mgHeading     = Color.white                                              // #FFFFFF
-    static let mgSecondary   = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255) // #888888
-    static let mgCaption     = Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255)    // #555555
-    static let mgOff         = Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255)    // #333333
-    static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)   // #FF3B30
+    // Adaptive so the settings family follows the same TodayFinish (light-by-day /
+    // dark-by-night) as Today and Chat. Dark values are the Milgrain spec; light values
+    // are the inverted equivalents. Resolve via the same colorScheme override the other
+    // screens apply (.environment(\.colorScheme, lightMode ? .light : .dark)).
+    static let mgBg = nmlAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
+                                  light: Color(red: 250 / 255, green: 250 / 255, blue: 249 / 255)) // near-white
+    static let mgDivider = nmlAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
+                                       light: Color.black.opacity(0.10))
+    static let mgHeading = nmlAdaptive(dark: Color.white,                                     // #FFFFFF
+                                       light: Color(red: 0.11, green: 0.11, blue: 0.12))      // near-black
+    static let mgSecondary = nmlAdaptive(dark: Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255), // #888
+                                         light: Color(red: 0.42, green: 0.42, blue: 0.46))
+    static let mgCaption = nmlAdaptive(dark: Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255), // #555
+                                       light: Color(red: 0.56, green: 0.56, blue: 0.58))
+    static let mgOff = nmlAdaptive(dark: Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255), // #333 toggle off
+                                   light: Color(white: 0.82))
+    /// Fixed both finishes — system red reads on black and white alike.
+    static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
 }
 
 extension Font {

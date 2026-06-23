@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import AVFoundation
 import UIKit
 
 private final class NativeActionTimeoutBox: @unchecked Sendable {
@@ -33,7 +32,6 @@ final class ChatViewModel {
     /// Called on the main actor when a silent pendant execution finishes.
     var onSilentExecComplete: (() -> Void)?
 
-    @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
@@ -134,7 +132,6 @@ final class ChatViewModel {
         markChatActivity(for: userId)
         let pendingDecision = localActionDecision(for: text)
 
-        audioPlayback.stop()
         inputText = ""
         isSending = true
         statusLabel = nil
@@ -238,6 +235,7 @@ final class ChatViewModel {
                 nativeHints: nativeHints,
                 incognito: incognito
             )
+            await MainActor.run { HapticManager.shared.impact(.light) }
             var fullText = ""
 
             for await event in stream {
@@ -277,12 +275,6 @@ final class ChatViewModel {
 
                     case .sources(let sources):
                         guard updateAssistantMessage(id: assistantID, { $0.sources = sources }) else { return }
-
-                    case .audio(let base64Audio, _):
-                        playAudio(base64Audio)
-
-                    case .ttsError(let error):
-                        statusLabel = "Voice unavailable: \(error)"
 
                     case .done:
                         _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
@@ -408,8 +400,6 @@ final class ChatViewModel {
                                 }
                             }
                         }
-                    case .audio(let base64Audio, _):
-                        self.playAudio(base64Audio)
                     case .done, .error:
                         break
                     default:
@@ -462,6 +452,7 @@ final class ChatViewModel {
                     sendWatchdogTask = nil
                 }
             }
+            await MainActor.run { HapticManager.shared.impact(.light) }
             do {
                 let response = try await chatService.sendImageMessage(
                     userId: userId,
@@ -480,17 +471,12 @@ final class ChatViewModel {
                         $0.isStreaming = false
                     }
                     openDeepLinks(actions)
-                    if let audio = response.audio {
-                        playAudio(audio)
-                    } else if let ttsError = response.ttsError {
-                        statusLabel = "Voice unavailable: \(ttsError)"
-                    } else {
-                        statusLabel = nil
-                    }
+                    statusLabel = nil
                     networkError = nil
                     lastFailedText = nil
                     isSending = false
                     currentSendTask = nil
+                    HapticManager.shared.impact(.soft)
                 }
             } catch {
                 await MainActor.run {
@@ -503,6 +489,7 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    HapticManager.shared.error()
                 }
             }
         }
@@ -920,113 +907,4 @@ final class ChatViewModel {
         }
     }
 
-    // MARK: - Audio Playback
-
-    private func playAudio(_ base64Audio: String) {
-        audioPlayback.play(base64Audio) { [weak self] message in
-            Task { @MainActor in
-                self?.statusLabel = message
-            }
-        }
-    }
-}
-
-// Streamed TTS arrives as many small WAV chunks (one per PCM segment). Playing each as a
-// separate AVAudioPlayer left a gap + click at every boundary (crackling). Instead we schedule
-// the raw PCM gaplessly into a single AVAudioEngine player node, so chunks play as one
-// continuous stream. Backend TTS is 24kHz / 16-bit / mono.
-private final class AudioPlaybackManager: NSObject {
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
-    private let renderFormat = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
-    private var onError: ((String) -> Void)?
-    private var configured = false
-    private var observerAdded = false
-
-    func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
-        guard let data = Data(base64Encoded: base64Audio),
-              let buffer = Self.pcmBuffer(fromWav: data, format: renderFormat) else { return }
-        self.onError = onError
-        guard ensureRunning() else { return }
-        playerNode.scheduleBuffer(buffer, completionHandler: nil)
-        if !playerNode.isPlaying { playerNode.play() }
-    }
-
-    func stop() {
-        if playerNode.isPlaying { playerNode.stop() }
-        if engine.isRunning { engine.stop() }
-        configured = false
-    }
-
-    // Engine + audio session are set up once; reconfiguring per chunk added latency and gaps.
-    private func ensureRunning() -> Bool {
-        if configured && engine.isRunning { return true }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true)
-
-            if !observerAdded {
-                observerAdded = true
-                NotificationCenter.default.addObserver(
-                    forName: AVAudioSession.interruptionNotification,
-                    object: nil, queue: .main
-                ) { [weak self] note in
-                    guard let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-                          let t = AVAudioSession.InterruptionType(rawValue: type) else { return }
-                    if t == .began { self?.stop() } else { self?.configured = false }
-                }
-                // Headphones unplugged etc.: stop so audio doesn't blast the speaker mid-reply.
-                NotificationCenter.default.addObserver(
-                    forName: AVAudioSession.routeChangeNotification,
-                    object: nil, queue: .main
-                ) { [weak self] note in
-                    guard let reason = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-                          reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else { return }
-                    self?.stop()
-                }
-            }
-
-            if engine.attachedNodes.contains(playerNode) == false {
-                engine.attach(playerNode)
-                engine.connect(playerNode, to: engine.mainMixerNode, format: renderFormat)
-            }
-            engine.prepare()
-            try engine.start()
-            configured = true
-            return true
-        } catch {
-            onError?("Voice playback failed")
-            return false
-        }
-    }
-
-    // Strips the WAV header and converts 16-bit PCM to a float buffer the engine can schedule.
-    private static func pcmBuffer(fromWav data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        let bytes = [UInt8](data)
-        // Find the "data" subchunk; fall back to the canonical 44-byte header offset.
-        var pcmStart = 44
-        if let marker = "data".data(using: .ascii) {
-            let markerBytes = [UInt8](marker)
-            var i = 12
-            while i + 8 <= bytes.count {
-                if Array(bytes[i..<i+4]) == markerBytes { pcmStart = i + 8; break }
-                i += 1
-            }
-        }
-        guard bytes.count > pcmStart else { return nil }
-        let pcmBytes = bytes[pcmStart...]
-        let sampleCount = pcmBytes.count / 2
-        guard sampleCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sampleCount)),
-              let channel = buffer.floatChannelData?[0] else { return nil }
-        buffer.frameLength = AVAudioFrameCount(sampleCount)
-        pcmBytes.withUnsafeBytes { raw in
-            let samples = raw.bindMemory(to: Int16.self)
-            for i in 0..<sampleCount {
-                channel[i] = Float(Int16(littleEndian: samples[i])) / 32768.0
-            }
-        }
-        return buffer
-    }
 }

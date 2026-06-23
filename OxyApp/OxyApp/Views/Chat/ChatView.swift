@@ -981,7 +981,6 @@ private struct ChatInputBar: View {
     let onVoice: () -> Void
     let onAttach: () -> Void
     let onRemoveAttachment: () -> Void
-    @State private var voicePulse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1065,18 +1064,6 @@ private struct ChatInputBar: View {
                 // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
-                        if isRecording && !canSend {
-                            Circle()
-                                .stroke(Color.nmlGlow.opacity(0.30), lineWidth: 2)
-                                .frame(width: 50, height: 50)
-                                .scaleEffect(voicePulse ? 1.32 : 0.78)
-                                .opacity(voicePulse ? 0 : 0.85)
-                            Circle()
-                                .stroke(Color.nmlGlow.opacity(0.20), lineWidth: 1.5)
-                                .frame(width: 62, height: 62)
-                                .scaleEffect(voicePulse ? 1.18 : 0.72)
-                                .opacity(voicePulse ? 0 : 0.65)
-                        }
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
@@ -1100,19 +1087,11 @@ private struct ChatInputBar: View {
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
                 .animation(.nmlFast, value: canAct)
-                .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
             }
             .padding(.horizontal, 14)
             .padding(.top, 10)
             .padding(.bottom, 12)
             // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
-        }
-        .onAppear { voicePulse = true }
-        .onChange(of: isRecording) { _, recording in
-            if recording {
-                voicePulse = false
-                DispatchQueue.main.async { voicePulse = true }
-            }
         }
     }
 

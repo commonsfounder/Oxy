@@ -26,7 +26,9 @@ struct ProactiveView: View {
     private let native = NativeIntegrationManager.shared
 
     private var visibleBriefings: [Briefing] {
-        briefings.filter(\.isWorthShowing)
+        briefings
+            .filter(\.isWorthShowing)
+            .sorted { (Date.oxyParse($0.createdAt) ?? .distantPast) > (Date.oxyParse($1.createdAt) ?? .distantPast) }
     }
 
     var body: some View {
@@ -508,32 +510,30 @@ struct ProactiveView: View {
     }
 
     @ViewBuilder private var briefingCard: some View {
-        if !visibleBriefings.isEmpty {
+        // Only the freshest briefing — the server often has several near-identical runs
+        // queued, and stacking them all just repeats the same heatwave/inbox copy.
+        if let briefing = visibleBriefings.first {
             TodayCard {
                 cardLabel("Briefing")
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(visibleBriefings) { briefing in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(cleanBody(briefing))
-                                .font(.nmlBody(14, weight: .light))
-                                .foregroundStyle(p.ink)
-                                .lineSpacing(3)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            HStack(spacing: 18) {
-                                Button("Ask about this") {
-                                    HapticManager.shared.impact(.light)
-                                    discuss(briefing)
-                                }
-                                .foregroundStyle(p.titanium)
-                                Button("Dismiss") { Task { await markRead(briefing) } }
-                                    .foregroundStyle(p.muted)
-                            }
-                            .font(.nmlBody(13, weight: .medium))
-                            .tracking(0.3)
-                            .buttonStyle(.nmlScale(0.98))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(cleanBody(briefing))
+                        .font(.nmlBody(14, weight: .light))
+                        .foregroundStyle(p.ink)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(spacing: 18) {
+                        Button("Ask about this") {
+                            HapticManager.shared.impact(.light)
+                            discuss(briefing)
                         }
+                        .foregroundStyle(p.titanium)
+                        Button("Dismiss") { Task { await markRead(briefing) } }
+                            .foregroundStyle(p.muted)
                     }
+                    .font(.nmlBody(13, weight: .medium))
+                    .tracking(0.3)
+                    .buttonStyle(.nmlScale(0.98))
                 }
             }
         }

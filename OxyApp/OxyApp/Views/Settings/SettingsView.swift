@@ -1,4 +1,3 @@
-import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -11,14 +10,12 @@ struct SettingsView: View {
     @State private var settings = OxySettings()
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
-    @State private var voicePreview = VoicePreviewPlayer()
-    @State private var backendVersionText = "Checking backend..."
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.mgBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
@@ -32,31 +29,19 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.nmlTitanium)
+                                .tint(Color.mgSecondary)
                                 .onChange(of: settings.bubbleStyle) { _, _ in saveSettings() }
                             }
-                        }
-
-                        // Voice
-                        settingsSection(title: "Voice") {
-                            settingRow(label: "Voice Replies", description: nil) {
-                                NamelessToggle(isOn: $settings.voiceOn)
-                                    .onChange(of: settings.voiceOn) { _, _ in saveSettings() }
-                            }
-
-                            NamelessDivider()
-
-                            voicePickerRow
                         }
 
                         // Autonomy
                         settingsSection(title: "Assistant") {
                             InitiativeScroller(selection: $settings.autonomy, onChange: saveSettings)
 
-                            NamelessDivider()
+                            MilgrainDivider()
 
                             settingRow(label: "Briefings", description: nil) {
-                                NamelessToggle(isOn: $settings.proactiveBriefings)
+                                MilgrainToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
                         }
@@ -69,11 +54,11 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.nmlTitanium)
+                                .tint(Color.mgSecondary)
                                 .onChange(of: settings.preferredMapsApp) { _, _ in saveSettings() }
                             }
 
-                            NamelessDivider()
+                            MilgrainDivider()
 
                             settingRow(label: "Transport", description: nil) {
                                 Picker("Transport", selection: $settings.preferredTransportMode) {
@@ -83,34 +68,34 @@ struct SettingsView: View {
                                 }
                                 .labelsHidden()
                                 .pickerStyle(.menu)
-                                .tint(Color.nmlTitanium)
+                                .tint(Color.mgSecondary)
                                 .onChange(of: settings.preferredTransportMode) { _, _ in saveSettings() }
                             }
 
-                            NamelessDivider()
+                            MilgrainDivider()
 
                             settingRow(label: "Confirm Sensitive Apps", description: nil) {
-                                NamelessToggle(isOn: $settings.confirmSensitiveAppOpens)
+                                MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
                         }
 
                         settingsSection(title: "About") {
                             legalLink(label: "Support", path: "/support")
-                            NamelessDivider()
+                            MilgrainDivider()
                             legalLink(label: "Privacy Policy", path: "/privacy")
-                            NamelessDivider()
+                            MilgrainDivider()
                             legalLink(label: "Terms of Use", path: "/terms")
-                            NamelessDivider()
+                            MilgrainDivider()
                             Button(action: handleVersionTap) {
                                 HStack {
                                     Text("Version")
-                                        .font(.system(size: 15, weight: .regular))
-                                        .foregroundStyle(Color.nmlInk)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.mgHeading)
                                     Spacer()
-                                    Text(backendVersionText)
-                                        .font(.nmlMono(11))
-                                        .foregroundStyle(Color.nmlMuted)
+                                    Text("milgrain-0001-alpha")
+                                        .font(.system(size: 14, weight: .regular))
+                                        .foregroundStyle(Color.mgCaption)
                                         .lineLimit(1)
                                 }
                                 .padding(.vertical, 16)
@@ -129,14 +114,12 @@ struct SettingsView: View {
             .sheet(isPresented: $showBackendURLEditor) {
                 BackendURLEditorSheet(currentURL: $customBackendURL) {
                     showBackendURLEditor = false
-                    loadBackendVersion()
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
             .onAppear {
                 loadSettings()
-                loadBackendVersion()
             }
             .gesture(
                 DragGesture(minimumDistance: 20)
@@ -151,39 +134,9 @@ struct SettingsView: View {
 
     // MARK: - Helpers
 
-    private var selectedVoiceLabel: String {
-        OxySettings.voiceOptions.first(where: { $0.value == settings.voice })?.label ?? settings.voice
-    }
-
-    private func previewVoice(_ voice: String) {
-        Task {
-            await voicePreview.preview(voice: voice)
-        }
-    }
-
-    private func loadBackendVersion() {
-        backendVersionText = "Checking backend..."
-        Task {
-            do {
-                let version = try await ChatService().backendVersion()
-                let rawCommit = version.gitCommit.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 }
-                let commit = rawCommit ?? version.deployId.flatMap { $0.isEmpty || $0 == "unknown" ? nil : $0 } ?? "unknown"
-                let branch = version.gitBranch.flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
-                let environment = version.environment.flatMap { $0.isEmpty ? nil : $0 } ?? "env unknown"
-                await MainActor.run {
-                    backendVersionText = "\(commit) · \(branch) · \(environment)"
-                }
-            } catch {
-                await MainActor.run {
-                    backendVersionText = "Backend version unavailable"
-                }
-            }
-        }
-    }
-
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: title)
+            MilgrainSectionHeader(title: title)
                 .padding(.bottom, 10)
             VStack(spacing: 0) {
                 content()
@@ -199,65 +152,16 @@ struct SettingsView: View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(label)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.mgHeading)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Color.mgSecondary)
                 }
             }
             Spacer()
             accessory()
-        }
-        .padding(.vertical, 16)
-    }
-
-    private var voicePickerRow: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Voice")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
-                Text(voicePreview.isPlaying ? "Playing preview" : "Tap preview to hear")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
-            }
-
-            Spacer(minLength: 12)
-
-            Button {
-                previewVoice(settings.voice)
-            } label: {
-                Text(voicePreview.isLoading ? "…" : (voicePreview.isPlaying ? "Playing" : "Preview"))
-                    .font(.nmlBody(12, weight: .medium))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.nmlMuted)
-            }
-            .buttonStyle(.nmlScale)
-            .disabled(voicePreview.isLoading)
-
-            Menu {
-                ForEach(OxySettings.voiceOptions, id: \.value) { voice in
-                    Button {
-                        settings.voice = voice.value
-                        saveSettings()
-                    } label: {
-                        if settings.voice == voice.value {
-                            Label(voice.label, systemImage: "checkmark")
-                        } else {
-                            Text(voice.label)
-                        }
-                    }
-                }
-            } label: {
-                Text(selectedVoiceLabel)
-                    .font(.nmlBody(13, weight: .medium))
-                    .tracking(0.2)
-                    .foregroundStyle(Color.nmlTitanium)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 18)
         }
         .padding(.vertical, 16)
     }
@@ -273,9 +177,9 @@ struct SettingsView: View {
                 Spacer()
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.mgSecondary)
             }
-            .foregroundStyle(Color.nmlInk)
+            .foregroundStyle(Color.mgHeading)
             .padding(.vertical, 16)
         }
         .buttonStyle(.nmlScale(0.98))
@@ -311,9 +215,6 @@ struct SettingsView: View {
 
     private func normalizeSettings() {
         settings.autonomy = OxySettings.normalizedAutonomy(settings.autonomy)
-        if !OxySettings.voiceOptions.contains(where: { $0.value == settings.voice }) {
-            settings.voice = "Aoede"
-        }
         if !OxySettings.accentOptions.contains(where: { $0.value == settings.accentColor }) {
             settings.accentColor = "stone"
         }
@@ -329,9 +230,9 @@ private struct BackendURLEditorSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.mgBg.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
-                    NamelessSectionHeader(title: "Custom Backend URL")
+                    MilgrainSectionHeader(title: "Custom Backend URL")
 
                     NamelessLineField(
                         placeholder: "https://your-backend.run.app",
@@ -343,7 +244,7 @@ private struct BackendURLEditorSheet: View {
 
                     Text("Leave blank to use the default Cloud Run backend.")
                         .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.mgSecondary)
 
                     if !currentURL.isEmpty {
                         Button(role: .destructive) {
@@ -365,7 +266,7 @@ private struct BackendURLEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onDone() }
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(Color.mgHeading)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -373,75 +274,12 @@ private struct BackendURLEditorSheet: View {
                         onDone()
                     }
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.nmlTitanium)
+                    .foregroundStyle(Color.mgHeading)
                 }
             }
         }
         .onAppear { draft = currentURL }
     }
-}
-
-// MARK: - Voice Preview
-
-@Observable
-@MainActor
-private final class VoicePreviewPlayer: NSObject, AVAudioPlayerDelegate {
-    var isLoading = false
-    var isPlaying = false
-    private var player: AVAudioPlayer?
-    private var previewTask: Task<Void, Never>?
-
-    func preview(voice: String) async {
-        previewTask?.cancel()
-        player?.stop()
-        isLoading = true
-        isPlaying = false
-
-        let task = Task {
-            do {
-                let data = try await APIClient.shared.request(
-                    path: "/tts-preview",
-                    method: "POST",
-                    body: [
-                        "voice": voice,
-                        "text": "This is a preview of how this voice sounds."
-                    ]
-                )
-                guard !Task.isCancelled else { return }
-                let response = try JSONDecoder().decode(TTSPreviewResponse.self, from: data)
-                guard let audioData = Data(base64Encoded: response.audio) else {
-                    isLoading = false
-                    return
-                }
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-                try audioSession.setActive(true)
-                let nextPlayer = try AVAudioPlayer(data: audioData)
-                guard !Task.isCancelled else { return }
-                nextPlayer.delegate = self
-                nextPlayer.prepareToPlay()
-                player = nextPlayer
-                isLoading = false
-                isPlaying = nextPlayer.play()
-            } catch {
-                isLoading = false
-                isPlaying = false
-            }
-        }
-
-        previewTask = task
-        await task.value
-    }
-
-    nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in
-            self.isPlaying = false
-        }
-    }
-}
-
-private struct TTSPreviewResponse: Codable {
-    let audio: String
 }
 
 // MARK: - Initiative
@@ -472,20 +310,20 @@ private struct InitiativeScroller: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Initiative")
                         .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Color.nmlInk)
+                        .foregroundStyle(Color.mgHeading)
                     Text(description)
                         .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.mgSecondary)
                 }
                 Spacer()
                 Text(selection)
                     .font(.nmlBody(13, weight: .medium))
                     .tracking(0.2)
-                    .foregroundStyle(Color.nmlTitanium)
+                    .foregroundStyle(Color.mgHeading)
             }
 
             Slider(value: value, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
-                .tint(Color.nmlTitanium)
+                .tint(Color.mgSecondary)
 
             HStack {
                 Text("Quiet")
@@ -496,7 +334,7 @@ private struct InitiativeScroller: View {
             }
             .font(.nmlBody(10, weight: .medium))
             .tracking(0.3)
-            .foregroundStyle(Color.nmlMuted)
+            .foregroundStyle(Color.mgSecondary)
         }
         .padding(.vertical, 16)
     }
@@ -517,9 +355,6 @@ private struct InitiativeScroller: View {
 struct OxySettings: Codable {
     var name: String = ""
     var userName: String = ""
-    var voice: String = "Aoede"
-    var voiceOn: Bool = true
-    var voiceEngine: String = "current"
     var autonomy: String = "Balanced"
     var proactiveBriefings: Bool = true
     var healthAlerts: Bool = true
@@ -538,7 +373,7 @@ struct OxySettings: Codable {
     var confirmSensitiveAppOpens: Bool = true
 
     enum CodingKeys: String, CodingKey {
-        case name, userName, voice, voiceOn, voiceEngine, autonomy, proactiveBriefings, healthAlerts, locationReminders
+        case name, userName, autonomy, proactiveBriefings, healthAlerts, locationReminders
         case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
         case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
         case confirmSensitiveAppOpens
@@ -550,9 +385,6 @@ struct OxySettings: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         userName = try container.decodeIfPresent(String.self, forKey: .userName) ?? ""
-        voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? "Aoede"
-        voiceOn = try container.decodeIfPresent(Bool.self, forKey: .voiceOn) ?? true
-        voiceEngine = try container.decodeIfPresent(String.self, forKey: .voiceEngine) ?? "current"
         autonomy = Self.normalizedAutonomy(try container.decodeIfPresent(String.self, forKey: .autonomy) ?? "Balanced")
         proactiveBriefings = try container.decodeIfPresent(Bool.self, forKey: .proactiveBriefings) ?? true
         healthAlerts = try container.decodeIfPresent(Bool.self, forKey: .healthAlerts) ?? true
@@ -571,31 +403,12 @@ struct OxySettings: Codable {
         confirmSensitiveAppOpens = try container.decodeIfPresent(Bool.self, forKey: .confirmSensitiveAppOpens) ?? true
     }
 
-    struct VoiceOption: Identifiable {
-        let value: String
-        let label: String
-        var id: String { value }
-    }
-
     struct AccentOption: Identifiable {
         let value: String
         let label: String
         let color: Color
         var id: String { value }
     }
-
-    static let voiceOptions: [VoiceOption] = [
-        VoiceOption(value: "Aoede", label: "Breezy"),
-        VoiceOption(value: "Algenib", label: "Gravel"),
-        VoiceOption(value: "Autonoe", label: "Bright"),
-        VoiceOption(value: "Fenrir", label: "Electric"),
-        VoiceOption(value: "Gacrux", label: "Mature"),
-        VoiceOption(value: "Iapetus", label: "Measured"),
-        VoiceOption(value: "Puck", label: "Playful"),
-        VoiceOption(value: "Sulafat", label: "Warm"),
-        VoiceOption(value: "Vindemiatrix", label: "Gentle"),
-        VoiceOption(value: "Zubenelgenubi", label: "Casual"),
-    ]
 
     static let designTemplates = ["compact", "glass", "dense"]
     static let designPalettes = ["stone", "mint", "blue", "violet"]

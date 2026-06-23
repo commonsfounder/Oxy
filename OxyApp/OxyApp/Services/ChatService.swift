@@ -15,7 +15,6 @@ struct ChatService {
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
         nativeHints: [String: Any]? = nil,
-        tts: Bool = false,
         incognito: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
@@ -34,9 +33,6 @@ struct ChatService {
         if let settings {
             body["settings"] = [
                 "name": settings.name,
-                "voice": settings.voice,
-                "voiceOn": settings.voiceOn,
-                "voiceEngine": settings.voiceEngine,
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
@@ -53,10 +49,7 @@ struct ChatService {
             body["nativeHints"] = nativeHints
         }
 
-        var queryItems = [URLQueryItem(name: "stream", value: "true")]
-        if tts || (settings?.voiceOn == true) {
-            queryItems.append(URLQueryItem(name: "tts", value: "true"))
-        }
+        let queryItems = [URLQueryItem(name: "stream", value: "true")]
 
         return api.sseStream(
             path: "/chat",
@@ -153,9 +146,6 @@ struct ChatService {
         if let settings {
             let payload: [String: Any] = [
                 "name": settings.name,
-                "voice": settings.voice,
-                "voiceOn": settings.voiceOn,
-                "voiceEngine": settings.voiceEngine,
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
@@ -168,19 +158,13 @@ struct ChatService {
             }
         }
 
-        var queryItems: [URLQueryItem] = []
-        if settings?.voiceOn == true {
-            queryItems.append(URLQueryItem(name: "tts", value: "true"))
-        }
-
         let data = try await api.multipartRequest(
             path: "/chat-with-image",
             fields: fields,
             fileField: "image",
             fileName: fileName,
             mimeType: mimeType,
-            fileData: imageData,
-            queryItems: queryItems
+            fileData: imageData
         )
         return try JSONDecoder().decode(ImageChatResponse.self, from: data)
     }
@@ -224,9 +208,6 @@ struct BackendVersion: Decodable {
 struct ImageChatResponse: Codable {
     let text: String
     let actions: [ActionResult]?
-    let audio: String?
-    let audioMimeType: String?
-    let ttsError: String?
 }
 
 private extension Encodable {

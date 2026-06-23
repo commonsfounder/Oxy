@@ -25,7 +25,7 @@ struct ConnectorsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.mgBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Connectors", onBack: { dismiss() })
@@ -34,7 +34,7 @@ struct ConnectorsView: View {
                     VStack(spacing: 0) {
                         ForEach(0..<6, id: \.self) { _ in
                             OxySkeletonCard(height: 56, cornerRadius: 0)
-                            NamelessDivider()
+                            MilgrainDivider()
                         }
                     }
                     .padding(.horizontal, 24)
@@ -51,7 +51,7 @@ struct ConnectorsView: View {
                             // pendant itself is allowed to sense and use.
                             if let caps = capabilities {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    NamelessSectionHeader(title: "On This Device")
+                                    MilgrainSectionHeader(title: "On This Device")
                                         .padding(.bottom, 12)
                                     deviceSection(caps)
                                 }
@@ -62,7 +62,7 @@ struct ConnectorsView: View {
 
                             // Third-party integrations
                             VStack(alignment: .leading, spacing: 4) {
-                                NamelessSectionHeader(title: "Integrations")
+                                MilgrainSectionHeader(title: "Integrations")
                                     .padding(.bottom, 12)
 
                                 let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
@@ -71,7 +71,7 @@ struct ConnectorsView: View {
                                 googleSection
                                 if !others.isEmpty {
                                     ForEach(others) { connector in
-                                        NamelessDivider()
+                                        MilgrainDivider()
                                         integrationRow(connector)
                                     }
                                 }
@@ -122,7 +122,7 @@ struct ConnectorsView: View {
         let items = NativeCapabilityItem.all(from: caps)
         return VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                if index != 0 { NamelessDivider() }
+                if index != 0 { MilgrainDivider() }
                 NativeCapabilityRow(item: item) {
                     await handleNativeAction(item)
                 }
@@ -452,25 +452,16 @@ private struct NativeCapabilityRow: View {
     let item: NativeCapabilityItem
     let onAction: () async -> Void
 
-    private var dotKind: NamelessStatusDot.Kind {
-        switch item.status {
-        case .granted:       return .enabled
-        case .denied:        return .error
-        case .notDetermined: return .off
-        }
-    }
-
     var body: some View {
         HStack(spacing: 16) {
-            NamelessStatusDot(kind: dotKind)
-
+            // No icon, no status dot (Milgrain spec) — just a raw label and a text state.
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.mgHeading)
                 Text(item.subtitle)
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color.mgSecondary)
             }
 
             Spacer()
@@ -479,29 +470,35 @@ private struct NativeCapabilityRow: View {
                 Task { await onAction() }
             } label: {
                 Text(statusLabel)
-                    .font(.nmlBody(12, weight: .semibold))
-                    .tracking(0.3)
-                    .foregroundStyle(Color.nmlTitanium)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(statusColor)
             }
             .buttonStyle(.nmlScale)
         }
         .padding(.vertical, 18)
     }
 
+    // Granted reads as a quiet "Connected" (#555); actionable states keep an
+    // affordance verb in #888 so the permission can still be granted or fixed.
     private var statusLabel: String {
         switch item.status {
-        case .granted:       return "Enabled"
+        case .granted:       return "Connected"
         case .denied:        return "Settings"
         case .notDetermined: return "Enable"
         }
+    }
+
+    private var statusColor: Color {
+        item.status == .granted ? Color.mgCaption : Color.mgSecondary
     }
 }
 
 // MARK: - Integration Row
 
-/// A flat row for a connected service — no icon tile, no card. Just raw
-/// typography: the name in clean white, monospace status detail beneath, a
-/// quiet glowing dot for connection, and a plain tracked-out text action.
+/// A flat row for a service — no icon tile, no card, no status dot. Just raw
+/// typography: the name in white, a quiet detail line, and a text state on the
+/// right. "Connected" reads muted (#555); when disconnected the right side keeps
+/// an affordance verb (#888) so the row can still be acted on.
 private struct IntegrationRow: View {
     let name: String
     let detail: String
@@ -510,34 +507,30 @@ private struct IntegrationRow: View {
     let isBusy: Bool
     let action: () -> Void
 
+    private var isConnected: Bool { dotKind == .enabled }
+
     var body: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(name)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.mgHeading)
                 Text(detail)
-                    .font(.nmlBody(12, weight: .regular))
-                    .foregroundStyle(Color.nmlMuted)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(Color.mgCaption)
             }
 
             Spacer()
-
-            NamelessStatusDot(kind: dotKind, diameter: 5)
 
             Button(action: action) {
                 if isBusy {
                     ProgressView()
                         .scaleEffect(0.6)
-                        .tint(Color.nmlMuted)
+                        .tint(Color.mgSecondary)
                 } else {
-                    // Destructive actions (Disconnect / Disable) read in coral so they're
-                    // visually distinct from the neutral Connect / Reconnect affordances.
-                    let isDestructive = ["DISCONNECT", "DISABLE"].contains(actionLabel.uppercased())
-                    Text(actionLabel.uppercased())
-                        .font(.system(size: 11, weight: .medium))
-                        .tracking(1.2)
-                        .foregroundStyle(isDestructive ? Color.nmlDanger : Color.nmlTitanium)
+                    Text(isConnected ? "Connected" : actionLabel)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(isConnected ? Color.mgCaption : Color.mgSecondary)
                 }
             }
             .buttonStyle(.nmlScale)

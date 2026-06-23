@@ -281,10 +281,8 @@ enum SSEEvent {
     case replace(String)
     case actions([ActionResult])
     case status(String, String)
-    case audio(String, String)
     case transcription(String)
     case transcriptionError(String)
-    case ttsError(String)
     case sources([MessageSource])
     case done
     case error(String)
@@ -310,17 +308,10 @@ enum SSEEvent {
                 json["status"] as? String ?? "",
                 json["label"] as? String ?? ""
             )
-        case "audio":
-            return .audio(
-                json["data"] as? String ?? "",
-                json["mimeType"] as? String ?? "audio/wav"
-            )
         case "transcription":
             return .transcription(json["text"] as? String ?? "")
         case "transcription-error":
             return .transcriptionError(json["error"] as? String ?? "Transcription failed")
-        case "tts-error":
-            return .ttsError(json["error"] as? String ?? "TTS failed")
         case "sources":
             if let itemsData = try? JSONSerialization.data(withJSONObject: json["items"] ?? []),
                let items = try? JSONDecoder().decode([MessageSource].self, from: itemsData) {

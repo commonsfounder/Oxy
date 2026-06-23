@@ -23,7 +23,7 @@ struct PendantStatusView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.mgBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Pendant", onBack: { dismiss() })
@@ -34,14 +34,14 @@ struct PendantStatusView: View {
 
                             // Live vitals — only meaningful once a device is linked.
                             VStack(alignment: .leading, spacing: 4) {
-                                NamelessSectionHeader(title: "Live")
+                                MilgrainSectionHeader(title: "Live")
                                     .padding(.bottom, 12)
                                 if pendant.isConnected {
                                     DeviceStatusCard(telemetry: telemetry)
                                 } else {
                                     Text("No live data — pendant not connected.")
-                                        .font(.nmlBody(13))
-                                        .foregroundStyle(Color.nmlMuted)
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundStyle(Color.mgSecondary)
                                         .padding(.vertical, 11)
                                 }
                             }
@@ -84,40 +84,41 @@ struct PendantStatusView: View {
 
     private var hardwareConfig: some View {
         VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: "Hardware Config")
+            MilgrainSectionHeader(title: "Hardware Config")
                 .padding(.bottom, 10)
 
             VStack(spacing: 0) {
                 configRow(label: "WAKEWORD", options: ["CHIN TILT", "TAP"], selection: $wakeword)
-                NamelessDivider()
+                MilgrainDivider()
                 configRow(label: "AUDIO OUTPUT", options: ["BLE BUDS", "WHISPER HAPTICS"], selection: $audioOutput)
-                NamelessDivider()
+                MilgrainDivider()
                 configRow(label: "HAPTIC FORCE", options: ["LOW", "MID", "HIGH"], selection: $hapticForce)
             }
         }
     }
 
+    // Raw label + right-aligned value (#555). No pill/segmented control — tapping
+    // the row cycles to the next option.
     private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
-        ViewThatFits(in: .horizontal) {
+        Button {
+            let current = options.firstIndex(of: selection.wrappedValue) ?? 0
+            selection.wrappedValue = options[(current + 1) % options.count]
+        } label: {
             HStack(alignment: .center, spacing: 16) {
-                configLabel(label)
-                NamelessSegmentedControl(options: options, selection: selection)
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.0)
+                    .foregroundStyle(Color.mgSecondary)
+                Spacer()
+                Text(selection.wrappedValue)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Color.mgCaption)
+                    .multilineTextAlignment(.trailing)
             }
-
-            VStack(alignment: .leading, spacing: 10) {
-                configLabel(label)
-                NamelessSegmentedControl(options: options, selection: selection)
-            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.nmlScale(0.98))
         .padding(.vertical, 14)
-    }
-
-    private func configLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.nmlMono(11, weight: .medium))
-            .tracking(1.0)
-            .foregroundStyle(Color.nmlMuted)
-            .fixedSize()
     }
 }
 
@@ -131,78 +132,71 @@ private struct PendantPairingSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: "Pairing")
+            MilgrainSectionHeader(title: "Pairing")
                 .padding(.bottom, 10)
 
             VStack(spacing: 0) {
                 HStack {
                     Text("Status")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Color.nmlInk)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.mgHeading)
                     Spacer()
-                    HStack(spacing: 10) {
-                        Text(statusDescription)
-                            .font(.nmlMono(12))
-                            .foregroundStyle(statusColor)
-                            .contentTransition(.numericText())
-                            .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
-                        statusIndicator
-                            .animation(.nmlSpring, value: pendant.connectionState)
-                    }
+                    // Static sans label — no status dot, no pulse (Milgrain spec).
+                    Text(statusDescription)
+                        .font(.nmlBody(15, weight: .semibold))
+                        .foregroundStyle(statusColor)
+                        .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                 }
                 .padding(.vertical, 16)
 
                 if let name = pendant.peripheralName, pendant.isConnected {
-                    NamelessDivider()
+                    MilgrainDivider()
                     HStack {
                         Text("Device")
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(Color.nmlInk)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.mgHeading)
                         Spacer()
                         Text(name)
-                            .font(.nmlMono(12))
-                            .foregroundStyle(Color.nmlMuted)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(Color.mgCaption)
                     }
                     .padding(.vertical, 16)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 if let error = pendant.lastError {
-                    NamelessDivider()
+                    MilgrainDivider()
                     Text(error)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.nmlDanger)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(Color.mgDestructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 16)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
-                NamelessDivider()
+                MilgrainDivider()
 
                 HStack(spacing: 12) {
                     if pendant.isConnected {
-                        Button("UNPAIR") {
+                        Button("Unpair") {
                             showUnpairConfirm = true
                         }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlDanger)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.mgDestructive)
                         .transition(.opacity)
                     } else if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
-                        Button("CANCEL") {
+                        Button("Cancel") {
                             pendant.stopScan()
                         }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlMuted)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.mgSecondary)
                         .transition(.opacity)
                     } else {
-                        Button("SCAN FOR PENDANT") {
+                        Button("Scan for pendant") {
                             pendant.startScan()
                         }
-                        .font(.nmlMono(11, weight: .medium))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlTitanium)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.mgHeading)
                         .transition(.opacity)
                     }
                     Spacer()
@@ -232,43 +226,10 @@ private struct PendantPairingSection: View {
 
     private var statusColor: Color {
         switch pendant.connectionState {
-        case .connected: return Color.nmlTitanium
-        case .error: return Color.nmlDanger
-        case .scanning, .connecting: return Color.nmlMuted
-        default: return Color.nmlMuted
+        case .connected: return Color.mgHeading
+        case .error: return Color.mgDestructive
+        default: return Color.mgSecondary
         }
-    }
-
-    @ViewBuilder
-    private var statusIndicator: some View {
-        switch pendant.connectionState {
-        case .connected:
-            NamelessStatusDot(kind: .live, diameter: 6)
-        case .scanning, .connecting:
-            ScanPulseView()
-        case .error:
-            NamelessStatusDot(kind: .error, diameter: 6)
-        case .disconnected:
-            NamelessStatusDot(kind: .off, diameter: 6)
-        }
-    }
-}
-
-private struct ScanPulseView: View {
-    @State private var pulse = false
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.nmlTitanium.opacity(pulse ? 0 : 0.4), lineWidth: 2)
-                .frame(width: pulse ? 24 : 12, height: pulse ? 24 : 12)
-                .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false), value: pulse)
-
-            Circle()
-                .fill(Color.nmlTitanium)
-                .frame(width: 8, height: 8)
-        }
-        .onAppear { pulse = true }
     }
 }
 

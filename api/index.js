@@ -2419,7 +2419,10 @@ const SINGLE_VALUED_SUBJECTS = [
   { key: 'station', re: /^(?:usual\s+station|my\s+station|nearest\s+station)\b/i },
   { key: 'bank', re: /^banks?\s+with\b/i },
   { key: 'name', re: /^(?:my\s+name\s+is|name\s+is|is\s+called)\b/i },
-  { key: 'gym', re: /^my\s+gym\s+is\b/i }
+  { key: 'gym', re: /^my\s+gym\s+is\b/i },
+  // Catches "Partner is gf" vs "Partner is a girlfriend." — same subject, different
+  // phrasing, neither a substring of the other, so the dedup check above missed it.
+  { key: 'partner', re: /^(?:(?:my\s+)?(?:partner|girlfriend|boyfriend|wife|husband|spouse|fianc[eé])\s+is|has\s+an?\s+(?:partner|girlfriend|boyfriend|wife|husband|fianc[eé]))\b/i }
 ];
 
 function factSubjectKey(content) {
@@ -2484,16 +2487,43 @@ async function saveMemory(userId, content, source = 'fact') {
   });
   if (isDup) return;
 
-  // (b) Replace a prior fact about the same single-valued subject.
+  // (b) Replace a prior fact about the same single-valued subject. This deterministic
+  // list only covers ~8 known subjects (school/home/work/partner/etc) — anything else
+  // falls through to the general conflict check below.
   const subject = factSubjectKey(clean);
   if (subject) {
     const stale = rows.filter(r => factSubjectKey(r.content) === subject).map(r => r.id);
     if (stale.length) await supabase.from('memories').delete().in('id', stale);
+  } else if (rows.length) {
+    // General case: a changed preference/state ("now prefers evening workouts" over
+    // "prefers morning workouts") that isn't one of the hardcoded subjects above. One
+    // cheap LLM call only runs here, not on every save — the deterministic path above
+    // already handles the common, free cases.
+    const conflict = await findConflictingMemory(rows, clean);
+    if (conflict) await supabase.from('memories').delete().eq('id', conflict.id);
   }
 
   await supabase
     .from('memories')
     .insert({ user_id: userId, content: clean, source, created_at: new Date().toISOString() });
+}
+
+// Catches contradictions outside the hardcoded single-valued subjects — e.g. a changed
+// preference or status. Returns the row it supersedes, or null if there's no conflict
+// (most new facts just add information and shouldn't replace anything).
+async function findConflictingMemory(rows, newFact) {
+  try {
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const list = rows.map((r, i) => `${i}: ${r.content}`).join('\n');
+    const result = await model.generateContent(
+      `Existing facts about a user:\n${list}\n\nNew fact: "${newFact}"\n\nDoes the new fact update, contradict, or supersede exactly ONE of the existing facts above (e.g. a changed preference, a different routine, an outdated status)? If yes, reply with ONLY that fact's number. If the new fact is unrelated to all of them, or simply adds new information without contradicting anything, reply with NONE.`
+    );
+    const raw = result.response.text().trim();
+    const idx = parseInt(raw, 10);
+    return Number.isInteger(idx) && rows[idx] ? rows[idx] : null;
+  } catch {
+    return null;
+  }
 }
 
 async function forgetMemory(userId, { scope = '', query = '' } = {}) {
@@ -2583,7 +2613,9 @@ Return an EMPTY STRING for anything transient or low-signal — do not save:
 
 CRITICAL: keep specific proper nouns exactly as stated — names of schools, colleges, employers, places, people, teams. NEVER generalise a name away. "I go to Cadbury Sixth Form College" → "School is Cadbury Sixth Form College" (NOT "Goes to school"). "I work at KPMG" → "Works at KPMG". For a school/college/work/home location, phrase it as "School is <name>" / "Work is <name>" / "Home is <address>" so it can be looked up later.
 
-Good examples: "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham", "Partner is Alisa".
+For a relationship, prefer the person's name if one is given ("Partner is Alisa"). If only the relationship type is mentioned with no name ("my girlfriend said...", "my partner is a girlfriend"), phrase it naturally as "Has a girlfriend" — never as an awkward copula like "Partner is a girlfriend."
+
+Good examples: "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham", "Partner is Alisa", "Has a girlfriend".
 Return only the fact with no explanation. If there is nothing durable and personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
     const fact = result.response.text().trim().replace(/^["']|["']$/g, '');

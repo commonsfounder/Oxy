@@ -22,7 +22,7 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.mgBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
@@ -35,35 +35,35 @@ struct ProfileView: View {
                                 HStack {
                                     Text("Your Name")
                                         .font(.system(size: 15, weight: .regular))
-                                        .foregroundStyle(Color.nmlInk)
+                                        .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
                                     TextField("Not set — tap to add", text: $settings.userName)
                                         .font(.system(size: 15, weight: .light))
-                                        .foregroundStyle(Color.nmlInk)
-                                        .tint(Color.nmlTitanium)
+                                        .foregroundStyle(Color.mgHeading)
+                                        .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
                                         .textContentType(.givenName)
                                         .onChange(of: settings.userName) { _, _ in saveSettings() }
                                 }
                                 .padding(.vertical, 18)
 
-                                NamelessDivider()
+                                MilgrainDivider()
 
                                 HStack {
                                     Text("Assistant Name")
                                         .font(.system(size: 15, weight: .regular))
-                                        .foregroundStyle(Color.nmlInk)
+                                        .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
                                     TextField("Not set — tap to name", text: $settings.name)
                                         .font(.system(size: 15, weight: .light))
-                                        .foregroundStyle(Color.nmlInk)
-                                        .tint(Color.nmlTitanium)
+                                        .foregroundStyle(Color.mgHeading)
+                                        .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
                                         .onChange(of: settings.name) { _, _ in saveSettings() }
                                 }
                                 .padding(.vertical, 18)
 
-                                NamelessDivider()
+                                MilgrainDivider()
 
                                 identityRow(label: "Account ID", value: appState.userId)
                             }
@@ -86,7 +86,7 @@ struct ProfileView: View {
                                     action: { showSignOutConfirm = true }
                                 )
 
-                                NamelessDivider()
+                                MilgrainDivider()
 
                                 actionRow(
                                     label: isSigningOutAll ? "Signing Out…" : "Sign Out All Devices",
@@ -95,7 +95,7 @@ struct ProfileView: View {
                                 )
                                 .disabled(isSigningOutAll)
 
-                                NamelessDivider()
+                                MilgrainDivider()
 
                                 actionRow(
                                     label: isDeletingAccount ? "Deleting Account…" : "Delete Account",
@@ -105,10 +105,10 @@ struct ProfileView: View {
                                 .disabled(isExportingData || isDeletingAccount)
 
                                 if let accountStatusText {
-                                    NamelessDivider()
+                                    MilgrainDivider()
                                     Text(accountStatusText)
                                         .font(.system(size: 12, weight: .light))
-                                        .foregroundStyle(Color.nmlMuted)
+                                        .foregroundStyle(Color.mgSecondary)
                                         .lineSpacing(3)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         .padding(.vertical, 14)
@@ -159,7 +159,7 @@ struct ProfileView: View {
 
     private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            NamelessSectionHeader(title: title)
+            MilgrainSectionHeader(title: title)
                 .padding(.bottom, 10)
             VStack(spacing: 0) { content() }
         }
@@ -169,11 +169,11 @@ struct ProfileView: View {
         HStack {
             Text(label)
                 .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(Color.mgHeading)
             Spacer(minLength: 16)
             Text(value)
                 .font(.nmlMono(12))
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(Color.mgSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
@@ -195,9 +195,9 @@ struct ProfileView: View {
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.mgSecondary)
             }
-            .foregroundStyle(destructive ? Color.nmlDanger : Color.nmlInk)
+            .foregroundStyle(destructive ? Color.mgDestructive : Color.mgHeading)
             .padding(.vertical, 16)
         }
         .buttonStyle(.nmlScale(0.98))

@@ -360,32 +360,30 @@ struct ActionCard: View {
     /// A high-risk action awaiting the user's confirmation keeps a bordered
     /// surface — it's a decision to make, not a receipt, so it should hold the eye.
     private var pendingCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(headline)
-                    .font(.nmlBody(14))
-                    .foregroundStyle(Color.nmlInk)
-                if let detail = detailText {
-                    Text(detail)
-                        .font(.nmlBody(13, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        TodayCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(headline)
+                        .font(.nmlBody(14))
+                        .foregroundStyle(Color.nmlInk)
+                    if let detail = detailText {
+                        Text(detail)
+                            .font(.nmlBody(13, weight: .light))
+                            .foregroundStyle(Color.nmlMuted)
+                            .lineLimit(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-            }
 
-            if let onCommand {
-                HStack(spacing: 0) {
-                    pendingButton("Confirm") { onCommand("confirm") }
-                    pendingButton("Cancel", muted: true) { onCommand("cancel") }
+                if let onCommand {
+                    HStack(spacing: 0) {
+                        pendingButton("Confirm") { onCommand("confirm") }
+                        pendingButton("Cancel", muted: true) { onCommand("cancel") }
+                    }
                 }
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.nmlObsidian)
-        .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
     }
 
     private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
@@ -395,7 +393,7 @@ struct ActionCard: View {
                 .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
-                .overlay(Rectangle().strokeBorder(Color.nmlCardBorder, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
         }
         .buttonStyle(.nmlScale)
     }
@@ -478,26 +476,24 @@ struct UberHandoffCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("RIDE · UBER")
-                        .font(.nmlMono(11))
-                        .tracking(1.4)
-                        .foregroundStyle(Color.nmlMuted)
-                    Spacer()
-                    ConfirmTick(active: confirmed)
-                }
+            TodayCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("RIDE · UBER")
+                            .font(.nmlMono(11))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.nmlMuted)
+                        Spacer()
+                        ConfirmTick(active: confirmed)
+                    }
 
-                VStack(alignment: .leading, spacing: 6) {
-                    handoffRow("DEST", destination)
-                    handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
-                    handoffRow("EST", estimate)
+                    VStack(alignment: .leading, spacing: 6) {
+                        handoffRow("DEST", destination)
+                        handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
+                        handoffRow("EST", estimate)
+                    }
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.nmlObsidian)
-            .border(Color.nmlCardBorder, width: 0.5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.nmlScale(0.98))
@@ -541,11 +537,11 @@ private struct ConfirmTick: View {
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                .strokeBorder(Color.nmlMuted.opacity(0.4), lineWidth: 1)
                 .frame(width: 18, height: 18)
             CheckPath()
                 .trim(from: 0, to: active ? 1 : 0)
-                .stroke(Color.nmlTitanium, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .stroke(Color.nmlInk, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
                 .frame(width: 9, height: 7)
         }
         .frame(width: 18, height: 18)
