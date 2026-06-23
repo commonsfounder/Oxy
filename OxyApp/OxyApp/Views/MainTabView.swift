@@ -9,6 +9,15 @@ struct MainTabView: View {
     // returns when the keyboard dismisses — which the interactive scroll-to-dismiss makes a
     // natural "swipe near that area to bring it back" gesture.
     @State private var keyboardUp = false
+    @State private var tabBar = TabBarVisibility()
+    // Light by day, dark at night (see TodayFinish).
+    private var lightMode: Bool { TodayFinish.isLight }
+
+    // Tucked away either while typing (keyboard up) or while scrolling down into content.
+    private var barTucked: Bool { keyboardUp || tabBar.hidden }
+
+    // Today/Chat carry the chosen finish; More stays fixed-dark.
+    private var canvasIsLight: Bool { lightMode && selectedTab != .more }
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -31,22 +40,38 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        // A true paged TabView for buttery 1:1 horizontal swiping. The native
-        // page style hides the system tab bar, so a slim custom bar is added via
-        // safeAreaInset (which also keeps page content clear of it).
-        TabView(selection: $selectedTab) {
-            ChatHomeView().tag(Tab.chat)
-            ProactiveView().tag(Tab.today)
-            MoreView().tag(Tab.more)
-        }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(.nmlStandard, value: selectedTab)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            bottomBar
-                .offset(y: keyboardUp ? 130 : 0)
-                .opacity(keyboardUp ? 0 : 1)
-                .allowsHitTesting(!keyboardUp)
-                .animation(.nmlStandard, value: keyboardUp)
+        // The aurora canvas lives here, behind the whole TabView and ignoring all safe
+        // areas, so it bleeds edge-to-edge — under the status bar and behind the floating
+        // tab bar. The pages themselves are transparent (More paints its own dark canvas).
+        ZStack {
+            // More keeps a flat dark canvas; Today/Chat show the aurora in the chosen finish.
+            if selectedTab == .more {
+                Color.black.ignoresSafeArea()
+            } else {
+                TodayAuroraBackground(light: lightMode)
+            }
+
+            // A true paged TabView for buttery 1:1 horizontal swiping. The native
+            // page style hides the system tab bar, so a slim custom bar is added via
+            // safeAreaInset (which also keeps page content clear of it).
+            TabView(selection: $selectedTab) {
+                ChatHomeView().tag(Tab.chat)
+                ProactiveView().tag(Tab.today)
+                MoreView().tag(Tab.more)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .animation(.nmlStandard, value: selectedTab)
+            .environment(tabBar)
+            // When the bar is tucked (scrolling or keyboard), it leaves the safe-area
+            // inset entirely so content fills to the bottom edge — no reserved dead band.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !barTucked {
+                    bottomBar
+                        .environment(\.colorScheme, canvasIsLight ? .light : .dark)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.nmlStandard, value: barTucked)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             keyboardUp = true
@@ -57,6 +82,8 @@ struct MainTabView: View {
         .id(accentColor)
         .onChange(of: selectedTab) { _, _ in
             HapticManager.shared.select()
+            // A fresh tab always shows its bar — don't inherit the previous tab's tucked state.
+            tabBar.hidden = false
         }
         .onAppear {
             HapticManager.shared.prepare()
@@ -163,6 +190,7 @@ struct MoreView: View {
                     appeared = false
                     withAnimation { appeared = true }
                 }
+                .hidesTabBarOnScroll()
             }
             .toolbar(.hidden, for: .navigationBar)
             .fullScreenCover(item: $destination) { dest in

@@ -26,6 +26,9 @@ struct ChatHomeView: View {
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
 
+    // Same time-based finish as the Today tab.
+    private var lightMode: Bool { TodayFinish.isLight }
+
     private let sidebarWidth: CGFloat = 312
     private var edgeWidth: CGFloat { 22 }
 
@@ -76,11 +79,12 @@ struct ChatHomeView: View {
             sidebar
                 .frame(width: sidebarWidth)
                 .frame(maxHeight: .infinity)
-                .background(Color.nmlObsidian.ignoresSafeArea())
+                .background(.regularMaterial, ignoresSafeAreaEdges: .all)
                 .offset(x: sidebarOpen ? dragOffset : -sidebarWidth)
                 .gesture(drawerCloseGesture)
         }
         .animation(.nmlSpring, value: sidebarOpen)
+        .environment(\.colorScheme, lightMode ? .light : .dark)
         .task { await loadSessions() }
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
@@ -450,7 +454,7 @@ private struct SidebarSectionHeader: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(Color.nmlObsidian)
+        .background(.regularMaterial)
     }
 }
 
@@ -485,4 +489,5 @@ private struct SidebarSearchResultRow: View {
 #Preview {
     ChatHomeView()
         .environment(AppState())
+        .environment(TabBarVisibility())
 }

@@ -18,6 +18,10 @@ struct ProactiveView: View {
     @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
     @State private var contentAppeared = false
 
+    // Light by day, dark at night — tracks the clock, not a manual switch.
+    private var lightMode: Bool { TodayFinish.isLight }
+    private var p: TodayPalette { lightMode ? .light : .dark }
+
     private let service = ChatService()
     private let native = NativeIntegrationManager.shared
 
@@ -28,9 +32,11 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.nmlObsidian.ignoresSafeArea()
+                // Canvas is the app-level aurora (see MainTabView) so it bleeds full-screen.
+                Color.clear
 
                 ScrollView {
+                  nmlGlassContainer(spacing: 16) {
                     VStack(alignment: .leading, spacing: 16) {
                         if let errorMessage {
                             ErrorBanner(message: errorMessage)
@@ -40,7 +46,7 @@ struct ProactiveView: View {
 
                         if isLoading && events.isEmpty && weather == nil && visibleBriefings.isEmpty {
                             ProgressView()
-                                .tint(Color.nmlTitanium)
+                                .tint(p.titanium)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 48)
                         } else {
@@ -74,7 +80,7 @@ struct ProactiveView: View {
                                 .animation(.nmlSpring.delay(0.32), value: contentAppeared)
 
                             if !hasAnyContent {
-                                EmptyProactiveState()
+                                EmptyProactiveState(palette: p)
                                     .opacity(contentAppeared ? 1 : 0)
                                     .offset(y: contentAppeared ? 0 : 14)
                                     .animation(.nmlSpring.delay(0.06), value: contentAppeared)
@@ -84,24 +90,18 @@ struct ProactiveView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
                     .padding(.bottom, 36)
+                  }
                 }
                 .refreshable { await loadDashboard() }
-
-                // Opaque cap over the status-bar inset. Today has no fixed header — an
-                // empty inline nav bar doesn't reliably paint its background, so without
-                // this the scrolling hero copy ghosts up under the clock.
-                .overlay(alignment: .top) {
-                    Color.clear
-                        .frame(height: 0)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.nmlObsidian, ignoresSafeAreaEdges: .top)
-                        .allowsHitTesting(false)
-                }
+                .hidesTabBarOnScroll()
             }
+            // No opaque cap: the aurora gradient runs full-bleed behind the status
+            // bar (as in the reference), so content scrolling under it reads as
+            // intentional rather than ghosting.
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.nmlObsidian, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
         }
+        .environment(\.colorScheme, lightMode ? .light : .dark)
         .task {
             await native.prepareTodayAccess()
             await loadDashboard()
@@ -123,15 +123,21 @@ struct ProactiveView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(greeting)
                     .font(.nmlDisplay(40, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
+                    .foregroundStyle(p.ink)
                 Spacer()
+                // Passive day/night indicator (the finish follows the clock automatically).
+                Image(systemName: lightMode ? "sun.max" : "moon.stars")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(p.muted)
+                    .frame(width: 30, height: 30)
+                    .accessibilityLabel(lightMode ? "Daytime" : "Night")
                 Button(action: { Task { await checkNow() } }) {
                     if isChecking {
-                        ProgressView().scaleEffect(0.7).tint(Color.nmlMuted)
+                        ProgressView().scaleEffect(0.7).tint(p.muted)
                     } else {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(Color.nmlTitanium)
+                            .foregroundStyle(p.titanium)
                             .frame(width: 30, height: 30)
                             .contentShape(Rectangle())
                     }
@@ -143,11 +149,11 @@ struct ProactiveView: View {
             Text(dateLine)
                 .font(.nmlBody(12, weight: .regular))
                 .tracking(0.5)
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(p.muted)
                 .padding(.bottom, 16)
 
             Rectangle()
-                .fill(Color.nmlHairline)
+                .fill(p.hairline)
                 .frame(height: 0.5)
         }
         .padding(.bottom, 4)
@@ -188,13 +194,13 @@ struct ProactiveView: View {
 
     @ViewBuilder private var weatherCard: some View {
         if weather == nil && !isLoading && !LocationManager.shared.isAuthorized {
-            NMLCard {
+            TodayCard {
                 HStack {
                     cardLabel("Weather")
                     Spacer()
                     Image(systemName: "location.slash")
                         .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(p.muted)
                 }
                 Button {
                     HapticManager.shared.impact(.light)
@@ -202,13 +208,13 @@ struct ProactiveView: View {
                 } label: {
                     Text("Allow location to see weather.")
                         .font(.nmlBody(13, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(p.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.nmlScale(0.98))
             }
         } else if let weather {
-            NMLCard {
+            TodayCard {
                 Button {
                     HapticManager.shared.impact(.light)
                     withAnimation(.nmlStandard) { weatherExpanded.toggle() }
@@ -219,23 +225,23 @@ struct ProactiveView: View {
                             Spacer()
                             Image(systemName: weatherExpanded ? "chevron.up" : "chevron.down")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.nmlMuted)
+                                .foregroundStyle(p.muted)
                         }
                         HStack(alignment: .center, spacing: 14) {
                             Image(systemName: weather.symbolName)
                                 .font(.system(size: 26, weight: .light))
-                                .foregroundStyle(Color.nmlTitanium)
+                                .foregroundStyle(p.titanium)
                                 .frame(width: 34)
                             Text("\(Int(weather.temperatureC.rounded()))°")
                                 .font(.nmlMono(40, weight: .ultraLight))
-                                .foregroundStyle(Color.nmlInk)
+                                .foregroundStyle(p.ink)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(weather.conditionDescription)
                                     .font(.nmlBody(13))
-                                    .foregroundStyle(Color.nmlInk)
+                                    .foregroundStyle(p.ink)
                                 Text(weatherDetail(weather))
                                     .font(.nmlMono(11))
-                                    .foregroundStyle(Color.nmlMuted)
+                                    .foregroundStyle(p.muted)
                             }
                             Spacer()
                         }
@@ -264,17 +270,17 @@ struct ProactiveView: View {
         ].compactMap { $0 }
 
         VStack(spacing: 0) {
-            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+            Rectangle().fill(p.hairline).frame(height: 0.5)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
                 ForEach(cells, id: \.0) { cell in
                     VStack(spacing: 4) {
                         Text(cell.0.uppercased())
                             .font(.nmlMono(9))
                             .tracking(0.8)
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(p.muted)
                         Text(cell.1)
                             .font(.nmlMono(15, weight: .regular))
-                            .foregroundStyle(Color.nmlInk)
+                            .foregroundStyle(p.ink)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -292,12 +298,12 @@ struct ProactiveView: View {
     }
 
     private var agendaCard: some View {
-        NMLCard {
+        TodayCard {
             cardLabel("Agenda")
             if events.isEmpty {
                 Text("Nothing scheduled today.")
                     .font(.nmlBody(13))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(p.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
@@ -309,23 +315,23 @@ struct ProactiveView: View {
                             HStack(alignment: .top, spacing: 12) {
                                 Text(event.isAllDay ? "all-day" : timeString(event.start))
                                     .font(.nmlMono(12))
-                                    .foregroundStyle(Color.nmlTitanium)
+                                    .foregroundStyle(p.titanium)
                                     .frame(width: 62, alignment: .leading)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(event.title)
                                         .font(.nmlBody(14))
-                                        .foregroundStyle(Color.nmlInk)
+                                        .foregroundStyle(p.ink)
                                         .lineLimit(2)
                                     if let location = event.location {
                                         Text(location)
                                             .font(.nmlBody(11))
-                                            .foregroundStyle(Color.nmlMuted)
+                                            .foregroundStyle(p.muted)
                                     }
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Color.nmlMuted)
+                                    .foregroundStyle(p.muted)
                                     .offset(y: 2)
                             }
                             .contentShape(Rectangle())
@@ -349,7 +355,7 @@ struct ProactiveView: View {
     @ViewBuilder private var inboxCard: some View {
         let emails = inboxEmails
         if !emails.isEmpty {
-            NMLCard {
+            TodayCard {
                 cardLabel("Inbox")
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(emails.enumerated()), id: \.element.id) { index, email in
@@ -361,17 +367,17 @@ struct ProactiveView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(email.cleanFrom)
                                         .font(.nmlBody(13, weight: .medium))
-                                        .foregroundStyle(Color.nmlInk)
+                                        .foregroundStyle(p.ink)
                                         .lineLimit(1)
                                     Text(email.cleanSubject)
                                         .font(.nmlBody(13, weight: .light))
-                                        .foregroundStyle(Color.nmlMuted)
+                                        .foregroundStyle(p.muted)
                                         .lineLimit(1)
                                 }
                                 Spacer(minLength: 8)
                                 Image(systemName: "chevron.right")
                                     .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(Color.nmlMuted)
+                                    .foregroundStyle(p.muted)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -379,7 +385,7 @@ struct ProactiveView: View {
                         }
                         .buttonStyle(.nmlScale(0.98))
                         if index < emails.count - 1 {
-                            Divider().background(Color.nmlHairline)
+                            Divider().background(p.hairline)
                         }
                     }
                 }
@@ -428,7 +434,7 @@ struct ProactiveView: View {
 
     @ViewBuilder private var activityCard: some View {
         if let steps {
-            NMLCard {
+            TodayCard {
                 Button {
                     HapticManager.shared.impact(.light)
                     openHealth()
@@ -439,22 +445,22 @@ struct ProactiveView: View {
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.nmlMuted)
+                                .foregroundStyle(p.muted)
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(steps.formatted())
                                 .font(.nmlMono(32, weight: .ultraLight))
-                                .foregroundStyle(Color.nmlInk)
+                                .foregroundStyle(p.ink)
                             Text("steps")
                                 .font(.nmlBody(13))
-                                .foregroundStyle(Color.nmlMuted)
+                                .foregroundStyle(p.muted)
                         }
                         .padding(.bottom, 4)
                         // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(Color.nmlHairline)
-                                Capsule().fill(Color.nmlTitanium)
+                                Capsule().fill(p.hairline)
+                                Capsule().fill(p.titanium)
                                     .frame(width: geo.size.width * min(Double(steps) / 10_000, 1))
                             }
                         }
@@ -469,7 +475,7 @@ struct ProactiveView: View {
 
     @ViewBuilder private var remindersCard: some View {
         if !reminders.isEmpty {
-            NMLCard {
+            TodayCard {
                 cardLabel("Reminders")
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(reminders) { reminder in
@@ -478,18 +484,18 @@ struct ProactiveView: View {
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 10) {
                                 Circle()
-                                    .strokeBorder(Color.nmlMuted, lineWidth: 1)
+                                    .strokeBorder(p.muted, lineWidth: 1)
                                     .frame(width: 16, height: 16)
                                     .offset(y: 1)
                                 Text(reminder.title)
                                     .font(.nmlBody(14))
-                                    .foregroundStyle(Color.nmlInk)
+                                    .foregroundStyle(p.ink)
                                 Spacer(minLength: 8)
                                 if let due = reminder.due {
                                     Text(reminder.overdue ? "overdue" : timeString(due))
                                         .font(.nmlMono(11, weight: reminder.overdue ? .semibold : .regular))
                                         // Amber = attention-needed; red is reserved for destructive actions.
-                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.nmlMuted)
+                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : p.muted)
                                 }
                             }
                             .contentShape(Rectangle())
@@ -503,14 +509,14 @@ struct ProactiveView: View {
 
     @ViewBuilder private var briefingCard: some View {
         if !visibleBriefings.isEmpty {
-            NMLCard {
+            TodayCard {
                 cardLabel("Briefing")
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(visibleBriefings) { briefing in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(cleanBody(briefing))
                                 .font(.nmlBody(14, weight: .light))
-                                .foregroundStyle(Color.nmlInk)
+                                .foregroundStyle(p.ink)
                                 .lineSpacing(3)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -519,9 +525,9 @@ struct ProactiveView: View {
                                     HapticManager.shared.impact(.light)
                                     discuss(briefing)
                                 }
-                                .foregroundStyle(Color.nmlTitanium)
+                                .foregroundStyle(p.titanium)
                                 Button("Dismiss") { Task { await markRead(briefing) } }
-                                    .foregroundStyle(Color.nmlMuted)
+                                    .foregroundStyle(p.muted)
                             }
                             .font(.nmlBody(13, weight: .medium))
                             .tracking(0.3)
@@ -628,14 +634,15 @@ struct ProactiveView: View {
 }
 
 private struct EmptyProactiveState: View {
+    let palette: TodayPalette
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Nothing needs you right now.")
                 .font(.nmlDisplay(21, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(palette.ink)
             Text("This stays quiet until there's something actually useful.")
                 .font(.nmlBody(13, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(palette.muted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -665,4 +672,5 @@ private extension Briefing {
 #Preview {
     ProactiveView()
         .environment(AppState())
+        .environment(TabBarVisibility())
 }

@@ -20,7 +20,7 @@ struct AppHeaderView: View {
                 Button(action: onLeading) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(Color.nmlInk.opacity(0.85))
                         .frame(width: circle, height: circle)
                         .nmlGlass(Circle(), interactive: true)
                 }
@@ -39,7 +39,7 @@ struct AppHeaderView: View {
                         GhostIcon(active: isIncognito)
                             .frame(width: 18, height: 18)
                             .frame(width: circle, height: circle)
-                            .nmlGlass(Circle(), tint: isIncognito ? Color.white : nil, interactive: true)
+                            .nmlGlass(Circle(), tint: isIncognito ? Color.nmlInk : nil, interactive: true)
                     }
                     .buttonStyle(.nmlScale)
                     .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
@@ -53,14 +53,17 @@ struct AppHeaderView: View {
     }
 }
 
-/// A minimal filled ghost glyph with cut-out eyes. Muted when off, white when on.
+/// A minimal filled ghost glyph with cut-out eyes. Muted when off, ink when on
+/// (ink adapts to the finish so it stays visible on a light or dark glass chip).
 private struct GhostIcon: View {
     var active: Bool
-    private let muted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
 
     var body: some View {
+        // Active chip is ink-tinted, so the glyph takes the inverse of ink to stay
+        // legible in both finishes; inactive is a neutral muted grey.
         GhostShape()
-            .fill(active ? Color.white : muted, style: FillStyle(eoFill: true))
+            .fill(active ? Color.nmlAdaptive(dark: Color(red: 0.08, green: 0.08, blue: 0.10), light: .white) : Color.nmlMuted,
+                  style: FillStyle(eoFill: true))
     }
 }
 

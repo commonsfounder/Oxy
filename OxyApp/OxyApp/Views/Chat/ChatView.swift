@@ -33,12 +33,15 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
+    // Same time-based finish as the Today tab.
+    private var lightMode: Bool { TodayFinish.isLight }
     private let networkMonitor = NWPathMonitor()
 
     var body: some View {
         NavigationStack {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            // Canvas is the app-level aurora (see MainTabView) so it bleeds full-screen.
+            Color.clear
 
             VStack(spacing: 0) {
                 // Offline banner
@@ -159,8 +162,9 @@ struct ChatView: View {
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
                             }
-                            .background(Color.nmlObsidian.ignoresSafeArea(edges: .top))
+                            // No frosted band — the header's glass buttons float on the canvas.
                         }
+                        .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
                             withAnimation(.nmlSpring) {
@@ -228,6 +232,7 @@ struct ChatView: View {
                         },
                         onVoice: {
                             guard !voiceInput.isTranscribing else { return }
+                            HapticManager.shared.impact(.medium)
                             if voiceInput.isRecording {
                                 voiceInput.stopRecording()
                             } else {
@@ -235,6 +240,7 @@ struct ChatView: View {
                             }
                         },
                         onAttach: {
+                            HapticManager.shared.impact(.light)
                             isInputFocused = false
                             withAnimation(.easeOut(duration: 0.2)) { showAttachMenu = true }
                         },
@@ -266,6 +272,8 @@ struct ChatView: View {
                 )
                 .presentationDetents([.height(340), .medium])
                 .presentationDragIndicator(.visible)
+                // Modal sheet stays dark in both finishes (its surface is fixed obsidian).
+                .preferredColorScheme(.dark)
             }
             .sheet(item: $messageDraft) { draft in
                 MessageComposeSheet(draft: draft) { result in
@@ -389,7 +397,7 @@ struct ChatView: View {
                         showFileImporter = true
                     }
                 }
-                .background(Color.nmlObsidian)
+                .background(.regularMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
@@ -506,6 +514,7 @@ struct ChatView: View {
     }
 
     private func handleActionOpen(_ action: ActionResult) {
+        HapticManager.shared.impact(.light)
         if action.action == "send_message", let draft = MessageDraft(action: action) {
             presentMessageDraft(draft)
             return
@@ -762,7 +771,7 @@ private struct VoiceRecordingBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(Color.nmlObsidian)
+        .background(.ultraThinMaterial)
         .onAppear { pulse = true }
     }
 }
@@ -1096,7 +1105,7 @@ private struct ChatInputBar: View {
             .padding(.horizontal, 14)
             .padding(.top, 10)
             .padding(.bottom, 12)
-            .background(Color.nmlObsidian)
+            // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
         }
         .onAppear { voicePulse = true }
         .onChange(of: isRecording) { _, recording in
@@ -1230,4 +1239,5 @@ struct PendantWaveform: View {
 #Preview {
     ChatView()
         .environment(AppState())
+        .environment(TabBarVisibility())
 }

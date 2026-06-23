@@ -12,22 +12,38 @@ import UIKit
 // below; there's nothing to switch.
 
 extension Color {
-    /// Pure black background — the single canvas colour across the app.
+    /// Resolves to `dark` under a dark colour scheme and `light` otherwise. Most of
+    /// the app is pinned dark (OxyApp sets `.preferredColorScheme(.dark)`), so these
+    /// stay on their dark values everywhere except the Today/Chat subtrees, which
+    /// override `colorScheme` to flip the whole language to the light finish.
+    static func nmlAdaptive(dark: Color, light: Color) -> Color {
+        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
+    }
+
+    /// Pure black background — the single canvas colour across the app. Stays black
+    /// in both finishes (it doubles as the contrast colour on titanium fills); the
+    /// light Today/Chat surfaces use the aurora gradient as their canvas, not this.
     static let nmlObsidian = Color.black
-    /// Slightly raised obsidian surface for cards and rows.
-    static let nmlSurface = Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255)
+    /// Slightly raised surface for cards and rows — dark obsidian / clean white.
+    static let nmlSurface = nmlAdaptive(dark: Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255),
+                                        light: Color.white.opacity(0.82))
     /// One step lighter still — for elements nested inside a surface (input fields, pills).
-    static let nmlSurface2 = Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255)
-    /// Titanium/silver hairline — always drawn at 0.5pt.
-    static let nmlHairline = Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16)
+    static let nmlSurface2 = nmlAdaptive(dark: Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255),
+                                         light: Color.white.opacity(0.9))
+    /// Hairline rule — titanium-on-black / ink-on-light, always drawn at 0.5pt.
+    static let nmlHairline = nmlAdaptive(dark: Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16),
+                                         light: Color.black.opacity(0.10))
     /// Flat solid card border (#222222) for raw monospace telemetry cards.
     static let nmlCardBorder = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
-    /// Soft titanium for icons, dots, and quiet emphasis.
+    /// Soft titanium for icons, dots, and quiet emphasis. Fixed: it's also the fill
+    /// behind black glyphs (send button), so it can't flip to a dark value.
     static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
-    /// Soft white for primary editorial type — intentionally never pure white.
-    static let nmlInk = Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255)
-    /// Muted secondary gray (#8E8E93) for captions, eyebrows, and secondary detail.
-    static let nmlMuted = Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255)
+    /// Primary editorial type — soft white on dark, near-black ink on light.
+    static let nmlInk = nmlAdaptive(dark: Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255),
+                                    light: Color(red: 0.13, green: 0.13, blue: 0.15))
+    /// Muted secondary text for captions, eyebrows, secondary detail.
+    static let nmlMuted = nmlAdaptive(dark: Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255),
+                                      light: Color(red: 0.42, green: 0.42, blue: 0.46))
     /// Faint halo behind a live-status dot.
     static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
 
@@ -43,7 +59,9 @@ extension Color {
 
     static let nmlFillGhost  = Color.white.opacity(0.04)
     static let nmlFillSubtle = Color.white.opacity(0.08)
-    static let nmlFillBubble = Color.white.opacity(0.13)
+    /// User chat-bubble fill — a white lift on dark, an ink lift on light (a white
+    /// tint would disappear against the light aurora canvas).
+    static let nmlFillBubble = nmlAdaptive(dark: Color.white.opacity(0.13), light: Color.black.opacity(0.06))
     static let nmlFillScrim  = Color.black.opacity(0.45)
 
     // MARK: - Semantic status colours
@@ -558,6 +576,250 @@ private struct SwipeToDismissModifier: ViewModifier {
 extension View {
     /// Edge-swipe-to-dismiss for full-screen covers. Apply to the presented screen's root.
     func swipeToDismiss() -> some View { modifier(SwipeToDismissModifier()) }
+}
+
+// MARK: - Milgrain tokens (settings family)
+//
+// A harder, purer greyscale for the settings-family screens (Settings, Connectors,
+// Pendant, Memory) per the Milgrain spec: a flat #0A0A0A canvas, dark #1A1A1A
+// hairlines, pure-white headings, and a #888/#555/#333 grey ramp. Kept separate from
+// the softer app-wide `nml*` tokens (off-black canvas, warm off-white ink, translucent
+// titanium hairlines) so Chat / Today / Onboarding are left untouched.
+
+extension Color {
+    static let mgBg          = Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255)   // #0A0A0A
+    static let mgDivider     = Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255)   // #1A1A1A
+    static let mgHeading     = Color.white                                              // #FFFFFF
+    static let mgSecondary   = Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255) // #888888
+    static let mgCaption     = Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255)    // #555555
+    static let mgOff         = Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255)    // #333333
+    static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)   // #FF3B30
+}
+
+extension Font {
+    /// Didot — iOS's built-in high-contrast Modern serif. Headings and the wordmark
+    /// ONLY (17pt and up): its hairline strokes alias and turn muddy at small sizes,
+    /// so labels and captions stay in the clean sans. Default weight is bold per spec.
+    static func mgDidot(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+        let bolds: Set<Font.Weight> = [.semibold, .bold, .heavy, .black]
+        return .custom(bolds.contains(weight) ? "Didot-Bold" : "Didot", size: size)
+    }
+}
+
+/// Full-bleed dark hairline (#1A1A1A, 0.5pt) — the Milgrain row separator.
+struct MilgrainDivider: View {
+    var body: some View {
+        Rectangle().fill(Color.mgDivider).frame(height: 0.5)
+    }
+}
+
+/// Plain uppercase, letter-spaced caption section header in #555. Left-aligned, no
+/// background. Sans, not Didot — Didot is illegible at 11pt.
+struct MilgrainSectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title.uppercased())
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(2.0)
+            .foregroundStyle(Color.mgCaption)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// White-on / #333-off capsule toggle, no glow or halo.
+struct MilgrainToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
+        } label: {
+            Capsule()
+                .fill(isOn ? Color.mgHeading : Color.mgOff)
+                .frame(width: 30, height: 16)
+                .overlay(
+                    Circle()
+                        .fill(isOn ? Color.mgBg : Color.mgSecondary)
+                        .frame(width: 12, height: 12)
+                        .padding(2)
+                        .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
+                )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
+        .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
+    }
+}
+
+// MARK: - Today tab: light/dark glass language
+//
+// The Today tab is the one screen that breaks the fixed-black rule: it has a
+// living aurora gradient with glass cards floating over it, in two finishes.
+// `TodayPalette` swaps the text/line colours between the dark aurora and the
+// light pastel finish; cards read `p.ink` / `p.muted` etc. so a single bool
+// flips the whole screen.
+
+/// The Today/Chat finish follows the time of day automatically: the light pastel
+/// finish by day, the dark aurora at night. Not user-toggled — it tracks the clock.
+enum TodayFinish {
+    static var isLight: Bool {
+        let hour = Calendar.current.component(.hour, from: Date())
+        return (7..<19).contains(hour)   // 07:00–18:59 = day
+    }
+}
+
+struct TodayPalette {
+    let ink: Color       // primary editorial text
+    let muted: Color     // captions, eyebrows, secondary
+    let titanium: Color  // icons, quiet emphasis
+    let hairline: Color  // 0.5pt rules
+
+    static let dark = TodayPalette(
+        ink:      Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255),
+        muted:    Color(red: 152 / 255, green: 152 / 255, blue: 158 / 255),
+        titanium: Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255),
+        hairline: Color.white.opacity(0.14)
+    )
+    static let light = TodayPalette(
+        ink:      Color(red: 0.13, green: 0.13, blue: 0.15),
+        muted:    Color(red: 0.42, green: 0.42, blue: 0.46),
+        titanium: Color(red: 0.30, green: 0.30, blue: 0.34),
+        hairline: Color.black.opacity(0.10)
+    )
+}
+
+/// A glass card for the Today tab — same silhouette as `NMLCard` but with a
+/// refractive Liquid Glass surface instead of an opaque fill, so it picks up the
+/// aurora gradient behind it. Group these in `nmlGlassContainer` to get the fluid
+/// morph between cards on iOS 26.
+struct TodayCard<Content: View>: View {
+    var padding: CGFloat = 16
+    @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var scheme
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(padding)
+            .background {
+                // Both finishes use a plain shape FILL (not a glassEffect/material modifier):
+                // a glass-effect background applies vibrancy to the card's content and washes
+                // the text out. A fill keeps the content text at full contrast.
+                if scheme == .dark {
+                    shape.fill(Color(red: 0.10, green: 0.10, blue: 0.12))
+                    shape.strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5)
+                } else {
+                    shape.fill(.ultraThinMaterial)
+                    shape.fill(Color.white.opacity(0.55))
+                    shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 0.5)
+                }
+            }
+            .clipShape(shape)
+            .shadow(color: Color.black.opacity(scheme == .dark ? 0 : 0.07), radius: 14, y: 6)
+    }
+}
+
+/// The living background for the Today tab: a slowly-drifting 3×3 mesh gradient.
+/// Dark finish is a muted aurora that stays mostly black (text stays readable);
+/// light finish is the soft pastel wash. Falls back to a static linear gradient
+/// before iOS 18 where `MeshGradient` doesn't exist.
+struct TodayAuroraBackground: View {
+    let light: Bool
+
+    private var colors: [Color] { light ? Self.lightColors : Self.darkColors }
+
+    var body: some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                // ponytail: 20fps drift — slow enough to barely cost battery, smooth
+                // enough to read as "alive". Drop the interval if it ever feels jerky.
+                TimelineView(.animation(minimumInterval: 1.0 / 20.0)) { ctx in
+                    let t = ctx.date.timeIntervalSinceReferenceDate
+                    MeshGradient(width: 3, height: 3, points: Self.points(t), colors: colors)
+                }
+            } else {
+                LinearGradient(colors: [colors.first!, colors.last!],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+        }
+        .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.5), value: light)
+    }
+
+    /// 3×3 control points; corners pinned, interior + edge-mids wobble on sine
+    /// waves at different speeds so the gradient never visibly loops.
+    static func points(_ t: Double) -> [SIMD2<Float>] {
+        func w(_ base: Double, _ speed: Double, _ amp: Double) -> Float {
+            Float(base + sin(t * speed) * amp)
+        }
+        return [
+            [0, 0],                         [w(0.5, 0.6, 0.06), 0],                  [1, 0],
+            [0, w(0.5, 0.5, 0.06)],         [w(0.5, 0.4, 0.08), w(0.5, 0.7, 0.08)], [1, w(0.5, 0.55, 0.06)],
+            [0, 1],                         [w(0.5, 0.65, 0.06), 1],                 [1, 1]
+        ]
+    }
+
+    // Dark: stays mostly true-black with a faint cool lift in the middle band — a
+    // quiet depth, not a purple haze.
+    private static let darkColors: [Color] = {
+        let lift  = Color(red: 0.09, green: 0.10, blue: 0.13)
+        let lift2 = Color(red: 0.11, green: 0.12, blue: 0.15)
+        return [.black, .black, .black,
+                lift,   lift2,  lift,
+                .black, .black, .black]
+    }()
+
+    // Light: near-white overall with only a whisper of colour in the middle band —
+    // clean white top AND bottom (no coloured blob hanging at the edges). Subtle on
+    // purpose; the reference is a faint holographic sheen on white, not a wash.
+    private static let lightColors: [Color] = {
+        let white = Color(red: 0.98, green: 0.975, blue: 0.965)
+        let lilac = Color(red: 0.91, green: 0.89,  blue: 0.97)
+        let peach = Color(red: 0.99, green: 0.93,  blue: 0.89)
+        let sky   = Color(red: 0.89, green: 0.94,  blue: 0.99)
+        return [white, white, white,
+                lilac, peach, sky,
+                white, white, white]
+    }()
+}
+
+// MARK: - Scroll-aware tab bar
+//
+// Reddit/iOS-style: the floating tab bar tucks away while you scroll down into
+// content and slides back when you scroll up (or reach the top). A single shared
+// observable carries the hidden state; each scroll view reports its direction via
+// `hidesTabBarOnScroll()` and MainTabView reads `hidden` to offset the bar.
+
+@Observable final class TabBarVisibility {
+    var hidden = false
+}
+
+private struct HidesTabBarOnScroll: ViewModifier {
+    @Environment(TabBarVisibility.self) private var visibility
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { oldY, newY in
+                // Ignore rubber-banding above the top and sub-pixel jitter.
+                guard newY > 0 else { withAnimation(.nmlStandard) { visibility.hidden = false }; return }
+                let delta = newY - oldY
+                guard abs(delta) > 6 else { return }
+                withAnimation(.nmlStandard) { visibility.hidden = delta > 0 && newY > 40 }
+            }
+        } else {
+            content // ponytail: pre-iOS-18 just keeps the bar pinned; not worth a manual offset reader.
+        }
+    }
+}
+
+extension View {
+    /// Hide the floating tab bar while scrolling down this scroll view, reveal it on
+    /// scroll-up or at the top. Attach to a `ScrollView` inside a tab.
+    func hidesTabBarOnScroll() -> some View { modifier(HidesTabBarOnScroll()) }
 }
 
 /// The quiet counterpart: border-only, muted titanium text, no fill.
