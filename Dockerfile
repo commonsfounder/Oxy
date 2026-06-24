@@ -5,6 +5,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
+# run_browser_task drives a real headless Chromium (playwright-extra). The slim base
+# ships neither the browser binary nor its shared libs, so install both here or
+# chromium.launch() fails at runtime on Cloud Run. --with-deps pulls the apt libs.
+RUN npx playwright install --with-deps chromium
+
 COPY . .
 
 ENV NODE_ENV=production
