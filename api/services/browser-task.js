@@ -270,6 +270,30 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   return { type: 'awaiting_more', summary: `Still working on it — ${session.history.length} step(s) so far. Want me to keep going?` };
 }
 
+async function confirmPayment(userId) {
+  const session = getSession(userId);
+  if (!session || !session.pendingPaymentLabel) {
+    return { type: 'error', error: 'No order is waiting for payment confirmation — it may have expired.' };
+  }
+  try {
+    const elements = await extractClickableElements(session.page);
+    const target = findElementByText(elements, session.pendingPaymentLabel);
+    if (!target) {
+      return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
+    }
+    await session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex).click({ timeout: 10000 });
+    const text = `Done — placed the order (${session.pendingPaymentLabel}).`;
+    await closeSession(userId);
+    return { type: 'done', text };
+  } catch (error) {
+    return { type: 'error', error: error.message };
+  }
+}
+
+function cancelPayment(userId) {
+  touchSession(userId);
+}
+
 module.exports = {
   matchesPaymentKeyword,
   buildDecisionPrompt,
@@ -280,5 +304,7 @@ module.exports = {
   touchSession,
   closeSession,
   extractClickableElements,
-  runOrderingTurn
+  runOrderingTurn,
+  confirmPayment,
+  cancelPayment
 };
