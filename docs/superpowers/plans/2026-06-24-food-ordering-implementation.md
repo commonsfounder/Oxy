@@ -106,7 +106,7 @@ test('findElementByText finds an exact match case-insensitively', () => {
 });
 
 test('findElementByText falls back to a substring match', () => {
-  const elements = [{ id: 0, text: 'Place your order now' }];
+  const elements = [{ id: 0, text: 'Place order now' }];
   const found = findElementByText(elements, 'place order');
   assert.equal(found.id, 0);
 });
@@ -494,8 +494,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       if (decision.action === 'ready_for_payment') {
-        const label = findElementByText(elements, decision.summary)?.text;
-        session.pendingPaymentLabel = label || null;
+        // Store the real pay button's text (the cart-summary text never matches a
+        // clickable element), so confirmPayment can re-find and click it later.
+        const payEl = elements.find(el => matchesPaymentKeyword(el.text));
+        session.pendingPaymentLabel = payEl?.text || null;
         return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
       }
 
