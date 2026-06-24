@@ -6920,3 +6920,7 @@ if (process.env.SENTRY_DSN) {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+// Exposed so tests can exercise the real dispatch path (executeActions -> the contract
+// validator -> this switch) instead of only unit-testing pieces in isolation — that gap
+// is exactly how the contract/handler mismatch shipped to production undetected.
+module.exports.executeActions = executeActions;
