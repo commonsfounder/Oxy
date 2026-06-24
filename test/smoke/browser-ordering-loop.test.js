@@ -72,3 +72,53 @@ test('findElementByText returns null when nothing matches', () => {
   const elements = [{ id: 0, text: 'Add to basket' }];
   assert.equal(findElementByText(elements, 'place order'), null);
 });
+
+const {
+  getSession,
+  createSession,
+  touchSession,
+  closeSession
+} = require('../../api/services/browser-task');
+
+function fakeBrowser() {
+  let closed = false;
+  return {
+    closed: () => closed,
+    close: async () => { closed = true; }
+  };
+}
+
+test('createSession stores a session retrievable by getSession', () => {
+  const browser = fakeBrowser();
+  createSession('user-a', { browser, context: {}, page: {}, goal: 'order pizza', history: [], pendingPaymentLabel: null });
+  const found = getSession('user-a');
+  assert.ok(found);
+  assert.equal(found.goal, 'order pizza');
+});
+
+test('getSession returns null and closes the browser once idle past the timeout', () => {
+  const browser = fakeBrowser();
+  createSession('user-b', { browser, context: {}, page: {}, goal: 'order pizza', history: [], pendingPaymentLabel: null });
+  const session = getSession('user-b');
+  session.lastActivityAt = Date.now() - (21 * 60 * 1000); // older than the 20-minute idle timeout
+  const result = getSession('user-b');
+  assert.equal(result, null);
+});
+
+test('touchSession refreshes lastActivityAt so the session is not evicted', () => {
+  const browser = fakeBrowser();
+  createSession('user-c', { browser, context: {}, page: {}, goal: 'order pizza', history: [], pendingPaymentLabel: null });
+  const session = getSession('user-c');
+  session.lastActivityAt = Date.now() - (21 * 60 * 1000);
+  touchSession('user-c');
+  const result = getSession('user-c');
+  assert.ok(result);
+});
+
+test('closeSession closes the browser and removes the session', async () => {
+  const browser = fakeBrowser();
+  createSession('user-d', { browser, context: {}, page: {}, goal: 'order pizza', history: [], pendingPaymentLabel: null });
+  await closeSession('user-d');
+  assert.equal(getSession('user-d'), null);
+  assert.equal(browser.closed(), true);
+});

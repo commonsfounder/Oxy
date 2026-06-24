@@ -42,6 +42,39 @@ async function launchBrowser() {
   return chromium.launch({ headless: true });
 }
 
+// Live session store with idle eviction
+const SESSION_IDLE_MS = 20 * 60 * 1000;
+const liveSessions = new Map();
+
+function createSession(userId, session) {
+  const record = { ...session, lastActivityAt: Date.now() };
+  liveSessions.set(userId, record);
+  return record;
+}
+
+function getSession(userId) {
+  const session = liveSessions.get(userId);
+  if (!session) return null;
+  if (Date.now() - session.lastActivityAt > SESSION_IDLE_MS) {
+    liveSessions.delete(userId);
+    session.browser.close().catch(() => {});
+    return null;
+  }
+  return session;
+}
+
+function touchSession(userId) {
+  const session = liveSessions.get(userId);
+  if (session) session.lastActivityAt = Date.now();
+}
+
+async function closeSession(userId) {
+  const session = liveSessions.get(userId);
+  if (!session) return;
+  liveSessions.delete(userId);
+  await session.browser.close().catch(() => {});
+}
+
 const PAYMENT_KEYWORD_PATTERN = /\b(place( your)? order|pay now|confirm purchase|complete order|checkout\s*(and|&)\s*pay|buy now|submit payment|confirm( and)? pay)\b/i;
 
 function matchesPaymentKeyword(text) {
@@ -97,5 +130,9 @@ module.exports = {
   matchesPaymentKeyword,
   buildDecisionPrompt,
   parseModelDecision,
-  findElementByText
+  findElementByText,
+  createSession,
+  getSession,
+  touchSession,
+  closeSession
 };
