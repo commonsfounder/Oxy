@@ -277,7 +277,10 @@ async function confirmPayment(userId) {
   }
   try {
     const elements = await extractClickableElements(session.page);
-    const target = findElementByText(elements, session.pendingPaymentLabel);
+    // Exact match only — never substring-fallback at the payment step, where a
+    // stored "Pay" could otherwise match "Apple Pay"/"PayPal" and click the wrong control.
+    const wanted = session.pendingPaymentLabel.trim().toLowerCase();
+    const target = elements.find(el => el.text.trim().toLowerCase() === wanted);
     if (!target) {
       return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
     }
