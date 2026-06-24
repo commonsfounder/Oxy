@@ -9,8 +9,12 @@ const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL |
 // app reports "stuck waiting on the network" while the server is still working. Keep
 // turns short; if the order isn't done, return awaiting_more and the next message
 // (routed back in by the deterministic-resume path) continues it.
+//
+// This budget covers the WHOLE turn, including opening a brand-new browser session
+// (launch + page load + hydration) on the first call — not just the step loop — or a
+// slow first open alone could already exceed the 45s watchdog before a single step runs.
 const MAX_STEPS = 15;
-const MAX_DURATION_MS = 30 * 1000;
+const MAX_DURATION_MS = 18 * 1000;
 
 let geminiClient = null;
 function getGemini() {
@@ -261,10 +265,10 @@ async function openNewSession(userId, url, goal) {
   const browser = await launchBrowser();
   const context = await browser.newContext(storageState ? { storageState } : {});
   const page = await context.newPage();
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 10000 });
   // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
   // and the model thinks there's no search bar.
-  await settle(page, 8000);
+  await settle(page, 5000);
   return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal) });
 }
 
@@ -301,6 +305,10 @@ async function loadResumeContext(userId) {
 }
 
 async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
+  // Started here, not after the session is open — a slow first-time browser launch +
+  // page load must count against the same budget that bounds the step loop, or the
+  // open alone can eat the mobile client's 45s watchdog before a single step runs.
+  const startedAt = Date.now();
   let session = getSession(userId);
   if (!session) {
     // No live session. Prefer the url we were handed; otherwise re-open where we left
@@ -351,7 +359,6 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     return { type: 'ask', question: 'This is taking a while — want me to keep trying, or stop here?' };
   }
 
-  const startedAt = Date.now();
   let steps = 0;
   let consecutiveBadDecisions = 0;
   // One calm line when we genuinely can't make progress — never a loop of asks, never a
