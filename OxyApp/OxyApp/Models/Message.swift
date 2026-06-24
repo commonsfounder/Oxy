@@ -289,10 +289,18 @@ struct BriefingSignal: Codable, Equatable, Identifiable {
     let receipt: String?
     let label: String?
     let prompt: String?
+    /// Present only on auto-executed actions that can be reversed (the server holds the
+    /// actual descriptor; the app just needs to know an Undo exists and send the title back).
+    let undo: BriefingSignalUndo?
 
     var id: String { title + "|" + (status ?? "") }
     var isDone: Bool { status == "done" }
     var isPending: Bool { status == "pending" }
+    var canUndo: Bool { isDone && undo != nil }
+}
+
+struct BriefingSignalUndo: Codable, Equatable {
+    let type: String?
 }
 
 struct BriefingEmail: Codable, Equatable, Identifiable {

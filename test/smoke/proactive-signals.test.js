@@ -72,6 +72,20 @@ test('executeSafeSignals runs the safe tier once and is idempotent across re-swe
   assert.equal(second.signals[0].status, 'done');
 });
 
+test('executeSafeSignals attaches an undo descriptor to reminders but not calendar events', async () => {
+  const exec = async () => ({ success: true, actionSummary: 'Done' });
+  const reminder = [{ title: 'Leave by 8:40', detail: '', action: { type: 'create_reminder', params: { title: 'Leave for the dentist', due_date: 'x' } } }];
+  const cal = [{ title: 'Focus block', detail: '', action: { type: 'create_calendar_event', params: { title: 'Focus', start: 'x' } } }];
+
+  const r = await executeSafeSignals('u1', reminder, [], exec);
+  assert.equal(r.signals[0].undo.type, 'cancel_scheduled_task');
+  assert.equal(r.signals[0].undo.params.title, 'Leave for the dentist');
+
+  const c = await executeSafeSignals('u1', cal, [], exec);
+  assert.equal(c.signals[0].status, 'done');
+  assert.equal(c.signals[0].undo, undefined);
+});
+
 test('executeSafeSignals leaves sensitive actions pending with a tap prompt and never executes them', async () => {
   let calls = 0;
   const exec = async () => { calls += 1; return { success: true }; };

@@ -18,6 +18,8 @@ struct ProactiveView: View {
     // Throttle for the auto proactive run below.
     @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
     @State private var contentAppeared = false
+    // Signals the user has undone this session — flips the receipt to "Undone" immediately.
+    @State private var undoneSignalIDs: Set<String> = []
 
     // Light by day, dark at night — tracks the clock, not a manual switch.
     private var lightMode: Bool { TodayFinish.isLight }
@@ -581,8 +583,9 @@ struct ProactiveView: View {
                         .padding(.bottom, 4)
                 }
                 VStack(alignment: .leading, spacing: 0) {
+                    let briefingId = visibleBriefings.first?.id ?? ""
                     ForEach(Array(signals.enumerated()), id: \.element.id) { index, signal in
-                        signalRow(signal)
+                        signalRow(signal, briefingId: briefingId)
                         if index < signals.count - 1 {
                             Divider().background(p.hairline)
                         }
@@ -592,8 +595,9 @@ struct ProactiveView: View {
         }
     }
 
-    private func signalRow(_ s: BriefingSignal) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func signalRow(_ s: BriefingSignal, briefingId: String) -> some View {
+        let undone = undoneSignalIDs.contains(s.id)
+        return HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(s.title)
                     .font(.nmlBody(14, weight: .medium))
@@ -606,12 +610,12 @@ struct ProactiveView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 // A safe action already ran — quiet receipt, no tap needed.
-                if s.isDone, let receipt = s.receipt, !receipt.isEmpty {
+                if s.isDone {
                     HStack(spacing: 5) {
-                        Image(systemName: "checkmark")
+                        Image(systemName: undone ? "arrow.uturn.backward" : "checkmark")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Color.nmlGlow)
-                        Text(receipt)
+                            .foregroundStyle(undone ? p.muted : Color.nmlGlow)
+                        Text(undone ? "Undone" : (s.receipt ?? "Done"))
                             .font(.nmlMono(11))
                             .foregroundStyle(p.muted)
                     }
@@ -632,10 +636,40 @@ struct ProactiveView: View {
                 }
                 .buttonStyle(.nmlScale(0.97))
                 .fixedSize()
+            } else if s.canUndo && !undone {
+                Button { undo(s, briefingId: briefingId) } label: {
+                    Text("Undo")
+                        .font(.nmlBody(12, weight: .medium))
+                        .foregroundStyle(p.muted)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                }
+                .buttonStyle(.nmlScale(0.97))
+                .fixedSize()
             }
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Reverse an auto-executed safe action. Optimistic — flip the row immediately, revert if
+    /// the server can't undo it. The server runs the descriptor it stored, not anything we send.
+    private func undo(_ s: BriefingSignal, briefingId: String) {
+        guard !briefingId.isEmpty else { return }
+        HapticManager.shared.impact(.light)
+        undoneSignalIDs.insert(s.id)
+        Task {
+            do {
+                _ = try await APIClient.shared.request(
+                    path: "/briefings/\(briefingId)/signal-undo",
+                    method: "POST",
+                    body: ["userId": appState.userId, "title": s.title]
+                )
+            } catch {
+                await MainActor.run { undoneSignalIDs.remove(s.id) }
+            }
+        }
     }
 
     /// Hands a pending signal to chat as a sent message — Millie carries it out, with the

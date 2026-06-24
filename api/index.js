@@ -4602,6 +4602,41 @@ app.post('/briefings/:id/read', async (req, res) => {
   }
 });
 
+// Undo an auto-executed safe signal. The client sends only the signal title; the server
+// runs the undo descriptor it stored when the action ran, so there's no way to drive an
+// arbitrary action through here. Marks the signal undone so it stays undone across reloads.
+app.post('/briefings/:id/signal-undo', async (req, res) => {
+  try {
+    const { userId, title } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { data: briefing, error } = await supabase
+      .from('briefings')
+      .select('id, metadata')
+      .eq('id', req.params.id)
+      .eq('user_id', userId)
+      .single();
+    if (error || !briefing) return res.status(404).json({ error: 'Briefing not found.' });
+
+    const metadata = briefing.metadata || {};
+    const signals = Array.isArray(metadata.signals) ? metadata.signals : [];
+    const signal = signals.find(s => s.title === title && s.status === 'done' && s.undo?.type);
+    if (!signal) return res.status(400).json({ error: 'Nothing to undo.' });
+
+    const result = await executeAction(userId, signal.undo.type, signal.undo.params);
+    if (!result || !result.success) {
+      return res.status(502).json({ error: result?.error || 'Undo failed.' });
+    }
+
+    signal.status = 'undone';
+    signal.receipt = 'Undone';
+    delete signal.undo;
+    await supabase.from('briefings').update({ metadata }).eq('id', briefing.id).eq('user_id', userId);
+    res.json({ ok: true });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 app.post('/proactive/:userId/run', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -5105,6 +5140,16 @@ function parseSignalsResponse(raw) {
   return { lead: stripActionMarkupForDisplay(text).trim(), signals: [] };
 }
 
+// How to reverse a safe action, when it's reversible. cancel_scheduled_task matches by the
+// reminder's own title (the title we created it with — not the signal headline), so no id
+// capture is needed. Calendar events are undone in the Calendar app (the app deep-links there).
+function undoDescriptorFor(action) {
+  if (action.type === 'create_reminder' && action.params?.title) {
+    return { type: 'cancel_scheduled_task', params: { title: action.params.title } };
+  }
+  return null;
+}
+
 // Runs safe-tier actions, idempotently, annotating each signal with what
 // happened. Strips structured params from the stored shape (the app only needs
 // status/receipt for done, label/prompt for pending). `exec` is injectable for tests.
@@ -5119,9 +5164,11 @@ async function executeSafeSignals(userId, signals, priorExecuted = [], exec = ex
 
     if (tier === 'safe') {
       const sig = signalActionSig(action);
+      const undo = undoDescriptorFor(action);
       if (executed.has(sig)) {
         stored.status = 'done';
         stored.receipt = signal.receipt || 'Done';
+        if (undo) stored.undo = undo;
         out.push(stored);
         continue;
       }
@@ -5130,6 +5177,7 @@ async function executeSafeSignals(userId, signals, priorExecuted = [], exec = ex
         if (result && result.success) {
           stored.status = 'done';
           stored.receipt = result.actionSummary || result.text || 'Done';
+          if (undo) stored.undo = undo;
           executed.add(sig);
         }
         // failed/invalid action degrades silently to an info-only signal
