@@ -18,6 +18,21 @@ test('matchesPaymentKeyword catches common finalize/payment button text', () => 
   assert.equal(matchesPaymentKeyword(undefined), false);
 });
 
+test('matchesPaymentKeyword catches real-world finalize buttons and rejects mid-flow ones', () => {
+  // must match (finalize / charge)
+  for (const t of ['Pay £9.50 now', 'Pay', 'Order now', 'Complete your order',
+    'Complete purchase', 'Submit order', 'Confirm order', 'Confirm purchase',
+    'Buy', 'Buy now', 'Slide to pay', 'Confirm and pay', 'Proceed to payment',
+    'Place your order']) {
+    assert.equal(matchesPaymentKeyword(t), true, `expected match: ${t}`);
+  }
+  // must NOT match (browse / mid-flow — pausing here would strand the user)
+  for (const t of ['Add to basket', 'Add to cart', 'View menu', 'Search',
+    'Proceed to checkout', 'Continue', 'Edit order', 'More options']) {
+    assert.equal(matchesPaymentKeyword(t), false, `expected no match: ${t}`);
+  }
+});
+
 test('buildDecisionPrompt includes the goal, history, and numbered elements', () => {
   const prompt = buildDecisionPrompt('order a pizza', ['Searched for pizza places'], [
     { id: 0, text: 'Domino\'s' },

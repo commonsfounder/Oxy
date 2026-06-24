@@ -85,7 +85,12 @@ async function closeSession(userId) {
   await session.browser.close().catch(() => {});
 }
 
-const PAYMENT_KEYWORD_PATTERN = /\b(place( your)? order|pay now|confirm purchase|complete order|checkout\s*(and|&)\s*pay|buy now|submit payment|confirm( and)? pay)\b/i;
+// Deterministic backstop: any element whose text matches this is treated as a
+// payment/finalize control and is NEVER auto-clicked — the loop pauses for explicit
+// user confirmation instead. Tuned to over-match: a false positive merely over-pauses,
+// a false negative is an unconfirmed charge. \bpay\b / \bbuy\b cover "pay now",
+// "pay £9.50 now", "slide to pay", "confirm and pay", "buy now", etc.
+const PAYMENT_KEYWORD_PATTERN = /\bpay\b|\bbuy\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)|checkout\s*(and|&)?\s*pay|proceed\s+to\s+payment|slide\s+to\s+pay/i;
 
 function matchesPaymentKeyword(text) {
   return PAYMENT_KEYWORD_PATTERN.test(String(text || ''));
@@ -175,7 +180,17 @@ async function openNewSession(userId, url, goal) {
   const context = await browser.newContext(storageState ? { storageState } : {});
   const page = await context.newPage();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  return createSession(userId, { browser, context, page, goal, history: [], pendingPaymentLabel: null });
+  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null });
+}
+
+// Best-effort: save cookies/localStorage so a logged-in session survives into the
+// next run. Failing to persist must never abort an in-progress order.
+async function persistStorage(userId, session) {
+  try {
+    await saveStorageState(userId, session.site, await session.context.storageState());
+  } catch {
+    // swallow — cookie persistence is non-critical to the current turn
+  }
 }
 
 async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
@@ -262,6 +277,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
       consecutiveBadDecisions = 0;
       touchSession(userId);
+      await persistStorage(userId, session);
     }
   } catch (error) {
     return { type: 'error', error: error.message };
@@ -286,6 +302,7 @@ async function confirmPayment(userId) {
     }
     await session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex).click({ timeout: 10000 });
     const text = `Done — placed the order (${session.pendingPaymentLabel}).`;
+    await persistStorage(userId, session);
     await closeSession(userId);
     return { type: 'done', text };
   } catch (error) {

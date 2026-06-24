@@ -40,7 +40,7 @@ const {
   advanceScheduledTask,
   describeSchedule
 } = require('./services/scheduled-tasks');
-const { runOrderingTurn, confirmPayment, cancelPayment, getSession } = require('./services/browser-task');
+const { runOrderingTurn, confirmPayment, getSession } = require('./services/browser-task');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
