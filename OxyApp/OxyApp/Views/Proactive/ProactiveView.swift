@@ -10,6 +10,7 @@ struct ProactiveView: View {
     @State private var events: [TodayEvent] = []
     @State private var reminders: [TodayReminder] = []
     @State private var steps: Int?
+    @State private var sleepMinutes: Int?
     @State private var isLoading = false
     @State private var isChecking = false
     @State private var errorMessage: String?
@@ -52,6 +53,10 @@ struct ProactiveView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 48)
                         } else {
+                            signalsCard
+                                .opacity(contentAppeared ? 1 : 0)
+                                .offset(y: contentAppeared ? 0 : 14)
+                                .animation(.nmlSpring.delay(0.04), value: contentAppeared)
                             weatherCard
                                 .opacity(contentAppeared ? 1 : 0)
                                 .offset(y: contentAppeared ? 0 : 14)
@@ -115,7 +120,7 @@ struct ProactiveView: View {
     }
 
     private var hasAnyContent: Bool {
-        weather != nil || !events.isEmpty || steps != nil || !reminders.isEmpty || !visibleBriefings.isEmpty
+        weather != nil || !events.isEmpty || steps != nil || sleepMinutes != nil || !reminders.isEmpty || !visibleBriefings.isEmpty
     }
 
     // MARK: - Hero
@@ -237,6 +242,8 @@ struct ProactiveView: View {
                             Text("\(Int(weather.temperatureC.rounded()))°")
                                 .font(.nmlMono(40, weight: .ultraLight))
                                 .foregroundStyle(p.ink)
+                                .contentTransition(.numericText())
+                                .animation(.nmlStandard, value: weather.temperatureC)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(weather.conditionDescription)
                                     .font(.nmlBody(13))
@@ -348,10 +355,16 @@ struct ProactiveView: View {
     private var inboxEmails: [BriefingEmail] {
         // Emails ride along on the most recent briefing's metadata. Dedup by id, and drop
         // marketing/bulk mail — the dashboard is for things that actually need you.
+        // ponytail: the client has no importance signal (no unread/priority on BriefingEmail),
+        // so "important" = freshest non-promotional, newest first, capped to stay glanceable.
+        // Real ranking has to come from the proactive job that fills metadata.emails.
         var seen = Set<String>()
         return visibleBriefings
             .flatMap(\.emails)
             .filter { seen.insert($0.id).inserted && !$0.isLikelyPromotional }
+            .sorted { (Date.oxyParse($0.date) ?? .distantPast) > (Date.oxyParse($1.date) ?? .distantPast) }
+            .prefix(5)
+            .map { $0 }
     }
 
     @ViewBuilder private var inboxCard: some View {
@@ -435,7 +448,7 @@ struct ProactiveView: View {
     }
 
     @ViewBuilder private var activityCard: some View {
-        if let steps {
+        if steps != nil || sleepMinutes != nil {
             TodayCard {
                 Button {
                     HapticManager.shared.impact(.light)
@@ -449,30 +462,66 @@ struct ProactiveView: View {
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(p.muted)
                         }
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(steps.formatted())
-                                .font(.nmlMono(32, weight: .ultraLight))
-                                .foregroundStyle(p.ink)
-                            Text("steps")
-                                .font(.nmlBody(13))
-                                .foregroundStyle(p.muted)
-                        }
-                        .padding(.bottom, 4)
-                        // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(p.hairline)
-                                Capsule().fill(p.titanium)
-                                    .frame(width: geo.size.width * min(Double(steps) / 10_000, 1))
+                        if let steps {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(steps.formatted())
+                                    .font(.nmlMono(32, weight: .ultraLight))
+                                    .foregroundStyle(p.ink)
+                                    .contentTransition(.numericText())
+                                Text("steps")
+                                    .font(.nmlBody(13))
+                                    .foregroundStyle(p.muted)
                             }
+                            .padding(.bottom, 4)
+                            // Progress toward a flat 10k goal. ponytail: hardcoded goal, make it a setting if asked.
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(p.hairline)
+                                    Capsule().fill(p.titanium)
+                                        .frame(width: geo.size.width * min(Double(steps) / 10_000, 1))
+                                }
+                            }
+                            .frame(height: 1.5)
                         }
-                        .frame(height: 1.5)
+                        // Last night's sleep rides along as the card's second vital. When steps
+                        // are missing it stands alone (no goal bar to anchor to).
+                        if let sleepMinutes {
+                            sleepRow(sleepMinutes, hasSteps: steps != nil)
+                        }
                     }
                     .contentShape(Rectangle())
+                    // One transaction rolls the digits and slides the goal bar together.
+                    .animation(.nmlRelax, value: steps)
+                    .animation(.nmlStandard, value: sleepMinutes)
                 }
                 .buttonStyle(.nmlScale(0.98))
             }
         }
+    }
+
+    @ViewBuilder private func sleepRow(_ minutes: Int, hasSteps: Bool) -> some View {
+        VStack(spacing: 0) {
+            if hasSteps {
+                Rectangle().fill(p.hairline).frame(height: 0.5).padding(.top, 14)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Last night")
+                    .font(.nmlBody(13))
+                    .foregroundStyle(p.muted)
+                Spacer(minLength: 8)
+                Text(sleepLabel(minutes))
+                    .font(.nmlMono(15, weight: .regular))
+                    .foregroundStyle(p.ink)
+                    .contentTransition(.numericText())
+            }
+            .padding(.top, hasSteps ? 12 : 4)
+        }
+    }
+
+    /// "7h 20m" / "6h" — whole-hour sleep reads cleaner without a trailing "0m".
+    private func sleepLabel(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
     }
 
     @ViewBuilder private var remindersCard: some View {
@@ -509,10 +558,101 @@ struct ProactiveView: View {
         }
     }
 
+    // MARK: - Signals (what matters today)
+
+    /// The freshest briefing's ranked feed. Empty for legacy briefings (which fall back
+    /// to the prose `briefingCard`).
+    private var topSignals: [BriefingSignal] {
+        visibleBriefings.first?.signals ?? []
+    }
+
+    @ViewBuilder private var signalsCard: some View {
+        let signals = topSignals
+        if !signals.isEmpty {
+            TodayCard {
+                cardLabel("What matters")
+                if let lead = visibleBriefings.first?.lead, !lead.isEmpty {
+                    Text(lead)
+                        .font(.nmlBody(14, weight: .light))
+                        .foregroundStyle(p.ink)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 4)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(signals.enumerated()), id: \.element.id) { index, signal in
+                        signalRow(signal)
+                        if index < signals.count - 1 {
+                            Divider().background(p.hairline)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func signalRow(_ s: BriefingSignal) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(s.title)
+                    .font(.nmlBody(14, weight: .medium))
+                    .foregroundStyle(p.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail = s.detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.nmlBody(13, weight: .light))
+                        .foregroundStyle(p.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // A safe action already ran — quiet receipt, no tap needed.
+                if s.isDone, let receipt = s.receipt, !receipt.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color.nmlGlow)
+                        Text(receipt)
+                            .font(.nmlMono(11))
+                            .foregroundStyle(p.muted)
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 8)
+            // A sensitive action waits for one tap; sending the prompt into chat routes it
+            // through the existing flow (which confirms before anything leaves).
+            if s.isPending, let label = s.label, let prompt = s.prompt, !label.isEmpty {
+                Button { act(prompt) } label: {
+                    Text(label)
+                        .font(.nmlBody(12, weight: .medium))
+                        .foregroundStyle(p.titanium)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                }
+                .buttonStyle(.nmlScale(0.97))
+                .fixedSize()
+            }
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Hands a pending signal to chat as a sent message — Millie carries it out, with the
+    /// existing review sheet gating anything that leaves the device.
+    private func act(_ prompt: String) {
+        HapticManager.shared.impact(.light)
+        NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            NotificationCenter.default.post(name: .oxyVoiceMessage, object: nil, userInfo: ["text": prompt])
+        }
+    }
+
     @ViewBuilder private var briefingCard: some View {
         // Only the freshest briefing — the server often has several near-identical runs
         // queued, and stacking them all just repeats the same heatwave/inbox copy.
-        if let briefing = visibleBriefings.first {
+        // Skipped when the briefing carries structured signals (the Signals card subsumes it).
+        if topSignals.isEmpty, let briefing = visibleBriefings.first {
             TodayCard {
                 cardLabel("Briefing")
                 VStack(alignment: .leading, spacing: 8) {
@@ -564,12 +704,14 @@ struct ProactiveView: View {
         async let eventsResult = native.todaysEvents()
         async let remindersResult = native.todaysReminders()
         async let stepsResult = native.todaysSteps()
+        async let sleepResult = native.todaysSleepMinutes()
 
         briefings = await briefingsResult
         weather = await weatherResult
         events = await eventsResult
         reminders = await remindersResult
         steps = await stepsResult
+        sleepMinutes = await sleepResult
         isLoading = false
         contentAppeared = false
         withAnimation(.nmlSpring.delay(0.04)) { contentAppeared = true }

@@ -4712,6 +4712,35 @@ app.get('/history/:userId/sessions', async (req, res) => {
   }
 });
 
+// Delete a conversation "session". Sessions are synthetic — a time-gap grouping of
+// conversation rows, not a stored row — so we delete every row in the session's
+// [from, to] created_at window. Ranges are disjoint (sessions split on >45min gaps),
+// so this never bleeds into a neighbouring conversation.
+app.delete('/history/:userId/sessions/:sessionId', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  const from = String(req.query.from || '').trim();
+  const to = String(req.query.to || '').trim();
+  if (!from || !to) return res.status(400).json({ error: 'bad.request' });
+  try {
+    const { error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('user_id', req.params.userId)
+      .gte('created_at', from)
+      .lte('created_at', to);
+    if (error) throw error;
+    // Drop the stored title for this session, if one was generated.
+    await supabase
+      .from('preferences')
+      .delete()
+      .eq('user_id', req.params.userId)
+      .eq('key', `_stitle_${req.params.sessionId}`);
+    res.json({ ok: true });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 app.get('/history/:userId/search', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   const q = (req.query.q || '').trim();
@@ -4909,7 +4938,7 @@ async function gatherProactiveContext(userId, now = new Date()) {
     tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_calendar_events', { max_results: 5 }) });
     // Primary tab only (INBOX + CATEGORY_PERSONAL) so briefings surface real mail, not
     // promotions/job-alerts/Father's-Day spam that Gmail files under other categories.
-    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_emails', { max_results: 5, label: ['INBOX', 'CATEGORY_PERSONAL'] }) });
+    tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_emails', { max_results: 12, label: ['INBOX', 'CATEGORY_PERSONAL'] }) });
   } else if (enabled.includes('microsoft')) {
     tasks.push({ key: 'calendarText', run: () => executeAction(userId, 'get_outlook_events', { max_results: 5 }) });
     tasks.push({ key: 'emailText', run: () => executeAction(userId, 'get_outlook_emails', { max_results: 5 }) });
@@ -4926,7 +4955,10 @@ async function gatherProactiveContext(userId, now = new Date()) {
       // Keep the structured Primary-inbox emails so the Today tab can show a real Inbox
       // card instead of only the prose summary. Already filtered to INBOX/CATEGORY_PERSONAL.
       if (key === 'emailText' && Array.isArray(outcome.value.emails)) {
-        context.emails = outcome.value.emails.slice(0, 3).map(email => ({
+        // Keep up to 8 so the client has real Primary-inbox mail to dedup, drop promos
+        // from, and rank — a hard cap of 3 here meant the 4th-onward (often the one that
+        // matters) never reached the dashboard. The Today card trims to a glanceable few.
+        context.emails = outcome.value.emails.slice(0, 8).map(email => ({
           from: email.senderName || email.senderAddress || email.from || 'Unknown',
           subject: email.subject || '(no subject)',
           snippet: String(email.snippet || '').slice(0, 140),
@@ -4981,6 +5013,139 @@ async function getLatestNativeContext(userId) {
   return data || null;
 }
 
+// --- Proactive Signals ---------------------------------------------------
+// The briefing model now returns { lead, signals }. Each signal is one thing
+// that needs the user, optionally carrying an action. The SAFE tier (reversible,
+// private, server-executable) auto-runs during the sweep; everything else is
+// SENSITIVE and only ever runs on an explicit tap in the app.
+
+const SAFE_SIGNAL_ACTIONS = new Set(['create_reminder', 'create_calendar_event']);
+
+function signalActionHasAttendees(params) {
+  const a = params && (params.attendees || params.guests || params.invitees);
+  return Array.isArray(a) ? a.length > 0 : Boolean(a);
+}
+
+// Tier is decided here, server-side — never trusted from the model. Unknown
+// action types fail safe to 'sensitive'. A calendar event with attendees emails
+// people, so it leaves the safe tier.
+function classifySignalTier(action) {
+  if (!action || typeof action.type !== 'string') return 'none';
+  if (action.type === 'create_calendar_event' && signalActionHasAttendees(action.params)) return 'sensitive';
+  return SAFE_SIGNAL_ACTIONS.has(action.type) ? 'safe' : 'sensitive';
+}
+
+// Stable key order so the same action always hashes the same (idempotency).
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+}
+
+function signalActionSig(action) {
+  return crypto.createHash('sha256')
+    .update(`${action.type}:${stableStringify(action.params || {})}`)
+    .digest('hex').slice(0, 16);
+}
+
+// Pull the first balanced {...} out of the model text, tolerating ```json fences
+// and trailing prose. Returns null if there's no object to parse.
+function extractJsonObject(text) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced ? fenced[1] : text;
+  const start = body.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < body.length; i++) {
+    if (body[i] === '{') depth++;
+    else if (body[i] === '}') { depth--; if (depth === 0) return body.slice(start, i + 1); }
+  }
+  return null;
+}
+
+function normalizeSignal(raw) {
+  if (!raw || typeof raw.title !== 'string' || !raw.title.trim()) return null;
+  const signal = {
+    title: raw.title.trim().slice(0, 120),
+    detail: typeof raw.detail === 'string' ? raw.detail.trim().slice(0, 240) : '',
+    status: 'info'
+  };
+  const a = raw.action;
+  if (a && typeof a.type === 'string' && a.type.trim()) {
+    signal.action = {
+      type: a.type.trim(),
+      params: (a.params && typeof a.params === 'object') ? a.params : {},
+      label: typeof a.label === 'string' ? a.label.trim().slice(0, 40) : '',
+      prompt: typeof a.prompt === 'string' ? a.prompt.trim().slice(0, 300) : ''
+    };
+  }
+  return signal;
+}
+
+// Defensive: structured parse with a prose fallback that matches the old
+// behaviour exactly (whole text becomes the lead), so a model that ignores the
+// JSON instruction never blanks the Today tab.
+function parseSignalsResponse(raw) {
+  const text = String(raw || '').trim();
+  if (!text || /^NOTHING\b/i.test(text)) return { lead: '', signals: [] };
+  const jsonText = extractJsonObject(text);
+  if (jsonText) {
+    try {
+      const obj = JSON.parse(jsonText);
+      // Only trust it if it's actually our shape; a stray {...} in prose falls through.
+      if (obj && (Array.isArray(obj.signals) || typeof obj.lead === 'string')) {
+        const lead = typeof obj.lead === 'string' ? obj.lead.trim() : '';
+        const signals = Array.isArray(obj.signals)
+          ? obj.signals.slice(0, 4).map(normalizeSignal).filter(Boolean)
+          : [];
+        return { lead, signals };
+      }
+    } catch { /* fall through to prose */ }
+  }
+  return { lead: stripActionMarkupForDisplay(text).trim(), signals: [] };
+}
+
+// Runs safe-tier actions, idempotently, annotating each signal with what
+// happened. Strips structured params from the stored shape (the app only needs
+// status/receipt for done, label/prompt for pending). `exec` is injectable for tests.
+async function executeSafeSignals(userId, signals, priorExecuted = [], exec = executeAction) {
+  const executed = new Set(priorExecuted);
+  const out = [];
+  for (const signal of signals) {
+    const action = signal.action;
+    const stored = { title: signal.title, detail: signal.detail, status: 'info' };
+    if (!action) { out.push(stored); continue; }
+    const tier = classifySignalTier(action);
+
+    if (tier === 'safe') {
+      const sig = signalActionSig(action);
+      if (executed.has(sig)) {
+        stored.status = 'done';
+        stored.receipt = signal.receipt || 'Done';
+        out.push(stored);
+        continue;
+      }
+      try {
+        const result = await withTimeout(exec(userId, action.type, action.params), 12000, action.type);
+        if (result && result.success) {
+          stored.status = 'done';
+          stored.receipt = result.actionSummary || result.text || 'Done';
+          executed.add(sig);
+        }
+        // failed/invalid action degrades silently to an info-only signal
+      } catch (e) {
+        console.warn('[proactive] safe signal failed:', action.type, e?.message || e);
+      }
+    } else if (tier === 'sensitive') {
+      stored.status = 'pending';
+      stored.label = action.label || 'Do it';
+      stored.prompt = action.prompt || signal.title;
+    }
+    out.push(stored);
+  }
+  return { signals: out, executed: [...executed] };
+}
+
 async function buildIntervalBriefing(userId, window, nativeContext, now = new Date(), prefetchedCtx = null) {
   const [memory, history, preferences, ctx] = await Promise.all([
     getMemory(userId),
@@ -4998,23 +5163,37 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
   const remindersText = (ctx.reminders || []).length
     ? ctx.reminders.map(r => `- ${r.title}${r.due ? ` (due ${r.due})` : ''}`).join('\n')
     : 'none';
-  const systemPrompt = `You are writing a brief, genuinely useful ${window.label.toLowerCase()} for someone you know well. Speak to them directly — warm but unfussy, like a sharp assistant who remembers what matters to them, not a notifications feed.
+  const systemPrompt = `You are deciding what genuinely needs ${window.label.toLowerCase() === 'briefing' ? 'this person' : 'this person right now'} — someone you know well. Not a recap, not a notifications feed: a sharp assistant's judgement of the few things that matter, each with an action when there's an obvious one.
 
-Ground everything in what's actually real: the calendar, reminders, emails, location, health and weather shown or found via Google Search grounding (use their coordinates for weather). You SHOULD draw on Memory and recent conversation to make this personal and relevant — connect today to what you know about them (the people, plans, tastes, where they live and work) — but only when it genuinely adds something. Never invent facts, events, or emails to do it.
+Ground everything in what's actually real: the calendar, reminders, emails, location, health and weather shown or found via Google Search grounding (use their coordinates for weather). Draw on Memory and recent conversation to make this personal — connect today to what you know about them — but never invent facts, events, or emails.
 
-Aim for one short, flowing paragraph that does at least one of these well, best first:
-- Frame the day: the next real calendar event and when to leave for it; or plainly note an open day if there's nothing on.
-- Weather that means something: they already have a separate weather card, so don't just restate the forecast — say what it means for them today (what to bring, impact on a known plan, their commute, an event they're heading to).
-- A pending reminder or errand that fits this moment or where they are right now.
-- A genuinely useful, personal note grounded in Memory or current context — relevant, never generic pep talk.
+Return ONLY a JSON object, no prose around it, in exactly this shape:
+{
+  "lead": "One short warm sentence framing the day. May be empty string if there's nothing to frame.",
+  "signals": [
+    { "title": "Short imperative headline (<10 words)",
+      "detail": "One line on why it matters now.",
+      "action": { "type": "...", "label": "Button text", "params": { ... }, "prompt": "..." } }
+  ]
+}
+
+Rules for signals:
+- At most 4, ranked most-important first. Fewer is better. Omit anything that doesn't actually need them.
+- "action" is OPTIONAL — only add one when there's a clear, useful thing to do. A signal can be pure information.
+- Available actions:
+  - create_reminder — params: { "title", "due_date" (ISO 8601 with timezone) }. Use for "leave by", errands, follow-ups.
+  - create_calendar_event — params: { "title", "start" (ISO), "end" (ISO, optional) }. No attendees.
+  - send_email / send_message — set "prompt" to a natural instruction ("Draft and send a short reply to Sarah confirming Friday"); leave params empty. These always ask the user before sending.
+- For create_reminder / create_calendar_event, fill "params" precisely from real calendar/reminder/time data. Never invent a time.
+- "label" is the button text (e.g. "Set reminder", "Reply to Sarah"). Keep it 1–3 words.
 
 Hard rules:
-- Plain text only. No markdown, no asterisks, no bullet characters, no headings.
-- Be specific and real. Do NOT invent calendar events, emails, weather, or facts beyond what's shown or what search returns. No fictional exams, deadlines, or tasks.
-- No life-coaching, no motivational filler, no "make the most of your day" / "stay sharp" / "hope you have a chill evening". Useful and personal, never preachy.
-- Refer to calendar events by their literal title and time. Do NOT guess who a meeting is "with" unless the event explicitly names another attendee — and never name the user themselves as the other party.
-- Emails shown are the user's Primary inbox and are ALSO displayed to them separately as their own list. Do NOT enumerate them — mention an email only if it's genuinely urgent or time-sensitive.
-- Only if there is truly nothing real to say — no events, no reminders, no usable location or weather, and nothing in memory or context worth connecting to today — reply with exactly: NOTHING
+- Output JSON only. No markdown fences, no commentary before or after.
+- Be specific and real. Do NOT invent calendar events, emails, weather, deadlines, or tasks beyond what's shown or what search returns.
+- No life-coaching or motivational filler. Useful and personal, never preachy.
+- Refer to calendar events by their literal title and time. Don't guess who a meeting is "with" unless an attendee is named.
+- Emails shown are the user's Primary inbox and are ALSO displayed separately. Don't enumerate them — only raise one as a signal if it's genuinely urgent or time-sensitive.
+- If there is truly nothing real worth surfacing, return: {"lead":"","signals":[]}
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}
@@ -5040,10 +5219,10 @@ Coordinates: ${formatLocationForPrompt(location)}
 Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
-Keep it under 70 words. Just the real, useful items — nothing else.`;
+Return the JSON object now — nothing else.`;
 
-  const text = await generateGroundedBriefing(systemPrompt, `${window.label} now`);
-  return stripActionMarkupForDisplay(text).trim();
+  const raw = await generateGroundedBriefing(systemPrompt, `${window.label} now`);
+  return parseSignalsResponse(raw);
 }
 
 // Re-refresh a live window's briefing at most this often when nothing changed, so weather/news
@@ -5079,14 +5258,25 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
   const fresh = state.at && (now.getTime() - new Date(state.at).getTime()) < BRIEFING_MAX_AGE_MS;
   if (!force && state.sig === sig && fresh) return null;
 
-  const text = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
-  // No concrete content right now — record the signature so we don't re-call the model until
-  // something actually changes, but never permanently lock the window (later in the day there
-  // may be a real item).
-  if (!text || /^NOTHING\b/i.test(text) || text.length < 12) {
-    await setPreferenceValue(userId, key, JSON.stringify({ id: state.id, sig, at: now.toISOString() }));
+  const { lead, signals: rawSignals } = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
+  // Auto-run the safe tier (reversible, private) before persisting, so the stored card
+  // carries the receipts. Carry executed sigs across regenerations of this window/day so a
+  // re-sweep can't create the same reminder twice.
+  const priorExecuted = Array.isArray(state.executed) ? state.executed : [];
+  const { signals, executed } = await executeSafeSignals(userId, rawSignals, priorExecuted);
+
+  // No concrete content right now — record the signature (and any executed sigs) so we don't
+  // re-call the model until something changes, but never permanently lock the window.
+  const hasContent = signals.length > 0 || (lead && lead.length >= 12);
+  if (!hasContent) {
+    await setPreferenceValue(userId, key, JSON.stringify({ id: state.id, sig, at: now.toISOString(), executed }));
     return null;
   }
+
+  // `body` keeps a plain-text summary so older clients (and the chat "Ask about this") still
+  // read something; the structured feed rides in metadata.
+  const body = lead || signals.map(s => s.title).join(' · ');
+  const metadata = { window: window.id, date: todayKey, emails: ctx.emails, lead, signals };
 
   let briefing;
   if (state.id) {
@@ -5094,7 +5284,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
     // window with current content, rather than stacking a new card on every change.
     const { data, error } = await supabase
       .from('briefings')
-      .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey, emails: ctx.emails } })
+      .update({ body, read: false, created_at: now.toISOString(), metadata })
       .eq('id', state.id)
       .eq('user_id', userId)
       .select('id, body')
@@ -5116,7 +5306,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
     if (existing?.id) {
       const { data: updated } = await supabase
         .from('briefings')
-        .update({ body: text, read: false, created_at: now.toISOString(), metadata: { window: window.id, date: todayKey, emails: ctx.emails } })
+        .update({ body, read: false, created_at: now.toISOString(), metadata })
         .eq('id', existing.id)
         .select('id, body')
         .single();
@@ -5126,13 +5316,13 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
       briefing = await createBriefing(userId, {
         kind: `${window.id}_briefing`,
         title: window.label,
-        body: text,
+        body,
         source: 'schedule',
-        metadata: { window: window.id, date: todayKey, emails: ctx.emails }
+        metadata
       });
     }
   }
-  await setPreferenceValue(userId, key, JSON.stringify({ id: briefing.id, sig, at: now.toISOString() }));
+  await setPreferenceValue(userId, key, JSON.stringify({ id: briefing.id, sig, at: now.toISOString(), executed }));
   return { type: `${window.id}_briefing`, text: briefing.body };
 }
 
@@ -5553,11 +5743,16 @@ function postResponseTasks(userId, message, trace = null) {
   }
 }
 
-async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
-  saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
-    .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
-  if (message) maybeGenerateSessionTitle(userId, message, trace);
-  postResponseTasks(userId, message, trace);
+async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [], persist = true }) {
+  // Silent turns (e.g. a browser task auto-continuing) stream their signal to the
+  // client but write nothing to history — otherwise every 3-step pause stacks a
+  // "still working… keep going?" message and a card in the transcript.
+  if (persist) {
+    saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
+      .catch(err => trace.log('supabase.conversations.insert_assistant.short_async_fail', err.message));
+    if (message) maybeGenerateSessionTitle(userId, message, trace);
+    postResponseTasks(userId, message, trace);
+  }
 
   if (streaming) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -5706,10 +5901,19 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       const resumeGoal = message === BROWSER_TASK_CONTINUE ? '' : message;
       let resumeResults = await executeActions(userId, [{ type: 'run_browser_task', input: { goal: resumeGoal } }], { userMessage: message, location, nativeHints, trace }, trace);
       resumeResults = normalizeActionResultsForClient(resumeResults);
+      // A "still working" pause is internal plumbing: the client auto-continues off
+      // the signal in the actions event, so don't persist it or surface its text —
+      // that's what stacked a card + "keep going?" prompt every 3 steps.
+      const stillWorking = resumeResults.some(r => r?.result?.actionSummary === 'Browser task paused');
       const spoken = summarizeFinishedActionsForUser(resumeResults) ||
         resumeResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
         'Done.';
-      await respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults: resumeResults });
+      await respondWithResult({
+        res, streaming, wantsTTS, settings, trace, userId, message,
+        spoken: stillWorking ? '' : spoken,
+        actionResults: resumeResults,
+        persist: !stillWorking
+      });
       return;
     }
 
@@ -6924,3 +7128,7 @@ module.exports.runProactiveSweep = runProactiveSweep;
 // validator -> this switch) instead of only unit-testing pieces in isolation — that gap
 // is exactly how the contract/handler mismatch shipped to production undetected.
 module.exports.executeActions = executeActions;
+// Proactive Signals — pure logic exposed for unit tests (parser, tier rules, idempotency).
+module.exports.parseSignalsResponse = parseSignalsResponse;
+module.exports.classifySignalTier = classifySignalTier;
+module.exports.executeSafeSignals = executeSafeSignals;

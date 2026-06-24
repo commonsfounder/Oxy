@@ -352,6 +352,28 @@ private struct InitiativeScroller: View {
 
 // MARK: - Settings Model
 
+/// Decoding the `oxy_settings` blob on every SwiftUI body pass is what made the
+/// chat stutter — MessageBubble read it per bubble, per streamed token. Decode
+/// once and refresh only when a default actually changes.
+/// ponytail: re-decodes on any UserDefaults change (fires a bit more than needed);
+/// fine — it's one tiny blob. Narrow to oxy_settings only if it ever shows up in a trace.
+enum OxySettingsCache {
+    static private(set) var current: OxySettings = {
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { _ in current = load() }
+        return load()
+    }()
+
+    private static func load() -> OxySettings {
+        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
+              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else {
+            return OxySettings()
+        }
+        return settings
+    }
+}
+
 struct OxySettings: Codable {
     var name: String = ""
     var userName: String = ""

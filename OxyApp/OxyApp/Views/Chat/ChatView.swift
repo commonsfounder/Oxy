@@ -196,7 +196,10 @@ struct ChatView: View {
                                 viewModel.scrollTargetMessageID = nil
                             }
                         }
-                        .onChange(of: viewModel.messages) {
+                        // Both helpers only inspect `.actions` on the last few messages.
+                        // Keying on the action count (instead of the whole messages array)
+                        // avoids an O(conversation) Equatable compare on every streamed token.
+                        .onChange(of: viewModel.messages.suffix(3).reduce(0) { $0 + $1.actions.count }) {
                             presentPendingReviewIfNeeded()
                             presentMessageComposerIfNeeded()
                         }
@@ -993,6 +996,13 @@ private struct ChatInputBar: View {
                             .scaledToFill()
                             .frame(width: 38, height: 38)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                            // A hairline edge so the photo reads as a crisp object, not a
+                            // torn-out scrap. Color.primary is pure-ish black in light /
+                            // white in dark — never a tinted neutral that reads as dirt.
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                            )
                     } else {
                         Image(systemName: attachmentIsImage ? "photo.fill" : "doc.fill")
                             .font(.system(size: 16, weight: .semibold))
@@ -1014,6 +1024,9 @@ private struct ChatInputBar: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
                             .foregroundStyle(Color.nmlMuted)
+                            // Glyph stays 16pt; the tap target grows to the 40×40 minimum.
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.nmlScale)
                 }

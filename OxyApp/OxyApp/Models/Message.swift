@@ -267,10 +267,32 @@ struct Briefing: Codable, Identifiable, Equatable {
     var emails: [BriefingEmail] {
         metadata?.emails ?? []
     }
+
+    var lead: String? { metadata?.lead }
+    var signals: [BriefingSignal] { metadata?.signals ?? [] }
 }
 
 struct BriefingMetadata: Codable, Equatable {
     let emails: [BriefingEmail]?
+    let lead: String?
+    let signals: [BriefingSignal]?
+}
+
+/// One ranked "what matters today" item. `status` is server-set:
+/// - `done`    — a safe action already auto-ran; `receipt` describes it.
+/// - `pending` — a sensitive action waiting on a tap; `label`+`prompt` drive it (sent into chat).
+/// - `info`    — informational only, no action.
+struct BriefingSignal: Codable, Equatable, Identifiable {
+    let title: String
+    let detail: String?
+    let status: String?
+    let receipt: String?
+    let label: String?
+    let prompt: String?
+
+    var id: String { title + "|" + (status ?? "") }
+    var isDone: Bool { status == "done" }
+    var isPending: Bool { status == "pending" }
 }
 
 struct BriefingEmail: Codable, Equatable, Identifiable {

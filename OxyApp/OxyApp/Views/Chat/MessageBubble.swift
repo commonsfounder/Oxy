@@ -11,14 +11,7 @@ struct MessageBubble: View {
     var onOpenAction: ((ActionResult) -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
-    private var bubbleStyle: String {
-        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
-              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else {
-            return "comfort"
-        }
-        return settings.bubbleStyle
-    }
-    private var isCompact: Bool { bubbleStyle == "compact" }
+    private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
     private var visibleActions: [ActionResult] {
         message.actions.filter { action in
             !action.pending &&
@@ -50,6 +43,17 @@ struct MessageBubble: View {
             if !message.content.isEmpty && uberAction == nil {
                 HStack(alignment: .bottom, spacing: 0) {
                     if isUser { Spacer(minLength: 64) }
+
+                    // The assistant's voice gets a quiet leading rule — it anchors the reply
+                    // like a quoted passage in a magazine, without caging it in a bubble.
+                    // Fills the text height; never drawn on the user (bubbled) side.
+                    if !isUser {
+                        RoundedRectangle(cornerRadius: 1, style: .continuous)
+                            .fill(Color.nmlMuted.opacity(0.35))
+                            .frame(width: 2)
+                            .frame(maxHeight: .infinity)
+                            .padding(.trailing, 12)
+                    }
 
                     Group {
                         if message.isStreaming && !isUser {
@@ -140,7 +144,9 @@ struct MessageBubble: View {
                 .combined(with: .scale(scale: 0.97, anchor: isUser ? .bottomTrailing : .bottomLeading)),
             removal: .opacity
         ))
-        .animation(.nmlSpring, value: message.content)
+        // Animate the streaming→settled flip, not every token. Animating on
+        // `content` re-ran a spring layout pass per streamed word — a stutter source.
+        .animation(.nmlSpring, value: message.isStreaming)
     }
 }
 
