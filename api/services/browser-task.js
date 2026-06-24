@@ -314,6 +314,9 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
       openUrl = resume.last_url;
       priorHistory = Array.isArray(resume.history) ? resume.history : [];
+      // An empty incoming goal is a silent continuation — recover the real goal from
+      // what was persisted rather than re-opening with nothing to work toward.
+      goal = goal || resume.goal || '';
       onProgress('Picking up where we left off…');
     } else {
       onProgress('Opening browser…');
@@ -331,8 +334,21 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     }
   } else {
     touchSession(userId);
-    session.goal = goal; // latest message becomes the active instruction, history carries prior context
-    session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
+    // Empty goal = silent continuation (auto-continue loop) — keep grinding on the
+    // existing instruction instead of clobbering it. Non-empty = a real new reply/goal.
+    if (goal) {
+      session.goal = goal;
+      session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
+      session.autoContinueCount = 0; // a real instruction resets the runaway guard
+    } else {
+      session.autoContinueCount = (session.autoContinueCount || 0) + 1;
+    }
+  }
+
+  // Backstop against a client bug auto-continuing forever: ~12 silent turns is several
+  // minutes of unattended browsing, well past any real order. Force a human check-in.
+  if ((session.autoContinueCount || 0) > 12) {
+    return { type: 'ask', question: 'This is taking a while — want me to keep trying, or stop here?' };
   }
 
   const startedAt = Date.now();

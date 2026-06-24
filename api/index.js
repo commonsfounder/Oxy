@@ -47,6 +47,10 @@ const {
   isPendingRevisionMessage,
   reviewTitleForAction
 } = require('./services/pending-review');
+// Sent by the client to silently keep an "awaiting_more" browser task moving without
+// the user having to type "keep going" every ~30s turn. Never shown in the transcript
+// and never overwrites the in-progress goal (see the run_browser_task resume below).
+const BROWSER_TASK_CONTINUE = '__oxy_continue_browser_task__';
 const {
   ACTION_CONTRACTS,
   actionPromptBlock,
@@ -2281,7 +2285,10 @@ async function executeAction(userId, action, params, context = {}) {
     }
     case 'run_browser_task': {
       const goal = String(params?.goal || '').trim();
-      if (!goal) return { success: false, error: 'run_browser_task needs a goal.' };
+      // Empty goal is only valid as a silent continuation of an already-open session
+      // (the auto-continue loop from /chat) — it keeps grinding on the existing goal
+      // instead of needing a fresh instruction every turn.
+      if (!goal && !getSession(userId)) return { success: false, error: 'run_browser_task needs a goal.' };
       const url = String(params?.url || '').trim() || null;
       const title = String(params?.title || '').trim() || (url ? `Browser task: ${new URL(url).hostname}` : 'Browser task');
       const onProgress = label => context.sendStatus?.('action_progress', label, { action: 'run_browser_task' });
@@ -5604,7 +5611,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     trace.log(`request.start stream=${streaming} tts=${wantsTTS} incognito=${!!trace.incognito} msg=${JSON.stringify((message || '').slice(0, 80))}`);
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
-    saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+    // The silent continuation sentinel never appears as a real user turn.
+    if (message !== BROWSER_TASK_CONTINUE) {
+      saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
+    }
 
     // If we asked the user for a personal place ("what's your school?"), capture
     // their reply, remember it, and re-run the original action with it.
@@ -5687,7 +5697,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       }
       trace.log('browser_task.resume');
       awaitingBrowser.awaitingInput = false; // cleared now; the case re-sets it from the new outcome
-      let resumeResults = await executeActions(userId, [{ type: 'run_browser_task', input: { goal: message } }], { userMessage: message, location, nativeHints, trace }, trace);
+      // The continue sentinel carries no new instruction — pass an empty goal so the
+      // loop keeps working the existing goal instead of clobbering it.
+      const resumeGoal = message === BROWSER_TASK_CONTINUE ? '' : message;
+      let resumeResults = await executeActions(userId, [{ type: 'run_browser_task', input: { goal: resumeGoal } }], { userMessage: message, location, nativeHints, trace }, trace);
       resumeResults = normalizeActionResultsForClient(resumeResults);
       const spoken = summarizeFinishedActionsForUser(resumeResults) ||
         resumeResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||

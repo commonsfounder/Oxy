@@ -38,6 +38,13 @@ final class ChatViewModel {
     @ObservationIgnored private var pendingLocalAction: ActionResult?
     @ObservationIgnored private var lastFailedText: String?
 
+    // Sent instead of typed text to silently keep an in-progress browser/ordering task
+    // moving — never shown as a chat bubble, must match BROWSER_TASK_CONTINUE in api/index.js.
+    private static let browserTaskContinueSentinel = "__oxy_continue_browser_task__"
+    // Matches the server's own runaway backstop (browser-task.js) — belt and braces so a
+    // stuck order surfaces to the user instead of silently grinding forever.
+    private static let maxBrowserAutoContinues = 12
+
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
     private let nativeManager = NativeIntegrationManager.shared
@@ -237,6 +244,7 @@ final class ChatViewModel {
             )
             await MainActor.run { HapticManager.shared.impact(.light) }
             var fullText = ""
+            var needsBrowserContinue = false
 
             for await event in stream {
                 if Task.isCancelled { break }
@@ -258,6 +266,12 @@ final class ChatViewModel {
                             HapticManager.shared.success()
                         } else if results.contains(where: { !$0.success }) {
                             HapticManager.shared.warning()
+                        }
+                        // "Browser task paused" just means the ordering loop is still
+                        // working and hit its per-turn time budget — not a real question.
+                        // Keep it moving ourselves instead of making the user say "keep going".
+                        if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                            needsBrowserContinue = true
                         }
                         Task {
                             await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
@@ -298,6 +312,10 @@ final class ChatViewModel {
                         currentSendTask = nil
                     }
                 }
+            }
+
+            if needsBrowserContinue, !Task.isCancelled {
+                await continueBrowserTask(userId: userId, assistantID: assistantID)
             }
 
             await MainActor.run {
@@ -407,6 +425,68 @@ final class ChatViewModel {
                     }
                 }
             }
+        }
+    }
+
+    /// Silently keeps an "awaiting_more" browser/ordering task moving — no new chat
+    /// bubble, no typing required. Updates the same assistant message in place and
+    /// loops itself as long as the loop keeps reporting "still working", stopping the
+    /// moment it needs a real answer, payment confirmation, or hits done/error.
+    private func continueBrowserTask(userId: String, assistantID: UUID, attempt: Int = 1) async {
+        guard attempt <= Self.maxBrowserAutoContinues else { return }
+
+        await MainActor.run {
+            isSending = true
+            statusLabel = "Still working on your order…"
+            // Each turn gets its own 45s budget, same as a fresh send — the chain as a
+            // whole can run for minutes, but any single round trip is still watchdogged.
+            startSendWatchdog(assistantID: assistantID)
+        }
+
+        let stream = chatService.sendMessage(
+            userId: userId,
+            message: Self.browserTaskContinueSentinel,
+            chatStartedAt: activeChatStartedAt,
+            settings: currentSettings,
+            location: locationManager.locationDict,
+            incognito: incognito
+        )
+
+        var turnText = ""
+        var needsMore = false
+
+        for await event in stream {
+            if Task.isCancelled { break }
+            await MainActor.run {
+                switch event {
+                case .text(let chunk):
+                    turnText += chunk
+                case .replace(let replacement):
+                    turnText = replacement
+                case .actions(let results):
+                    _ = updateAssistantMessage(id: assistantID, { $0.actions = results })
+                    openDeepLinks(results)
+                    if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                        needsMore = true
+                    }
+                case .status(let status, let label):
+                    setStatus(status, label)
+                case .error(let error):
+                    networkError = friendlyNetworkError(error)
+                default:
+                    break
+                }
+            }
+        }
+
+        if !turnText.isEmpty {
+            await MainActor.run {
+                _ = updateAssistantMessage(id: assistantID, { $0.content = turnText })
+            }
+        }
+
+        if needsMore {
+            await continueBrowserTask(userId: userId, assistantID: assistantID, attempt: attempt + 1)
         }
     }
 
