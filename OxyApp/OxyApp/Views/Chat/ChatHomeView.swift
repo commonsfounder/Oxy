@@ -146,6 +146,9 @@ struct ChatHomeView: View {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 13))
                             .foregroundStyle(Color.nmlMuted)
+                            // Glyph stays 13pt; the tap target grows to the 40×40 minimum.
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.nmlScale)
                 }
@@ -177,26 +180,44 @@ struct ChatHomeView: View {
         } else if sessions.isEmpty {
             emptyState
         } else {
-            ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
-                    ForEach(groupedSessions, id: \.label) { group in
-                        Section {
-                            ForEach(group.sessions) { session in
-                                Button {
-                                    HapticManager.shared.impact(.light)
-                                    open(session)
-                                } label: {
-                                    SidebarRow(title: session.title, trailing: session.relativeTime)
-                                }
-                                .buttonStyle(.nmlScale(0.98))
+            // A real List (like the Memory tab) so swipe-to-delete is the native,
+            // reliable gesture — a hand-rolled drag in a ScrollView renders a red
+            // sliver behind every row and isn't worth fighting SwiftUI for.
+            List {
+                ForEach(groupedSessions, id: \.label) { group in
+                    Section {
+                        ForEach(group.sessions) { session in
+                            Button {
+                                HapticManager.shared.impact(.light)
+                                open(session)
+                            } label: {
+                                SidebarRow(title: session.title, trailing: session.relativeTime)
                             }
-                        } header: {
-                            SidebarSectionHeader(label: group.label)
+                            .buttonStyle(.nmlScale(0.98))
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    delete(session)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                                // The accent tint otherwise overrides the system's
+                                // destructive red on the swipe action.
+                                .tint(Color.mgDestructive)
+                            }
                         }
+                    } header: {
+                        SidebarSectionHeader(label: group.label)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
                     }
                 }
-                .padding(.bottom, 24)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 0)
         }
     }
 
@@ -342,6 +363,32 @@ struct ChatHomeView: View {
         isLoadingSessions = false
     }
 
+    /// Removes a conversation. Optimistic: drop it from the list immediately, then
+    /// tell the backend to delete every row in the session's time window. If the live
+    /// chat is showing this session, reset to a fresh one so it doesn't dangle.
+    private func delete(_ session: ChatSessionSummary) {
+        guard let from = session.startedAt ?? session.lastAt,
+              let to = session.lastAt ?? session.startedAt else { return }
+        HapticManager.shared.impact(.medium)
+        sessions.removeAll { $0.id == session.id }
+        if selectedSession?.id == session.id { startNewChat() }
+        Task {
+            do {
+                _ = try await APIClient.shared.request(
+                    path: "/history/\(appState.userId)/sessions/\(session.id)",
+                    method: "DELETE",
+                    queryItems: [
+                        URLQueryItem(name: "from", value: from),
+                        URLQueryItem(name: "to", value: to)
+                    ]
+                )
+            } catch {
+                // Couldn't reach the server — put it back so the list stays truthful.
+                await loadSessions()
+            }
+        }
+    }
+
     private func handleSearch(_ query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         searchTask?.cancel()
@@ -454,7 +501,9 @@ private struct SidebarSectionHeader: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(.regularMaterial)
+        // The drawer is already .regularMaterial; a second material here blurs a blur
+        // and smears as it pins. An opaque surface keeps the pinned header crisp.
+        .background(Color.nmlSurface)
     }
 }
 

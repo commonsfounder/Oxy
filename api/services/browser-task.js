@@ -353,10 +353,11 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     }
   }
 
-  // Backstop against a client bug auto-continuing forever: ~12 silent turns is several
-  // minutes of unattended browsing, well past any real order. Force a human check-in.
-  if ((session.autoContinueCount || 0) > 12) {
-    return { type: 'ask', question: 'This is taking a while — want me to keep trying, or stop here?' };
+  // Backstop against auto-continuing forever. Set high enough to carry a long-but-healthy
+  // order all the way to the pay button (it stops there for confirmation anyway) — this
+  // only trips on a genuinely runaway loop, where a human check-in is the right call.
+  if ((session.autoContinueCount || 0) > 40) {
+    return { type: 'ask', question: 'This order is taking an unusually long time — want me to keep trying, or stop here?' };
   }
 
   let steps = 0;
@@ -486,7 +487,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     return { type: 'error', error: `Hit a snag on the page (${reason}). Say "keep going" and I'll pick up where I left off.` };
   }
 
-  return { type: 'awaiting_more', summary: `Still working on it — ${session.history.length} step(s) so far. Want me to keep going?` };
+  // No "want me to keep going?" — the client auto-continues, so asking a question we
+  // immediately answer ourselves just litters the transcript.
+  const n = session.history.length;
+  return { type: 'awaiting_more', summary: `Working on your order — ${n} step${n === 1 ? '' : 's'} in…` };
 }
 
 async function confirmPayment(userId) {

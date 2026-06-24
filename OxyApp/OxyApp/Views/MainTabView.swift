@@ -142,7 +142,7 @@ struct MainTabView: View {
             }
             .contentShape(Capsule())
         }
-        .buttonStyle(.nmlScale(0.93))
+        .buttonStyle(.nmlScale(0.96))
     }
 }
 
@@ -252,7 +252,9 @@ struct MoreView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.99))
+        // A full-bleed 46pt header: scaling it is motion you can't perceive, only cost.
+        // Plain = static, the skill's prescription for big surfaces.
+        .buttonStyle(.plain)
     }
 
     private var displayName: String {
