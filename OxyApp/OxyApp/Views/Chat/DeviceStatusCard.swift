@@ -57,6 +57,9 @@ struct DeviceStatusCard: View {
             .tracking(0.4)
             .foregroundStyle(Color.nmlTitanium)
             .fixedSize()
+            // Live telemetry rolls its digits instead of popping.
+            .contentTransition(.numericText())
+            .animation(.nmlStandard, value: text)
     }
 }
 

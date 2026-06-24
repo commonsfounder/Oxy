@@ -11,6 +11,9 @@ struct MemoryView: View {
     @State private var showClearAllConfirm = false
     @State private var pendingDeleteItem: MemoryItem?
     @State private var search = ""
+    // The composer stays collapsed to a single line so saved memories lead the screen —
+    // you read memories far more often than you add one.
+    @State private var composerExpanded = false
     private let embedded: Bool
 
     init(embedded: Bool = false) {
@@ -51,16 +54,39 @@ struct MemoryView: View {
                 List {
                     Group {
                         VStack(alignment: .leading, spacing: 20) {
-                            MilgrainSectionHeader(title: "Remember")
-                            MemoryDropBox(
-                                draft: $draft,
-                                isSaving: isSaving,
-                                message: saveMessage,
-                                onSave: { Task { await saveMemory() } }
-                            )
+                            if composerExpanded {
+                                MilgrainSectionHeader(title: "Remember")
+                                MemoryDropBox(
+                                    draft: $draft,
+                                    isSaving: isSaving,
+                                    message: saveMessage,
+                                    onSave: { Task { await saveMemory() } },
+                                    onCollapse: { withAnimation(.nmlStandard) { composerExpanded = false } }
+                                )
+                            } else {
+                                // Collapsed: a single quiet line. Tapping it reveals the full composer.
+                                Button {
+                                    HapticManager.shared.impact(.light)
+                                    saveMessage = nil
+                                    withAnimation(.nmlStandard) { composerExpanded = true }
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(Color.mgSecondary)
+                                        Text("Remember something…")
+                                            .font(.nmlBody(15, weight: .light))
+                                            .foregroundStyle(Color.mgSecondary)
+                                        Spacer(minLength: 0)
+                                    }
+                                    .padding(.vertical, 14)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.nmlScale(0.99))
+                            }
                         }
                         .padding(.top, 12)
-                        .padding(.bottom, 36)
+                        .padding(.bottom, composerExpanded ? 36 : 24)
 
                         HStack {
                             MilgrainSectionHeader(title: "Saved Memories")
@@ -69,6 +95,8 @@ struct MemoryView: View {
                                 Text("\(items.count)")
                                     .font(.nmlBody(13))
                                     .foregroundStyle(Color.mgSecondary)
+                                    .contentTransition(.numericText())
+                                    .animation(.nmlStandard, value: items.count)
                             }
                         }
                         .padding(.bottom, 12)
@@ -216,8 +244,10 @@ struct MemoryView: View {
             )
             await MainActor.run {
                 draft = ""
-                saveMessage = "Saved."
+                saveMessage = nil
                 isSaving = false
+                // Collapse back to the quiet line so the freshly-saved memory leads again.
+                withAnimation(.nmlStandard) { composerExpanded = false }
             }
             await loadMemory()
         } catch {
@@ -274,6 +304,7 @@ private struct MemoryDropBox: View {
     let isSaving: Bool
     let message: String?
     let onSave: () -> Void
+    var onCollapse: (() -> Void)?
 
     private var canSave: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSaving
@@ -281,9 +312,23 @@ private struct MemoryDropBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Add it once. It's kept for later.")
-                .font(.mgDidot(18, weight: .bold))
-                .foregroundStyle(Color.mgHeading)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Add it once. It's kept for later.")
+                    .font(.mgDidot(18, weight: .bold))
+                    .foregroundStyle(Color.mgHeading)
+                Spacer(minLength: 8)
+                if let onCollapse {
+                    Button(action: onCollapse) {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.mgSecondary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.nmlScale)
+                    .accessibilityLabel("Collapse")
+                }
+            }
 
             NamelessLineField(
                 placeholder: "Remember that…",
@@ -312,7 +357,7 @@ private struct MemoryDropBox: View {
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.nmlScale)
                 .disabled(!canSave)
             }
         }

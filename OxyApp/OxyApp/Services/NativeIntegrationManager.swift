@@ -2226,6 +2226,14 @@ final class NativeIntegrationManager: NSObject {
         return Int(value.rounded())
     }
 
+    /// Last night's total sleep, in whole minutes — for the Today vitals row.
+    func todaysSleepMinutes() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let minutes = await sleepMinutesLastNight() else { return nil }
+        let rounded = Int(minutes.rounded())
+        return rounded > 0 ? rounded : nil
+    }
+
     private func nativeCapabilities() async -> NativeCapabilities {
         let notificationSettings = await UNUserNotificationCenter.current().notificationSettings()
         let contactStatus = CNContactStore.authorizationStatus(for: .contacts)

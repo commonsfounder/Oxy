@@ -15,19 +15,30 @@ struct ErrorBanner: View {
             Spacer(minLength: 8)
 
             if let onRetry {
-                Button("Retry", action: onRetry)
-                    .font(.nmlBody(12, weight: .semibold))
-                    .tracking(0.3)
-                    .foregroundStyle(Color.nmlTitanium)
-                    .buttonStyle(.plain)
+                Button(action: onRetry) {
+                    Text("Retry")
+                        .font(.nmlBody(12, weight: .semibold))
+                        .tracking(0.3)
+                        .foregroundStyle(Color.nmlTitanium)
+                        // Pad the label to a ~40pt tap target without distorting the row.
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.nmlScale)
             }
 
             if let onDismiss {
-                Button("Dismiss", action: onDismiss)
-                    .font(.nmlBody(12, weight: .semibold))
-                    .tracking(0.3)
-                    .foregroundStyle(Color.nmlMuted)
-                    .buttonStyle(.plain)
+                Button(action: onDismiss) {
+                    Text("Dismiss")
+                        .font(.nmlBody(12, weight: .semibold))
+                        .tracking(0.3)
+                        .foregroundStyle(Color.nmlMuted)
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.nmlScale)
             }
         }
         .padding(.horizontal, 16)
