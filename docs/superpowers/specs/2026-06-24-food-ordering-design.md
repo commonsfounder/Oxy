@@ -72,9 +72,10 @@ the existing `loadStorageState`/`saveStorageState` Supabase-backed cookie persis
 
 An idle sweep (checked lazily on each access, no separate timer) closes and evicts any
 session whose `lastActivityAt` is older than **20 minutes**, calling `browser.close()` to
-free the process. Resuming after eviction is best-effort: cookies are restored from
-`browser_sessions` and the page re-navigates to last known URL, but the cart may not
-have survived — this is communicated to the user, not silently assumed to work.
+free the process. Eviction is final, not silently papered over: resuming after it
+requires the site/restaurant to be named again (a fresh session, logged in via the
+existing `browser_sessions` cookie persistence) — the assistant says plainly that the
+previous in-progress order expired rather than pretending to pick the old cart back up.
 
 ### The loop
 
