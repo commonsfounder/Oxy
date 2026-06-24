@@ -59,8 +59,8 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['url', 'goal'],
     optional: ['title'],
-    inputExample: { url: 'https://example.com/search', goal: 'Find listings under $1000 and summarize them', title: 'short label for the briefing' },
-    guidance: 'Use when the user wants you to browse a real website and do/check something for them — e.g. "check Marketplace for X", "see if this site has Y in stock", "log into Z and check my balance". This runs in the background and may take a minute or more; tell the user you\'re on it, the result lands as a briefing, not in this reply. Do not use for anything available via a connector (email, calendar, music, maps) — those are faster and more reliable.',
+    inputExample: { url: 'https://example.com/search (only needed to start a new task)', goal: 'Find listings under $1000 and summarize them, or order 1 large pepperoni pizza, or the user\'s reply to a question you previously asked', title: 'short label for the briefing' },
+    guidance: 'Use when the user wants you to browse a real website and do/check something for them — e.g. "check Marketplace for X", "order me a pizza", "log into Z and check my balance". For anything food/shopping-related and vague ("order me something"), have a normal conversation first — ask what they\'re in the mood for, which restaurant, what items — before calling this action. This can run across several turns: if you previously asked the user a question via this action, or it told you it was still working, call it again with their reply as the goal and omit url — it resumes the same in-progress session rather than starting over. This may pause to ask you to confirm before any payment is finalized; never imply an order is placed until that confirmation step completes. Do not use for anything available via a connector (email, calendar, music, maps) — those are faster and more reliable.',
     successSummary: 'Browser task started',
     failureSummary: 'Browser task failed to start',
     confirmation: 'none'

@@ -40,7 +40,7 @@ const {
   advanceScheduledTask,
   describeSchedule
 } = require('./services/scheduled-tasks');
-const { runBrowserTask } = require('./services/browser-task');
+const { runOrderingTurn, confirmPayment, cancelPayment, getSession } = require('./services/browser-task');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -506,22 +506,6 @@ async function sendPushToUser(userId, briefing) {
       }
     }));
   return { sent };
-}
-
-async function summarizeBrowserResult(url, goal, result) {
-  if (!result.success) return `Couldn't finish checking ${new URL(url).hostname}: ${result.error}`;
-  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-  const response = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: `You browsed ${url} to help with this goal: "${goal}".\n\nHere is the visible page text:\n${result.text}\n\nWrite a short, direct answer to the goal for the user, as if reporting back. If the goal can't be answered from this text, say what you found instead.` }] }],
-    generationConfig: { temperature: 0.3, maxOutputTokens: 512 }
-  });
-  return response.response.text().trim() || 'Finished checking, but had nothing useful to report.';
-}
-
-async function runBrowserTaskAndNotify(userId, { url, goal, title }) {
-  const result = await runBrowserTask(userId, { url });
-  const body = await summarizeBrowserResult(url, goal, result);
-  await createBriefing(userId, { kind: 'browser_task', title, body, source: 'browser_task', metadata: { url, goal } });
 }
 
 async function createBriefing(userId, { kind, title, body, source = 'proactive', metadata = {}, push = true }) {
@@ -2296,37 +2280,47 @@ async function executeAction(userId, action, params, context = {}) {
       };
     }
     case 'run_browser_task': {
-      const url = String(params?.url || '').trim();
       const goal = String(params?.goal || '').trim();
-      if (!url || !goal) return { success: false, error: 'run_browser_task needs a url and a goal.' };
-      const title = String(params?.title || '').trim() || `Browser check: ${new URL(url).hostname}`;
+      if (!goal) return { success: false, error: 'run_browser_task needs a goal.' };
+      const url = String(params?.url || '').trim() || null;
+      const title = String(params?.title || '').trim() || (url ? `Browser task: ${new URL(url).hostname}` : 'Browser task');
+      const onProgress = label => context.sendStatus?.('action_progress', label, { action: 'run_browser_task' });
 
-      // Live chat turn (has an SSE channel): run inline and stream step-by-step
-      // progress, same status-chip mechanism other actions already use.
-      if (typeof context.sendStatus === 'function') {
-        const onProgress = label => context.sendStatus('action_progress', label, { action: 'run_browser_task' });
-        const result = await runBrowserTask(userId, { url, onProgress });
-        const text = await summarizeBrowserResult(url, goal, result);
-        return {
-          success: result.success,
-          text,
-          cardText: title,
-          actionSummary: result.success ? 'Browser task finished' : 'Browser task failed',
-          screenshotBase64: result.screenshotBase64 || null
-        };
+      if (context.bypassReview) {
+        const outcome = getSession(userId)
+          ? await confirmPayment(userId)
+          : { type: 'error', error: 'No order is waiting for payment confirmation — it may have expired.' };
+        if (outcome.type === 'error') return { success: false, error: outcome.error };
+        return { success: true, text: outcome.text, cardText: title, actionSummary: 'Order placed' };
       }
 
-      // No live channel (scheduled/proactive invocation): fire-and-forget,
-      // result lands as a briefing once the browse finishes.
-      runBrowserTaskAndNotify(userId, { url, goal, title }).catch(err =>
-        console.error('[run_browser_task] background failure:', err.message)
-      );
-      return {
-        success: true,
-        text: `On it — I'll let you know what I find on ${new URL(url).hostname}.`,
-        cardText: title,
-        actionSummary: 'Browser task started'
-      };
+      const outcome = await runOrderingTurn(userId, { url, goal, onProgress });
+
+      switch (outcome.type) {
+        case 'error':
+          return { success: false, error: outcome.error };
+        case 'done':
+          return { success: true, text: outcome.text, cardText: title, actionSummary: 'Browser task finished' };
+        case 'ask':
+          return { success: true, text: outcome.question, cardText: title, actionSummary: 'Needs your input' };
+        case 'awaiting_more':
+          return { success: true, text: outcome.summary, cardText: title, actionSummary: 'Browser task paused' };
+        case 'ready_for_payment': {
+          const reviewAction = { type: 'run_browser_task', input: params };
+          await setPendingAction(userId, reviewAction, context);
+          const total = outcome.total ? ` Total: ${outcome.total}.` : '';
+          return {
+            success: true,
+            pending: true,
+            text: `Ready to order: ${outcome.summary}.${total} Say "confirm" to place it or "cancel" to stop.`,
+            cardText: title,
+            actionSummary: 'Awaiting payment confirmation',
+            confirmation: 'review_required'
+          };
+        }
+        default:
+          return { success: false, error: `Unrecognized ordering-loop outcome: ${outcome.type}` };
+      }
     }
     case 'forget_memory':
       return forgetMemory(userId, params || {});
