@@ -195,6 +195,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
 
   const startedAt = Date.now();
   let steps = 0;
+  let consecutiveBadDecisions = 0;
 
   try {
     while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
@@ -204,8 +205,9 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       const decision = await decideNextAction(session.goal, session.history, elements);
 
       if (decision.action === 'invalid') {
+        consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
-        if (steps >= 3 && session.history.slice(-3).every(h => h.includes('could not decide'))) {
+        if (consecutiveBadDecisions >= 3) {
           return { type: 'ask', question: 'I\'m stuck on this page — what should I do next?' };
         }
         continue;
@@ -221,17 +223,25 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       if (decision.action === 'ready_for_payment') {
-        // Store the real pay button's text (the cart-summary text never matches a
-        // clickable element), so confirmPayment can re-find and click it later.
+        // Find the real pay button (the cart-summary text never matches a clickable
+        // element) so confirmPayment can re-find and click it. If no pay control is
+        // visible yet, don't hand off a dead-end — ask the user how to proceed.
         const payEl = elements.find(el => matchesPaymentKeyword(el.text));
-        session.pendingPaymentLabel = payEl?.text || null;
+        if (!payEl) {
+          return { type: 'ask', question: 'The order looks ready, but I can\'t see a payment button on screen yet — want me to keep going, or check the cart yourself?' };
+        }
+        session.pendingPaymentLabel = payEl.text;
         return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
       }
 
       // click or fill
       const target = elements.find(el => el.id === decision.elementId);
       if (!target) {
+        consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: tried to act on element #${decision.elementId}, which no longer exists`);
+        if (consecutiveBadDecisions >= 3) {
+          return { type: 'ask', question: 'I\'m stuck on this page — what should I do next?' };
+        }
         continue;
       }
 
@@ -250,6 +260,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         await locator.fill(String(decision.value || ''), { timeout: 10000 });
         session.history.push(`Step ${steps}: filled "${target.text}" with "${decision.value}"`);
       }
+      consecutiveBadDecisions = 0;
       touchSession(userId);
     }
   } catch (error) {
