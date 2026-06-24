@@ -36,12 +36,6 @@ async function loadStorageState(userId, site) {
   return data?.storage_state || undefined;
 }
 
-async function saveStorageState(userId, site, storageState) {
-  await getSupabase()
-    .from('browser_sessions')
-    .upsert({ user_id: userId, site, storage_state: storageState, updated_at: new Date().toISOString() }, { onConflict: 'user_id,site' });
-}
-
 function siteKeyFromUrl(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch { return 'unknown'; }
@@ -53,7 +47,9 @@ function siteKeyFromUrl(url) {
 async function launchBrowser() {
   const remoteEndpoint = process.env.BROWSER_REMOTE_ENDPOINT;
   if (remoteEndpoint) return chromium.connectOverCDP(remoteEndpoint);
-  return chromium.launch({ headless: true });
+  // ponytail: headless:true in prod; BROWSER_HEADLESS=false lets a local debug run pop
+  // a real window so you can watch the loop click around, instead of trusting logs.
+  return chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
 }
 
 // Live session store with idle eviction
@@ -100,6 +96,24 @@ function matchesPaymentKeyword(text) {
   return PAYMENT_KEYWORD_PATTERN.test(String(text || ''));
 }
 
+// A question we must NEVER surface to the user: a real assistant doesn't ask for a
+// URL, an element id, a CSS selector, or "which platform" — those are the loop's job
+// to figure out. If the model tries, we suppress it and retry instead.
+const TECHNICAL_ASK_PATTERN = /\b(url|link|element\s*id|element's\s*id|selector|css|xpath|dom|html|\bid\s+of\b|which\s+(site|platform)|delivery\s+platform|search\s+bar)\b/i;
+
+function isTechnicalAsk(question) {
+  return TECHNICAL_ASK_PATTERN.test(String(question || ''));
+}
+
+// Goals that mean "place an order" — for these, "done" is ALWAYS premature inside the
+// loop: a real order only completes through ready_for_payment → confirmPayment, so an
+// early "done" (e.g. right after setting the address) must not close the browser.
+const ORDER_GOAL_PATTERN = /\b(order|deliver(?:y|ed)?|buy|cart|basket|checkout|food|eats|pizza|meal|grocer|takeaway|takeout)\b/i;
+
+function isOrderGoal(goal) {
+  return ORDER_GOAL_PATTERN.test(String(goal || ''));
+}
+
 function buildDecisionPrompt(goal, history, elements) {
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
@@ -107,18 +121,32 @@ function buildDecisionPrompt(goal, history, elements) {
   const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
   return `You are controlling a real web browser to help with this goal: "${goal}"
 
+You can SEE the current page in the attached screenshot. Every clickable element has a
+small numbered badge drawn on it; the number is its element id and matches the list
+below. LOOK at the screenshot first — find the thing you need (search box, address
+field, a restaurant, an "Add" button) by sight, then act on it by its number. The page
+text alone is unreliable; trust your eyes. If the page looks like it's still loading
+(spinners, blank areas, a skeleton), choose "wait".
+
 What's happened so far:
 ${historyText}
 
-Visible clickable elements on the current page:
+Numbered clickable elements on the current page:
 ${elementsText}
 
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
 {"action":"done","summary":"<short summary answering the goal>"}
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
+
+NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
+to use — that is YOUR job to work out from the page you can see. The only acceptable
+questions are about the order itself (which restaurant, which item, which size, a missing
+delivery address). If you can't find a control, "wait" for the page to settle and look
+again; do not ask a technical question.
 
 STAY ON THE GOAL. Re-read the goal every step and only take actions that move toward THAT specific thing. To find a named restaurant (e.g. "McDonald's"), use the SEARCH box and type its name — do NOT browse category tiles like "Healthy Food", "Offers", "Fast Food", or cuisine filters; those are distractions and almost never the goal. If you catch yourself on a category/promo page that isn't the named restaurant, go back to search. Pick the option whose text actually matches the goal, not one that merely looks clickable.
 
@@ -138,7 +166,7 @@ function parseModelDecision(rawText) {
   } catch {
     return { action: 'invalid', error: 'Could not parse model response as JSON.' };
   }
-  const validActions = new Set(['click', 'fill', 'ask', 'done', 'ready_for_payment']);
+  const validActions = new Set(['click', 'fill', 'wait', 'ask', 'done', 'ready_for_payment']);
   if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
@@ -174,15 +202,54 @@ async function extractClickableElements(page) {
       || '';
     const trimmed = text.trim().replace(/\s+/g, ' ').slice(0, 80);
     if (!trimmed) continue;
-    elements.push({ id: elements.length, text: trimmed, locatorIndex: i });
+    // box is viewport-relative (getBoundingClientRect under the hood) so it lines up
+    // with the screenshot; may be null for off-viewport elements — those just get no badge.
+    const box = await el.boundingBox().catch(() => null);
+    elements.push({ id: elements.length, text: trimmed, locatorIndex: i, box });
   }
   return elements;
 }
 
-async function decideNextAction(goal, history, elements) {
+// Set-of-marks perception: draw a numbered badge on each element, screenshot the
+// viewport, remove the overlay. The model SEES the page with ids it can point at —
+// which is what lets it find a search box even when the DOM text/aria is empty.
+async function captureMarkedScreenshot(page, elements) {
+  const marks = elements.filter(el => el.box).map(el => ({ id: el.id, ...el.box }));
+  await page.evaluate((marks) => {
+    const layer = document.createElement('div');
+    layer.id = '__oxy_marks__';
+    layer.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+    for (const m of marks) {
+      const box = document.createElement('div');
+      box.style.cssText = `position:fixed;left:${m.x}px;top:${m.y}px;width:${m.width}px;height:${m.height}px;border:2px solid #ff0066;box-sizing:border-box;`;
+      const label = document.createElement('div');
+      label.textContent = String(m.id);
+      label.style.cssText = `position:fixed;left:${m.x}px;top:${Math.max(0, m.y - 15)}px;background:#ff0066;color:#fff;font:bold 11px/15px monospace;padding:0 3px;`;
+      layer.appendChild(box);
+      layer.appendChild(label);
+    }
+    document.body.appendChild(layer);
+  }, marks).catch(() => {});
+  try {
+    const shot = await page.screenshot({ type: 'png' });
+    return shot.toString('base64');
+  } finally {
+    await page.evaluate(() => document.getElementById('__oxy_marks__')?.remove()).catch(() => {});
+  }
+}
+
+// Wait for the SPA to go quiet, but never throw: sites with long-poll/websocket
+// connections never reach true networkidle, so we swallow the timeout and move on.
+async function settle(page, timeout = 2500) {
+  await page.waitForLoadState('networkidle', { timeout }).catch(() => {});
+}
+
+async function decideNextAction(goal, history, elements, screenshotB64) {
   const model = getGemini().getGenerativeModel({ model: FAST_MODEL });
+  const parts = [{ text: buildDecisionPrompt(goal, history, elements) }];
+  if (screenshotB64) parts.push({ inlineData: { mimeType: 'image/png', data: screenshotB64 } });
   const response = await model.generateContent({
-    contents: [{ role: 'user', parts: [{ text: buildDecisionPrompt(goal, history, elements) }] }],
+    contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 300, responseMimeType: 'application/json' }
   });
   return parseModelDecision(response.response.text());
@@ -195,60 +262,148 @@ async function openNewSession(userId, url, goal) {
   const context = await browser.newContext(storageState ? { storageState } : {});
   const page = await context.newPage();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null });
+  // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
+  // and the model thinks there's no search bar.
+  await settle(page, 8000);
+  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal) });
 }
 
-// Best-effort: save cookies/localStorage so a logged-in session survives into the
-// next run. Failing to persist must never abort an in-progress order.
+// Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
+// history) so an idle-evicted or accidentally-closed session can be re-opened where it
+// left off instead of dead-ending. Failing to persist must never abort an in-progress order.
 async function persistStorage(userId, session) {
   try {
-    await saveStorageState(userId, session.site, await session.context.storageState());
+    await getSupabase().from('browser_sessions').upsert({
+      user_id: userId,
+      site: session.site,
+      storage_state: await session.context.storageState(),
+      last_url: session.page.url(),
+      goal: session.goal,
+      history: session.history,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,site' });
   } catch {
-    // swallow — cookie persistence is non-critical to the current turn
+    // swallow — persistence is non-critical to the current turn
   }
+}
+
+// Most-recent persisted session for the user, so a resume with no live session and no
+// url can re-open the browser at the last page (cookies + cart survive via storageState).
+async function loadResumeContext(userId) {
+  const { data } = await getSupabase()
+    .from('browser_sessions')
+    .select('last_url, goal, history, site')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.last_url ? data : null;
 }
 
 async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   let session = getSession(userId);
   if (!session) {
-    if (!url) return { type: 'error', error: 'That session expired (idle too long) and there\'s no url to restart it — ask the user which site/restaurant again.' };
-    onProgress('Opening browser…');
+    // No live session. Prefer the url we were handed; otherwise re-open where we left
+    // off from persisted context so an idle-evicted order resumes instead of dead-ending.
+    let openUrl = url;
+    let priorHistory = null;
+    if (!openUrl) {
+      const resume = await loadResumeContext(userId);
+      if (!resume) {
+        return { type: 'error', error: 'I don\'t have an order in progress to pick back up. Tell me what you\'d like and where to deliver it, and I\'ll start fresh.' };
+      }
+      openUrl = resume.last_url;
+      priorHistory = Array.isArray(resume.history) ? resume.history : [];
+      onProgress('Picking up where we left off…');
+    } else {
+      onProgress('Opening browser…');
+    }
     try {
-      session = await openNewSession(userId, url, goal);
+      session = await openNewSession(userId, openUrl, goal);
+      if (priorHistory) {
+        session.history = priorHistory;
+        // A resumed session that already has steps is an order in progress — latch the
+        // flag so a premature "done" (on a bare reply like "mcdonald's") can't close it.
+        if (priorHistory.length) session.isOrder = true;
+      }
     } catch (error) {
       return { type: 'error', error: error.message };
     }
   } else {
     touchSession(userId);
     session.goal = goal; // latest message becomes the active instruction, history carries prior context
+    session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
   }
 
   const startedAt = Date.now();
   let steps = 0;
   let consecutiveBadDecisions = 0;
+  // One calm line when we genuinely can't make progress — never a loop of asks, never a
+  // request for a URL/selector. Keeps the session open so "keep going" can retry.
+  const STUCK = { type: 'error', error: 'I got stuck on this page and couldn\'t make progress. Want me to try a different restaurant, or another platform like Deliveroo or Just Eat?' };
 
   try {
     while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
       steps += 1;
       onProgress('Looking at the page…');
+      await settle(session.page); // let any in-flight render finish before we look
       const elements = await extractClickableElements(session.page);
-      const decision = await decideNextAction(session.goal, session.history, elements);
+
+      // Blocked/empty shell: a near-empty page with almost no text means the site served
+      // a stripped page (common when a datacenter IP is blocked). Fail once, cleanly.
+      if (steps === 1 && elements.length < 3) {
+        const bodyLen = await session.page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0);
+        if (bodyLen < 200) {
+          return { type: 'error', error: 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try Deliveroo or Just Eat instead?' };
+        }
+      }
+
+      const screenshot = await captureMarkedScreenshot(session.page, elements).catch(() => null);
+      // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
+      // at each step, to eyeball that badges land on real controls. No-op when unset.
+      if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
+        require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.png`, Buffer.from(screenshot, 'base64'), () => {});
+      }
+      const decision = await decideNextAction(session.goal, session.history, elements, screenshot);
 
       if (decision.action === 'invalid') {
         consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
-        if (consecutiveBadDecisions >= 3) {
-          return { type: 'ask', question: 'I\'m stuck on this page — what should I do next?' };
-        }
+        if (consecutiveBadDecisions >= 3) return STUCK;
+        continue;
+      }
+
+      if (decision.action === 'wait') {
+        session.history.push(`Step ${steps}: waited for the page to settle`);
+        await session.page.waitForTimeout(1500);
+        consecutiveBadDecisions = 0;
         continue;
       }
 
       if (decision.action === 'done') {
+        // For an order, "done" inside the loop is always premature — a real order only
+        // completes via ready_for_payment → confirmPayment. Don't throw away the cart.
+        if (session.isOrder) {
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: ignored a premature "done" (order isn't placed yet)`);
+          if (consecutiveBadDecisions >= 3) {
+            return { type: 'awaiting_more', summary: 'Paused — tell me the next step (which item, size, or deal) and I\'ll carry on.' };
+          }
+          continue;
+        }
         await closeSession(userId);
         return { type: 'done', text: decision.summary || 'Done.' };
       }
 
       if (decision.action === 'ask') {
+        // Never surface a technical question. Treat it as a stuck step and retry instead.
+        if (isTechnicalAsk(decision.question)) {
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: suppressed a technical question ("${String(decision.question).slice(0, 60)}")`);
+          if (consecutiveBadDecisions >= 3) return STUCK;
+          await session.page.waitForTimeout(1200);
+          continue;
+        }
         return { type: 'ask', question: decision.question };
       }
 
@@ -269,9 +424,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       if (!target) {
         consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: tried to act on element #${decision.elementId}, which no longer exists`);
-        if (consecutiveBadDecisions >= 3) {
-          return { type: 'ask', question: 'I\'m stuck on this page — what should I do next?' };
-        }
+        if (consecutiveBadDecisions >= 3) return STUCK;
         continue;
       }
 
@@ -343,6 +496,8 @@ function cancelPayment(userId) {
 
 module.exports = {
   matchesPaymentKeyword,
+  isTechnicalAsk,
+  isOrderGoal,
   buildDecisionPrompt,
   parseModelDecision,
   findElementByText,

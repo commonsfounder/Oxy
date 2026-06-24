@@ -3,6 +3,8 @@ const test = require('node:test');
 
 const {
   matchesPaymentKeyword,
+  isTechnicalAsk,
+  isOrderGoal,
   buildDecisionPrompt,
   parseModelDecision,
   findElementByText
@@ -47,6 +49,44 @@ test('buildDecisionPrompt includes the goal, history, and numbered elements', ()
 test('buildDecisionPrompt handles empty history', () => {
   const prompt = buildDecisionPrompt('check stock', [], [{ id: 0, text: 'Search' }]);
   assert.match(prompt, /\(nothing yet\)/);
+});
+
+test('buildDecisionPrompt tells the model it can see the page and offers a wait action', () => {
+  const prompt = buildDecisionPrompt('order a pizza', [], [{ id: 0, text: 'Search' }]);
+  assert.match(prompt, /screenshot/i);
+  assert.match(prompt, /numbered badge/i);
+  assert.match(prompt, /"action":"wait"/);
+  assert.match(prompt, /NEVER ask the user for a URL/i);
+});
+
+test('isTechnicalAsk flags questions a real assistant must never ask', () => {
+  for (const q of [
+    'Please provide the search bar element ID',
+    'What is the URL for the McDonald\'s order page?',
+    'Should I navigate to a specific delivery platform?',
+    'Give me the CSS selector for the search box'
+  ]) {
+    assert.equal(isTechnicalAsk(q), true, `expected technical: ${q}`);
+  }
+  // legitimate, user-facing questions must pass through
+  for (const q of [
+    'Which restaurant would you like to order from?',
+    'What size pizza?',
+    'I don\'t have a delivery address on record — where should it go?'
+  ]) {
+    assert.equal(isTechnicalAsk(q), false, `expected fine: ${q}`);
+  }
+});
+
+test('isOrderGoal recognizes ordering intent so a premature "done" never closes the cart', () => {
+  assert.equal(isOrderGoal('Order a McDonald\'s Big Mac to 1805 Coventry Road'), true);
+  assert.equal(isOrderGoal('get me some jerk chicken for delivery'), true);
+  assert.equal(isOrderGoal('mcdonald\'s'), false); // bare reply — handled by live session, not a fresh order goal
+  assert.equal(isOrderGoal('what is the capital of France'), false);
+});
+
+test('parseModelDecision parses a valid wait decision', () => {
+  assert.deepEqual(parseModelDecision('{"action":"wait"}'), { action: 'wait' });
 });
 
 test('parseModelDecision parses a valid click decision', () => {
