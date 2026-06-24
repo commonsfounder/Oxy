@@ -120,7 +120,9 @@ DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter
 
 Use "ask" ONLY as a genuine last resort, when you truly cannot proceed: a real fork the goal does not resolve (e.g. two clearly different restaurants match equally well), or required input that is missing from the goal and history (e.g. a delivery address you were never given). NEVER ask whether to do something you could just do — searching for a named item, filling a field whose value you already know, or picking the obvious best match. "Should I search for X?" is never a valid question — just search.
 
-Use "ready_for_payment" once the cart is built and the next step would be paying — never choose "click" on anything that finalizes a purchase yourself.`;
+Use "ready_for_payment" once the cart is built and the next step would be paying — never choose "click" on anything that finalizes a purchase yourself.
+
+CRITICAL — "done" CLOSES the browser and ENDS the task. Use it ONLY when the goal is fully complete with nothing left to do: a pure information lookup you have answered, or an order that has ALREADY been placed. While building an order you must NEVER use "done". If you are waiting on the user to choose something (which pizza, which size, which deal) so you can continue, that is "ask" — it keeps the session alive so you can carry on when they reply. Showing a menu and waiting for their choice is "ask", NOT "done". If the cart is built, it is "ready_for_payment". Choosing "done" mid-order throws away the cart and forces the user to start over.`;
 }
 
 function parseModelDecision(rawText) {
