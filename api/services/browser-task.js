@@ -116,7 +116,11 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"done","summary":"<short summary answering the goal>"}
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
 
-Use "ask" only for genuine ambiguity you cannot resolve from the goal and history (e.g. multiple matching restaurants, a required size/option choice). Use "ready_for_payment" once the cart is built and the next step would be paying — never choose "click" on anything that finalizes a purchase yourself.`;
+DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
+
+Use "ask" ONLY as a genuine last resort, when you truly cannot proceed: a real fork the goal does not resolve (e.g. two clearly different restaurants match equally well), or required input that is missing from the goal and history (e.g. a delivery address you were never given). NEVER ask whether to do something you could just do — searching for a named item, filling a field whose value you already know, or picking the obvious best match. "Should I search for X?" is never a valid question — just search.
+
+Use "ready_for_payment" once the cart is built and the next step would be paying — never choose "click" on anything that finalizes a purchase yourself.`;
 }
 
 function parseModelDecision(rawText) {
