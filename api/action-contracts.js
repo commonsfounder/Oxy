@@ -55,6 +55,16 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Could not cancel scheduled task',
     confirmation: 'none'
   },
+  run_browser_task: {
+    risk: 'low',
+    required: ['url', 'goal'],
+    optional: ['title'],
+    inputExample: { url: 'https://example.com/search', goal: 'Find listings under $1000 and summarize them', title: 'short label for the briefing' },
+    guidance: 'Use when the user wants you to browse a real website and do/check something for them — e.g. "check Marketplace for X", "see if this site has Y in stock", "log into Z and check my balance". This runs in the background and may take a minute or more; tell the user you\'re on it, the result lands as a briefing, not in this reply. Do not use for anything available via a connector (email, calendar, music, maps) — those are faster and more reliable.',
+    successSummary: 'Browser task started',
+    failureSummary: 'Browser task failed to start',
+    confirmation: 'none'
+  },
   play_music: {
     risk: 'low',
     required: ['query'],

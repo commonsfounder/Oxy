@@ -40,6 +40,7 @@ const {
   advanceScheduledTask,
   describeSchedule
 } = require('./services/scheduled-tasks');
+const { runBrowserTask } = require('./services/browser-task');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -505,6 +506,22 @@ async function sendPushToUser(userId, briefing) {
       }
     }));
   return { sent };
+}
+
+async function summarizeBrowserResult(url, goal, result) {
+  if (!result.success) return `Couldn't finish checking ${new URL(url).hostname}: ${result.error}`;
+  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+  const response = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: `You browsed ${url} to help with this goal: "${goal}".\n\nHere is the visible page text:\n${result.text}\n\nWrite a short, direct answer to the goal for the user, as if reporting back. If the goal can't be answered from this text, say what you found instead.` }] }],
+    generationConfig: { temperature: 0.3, maxOutputTokens: 512 }
+  });
+  return response.response.text().trim() || 'Finished checking, but had nothing useful to report.';
+}
+
+async function runBrowserTaskAndNotify(userId, { url, goal, title }) {
+  const result = await runBrowserTask(userId, { url });
+  const body = await summarizeBrowserResult(url, goal, result);
+  await createBriefing(userId, { kind: 'browser_task', title, body, source: 'browser_task', metadata: { url, goal } });
 }
 
 async function createBriefing(userId, { kind, title, body, source = 'proactive', metadata = {}, push = true }) {
@@ -2278,6 +2295,39 @@ async function executeAction(userId, action, params, context = {}) {
         webLink: `https://music.apple.com/search?term=${encodeURIComponent(query)}`
       };
     }
+    case 'run_browser_task': {
+      const url = String(params?.url || '').trim();
+      const goal = String(params?.goal || '').trim();
+      if (!url || !goal) return { success: false, error: 'run_browser_task needs a url and a goal.' };
+      const title = String(params?.title || '').trim() || `Browser check: ${new URL(url).hostname}`;
+
+      // Live chat turn (has an SSE channel): run inline and stream step-by-step
+      // progress, same status-chip mechanism other actions already use.
+      if (typeof context.sendStatus === 'function') {
+        const onProgress = label => context.sendStatus('action_progress', label, { action: 'run_browser_task' });
+        const result = await runBrowserTask(userId, { url, onProgress });
+        const text = await summarizeBrowserResult(url, goal, result);
+        return {
+          success: result.success,
+          text,
+          cardText: title,
+          actionSummary: result.success ? 'Browser task finished' : 'Browser task failed',
+          screenshotBase64: result.screenshotBase64 || null
+        };
+      }
+
+      // No live channel (scheduled/proactive invocation): fire-and-forget,
+      // result lands as a briefing once the browse finishes.
+      runBrowserTaskAndNotify(userId, { url, goal, title }).catch(err =>
+        console.error('[run_browser_task] background failure:', err.message)
+      );
+      return {
+        success: true,
+        text: `On it — I'll let you know what I find on ${new URL(url).hostname}.`,
+        cardText: title,
+        actionSummary: 'Browser task started'
+      };
+    }
     case 'forget_memory':
       return forgetMemory(userId, params || {});
     case 'create_reminder': {
@@ -3023,7 +3073,7 @@ function buildAvailableActions(enabled) {
     linear: ['search_linear_issues', 'get_linear_issues', 'create_linear_issue', 'comment_linear_issue']
   };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
-  const internalActions = 'forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation, create_reminder, create_scheduled_task, list_scheduled_tasks, cancel_scheduled_task';
+  const internalActions = 'forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation, create_reminder, create_scheduled_task, list_scheduled_tasks, cancel_scheduled_task, run_browser_task';
   if (live.length === 0) return `No connectors enabled. Internal actions still available: ${internalActions}.`;
   const active = live.flatMap(id => actionMap[id] || []);
   return `Available connector actions: ${active.join(', ')}. Internal actions always available: ${internalActions}. Only use enabled connector actions — don't suggest actions for connectors that aren't enabled.`;
@@ -5680,7 +5730,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
         sendStatus('action_start', getActionStatusLabel(deterministicAction.actions[0].type, 'start'), { action: deterministicAction.actions[0].type });
-        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace }, trace, {
+        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace, sendStatus }, trace, {
           onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
             action: action.type,
             success: result?.success !== false
@@ -5849,7 +5899,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
-          actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace, {
+          actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace, sendStatus }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
               action: action.type,
