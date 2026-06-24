@@ -281,10 +281,13 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       const locator = session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex);
       if (decision.action === 'click') {
         onProgress(`Clicking "${target.text}"…`);
-        // Real sites overlay clickable cards/links with decorative or consent <div>s
-        // that "intercept pointer events" and stall a normal click. We resolved this
-        // exact interactive element, so force the click past the overlay. Safe here:
-        // the payment guardrail above means the loop never force-clicks a pay button.
+        // Two real-site hazards: (1) elements in horizontal carousels/off-screen rows
+        // aren't in the viewport, and force-click alone errors "outside of the viewport"
+        // because force skips the patient scroll-and-retry; (2) decorative/consent <div>s
+        // overlay the target and "intercept pointer events". So: scroll it into view
+        // first, then force the click past any overlay. Safe — the payment guardrail
+        // above means the loop never force-clicks a pay button.
+        await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
         await locator.click({ timeout: 10000, force: true });
         session.history.push(`Step ${steps}: clicked "${target.text}"`);
       } else if (decision.action === 'fill') {
@@ -297,7 +300,12 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       await persistStorage(userId, session);
     }
   } catch (error) {
-    return { type: 'error', error: error.message };
+    // Playwright errors carry a multi-line call log — log it server-side, but show the
+    // user a short, calm line (the session stays open so they can continue).
+    console.warn('[browser-task] step failed:', error.message);
+    const reason = String(error.message || 'something went wrong').split('\n')[0].slice(0, 160);
+    session.history.push(`Step ${steps}: action failed (${reason})`);
+    return { type: 'error', error: `Hit a snag on the page (${reason}). Say "keep going" and I'll pick up where I left off.` };
   }
 
   return { type: 'awaiting_more', summary: `Still working on it — ${session.history.length} step(s) so far. Want me to keep going?` };

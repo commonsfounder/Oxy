@@ -2298,7 +2298,9 @@ async function executeAction(userId, action, params, context = {}) {
       // Flag the live session so the NEXT user message is routed straight back into
       // the loop (deterministic resume) instead of the general chat brain.
       const liveSession = getSession(userId);
-      if (liveSession) liveSession.awaitingInput = (outcome.type === 'ask' || outcome.type === 'awaiting_more');
+      // ask/awaiting_more clearly await a reply; a recoverable error leaves the session
+      // open too, so route the user's "keep going" straight back into the loop.
+      if (liveSession) liveSession.awaitingInput = (outcome.type === 'ask' || outcome.type === 'awaiting_more' || outcome.type === 'error');
 
       switch (outcome.type) {
         case 'error':
