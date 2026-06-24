@@ -1,8 +1,18 @@
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
-const { createSupabaseServiceClient } = require('../../runtime');
+const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 
 chromium.use(stealth);
+
+const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
+const MAX_STEPS = 40;
+const MAX_DURATION_MS = 4 * 60 * 1000;
+
+let geminiClient = null;
+function getGemini() {
+  if (!geminiClient) geminiClient = createGeminiServiceClient();
+  return geminiClient;
+}
 
 let supabaseClient = null;
 function getSupabase() {
@@ -149,6 +159,106 @@ async function extractClickableElements(page) {
   return elements;
 }
 
+async function decideNextAction(goal, history, elements) {
+  const model = getGemini().getGenerativeModel({ model: FAST_MODEL });
+  const response = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: buildDecisionPrompt(goal, history, elements) }] }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 300, responseMimeType: 'application/json' }
+  });
+  return parseModelDecision(response.response.text());
+}
+
+async function openNewSession(userId, url, goal) {
+  const site = siteKeyFromUrl(url);
+  const storageState = await loadStorageState(userId, site);
+  const browser = await launchBrowser();
+  const context = await browser.newContext(storageState ? { storageState } : {});
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  return createSession(userId, { browser, context, page, goal, history: [], pendingPaymentLabel: null });
+}
+
+async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
+  let session = getSession(userId);
+  if (!session) {
+    if (!url) return { type: 'error', error: 'That session expired (idle too long) and there\'s no url to restart it — ask the user which site/restaurant again.' };
+    onProgress('Opening browser…');
+    try {
+      session = await openNewSession(userId, url, goal);
+    } catch (error) {
+      return { type: 'error', error: error.message };
+    }
+  } else {
+    touchSession(userId);
+    session.goal = goal; // latest message becomes the active instruction, history carries prior context
+  }
+
+  const startedAt = Date.now();
+  let steps = 0;
+
+  try {
+    while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
+      steps += 1;
+      onProgress('Looking at the page…');
+      const elements = await extractClickableElements(session.page);
+      const decision = await decideNextAction(session.goal, session.history, elements);
+
+      if (decision.action === 'invalid') {
+        session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
+        if (steps >= 3 && session.history.slice(-3).every(h => h.includes('could not decide'))) {
+          return { type: 'ask', question: 'I\'m stuck on this page — what should I do next?' };
+        }
+        continue;
+      }
+
+      if (decision.action === 'done') {
+        await closeSession(userId);
+        return { type: 'done', text: decision.summary || 'Done.' };
+      }
+
+      if (decision.action === 'ask') {
+        return { type: 'ask', question: decision.question };
+      }
+
+      if (decision.action === 'ready_for_payment') {
+        // Store the real pay button's text (the cart-summary text never matches a
+        // clickable element), so confirmPayment can re-find and click it later.
+        const payEl = elements.find(el => matchesPaymentKeyword(el.text));
+        session.pendingPaymentLabel = payEl?.text || null;
+        return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
+      }
+
+      // click or fill
+      const target = elements.find(el => el.id === decision.elementId);
+      if (!target) {
+        session.history.push(`Step ${steps}: tried to act on element #${decision.elementId}, which no longer exists`);
+        continue;
+      }
+
+      if (matchesPaymentKeyword(target.text)) {
+        session.pendingPaymentLabel = target.text;
+        return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
+      }
+
+      const locator = session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex);
+      if (decision.action === 'click') {
+        onProgress(`Clicking "${target.text}"…`);
+        await locator.click({ timeout: 10000 });
+        session.history.push(`Step ${steps}: clicked "${target.text}"`);
+      } else if (decision.action === 'fill') {
+        onProgress(`Typing into "${target.text}"…`);
+        await locator.fill(String(decision.value || ''), { timeout: 10000 });
+        session.history.push(`Step ${steps}: filled "${target.text}" with "${decision.value}"`);
+      }
+      touchSession(userId);
+    }
+  } catch (error) {
+    return { type: 'error', error: error.message };
+  }
+
+  return { type: 'awaiting_more', summary: `Still working on it — ${session.history.length} step(s) so far. Want me to keep going?` };
+}
+
 module.exports = {
   matchesPaymentKeyword,
   buildDecisionPrompt,
@@ -158,5 +268,6 @@ module.exports = {
   getSession,
   touchSession,
   closeSession,
-  extractClickableElements
+  extractClickableElements,
+  runOrderingTurn
 };
