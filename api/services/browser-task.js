@@ -272,7 +272,11 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       const locator = session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex);
       if (decision.action === 'click') {
         onProgress(`Clicking "${target.text}"…`);
-        await locator.click({ timeout: 10000 });
+        // Real sites overlay clickable cards/links with decorative or consent <div>s
+        // that "intercept pointer events" and stall a normal click. We resolved this
+        // exact interactive element, so force the click past the overlay. Safe here:
+        // the payment guardrail above means the loop never force-clicks a pay button.
+        await locator.click({ timeout: 10000, force: true });
         session.history.push(`Step ${steps}: clicked "${target.text}"`);
       } else if (decision.action === 'fill') {
         onProgress(`Typing into "${target.text}"…`);

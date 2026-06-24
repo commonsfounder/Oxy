@@ -61,8 +61,8 @@ const ACTION_CONTRACTS = {
     optional: ['url', 'title'],
     inputExample: { url: 'https://deliveroo.co.uk (a delivery platform you can act on; only needed to start a new task)', goal: 'Order jerk chicken for delivery to B18 4HE, or find Marketplace listings under $1000, or the user\'s reply to a question you previously asked', title: 'short label for the briefing' },
     guidance: 'Use when the user wants you to browse a real website and DO something for them — including placing a food/grocery/shopping order ("order me a pizza", "get me some jerk chicken"), checking a marketplace, or logging into a site to check something. This is how you ORDER things; do not fall back to find_place or an Uber when the user says "order it". To START a delivery order, set url to a platform you can drive — https://www.ubereats.com, https://deliveroo.co.uk, or https://www.just-eat.co.uk — and put BOTH the items AND the user\'s delivery address/postcode in the goal (e.g. "Order jerk chicken for delivery to B18 4HE"). You do not need a perfect deep link: the loop reads each page and will enter the address, search, and build the cart itself. If you don\'t know the user\'s delivery address, ask for it before starting. For vague requests ("order me something") have a normal conversation first — ask what they\'re craving — before calling this. This runs across several turns: if you previously asked the user a question via this action, or it said it was still working, call it again with their reply as the goal and OMIT url — it resumes the same in-progress session. It pauses to ask you to confirm before any payment is finalized; never imply an order is placed until that confirmation completes. Do not use for anything a connector already covers (email, calendar, music, maps).',
-    successSummary: 'Browser task started',
-    failureSummary: 'Browser task failed to start',
+    successSummary: 'Browser task ran',
+    failureSummary: 'Browser task failed',
     confirmation: 'none'
   },
   play_music: {
