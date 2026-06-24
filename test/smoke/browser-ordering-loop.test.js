@@ -9,6 +9,20 @@ const {
   parseModelDecision,
   findElementByText
 } = require('../../api/services/browser-task');
+const { validateActionWithContract } = require('../../api/action-contracts');
+
+// Regression: the contract's static `required` list can't express "goal is required
+// to START a task but optional to CONTINUE one" — that's conditional on live session
+// state. goal moved to `optional`; the real, session-aware check lives in the
+// run_browser_task case handler (api/index.js). If 'goal' ever lands back in
+// `required` here, the generic validator below would reject the auto-continue
+// sentinel's empty goal before that handler even runs — exactly the bug that broke
+// the whole auto-continue feature in production.
+test('validateActionWithContract does not require goal (the handler enforces it conditionally)', () => {
+  const action = { type: 'run_browser_task', input: {} };
+  const error = validateActionWithContract(action, '');
+  assert.equal(error, null, 'an empty goal must reach the handler, not be rejected upstream');
+});
 
 test('matchesPaymentKeyword catches common finalize/payment button text', () => {
   assert.equal(matchesPaymentKeyword('Place order'), true);

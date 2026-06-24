@@ -2287,8 +2287,12 @@ async function executeAction(userId, action, params, context = {}) {
       const goal = String(params?.goal || '').trim();
       // Empty goal is only valid as a silent continuation of an already-open session
       // (the auto-continue loop from /chat) — it keeps grinding on the existing goal
-      // instead of needing a fresh instruction every turn.
-      if (!goal && !getSession(userId)) return { success: false, error: 'run_browser_task needs a goal.' };
+      // instead of needing a fresh instruction every turn. No live session to continue
+      // and no goal to start one — a plain, non-technical question, never an internal
+      // action/field name.
+      if (!goal && !getSession(userId)) {
+        return { success: false, error: 'What would you like me to order, and from where?' };
+      }
       const url = String(params?.url || '').trim() || null;
       const title = String(params?.title || '').trim() || (url ? `Browser task: ${new URL(url).hostname}` : 'Browser task');
       const onProgress = label => context.sendStatus?.('action_progress', label, { action: 'run_browser_task' });
