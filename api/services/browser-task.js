@@ -126,6 +126,29 @@ function findElementByText(elements, text) {
     || null;
 }
 
+const CLICKABLE_SELECTOR = 'button, a, input, [role="button"]';
+const MAX_ELEMENTS = 60;
+
+async function extractClickableElements(page) {
+  const locator = page.locator(CLICKABLE_SELECTOR);
+  const count = await locator.count();
+  const elements = [];
+  for (let i = 0; i < count && elements.length < MAX_ELEMENTS; i++) {
+    const el = locator.nth(i);
+    const visible = await el.isVisible().catch(() => false);
+    if (!visible) continue;
+    const text = (await el.innerText().catch(() => ''))
+      || (await el.getAttribute('aria-label').catch(() => ''))
+      || (await el.getAttribute('placeholder').catch(() => ''))
+      || (await el.getAttribute('value').catch(() => ''))
+      || '';
+    const trimmed = text.trim().replace(/\s+/g, ' ').slice(0, 80);
+    if (!trimmed) continue;
+    elements.push({ id: elements.length, text: trimmed, locatorIndex: i });
+  }
+  return elements;
+}
+
 module.exports = {
   matchesPaymentKeyword,
   buildDecisionPrompt,
@@ -134,5 +157,6 @@ module.exports = {
   createSession,
   getSession,
   touchSession,
-  closeSession
+  closeSession,
+  extractClickableElements
 };
