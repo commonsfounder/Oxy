@@ -5,8 +5,12 @@ const { createSupabaseServiceClient, createGeminiServiceClient } = require('../.
 chromium.use(stealth);
 
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
-const MAX_STEPS = 40;
-const MAX_DURATION_MS = 4 * 60 * 1000;
+// Each turn must finish well within the mobile client's ~45s request watchdog, or the
+// app reports "stuck waiting on the network" while the server is still working. Keep
+// turns short; if the order isn't done, return awaiting_more and the next message
+// (routed back in by the deterministic-resume path) continues it.
+const MAX_STEPS = 15;
+const MAX_DURATION_MS = 30 * 1000;
 
 let geminiClient = null;
 function getGemini() {
@@ -116,7 +120,7 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"done","summary":"<short summary answering the goal>"}
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
 
-DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
+DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. On a delivery site (Uber Eats, Deliveroo, Just Eat), restaurants and the search bar usually do NOT appear until a delivery address is entered — if you don't see restaurants or a search box yet, find the address/postcode input, fill it with the address from the goal, and pick the first suggestion, BEFORE trying to search. Never ask the user for a URL or to pick a different platform — work with the page you're on. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
 
 Use "ask" ONLY as a genuine last resort, when you truly cannot proceed: a real fork the goal does not resolve (e.g. two clearly different restaurants match equally well), or required input that is missing from the goal and history (e.g. a delivery address you were never given). NEVER ask whether to do something you could just do — searching for a named item, filling a field whose value you already know, or picking the obvious best match. "Should I search for X?" is never a valid question — just search.
 

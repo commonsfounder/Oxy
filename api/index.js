@@ -40,7 +40,7 @@ const {
   advanceScheduledTask,
   describeSchedule
 } = require('./services/scheduled-tasks');
-const { runOrderingTurn, confirmPayment, getSession } = require('./services/browser-task');
+const { runOrderingTurn, confirmPayment, getSession, closeSession } = require('./services/browser-task');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -2295,6 +2295,10 @@ async function executeAction(userId, action, params, context = {}) {
       }
 
       const outcome = await runOrderingTurn(userId, { url, goal, onProgress });
+      // Flag the live session so the NEXT user message is routed straight back into
+      // the loop (deterministic resume) instead of the general chat brain.
+      const liveSession = getSession(userId);
+      if (liveSession) liveSession.awaitingInput = (outcome.type === 'ask' || outcome.type === 'awaiting_more');
 
       switch (outcome.type) {
         case 'error':
@@ -5666,6 +5670,27 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         spoken,
         actionResults
       });
+      return;
+    }
+
+    // Deterministic resume: if a browser/ordering session is open and waiting on the
+    // user's reply, route this message straight back into the loop instead of letting
+    // the general chat brain answer it (which would strand the order).
+    const awaitingBrowser = getSession(userId);
+    if (awaitingBrowser?.awaitingInput && !trace.incognito) {
+      if (isPendingCancelMessage(message)) {
+        await closeSession(userId);
+        await respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken: 'Okay, I\'ve stopped that order.' });
+        return;
+      }
+      trace.log('browser_task.resume');
+      awaitingBrowser.awaitingInput = false; // cleared now; the case re-sets it from the new outcome
+      let resumeResults = await executeActions(userId, [{ type: 'run_browser_task', input: { goal: message } }], { userMessage: message, location, nativeHints, trace }, trace);
+      resumeResults = normalizeActionResultsForClient(resumeResults);
+      const spoken = summarizeFinishedActionsForUser(resumeResults) ||
+        resumeResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
+        'Done.';
+      await respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults: resumeResults });
       return;
     }
 
