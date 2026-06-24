@@ -120,7 +120,7 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"done","summary":"<short summary answering the goal>"}
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
 
-DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. On a delivery site (Uber Eats, Deliveroo, Just Eat), restaurants and the search bar usually do NOT appear until a delivery address is entered — if you don't see restaurants or a search box yet, find the address/postcode input, fill it with the address from the goal, and pick the first suggestion, BEFORE trying to search. Never ask the user for a URL or to pick a different platform — work with the page you're on. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
+DEFAULT TO ACTING. Carry out the goal yourself — type in the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. On a delivery site (Uber Eats, Deliveroo, Just Eat), restaurants and the search bar usually do NOT appear until a delivery address is entered — if you don't see restaurants or a search box yet, find the address/postcode input, fill it with the address from the goal, and pick the first suggestion, BEFORE trying to search. The address box is an AUTOCOMPLETE: after you fill it, a dropdown of address suggestions appears as separate clickable items — you MUST click the matching suggestion to lock the address in; typing alone does NOT set it. Do not search or proceed until you have clicked a suggestion. If the restaurants shown are in the WRONG city or area (e.g. London when the address is Birmingham), the address did not commit — the page is defaulting to the server's location; clear the field, re-type the address, and click the suggestion. Never ask the user for a URL or to pick a different platform — work with the page you're on. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
 
 Use "ask" ONLY as a genuine last resort, when you truly cannot proceed: a real fork the goal does not resolve (e.g. two clearly different restaurants match equally well), or required input that is missing from the goal and history (e.g. a delivery address you were never given). NEVER ask whether to do something you could just do — searching for a named item, filling a field whose value you already know, or picking the obvious best match. "Should I search for X?" is never a valid question — just search.
 
@@ -151,7 +151,10 @@ function findElementByText(elements, text) {
     || null;
 }
 
-const CLICKABLE_SELECTOR = 'button, a, input, [role="button"]';
+// Include ARIA-role interactives, not just native controls: address-autocomplete
+// suggestions, menu items, size/option radios etc. are often role-based divs/li that
+// the loop must be able to see and click (e.g. committing a delivery address).
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 const MAX_ELEMENTS = 60;
 
 async function extractClickableElements(page) {
