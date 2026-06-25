@@ -85,6 +85,7 @@ const {
 } = require('../auth');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
+const { extractIncoming } = require('./services/incoming');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -5005,6 +5006,8 @@ async function gatherProactiveContext(userId, now = new Date()) {
     }
   });
 
+  // Structured deliveries/reservations parsed from the same Primary-inbox emails.
+  context.incoming = extractIncoming(context.emails);
   context.location = parseJsonObject(nativeContext?.location);
   context.health = parseJsonObject(nativeContext?.health);
   // Pending errands ride in the settings blob from the iOS native sync.
@@ -5324,7 +5327,7 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
   // `body` keeps a plain-text summary so older clients (and the chat "Ask about this") still
   // read something; the structured feed rides in metadata.
   const body = lead || signals.map(s => s.title).join(' · ');
-  const metadata = { window: window.id, date: todayKey, emails: ctx.emails, lead, signals };
+  const metadata = { window: window.id, date: todayKey, emails: ctx.emails, incoming: ctx.incoming, lead, signals };
 
   let briefing;
   if (state.id) {
