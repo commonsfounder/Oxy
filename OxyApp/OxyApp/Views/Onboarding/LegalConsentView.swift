@@ -65,7 +65,8 @@ struct LegalConsentView: View {
 
     private func consentRow(isOn: Binding<Bool>, lead: String, emphasis: String) -> some View {
         Button {
-            isOn.wrappedValue.toggle()
+            HapticManager.shared.impact(.rigid)
+            withAnimation(.nmlSpring) { isOn.wrappedValue.toggle() }
         } label: {
             HStack(alignment: .center, spacing: 16) {
                 NamelessCheckbox(isOn: isOn.wrappedValue)
@@ -98,7 +99,9 @@ private struct NamelessCheckbox: View {
                 Rectangle()
                     .strokeBorder(isOn ? Color.clear : Color.white.opacity(0.3), lineWidth: 1)
             )
-            .animation(.easeInOut(duration: 0.15), value: isOn)
+            // A small overshoot as it fills — presence with a little life, not a hard flip.
+            .scaleEffect(isOn ? 1.08 : 1.0)
+            .animation(.nmlSpring, value: isOn)
     }
 }
 

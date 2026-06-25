@@ -267,12 +267,8 @@ struct ChatView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             // A soft tick when Millie's reply settles; a warning buzz when a request fails.
-            .sensoryFeedback(trigger: assistantReplySettled) { _, settled in
-                settled ? .impact(weight: .soft) : nil
-            }
-            .sensoryFeedback(trigger: viewModel.networkError != nil) { _, failed in
-                failed ? .warning : nil
-            }
+            // Lives in its own modifier so this (large) body still type-checks in time.
+            .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,
@@ -558,6 +554,23 @@ struct ChatView: View {
         @unknown default:
             viewModel.statusLabel = nil
         }
+    }
+}
+
+/// The chat's two reward haptics, isolated from the main body so its type-checking
+/// cost doesn't compound the (already large) `ChatView` body expression.
+private struct ChatHaptics: ViewModifier {
+    let replySettled: Bool
+    let failed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .sensoryFeedback(trigger: replySettled) { _, settled in
+                settled ? .impact(flexibility: .soft, intensity: 0.7) : nil
+            }
+            .sensoryFeedback(trigger: failed) { _, didFail in
+                didFail ? .warning : nil
+            }
     }
 }
 

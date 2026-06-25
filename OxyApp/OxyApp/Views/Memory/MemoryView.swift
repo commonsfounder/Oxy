@@ -235,6 +235,8 @@ struct MemoryView: View {
                 body: ["userId": appState.userId, "content": content]
             )
             await MainActor.run {
+                // A soft success note as it's committed to memory.
+                HapticManager.shared.success()
                 draft = ""
                 saveMessage = nil
                 isSaving = false

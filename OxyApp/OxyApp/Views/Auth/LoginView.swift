@@ -42,16 +42,20 @@ struct LoginView: View {
 
                 if let token = response.token, let returnedUserId = response.userId {
                     await MainActor.run {
+                        // A warm success note as the door opens.
+                        HapticManager.shared.success()
                         appState.login(userId: returnedUserId, token: token)
                     }
                 } else {
                     await MainActor.run {
+                        HapticManager.shared.warning()
                         withAnimation { errorMessage = response.error ?? "Authentication failed" }
                         isLoading = false
                     }
                 }
             } catch {
                 await MainActor.run {
+                    HapticManager.shared.warning()
                     withAnimation { errorMessage = error.localizedDescription }
                     isLoading = false
                 }

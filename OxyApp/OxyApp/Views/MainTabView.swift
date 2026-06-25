@@ -296,7 +296,7 @@ struct MoreView: View {
         VStack(spacing: 0) {
             editorialRow("Memory") { destination = .memory }
             rowDivider
-            editorialRow("Connectors") { destination = .connectors }
+            editorialRow("Apps") { destination = .connectors }
             rowDivider
             editorialRow("Settings") { destination = .settings }
             rowDivider

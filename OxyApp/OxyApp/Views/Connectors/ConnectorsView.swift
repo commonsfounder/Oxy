@@ -28,7 +28,7 @@ struct ConnectorsView: View {
                 Color.mgBg.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Connectors", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Apps", onBack: { dismiss() })
 
                 if isLoading {
                     VStack(spacing: 0) {
@@ -60,9 +60,9 @@ struct ConnectorsView: View {
                                 .animation(.nmlSpring.delay(0.0), value: cardsVisible)
                             }
 
-                            // Third-party integrations
+                            // Connected apps
                             VStack(alignment: .leading, spacing: 4) {
-                                MilgrainSectionHeader(title: "Integrations")
+                                MilgrainSectionHeader(title: "Apps")
                                     .padding(.bottom, 12)
 
                                 let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
@@ -88,6 +88,9 @@ struct ConnectorsView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .sensoryFeedback(trigger: errorMessage != nil) { _, failed in
+                failed ? .warning : nil
+            }
             .task {
                 await loadAll()
             }
@@ -157,6 +160,7 @@ struct ConnectorsView: View {
 
     private var googleSection: some View {
         IntegrationRow(
+            iconSlug: "google",
             name: "Google",
             detail: googleDetail,
             isConnected: googleStatus == .connected,
@@ -193,6 +197,7 @@ struct ConnectorsView: View {
 
     private func integrationRow(_ connector: Connector) -> some View {
         IntegrationRow(
+            iconSlug: connector.icon,
             name: connector.name,
             detail: connector.statusText.uppercased(),
             isConnected: connector.connectionState == "connected",
@@ -354,6 +359,8 @@ struct ConnectorsView: View {
                         if connector.id == "google" {
                             googleStatus = enabled ? .connected : .idle
                         }
+                        // A success note as a service comes online (softer tick when disabling).
+                        if enabled { HapticManager.shared.success() } else { HapticManager.shared.impact(.soft) }
                         errorMessage = nil
                     }
                 }
@@ -374,6 +381,7 @@ struct NativeCapabilityItem {
     let id: String
     let title: String
     let subtitle: String
+    let systemImage: String
     let status: Status
 
     @MainActor static func all(from caps: NativeCapabilities) -> [NativeCapabilityItem] {
@@ -386,36 +394,42 @@ struct NativeCapabilityItem {
                 id: "contacts",
                 title: "Contacts",
                 subtitle: "Message and call people by name",
+                systemImage: "person.crop.circle",
                 status: caps.contacts ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "location",
                 title: "Location",
                 subtitle: "Rides, directions, local context",
+                systemImage: "location",
                 status: locCapStatus
             ),
             NativeCapabilityItem(
                 id: "health",
                 title: "Health",
                 subtitle: "Activity, heart rate, sleep",
+                systemImage: "heart",
                 status: caps.healthKit ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "reminders",
                 title: "Reminders",
                 subtitle: "Create and manage tasks",
+                systemImage: "checklist",
                 status: caps.reminders ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "music",
                 title: "Music",
                 subtitle: "Control Apple Music playback",
+                systemImage: "music.note",
                 status: caps.musicKit ? .granted : .notDetermined
             ),
             NativeCapabilityItem(
                 id: "notifications",
                 title: "Notifications",
                 subtitle: "Briefings and action alerts",
+                systemImage: "bell",
                 status: caps.notifications ? .granted : .notDetermined
             ),
         ]
@@ -429,8 +443,20 @@ private struct NativeCapabilityRow: View {
     let onAction: () async -> Void
 
     var body: some View {
-        HStack(spacing: 16) {
-            // No icon, no status dot (Milgrain spec) — just a raw label and a text state.
+        HStack(spacing: 14) {
+            // A neutral system-glyph tile so device permissions sit in the same rhythm as
+            // the branded app rows below.
+            Image(systemName: item.systemImage)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(Color.mgHeading)
+                .frame(width: 38, height: 38)
+                .background(Color.mgOff.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 38 * 14 / 64, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 38 * 14 / 64, style: .continuous)
+                        .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
+                )
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
                     .font(.system(size: 14, weight: .semibold))
@@ -476,6 +502,7 @@ private struct NativeCapabilityRow: View {
 /// right. "Connected" reads muted (#555); when disconnected the right side keeps
 /// an affordance verb (#888) so the row can still be acted on.
 private struct IntegrationRow: View {
+    let iconSlug: String
     let name: String
     let detail: String
     let isConnected: Bool
@@ -485,6 +512,7 @@ private struct IntegrationRow: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            ConnectorIcon(slug: iconSlug, name: name)
             VStack(alignment: .leading, spacing: 5) {
                 Text(name)
                     .font(.system(size: 15, weight: .semibold))
@@ -511,6 +539,49 @@ private struct IntegrationRow: View {
             .disabled(isBusy)
         }
         .padding(.vertical, 18)
+    }
+}
+
+// MARK: - Connector Icon
+
+/// A 38pt brand tile for an app row. Renders the bundled self-contained brand asset
+/// (a rounded tile with the logo baked in) when one exists for the slug; otherwise a
+/// clean monogram chip so every row still reads as an app, never a blank gap. A faint
+/// outline (pure black, low opacity) gives the tile a crisp edge on any surface.
+private struct ConnectorIcon: View {
+    let slug: String
+    let name: String
+
+    private var hasAsset: Bool { UIImage(named: slug) != nil }
+    private let side: CGFloat = 38
+    private var radius: CGFloat { side * 14 / 64 }  // iOS app-icon corner ratio (64→~14)
+
+    // The few slugs with no App Store artwork (system apps like Apple Wallet) get a real
+    // system glyph on a brand-appropriate tile — never a letter monogram.
+    private var fallbackSymbol: String { slug == "wallet" ? "wallet.pass.fill" : "app.dashed" }
+    private var fallbackDark: Bool { slug == "wallet" }
+
+    var body: some View {
+        Group {
+            if hasAsset {
+                Image(slug)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: fallbackSymbol)
+                    .font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(fallbackDark ? .white : Color.mgHeading)
+                    .frame(width: side, height: side)
+                    .background(fallbackDark ? Color.black : Color.mgOff.opacity(0.5))
+            }
+        }
+        .frame(width: side, height: side)
+        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
+        )
+        .accessibilityHidden(true)
     }
 }
 
