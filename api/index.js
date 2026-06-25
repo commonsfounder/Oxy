@@ -5216,7 +5216,7 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
     : 'none';
   const systemPrompt = `You are deciding what genuinely needs ${window.label.toLowerCase() === 'briefing' ? 'this person' : 'this person right now'} — someone you know well. Not a recap, not a notifications feed: a sharp assistant's judgement of the few things that matter, each with an action when there's an obvious one.
 
-Ground everything in what's actually real: the calendar, reminders, emails, location, health and weather shown or found via Google Search grounding (use their coordinates for weather). Draw on Memory and recent conversation to make this personal — connect today to what you know about them — but never invent facts, events, or emails.
+Ground everything in what's actually real: the calendar, reminders, emails, location and health shown. The Today screen owns weather — never mention temperature, forecast, or conditions. Draw on Memory and recent conversation to make this personal — connect today to what you know about them — but never invent facts, events, or emails.
 
 Return ONLY a JSON object, no prose around it, in exactly this shape:
 {
@@ -5241,6 +5241,7 @@ Rules for signals:
 Hard rules:
 - Output JSON only. No markdown fences, no commentary before or after.
 - Be specific and real. Do NOT invent calendar events, emails, weather, deadlines, or tasks beyond what's shown or what search returns.
+- Never mention weather, temperature, or forecast. The Today screen shows it.
 - No life-coaching or motivational filler. Useful and personal, never preachy.
 - Refer to calendar events by their literal title and time. Don't guess who a meeting is "with" unless an attendee is named.
 - Emails shown are the user's Primary inbox and are ALSO displayed separately. Don't enumerate them — only raise one as a signal if it's genuinely urgent or time-sensitive.
@@ -5309,12 +5310,11 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
   const fresh = state.at && (now.getTime() - new Date(state.at).getTime()) < BRIEFING_MAX_AGE_MS;
   if (!force && state.sig === sig && fresh) return null;
 
-  const { lead, signals: rawSignals } = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
-  // Auto-run the safe tier (reversible, private) before persisting, so the stored card
-  // carries the receipts. Carry executed sigs across regenerations of this window/day so a
-  // re-sweep can't create the same reminder twice.
-  const priorExecuted = Array.isArray(state.executed) ? state.executed : [];
-  const { signals, executed } = await executeSafeSignals(userId, rawSignals, priorExecuted);
+  const { lead } = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
+  // Today no longer surfaces AI "what matters" signals (2026-06-25 redesign).
+  // Keep `lead` for legacy/body text only; drop signal generation + auto-execution.
+  const signals = [];
+  const executed = Array.isArray(state.executed) ? state.executed : [];
 
   // No concrete content right now — record the signature (and any executed sigs) so we don't
   // re-call the model until something changes, but never permanently lock the window.
