@@ -268,12 +268,17 @@ struct Briefing: Codable, Identifiable, Equatable {
         metadata?.emails ?? []
     }
 
+    var incoming: [BriefingIncoming] {
+        metadata?.incoming ?? []
+    }
+
     var lead: String? { metadata?.lead }
     var signals: [BriefingSignal] { metadata?.signals ?? [] }
 }
 
 struct BriefingMetadata: Codable, Equatable {
     let emails: [BriefingEmail]?
+    let incoming: [BriefingIncoming]?
     let lead: String?
     let signals: [BriefingSignal]?
 }
@@ -329,6 +334,21 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
         ]
         return signals.contains { haystack.contains($0) }
     }
+}
+
+/// A delivery, order, or reservation parsed server-side from the user's inbox.
+/// `stage` is delivery progress 0…3 (ordered→delivered); nil for reservations.
+struct BriefingIncoming: Codable, Equatable, Identifiable {
+    let kind: String        // "delivery" | "reservation"
+    let title: String
+    let vendor: String
+    let status: String
+    let eta: String?
+    let stage: Int?
+
+    var id: String { vendor + "|" + title }
+    var isDelivery: Bool { kind == "delivery" }
+    var cleanTitle: String { title.decodingHTMLEntities() }
 }
 
 extension String {
