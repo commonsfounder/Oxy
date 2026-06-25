@@ -2142,8 +2142,19 @@ final class NativeIntegrationManager: NSObject {
         }
     }
 
+    /// All calendars the user can pick from for the Agenda card, title + stable id.
+    func availableCalendars() -> [(id: String, title: String)] {
+        eventStore.calendars(for: .event).map { ($0.calendarIdentifier, $0.title) }
+    }
+
+    /// All reminder lists the user can pick from for the Reminders card, title + stable id.
+    func availableReminderLists() -> [(id: String, title: String)] {
+        eventStore.calendars(for: .reminder).map { ($0.calendarIdentifier, $0.title) }
+    }
+
     /// Today's remaining calendar events (all-day events plus anything not yet finished), soonest first.
-    func todaysEvents() async -> [TodayEvent] {
+    /// `excludedCalendarIDs` lets the Agenda card hide calendars the user has turned off.
+    func todaysEvents(excludedCalendarIDs: Set<String> = []) async -> [TodayEvent] {
         guard calendarAuthorized else { return [] }
         let cal = Calendar.current
         let now = Date()
@@ -2151,6 +2162,7 @@ final class NativeIntegrationManager: NSObject {
         let predicate = eventStore.predicateForEvents(withStart: cal.startOfDay(for: now), end: endOfDay, calendars: nil)
         var seen = Set<String>()
         return eventStore.events(matching: predicate)
+            .filter { !excludedCalendarIDs.contains($0.calendar.calendarIdentifier) }
             .filter { $0.isAllDay || $0.endDate > now }
             .sorted { $0.startDate < $1.startDate }
             // Same event synced across calendars (or double-booked by the brain) shows once.
@@ -2172,7 +2184,8 @@ final class NativeIntegrationManager: NSObject {
     }
 
     /// Incomplete reminders due today or overdue, soonest first.
-    func todaysReminders() async -> [TodayReminder] {
+    /// `excludedListIDs` lets the Reminders card hide lists the user has turned off.
+    func todaysReminders(excludedListIDs: Set<String> = []) async -> [TodayReminder] {
         guard remindersAuthorized else { return [] }
         let predicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
         let reminders: [EKReminder] = await withCheckedContinuation { cont in
@@ -2187,6 +2200,7 @@ final class NativeIntegrationManager: NSObject {
         let overdueFloor = cal.date(byAdding: .day, value: -2, to: now) ?? now
         var seen = Set<String>()
         return reminders
+            .filter { !excludedListIDs.contains($0.calendar.calendarIdentifier) }
             .compactMap { reminder -> TodayReminder? in
                 guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps),
                       due <= endOfDay, due >= overdueFloor else { return nil }
@@ -2231,6 +2245,14 @@ final class NativeIntegrationManager: NSObject {
         guard HKHealthStore.isHealthDataAvailable(),
               let minutes = await sleepMinutesLastNight() else { return nil }
         let rounded = Int(minutes.rounded())
+        return rounded > 0 ? rounded : nil
+    }
+
+    /// Most recent resting heart rate (bpm), or nil if unavailable — for the Today vitals row.
+    func todaysRestingHeartRate() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let bpm = await latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute())) else { return nil }
+        let rounded = Int(bpm.rounded())
         return rounded > 0 ? rounded : nil
     }
 

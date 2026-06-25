@@ -172,9 +172,7 @@ struct ChatHomeView: View {
     @ViewBuilder
     private var sidebarList: some View {
         if isLoadingSessions {
-            Spacer()
-            ProgressView().tint(Color.nmlTitanium)
-            Spacer()
+            SidebarSkeleton()
         } else if !searchQuery.isEmpty {
             searchList
         } else if sessions.isEmpty {
@@ -462,6 +460,30 @@ struct ChatHomeView: View {
 }
 
 // MARK: - Sidebar rows
+
+/// Cold-start placeholder for the session list — shimmering rows that mirror
+/// SidebarRow (title bar + trailing time) so conversations settle in place
+/// instead of replacing a centered spinner.
+private struct SidebarSkeleton: View {
+    // Varied widths so it reads as conversation titles, not a progress bar.
+    private let widths: [CGFloat] = [184, 132, 208, 150, 196, 120, 168]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(widths.enumerated()), id: \.offset) { _, w in
+                HStack(spacing: 0) {
+                    OxySkeletonCard(height: 13, cornerRadius: 3).frame(width: w)
+                    Spacer(minLength: 12)
+                    OxySkeletonCard(height: 11, cornerRadius: 3).frame(width: 28)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+            Spacer()
+        }
+        .accessibilityLabel("Loading conversations")
+    }
+}
 
 private struct SidebarRow: View {
     let title: String

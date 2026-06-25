@@ -55,16 +55,19 @@ struct OxyThinkingIndicator: View {
 struct OxySkeletonCard: View {
     var height: CGFloat = 84
     var cornerRadius: CGFloat = 0
+    // Light-mode dashboards need a dark-on-light skeleton; default stays dark-on-dark.
+    var base: Color = .white.opacity(0.03)
+    var highlight: Color = .white.opacity(0.06)
 
     @State private var shimmer = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.white.opacity(0.03))
+            .fill(base)
             .frame(height: height)
             .overlay(
                 LinearGradient(
-                    colors: [.clear, Color.white.opacity(0.06), .clear],
+                    colors: [.clear, highlight, .clear],
                     startPoint: .leading,
                     endPoint: .trailing
                 )

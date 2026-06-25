@@ -9,6 +9,9 @@ struct ProactiveView: View {
     @State private var weather: OxyWeatherService.OxyWeatherSnapshot?
     @State private var events: [TodayEvent] = []
     @State private var reminders: [TodayReminder] = []
+    @State private var steps: Int?
+    @State private var sleepMinutes: Int?
+    @State private var restingHR: Int?
     @State private var isLoading = false
     @State private var isChecking = false
     @State private var errorMessage: String?
@@ -49,10 +52,7 @@ struct ProactiveView: View {
                         hero
 
                         if isLoading && events.isEmpty && weather == nil && visibleBriefings.isEmpty {
-                            ProgressView()
-                                .tint(p.titanium)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 48)
+                            loadingSkeleton
                         } else {
                             // removed: AI "what matters"/activity cards — 2026-06-25 redesign
                             ForEach(Array(layout.visibleOrdered().enumerated()), id: \.element) { idx, kind in
@@ -76,8 +76,8 @@ struct ProactiveView: View {
                 }
                 .refreshable { await loadDashboard() }
                 .hidesTabBarOnScroll()
-                .sheet(isPresented: $editingBoard) {
-                    TodayBoardEditor(layout: layout)
+                .sheet(isPresented: $editingBoard, onDismiss: { Task { await loadDashboard() } }) {
+                    TodayBoardEditor(layout: layout, native: native)
                 }
             }
             // No opaque cap: the aurora gradient runs full-bleed behind the status
@@ -109,9 +109,8 @@ struct ProactiveView: View {
 
     private var hero: some View {
         ZStack(alignment: .bottomLeading) {
+            // Fills the card; the parent ZStack frame + clipShape give it its rounded shape.
             HeroSky(condition: weather?.symbolName, light: lightMode)
-                .frame(height: 264)
-                .clipShape(RoundedRectangle(cornerRadius: 0))
 
             // Top row: day/night glyph + refresh, pinned top-trailing.
             VStack {
@@ -128,7 +127,8 @@ struct ProactiveView: View {
                 }
                 Spacer()
             }
-            .padding(.top, 8)
+            .padding(.top, 16)
+            .padding(.trailing, 18)
 
             // Greeting + temperature, bottom-leading. Whole hero is the tap target.
             Button {
@@ -140,7 +140,12 @@ struct ProactiveView: View {
                     Text(greeting)
                         .font(.nmlDisplay(31, weight: .light))
                         .foregroundStyle(p.ink)
+                        // Bound to the hero width so a long name wraps (then scales) instead
+                        // of running off the right edge.
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.6)
                         .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Text(dateLine)
                         .font(.nmlBody(12)).tracking(0.5).foregroundStyle(p.muted)
                         .padding(.top, 6)
@@ -165,8 +170,17 @@ struct ProactiveView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.nmlScale(0.99))
+            .padding(20)
         }
-        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity, minHeight: 264, alignment: .bottomLeading)
+        // A contained, rounded hero card that floats on the aurora canvas — matches the
+        // card language of the rest of the board instead of a sharp top-bleed block.
+        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .strokeBorder(p.hairline, lineWidth: 0.5)
+        )
+        .shadow(color: Color.black.opacity(lightMode ? 0.08 : 0.0), radius: 18, y: 8)
     }
 
     private var greeting: String {
@@ -291,7 +305,8 @@ struct ProactiveView: View {
             switch kind {
             case .incoming:  IncomingCard(items: incomingItems, palette: p)
             case .inbox:     inboxCard
-            case .agenda:    if !events.isEmpty { agendaCard }
+            case .agenda:    agendaCard
+            case .health:    healthCard
             case .reminders: remindersCard
             }
         }
@@ -397,10 +412,15 @@ struct ProactiveView: View {
 
     // removed: AI "what matters"/activity cards — 2026-06-25 redesign
 
-    @ViewBuilder private var remindersCard: some View {
-        if !reminders.isEmpty {
-            TodayCard {
-                cardLabel("Reminders")
+    private var remindersCard: some View {
+        TodayCard {
+            cardLabel("Reminders")
+            if reminders.isEmpty {
+                Text("Nothing due today.")
+                    .font(.nmlBody(13))
+                    .foregroundStyle(p.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(reminders) { reminder in
                         Button {
@@ -431,7 +451,60 @@ struct ProactiveView: View {
         }
     }
 
-    // removed: AI "what matters"/activity cards — 2026-06-25 redesign
+    /// Today's vitals from HealthKit — only the metrics that have data; a quiet line
+    /// when nothing's available (simulator, no permission, or no samples yet).
+    private var healthCard: some View {
+        let cells: [(String, String)] = [
+            layout.isOptionEnabled(HealthMetric.steps.id, for: .health) ? steps.map { ("Steps", $0.formatted()) } : nil,
+            layout.isOptionEnabled(HealthMetric.sleep.id, for: .health) ? sleepMinutes.map { ("Sleep", sleepLabel($0)) } : nil,
+            layout.isOptionEnabled(HealthMetric.restingHR.id, for: .health) ? restingHR.map { ("Resting HR", "\($0) bpm") } : nil
+        ].compactMap { $0 }
+
+        return TodayCard {
+            cardLabel("Health")
+            if cells.isEmpty {
+                Text("Connect Health to see your vitals.")
+                    .font(.nmlBody(13))
+                    .foregroundStyle(p.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(cells, id: \.0) { cell in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(cell.0.uppercased())
+                                .font(.nmlMono(9)).tracking(0.8)
+                                .foregroundStyle(p.muted)
+                            Text(cell.1)
+                                .font(.nmlMono(18, weight: .regular))
+                                .foregroundStyle(p.ink)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    /// "7h 32m" / "48m" from whole minutes.
+    private func sleepLabel(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    /// Cold-start placeholder: the hero + two cards in skeleton form, shimmering.
+    /// Mirrors the real layout so content settles in place instead of replacing a
+    /// centered spinner — reads as a luxury app loading, not a web app waiting.
+    private var loadingSkeleton: some View {
+        // Palette-aware shimmer: light-grey block + white sweep by day, the reverse by night.
+        let base: Color = lightMode ? .black.opacity(0.055) : .white.opacity(0.04)
+        let highlight: Color = lightMode ? .white.opacity(0.45) : .white.opacity(0.08)
+        return VStack(spacing: 16) {
+            OxySkeletonCard(height: 264, cornerRadius: 26, base: base, highlight: highlight)
+            OxySkeletonCard(height: 132, cornerRadius: NMLRadius.card, base: base, highlight: highlight)
+            OxySkeletonCard(height: 96, cornerRadius: NMLRadius.card, base: base, highlight: highlight)
+        }
+        .accessibilityLabel("Loading your day")
+    }
 
     private func cardLabel(_ text: String) -> some View {
         Text(text).nmlEyebrow().padding(.bottom, 14)
@@ -450,13 +523,19 @@ struct ProactiveView: View {
         errorMessage = nil
         async let briefingsResult = loadBriefingsSafely()
         async let weatherResult = OxyWeatherService.shared.currentWeather()
-        async let eventsResult = native.todaysEvents()
-        async let remindersResult = native.todaysReminders()
+        async let eventsResult = native.todaysEvents(excludedCalendarIDs: layout.excludedOptions(for: .agenda))
+        async let remindersResult = native.todaysReminders(excludedListIDs: layout.excludedOptions(for: .reminders))
+        async let stepsResult = native.todaysSteps()
+        async let sleepResult = native.todaysSleepMinutes()
+        async let restingHRResult = native.todaysRestingHeartRate()
 
         briefings = await briefingsResult
         weather = await weatherResult
         events = await eventsResult
         reminders = await remindersResult
+        steps = await stepsResult
+        sleepMinutes = await sleepResult
+        restingHR = await restingHRResult
         isLoading = false
         contentAppeared = false
         withAnimation(.nmlSpring.delay(0.04)) { contentAppeared = true }
@@ -485,7 +564,10 @@ struct ProactiveView: View {
     private func loadBriefingsSafely() async -> [Briefing] {
         do {
             return try await service.loadBriefings(userId: appState.userId)
+        } catch is CancellationError {
+            return briefings
         } catch {
+            // Cancellation is already handled above, so anything here is a real failure.
             errorMessage = error.localizedDescription
             return briefings
         }
@@ -500,8 +582,10 @@ struct ProactiveView: View {
             try await service.runProactiveCheck(userId: appState.userId)
             // A soft, satisfied tick when a hand-pulled refresh lands cleanly.
             if errorMessage == nil { HapticManager.shared.impact(.soft) }
+        } catch is CancellationError {
+            // refresh superseded — not a user-facing error
         } catch {
-            errorMessage = error.localizedDescription
+            if !error.isCancellation { errorMessage = error.localizedDescription }
         }
         await loadDashboard()
         isChecking = false
@@ -519,10 +603,18 @@ struct ProactiveView: View {
     }
 }
 
-/// Sheet for composing the Today board: reorder via drag, toggle visibility.
+/// Sheet for composing the Today board: reorder via drag, toggle visibility, and
+/// for cards that support it, tap the gear to pick which sources/metrics feed it.
 struct TodayBoardEditor: View {
     @Bindable var layout: TodayLayout
+    let native: NativeIntegrationManager
     @Environment(\.dismiss) private var dismiss
+    @State private var configuringKind: TodayCardKind?
+
+    /// Cards with per-card config beyond plain show/hide.
+    private func isConfigurable(_ kind: TodayCardKind) -> Bool {
+        kind == .health || kind == .agenda || kind == .reminders
+    }
 
     var body: some View {
         NavigationStack {
@@ -531,6 +623,13 @@ struct TodayBoardEditor: View {
                     HStack {
                         Text(kind.title).font(.nmlBody(15)).foregroundStyle(Color.nmlInk)
                         Spacer()
+                        if isConfigurable(kind) {
+                            Button { configuringKind = kind } label: {
+                                Image(systemName: "gearshape").foregroundStyle(Color.nmlTitanium)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 4)
+                        }
                         NamelessToggle(isOn: Binding(
                             get: { !layout.isHidden(kind) },
                             set: { _ in layout.toggle(kind) }
@@ -544,6 +643,55 @@ struct TodayBoardEditor: View {
             .scrollContentBackground(.hidden)
             .background(Color.nmlObsidian)
             .navigationTitle("Edit Today")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.foregroundStyle(Color.nmlInk)
+                }
+            }
+            .sheet(item: $configuringKind) { kind in
+                TodayCardOptionsEditor(kind: kind, layout: layout, native: native)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+/// Per-card option picker: Health metrics are fixed; Agenda/Reminders list the
+/// user's actual calendars/lists since those vary per device.
+private struct TodayCardOptionsEditor: View {
+    let kind: TodayCardKind
+    @Bindable var layout: TodayLayout
+    let native: NativeIntegrationManager
+    @Environment(\.dismiss) private var dismiss
+
+    private var options: [(id: String, title: String)] {
+        switch kind {
+        case .health:    return HealthMetric.allCases.map { ($0.id, $0.title) }
+        case .agenda:    return native.availableCalendars()
+        case .reminders: return native.availableReminderLists()
+        case .incoming, .inbox: return []
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(options, id: \.id) { option in
+                    HStack {
+                        Text(option.title).font(.nmlBody(15)).foregroundStyle(Color.nmlInk)
+                        Spacer()
+                        NamelessToggle(isOn: Binding(
+                            get: { layout.isOptionEnabled(option.id, for: kind) },
+                            set: { layout.setOption(option.id, for: kind, enabled: $0) }
+                        ))
+                    }
+                    .listRowBackground(Color.nmlSurface)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.nmlObsidian)
+            .navigationTitle("\(kind.title) sources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -564,6 +712,8 @@ private struct HeroSky: View {
 
     private var isRain: Bool { (condition ?? "").contains("rain") || (condition ?? "").contains("drizzle") }
     private var isCloud: Bool { (condition ?? "").contains("cloud") }
+    // "cloud.sun" (partly cloudy) and clear both carry the sun — still a daytime sky.
+    private var isSunny: Bool { (condition ?? "").contains("sun") || (condition ?? "").contains("clear") }
 
     var body: some View {
         ZStack {
@@ -595,14 +745,16 @@ private struct HeroSky: View {
                 }
             }
         }
-        .ignoresSafeArea(edges: .top)
     }
 
     private var skyColors: [Color] {
         if light {
-            return isCloud || isRain
-                ? [Color(white: 0.86), Color(white: 0.94)]
-                : [Color(red: 0.80, green: 0.88, blue: 0.97), Color(white: 0.97)]
+            // Rain: cool overcast wash. Sunny/partly: real daytime blue. Overcast (cloud,
+            // no sun): a soft blue-grey, not the flat dead grey it used to be.
+            if isRain { return [Color(red: 0.80, green: 0.84, blue: 0.89), Color(white: 0.96)] }
+            if isSunny { return [Color(red: 0.78, green: 0.87, blue: 0.97), Color(white: 0.975)] }
+            if isCloud { return [Color(red: 0.83, green: 0.87, blue: 0.92), Color(white: 0.96)] }
+            return [Color(red: 0.78, green: 0.87, blue: 0.97), Color(white: 0.975)]
         }
         return isRain
             ? [Color(red: 0.10, green: 0.11, blue: 0.13), Color.black]
@@ -643,6 +795,14 @@ private extension Briefing {
         ]
         if noisyFragments.contains(where: { lower.contains($0) }) { return false }
         return true
+    }
+}
+
+private extension Error {
+    // Task cancellation (view gone, refresh superseded) isn't a user-facing error.
+    // CancellationError catches Swift concurrency; -999 catches URLSession's cancel.
+    var isCancellation: Bool {
+        self is CancellationError || (self as NSError).code == NSURLErrorCancelled
     }
 }
 
