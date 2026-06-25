@@ -60,14 +60,8 @@ struct PendantStatusView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        if value.startLocation.x < 60, value.translation.width > 80 {
-                            dismiss()
-                        }
-                    }
-            )
+            // Edge-swipe-to-dismiss comes from `.swipeToDismiss()` on the presenting
+            // fullScreenCover (MoreView); no per-screen recognizer needed.
         }
         .onAppear { syncTelemetry() }
         .onDisappear { telemetry.stop() }
@@ -98,7 +92,8 @@ struct PendantStatusView: View {
     }
 
     // Raw label + right-aligned value (#555). No pill/segmented control — tapping
-    // the row cycles to the next option.
+    // the row cycles to the next option; a small up/down glyph signals that it cycles
+    // (otherwise the value reads as a static, non-interactive readout).
     private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
         Button {
             let current = options.firstIndex(of: selection.wrappedValue) ?? 0
@@ -114,11 +109,15 @@ struct PendantStatusView: View {
                     .font(.system(size: 14, weight: .regular))
                     .foregroundStyle(Color.mgCaption)
                     .multilineTextAlignment(.trailing)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.mgSecondary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.nmlScale(0.98))
         .padding(.vertical, 14)
+        .accessibilityHint("Cycles options")
     }
 }
 

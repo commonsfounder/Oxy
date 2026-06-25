@@ -41,7 +41,7 @@ struct ConnectorsView: View {
                     .padding(.top, 12)
                 } else {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 44) {
+                        VStack(alignment: .leading, spacing: 36) {
                             if let errorMessage {
                                 ErrorBanner(message: errorMessage)
                             }
@@ -105,14 +105,8 @@ struct ConnectorsView: View {
                     }
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        if value.startLocation.x < 60, value.translation.width > 80 {
-                            dismiss()
-                        }
-                    }
-            )
+            // Edge-swipe-to-dismiss comes from `.swipeToDismiss()` on the presenting
+            // fullScreenCover (MoreView); no per-screen recognizer needed.
         }
     }
 
@@ -165,20 +159,11 @@ struct ConnectorsView: View {
         IntegrationRow(
             name: "Google",
             detail: googleDetail,
-            dotKind: googleDotKind,
+            isConnected: googleStatus == .connected,
             actionLabel: googleButtonLabel,
             isBusy: googleStatus == .connecting,
             action: handleGoogleAction
         )
-    }
-
-    private var googleDotKind: NamelessStatusDot.Kind {
-        switch googleStatus {
-        case .connected:      return .enabled
-        case .needsReconnect: return .degraded
-        case .error:          return .error
-        case .idle, .connecting: return .off
-        }
     }
 
     private var googleButtonLabel: String {
@@ -210,20 +195,11 @@ struct ConnectorsView: View {
         IntegrationRow(
             name: connector.name,
             detail: connector.statusText.uppercased(),
-            dotKind: connectorDotKind(connector),
+            isConnected: connector.connectionState == "connected",
             actionLabel: connector.actionLabel,
             isBusy: false,
             action: { handleConnectorAction(connector) }
         )
-    }
-
-    private func connectorDotKind(_ connector: Connector) -> NamelessStatusDot.Kind {
-        switch connector.connectionState {
-        case "connected":                   return .enabled
-        case "needs_reconnect", "degraded", "needs_setup": return .degraded
-        case "error":                       return .error
-        default:                            return .off
-        }
     }
 
     // MARK: - Actions
@@ -502,12 +478,10 @@ private struct NativeCapabilityRow: View {
 private struct IntegrationRow: View {
     let name: String
     let detail: String
-    let dotKind: NamelessStatusDot.Kind
+    let isConnected: Bool
     let actionLabel: String
     let isBusy: Bool
     let action: () -> Void
-
-    private var isConnected: Bool { dotKind == .enabled }
 
     var body: some View {
         HStack(spacing: 14) {

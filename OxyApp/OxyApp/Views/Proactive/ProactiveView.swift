@@ -109,6 +109,10 @@ struct ProactiveView: View {
             // intentional rather than ghosting.
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
+            // A quiet warning buzz if something goes wrong while gathering the briefing.
+            .sensoryFeedback(trigger: errorMessage != nil) { _, failed in
+                failed ? .warning : nil
+            }
         }
         .environment(\.colorScheme, lightMode ? .light : .dark)
         .task {
@@ -402,7 +406,9 @@ struct ProactiveView: View {
                         }
                         .buttonStyle(.nmlScale(0.98))
                         if index < emails.count - 1 {
-                            Divider().background(p.hairline)
+                            // .overlay tints the divider line itself; .background only paints
+                            // behind it and leaves the default ~1pt system separator showing.
+                            Divider().overlay(p.hairline)
                         }
                     }
                 }
@@ -587,7 +593,7 @@ struct ProactiveView: View {
                     ForEach(Array(signals.enumerated()), id: \.element.id) { index, signal in
                         signalRow(signal, briefingId: briefingId)
                         if index < signals.count - 1 {
-                            Divider().background(p.hairline)
+                            Divider().overlay(p.hairline)
                         }
                     }
                 }
@@ -632,10 +638,13 @@ struct ProactiveView: View {
                         .foregroundStyle(p.titanium)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                        // Visual chip stays compact; the tap target floors at 44pt.
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.nmlScale(0.97))
-                .fixedSize()
+                .fixedSize(horizontal: true, vertical: false)
             } else if s.canUndo && !undone {
                 Button { undo(s, briefingId: briefingId) } label: {
                     Text("Undo")
@@ -643,10 +652,12 @@ struct ProactiveView: View {
                         .foregroundStyle(p.muted)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
-                        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(p.hairline, lineWidth: 0.5))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.nmlScale(0.97))
-                .fixedSize()
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
         .padding(.vertical, 12)
@@ -787,6 +798,8 @@ struct ProactiveView: View {
         await native.syncNativeContext(userId: appState.userId)
         do {
             try await service.runProactiveCheck(userId: appState.userId)
+            // A soft, satisfied tick when a hand-pulled refresh lands cleanly.
+            if errorMessage == nil { HapticManager.shared.impact(.soft) }
         } catch {
             errorMessage = error.localizedDescription
         }

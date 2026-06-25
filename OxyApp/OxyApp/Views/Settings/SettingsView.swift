@@ -22,16 +22,12 @@ struct SettingsView: View {
                     ScrollView {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
-                            settingRow(label: "Bubbles", description: nil) {
-                                Picker("Bubbles", selection: $settings.bubbleStyle) {
-                                    Text("Comfort").tag("comfort")
-                                    Text("Compact").tag("compact")
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(Color.mgSecondary)
-                                .onChange(of: settings.bubbleStyle) { _, _ in saveSettings() }
-                            }
+                            segmentRow(
+                                "Bubbles",
+                                options: ["comfort", "compact"],
+                                labels: ["Comfort", "Compact"],
+                                selection: $settings.bubbleStyle
+                            )
                         }
 
                         // Autonomy
@@ -47,30 +43,21 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "Action Defaults") {
-                            settingRow(label: "Preferred Maps", description: nil) {
-                                Picker("Preferred Maps", selection: $settings.preferredMapsApp) {
-                                    Text("Apple Maps").tag("apple")
-                                    Text("Google Maps").tag("google")
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(Color.mgSecondary)
-                                .onChange(of: settings.preferredMapsApp) { _, _ in saveSettings() }
-                            }
+                            segmentRow(
+                                "Preferred Maps",
+                                options: ["apple", "google"],
+                                labels: ["Apple Maps", "Google Maps"],
+                                selection: $settings.preferredMapsApp
+                            )
 
                             MilgrainDivider()
 
-                            settingRow(label: "Transport", description: nil) {
-                                Picker("Transport", selection: $settings.preferredTransportMode) {
-                                    Text("Driving").tag("driving")
-                                    Text("Transit").tag("transit")
-                                    Text("Walking").tag("walking")
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                .tint(Color.mgSecondary)
-                                .onChange(of: settings.preferredTransportMode) { _, _ in saveSettings() }
-                            }
+                            segmentRow(
+                                "Transport",
+                                options: ["driving", "transit", "walking"],
+                                labels: ["Driving", "Transit", "Walking"],
+                                selection: $settings.preferredTransportMode
+                            )
 
                             MilgrainDivider()
 
@@ -121,14 +108,8 @@ struct SettingsView: View {
             .onAppear {
                 loadSettings()
             }
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        if value.startLocation.x < 60, value.translation.width > 80 {
-                            dismiss()
-                        }
-                    }
-            )
+            // Edge-swipe-to-dismiss is provided once by `.swipeToDismiss()` on the
+            // presenting fullScreenCover (MoreView) — no per-screen copy needed.
         }
     }
 
@@ -142,6 +123,24 @@ struct SettingsView: View {
                 content()
             }
         }
+    }
+
+    /// A label stacked above a full-width Milgrain segmented control — the in-language
+    /// replacement for the stock `.menu` pickers, persisting on every change.
+    private func segmentRow(
+        _ label: String,
+        options: [String],
+        labels: [String]? = nil,
+        selection: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(label)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.mgHeading)
+            MilgrainSegmentedControl(options: options, labels: labels, selection: selection)
+        }
+        .padding(.vertical, 16)
+        .onChange(of: selection.wrappedValue) { _, _ in saveSettings() }
     }
 
     private func settingRow<Accessory: View>(
@@ -288,59 +287,39 @@ private struct InitiativeScroller: View {
     @Binding var selection: String
     let onChange: () -> Void
 
-    private var value: Binding<Double> {
+    /// Bridges the (possibly legacy) stored value to one of the five canonical levels so
+    /// the control always has a valid selection without rewriting `selection` on appear.
+    private var level: Binding<String> {
         Binding(
-            get: {
-                Double(OxySettings.autonomyLevels.firstIndex(of: OxySettings.normalizedAutonomy(selection)) ?? 2)
-            },
-            set: { newValue in
-                let rounded = min(max(Int(newValue.rounded()), 0), OxySettings.autonomyLevels.count - 1)
-                let next = OxySettings.autonomyLevels[rounded]
-                if next != selection {
-                    selection = next
-                    onChange()
-                }
+            get: { OxySettings.normalizedAutonomy(selection) },
+            set: { next in
+                guard next != selection else { return }
+                selection = next
+                onChange()
             }
         )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Initiative")
-                        .font(.system(size: 15, weight: .regular))
-                        .foregroundStyle(Color.mgHeading)
-                    Text(description)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Color.mgSecondary)
-                }
-                Spacer()
-                Text(selection)
-                    .font(.nmlBody(13, weight: .medium))
-                    .tracking(0.2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Initiative")
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.mgHeading)
+                Text(description)
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Color.mgSecondary)
             }
 
-            Slider(value: value, in: 0...Double(OxySettings.autonomyLevels.count - 1), step: 1)
-                .tint(Color.mgSecondary)
-
-            HStack {
-                Text("Quiet")
-                Spacer()
-                Text("Steady")
-                Spacer()
-                Text("Active")
-            }
-            .font(.nmlBody(10, weight: .medium))
-            .tracking(0.3)
-            .foregroundStyle(Color.mgSecondary)
+            // One control, one set of labels — the segments ARE the levels, so the old
+            // 3-caption / 5-step mismatch under the slider is gone.
+            MilgrainSegmentedControl(options: OxySettings.autonomyLevels, selection: level)
         }
         .padding(.vertical, 16)
     }
 
     private var description: String {
-        switch selection {
+        switch OxySettings.normalizedAutonomy(selection) {
         case "Quiet": return "Only speaks when asked."
         case "Low": return "Light nudges, mostly reactive."
         case "Active": return "Looks for useful openings."

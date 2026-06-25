@@ -37,6 +37,13 @@ struct ChatView: View {
     private var lightMode: Bool { TodayFinish.isLight }
     private let networkMonitor = NWPathMonitor()
 
+    /// True the instant the last message is a finished assistant reply — the trigger for the
+    /// soft "reply landed" tick. Reads only `.last`, so it stays O(1) per render.
+    private var assistantReplySettled: Bool {
+        guard let last = viewModel.messages.last else { return false }
+        return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
         ZStack {
@@ -259,6 +266,13 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
+            // A soft tick when Millie's reply settles; a warning buzz when a request fails.
+            .sensoryFeedback(trigger: assistantReplySettled) { _, settled in
+                settled ? .impact(weight: .soft) : nil
+            }
+            .sensoryFeedback(trigger: viewModel.networkError != nil) { _, failed in
+                failed ? .warning : nil
+            }
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,

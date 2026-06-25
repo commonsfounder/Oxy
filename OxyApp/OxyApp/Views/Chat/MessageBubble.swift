@@ -399,7 +399,7 @@ struct ActionCard: View {
                 .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
         }
         .buttonStyle(.nmlScale)
     }
@@ -622,7 +622,10 @@ struct TravelResultCard: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.nmlSurface)
-        .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+        // Rounded card silhouette to match every other card in the message stream
+        // (UberHandoffCard/ActionCard/pendingCard) — was the lone sharp-edged Rectangle.
+        .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
     }
 }
 

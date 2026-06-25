@@ -130,21 +130,40 @@ extension Animation {
 //
 // If a label is something the user operates (a control, a title, a status), it's
 // sans. If it's the product speaking to the user, it's serif. No other use of serif.
+/// Maps a SwiftUI `Font.Weight` to its `UIFont.Weight` twin. `Font.Weight` isn't a
+/// switchable enum, so a small lookup is the cleanest bridge for the metrics-scaled
+/// monospace font below.
+private func nmlUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
+    let map: [Font.Weight: UIFont.Weight] = [
+        .ultraLight: .ultraLight, .thin: .thin, .light: .light, .regular: .regular,
+        .medium: .medium, .semibold: .semibold, .bold: .bold, .heavy: .heavy, .black: .black
+    ]
+    return map[w] ?? .regular
+}
+
 extension Font {
+    // Every face below opts into Dynamic Type: custom fonts via `relativeTo:` and the
+    // monospace readout via `UIFontMetrics`. A fixed-size font ignores the user's text-size
+    // setting entirely, so the passed `size` is the point size at the Large default and
+    // scales from there.
+
     /// Editorial display face (Fraunces) — high-contrast serif with real personality.
     /// Reserved for titles and hero copy: the one place the type gets to have a voice.
     static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Fraunces", size: size).weight(weight)
+        .custom("Fraunces", size: size, relativeTo: .title).weight(weight)
     }
 
     /// Body / UI face (Inter) — a clean, even grotesque for running text and labels.
     static func nmlBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Inter", size: size).weight(weight)
+        .custom("Inter", size: size, relativeTo: .body).weight(weight)
     }
 
     /// Clean monospace for technical readouts — battery, latency, connection state.
+    /// Scaled with Dynamic Type via UIFontMetrics (a fixed-size `.system` mono otherwise
+    /// stays pinned no matter the user's text-size setting).
     static func nmlMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        let base = UIFont.monospacedSystemFont(ofSize: size, weight: nmlUIFontWeight(weight))
+        return Font(UIFontMetrics(forTextStyle: .body).scaledFont(for: base))
     }
 }
 
@@ -613,7 +632,7 @@ extension Font {
     /// so labels and captions stay in the clean sans. Default weight is bold per spec.
     static func mgDidot(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
         let bolds: Set<Font.Weight> = [.semibold, .bold, .heavy, .black]
-        return .custom(bolds.contains(weight) ? "Didot-Bold" : "Didot", size: size)
+        return .custom(bolds.contains(weight) ? "Didot-Bold" : "Didot", size: size, relativeTo: .title)
     }
 }
 
@@ -661,6 +680,50 @@ struct MilgrainToggle: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
         .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
+    }
+}
+
+/// White-on / muted-off segmented control in the Milgrain greyscale — the `mg*`
+/// counterpart to `NamelessSegmentedControl`. Replaces stock `Picker`/`Slider` in the
+/// settings family so option pickers stay in-language (the system menu/slider chrome
+/// is the same kind of stock control the green `Toggle` ban exists to keep out).
+/// `options` holds the stored values; pass `labels` when the display text differs.
+struct MilgrainSegmentedControl: View {
+    let options: [String]
+    var labels: [String]? = nil
+    @Binding var selection: String
+
+    private func label(_ index: Int) -> String {
+        if let labels, index < labels.count { return labels[index] }
+        return options[index]
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(options.enumerated()), id: \.element) { index, option in
+                let isSelected = selection == option
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { selection = option }
+                    HapticManager.shared.impact(.light)
+                } label: {
+                    Text(label(index))
+                        .font(.system(size: 12, weight: .semibold))
+                        .tracking(0.3)
+                        .foregroundStyle(isSelected ? Color.mgBg : Color.mgSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background {
+                            if isSelected { Capsule().fill(Color.mgHeading) }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+            }
+        }
+        .padding(3)
+        .background(Capsule().fill(Color.mgOff.opacity(0.4)))
+        .overlay(Capsule().strokeBorder(Color.mgDivider, lineWidth: 0.5))
     }
 }
 

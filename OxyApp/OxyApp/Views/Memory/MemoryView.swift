@@ -26,16 +26,8 @@ struct MemoryView: View {
         } else {
             NavigationStack {
                 memoryContent
-                    // Edge-swipe to dismiss, matching Connectors/Settings, so the
-                    // modally-presented Memory screen is never a dead end.
-                    .gesture(
-                        DragGesture(minimumDistance: 20)
-                            .onEnded { value in
-                                if value.startLocation.x < 60, value.translation.width > 80 {
-                                    dismiss()
-                                }
-                            }
-                    )
+                    // Edge-swipe-to-dismiss is provided once by `.swipeToDismiss()` on the
+                    // presenting fullScreenCover (MoreView) — no per-screen copy needed.
             }
         }
     }
@@ -313,8 +305,10 @@ private struct MemoryDropBox: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline) {
+                // Sans, matching every other heading in the settings family — the lone
+                // Didot here was the one place the mg dialect borrowed the display serif.
                 Text("Add it once. It's kept for later.")
-                    .font(.mgDidot(18, weight: .bold))
+                    .font(.nmlBody(17, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 Spacer(minLength: 8)
                 if let onCollapse {

@@ -43,8 +43,10 @@ current `hero` + separate `weatherCard`.
   "condition · feels X°" bottom-left.
 - **Tappable to expand** into richer detail not already on the face — hourly
   curve, H/L, precipitation chance, sunset, air quality — whatever the weather
-  service actually has. Reuses the existing `weatherExpanded` state; expansion
-  is a sheet or in-place reveal. Only show fields that have real data.
+  service actually has. The whole hero surface is the tap target; **no visible
+  "tap for hourly" pill or affordance** — the chrome stays clean. Reuses the
+  existing `weatherExpanded` state; expansion is a sheet or in-place reveal.
+  Only show fields that have real data.
 - This hero is the single source of weather truth — kills the briefing's stale
   baked-in weather prose by removing that prose entirely (see §4).
 

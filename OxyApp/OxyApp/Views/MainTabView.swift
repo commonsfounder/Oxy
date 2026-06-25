@@ -129,6 +129,9 @@ struct MainTabView: View {
             VStack(spacing: 3) {
                 Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
                     .font(.system(size: 18, weight: .regular))
+                    // A soft bounce the moment a tab becomes active — the icon answers the tap.
+                    .symbolEffect(.bounce, value: selected)
+                    .contentTransition(.symbolEffect(.replace))
                 Text(tab.label)
                     .font(.system(size: 10, weight: selected ? .semibold : .medium))
             }

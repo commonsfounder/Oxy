@@ -144,14 +144,8 @@ struct ProfileView: View {
             .sheet(item: $sharePayload) { payload in
                 ShareSheet(activityItems: [payload.url])
             }
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        if value.startLocation.x < 60, value.translation.width > 80 {
-                            dismiss()
-                        }
-                    }
-            )
+            // Edge-swipe-to-dismiss comes from `.swipeToDismiss()` on the presenting
+            // fullScreenCover (MoreView); no per-screen recognizer needed.
         }
     }
 
