@@ -59,10 +59,6 @@ struct ProactiveView: View {
                                 .opacity(contentAppeared ? 1 : 0)
                                 .offset(y: contentAppeared ? 0 : 14)
                                 .animation(.nmlSpring.delay(0.04), value: contentAppeared)
-                            weatherCard
-                                .opacity(contentAppeared ? 1 : 0)
-                                .offset(y: contentAppeared ? 0 : 14)
-                                .animation(.nmlSpring.delay(0.06), value: contentAppeared)
                             // Agenda only earns space when there's something on it — an empty
                             // "Nothing scheduled" card is dead weight.
                             if !events.isEmpty {
@@ -129,47 +125,68 @@ struct ProactiveView: View {
         weather != nil || !events.isEmpty || steps != nil || sleepMinutes != nil || !reminders.isEmpty || !visibleBriefings.isEmpty
     }
 
-    // MARK: - Hero
+    // MARK: - Hero (living weather)
 
     private var hero: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(greeting)
-                    .font(.nmlDisplay(40, weight: .light))
-                    .foregroundStyle(p.ink)
+        ZStack(alignment: .bottomLeading) {
+            HeroSky(condition: weather?.symbolName, light: lightMode)
+                .frame(height: 264)
+                .clipShape(RoundedRectangle(cornerRadius: 0))
+
+            // Top row: day/night glyph + refresh, pinned top-trailing.
+            VStack {
+                HStack {
+                    Spacer()
+                    Image(systemName: lightMode ? "sun.max" : "moon.stars")
+                        .font(.system(size: 14))
+                        .foregroundStyle(p.muted)
+                    Button(action: { Task { await checkNow() } }) {
+                        if isChecking { ProgressView().scaleEffect(0.7).tint(p.muted) }
+                        else { Image(systemName: "arrow.clockwise").font(.system(size: 15)).foregroundStyle(p.titanium) }
+                    }
+                    .buttonStyle(.nmlScale).disabled(isChecking).accessibilityLabel("Refresh")
+                }
                 Spacer()
-                // Passive day/night indicator (the finish follows the clock automatically).
-                Image(systemName: lightMode ? "sun.max" : "moon.stars")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(p.muted)
-                    .frame(width: 30, height: 30)
-                    .accessibilityLabel(lightMode ? "Daytime" : "Night")
-                Button(action: { Task { await checkNow() } }) {
-                    if isChecking {
-                        ProgressView().scaleEffect(0.7).tint(p.muted)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 16, weight: .regular))
-                            .foregroundStyle(p.titanium)
-                            .frame(width: 30, height: 30)
-                            .contentShape(Rectangle())
+            }
+            .padding(.top, 8)
+
+            // Greeting + temperature, bottom-leading. Whole hero is the tap target.
+            Button {
+                guard weather != nil else { return }
+                HapticManager.shared.impact(.light)
+                withAnimation(.nmlStandard) { weatherExpanded.toggle() }
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(greeting)
+                        .font(.nmlDisplay(31, weight: .light))
+                        .foregroundStyle(p.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(dateLine)
+                        .font(.nmlBody(12)).tracking(0.5).foregroundStyle(p.muted)
+                        .padding(.top, 6)
+                    if let weather {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text("\(Int(weather.temperatureC.rounded()))")
+                                .font(.nmlDisplay(56, weight: .light))
+                                .foregroundStyle(p.ink)
+                                .contentTransition(.numericText())
+                            Text("°").font(.nmlDisplay(24, weight: .light)).foregroundStyle(p.ink)
+                            Text("  \(weather.conditionDescription) · feels \(Int(weather.apparentC.rounded()))°")
+                                .font(.nmlBody(13)).foregroundStyle(p.muted)
+                        }
+                        .padding(.top, 14)
+                    }
+                    if weatherExpanded, let weather {
+                        weatherDetailGrid(weather)
+                            .padding(.top, 14)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
-                .buttonStyle(.nmlScale)
-                .disabled(isChecking)
-                .accessibilityLabel("Refresh")
+                .contentShape(Rectangle())
             }
-            Text(dateLine)
-                .font(.nmlBody(12, weight: .regular))
-                .tracking(0.5)
-                .foregroundStyle(p.muted)
-                .padding(.bottom, 16)
-
-            Rectangle()
-                .fill(p.hairline)
-                .frame(height: 0.5)
+            .buttonStyle(.nmlScale(0.99))
         }
-        .padding(.bottom, 4)
+        .padding(.horizontal, 4)
     }
 
     private var greeting: String {
@@ -204,75 +221,6 @@ struct ProactiveView: View {
     }
 
     // MARK: - Cards
-
-    @ViewBuilder private var weatherCard: some View {
-        if weather == nil && !isLoading && !LocationManager.shared.isAuthorized {
-            TodayCard {
-                HStack {
-                    cardLabel("Weather")
-                    Spacer()
-                    Image(systemName: "location.slash")
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(p.muted)
-                }
-                Button {
-                    HapticManager.shared.impact(.light)
-                    LocationManager.shared.requestPermission()
-                } label: {
-                    Text("Allow location to see weather.")
-                        .font(.nmlBody(13, weight: .light))
-                        .foregroundStyle(p.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.nmlScale(0.98))
-            }
-        } else if let weather {
-            TodayCard {
-                Button {
-                    HapticManager.shared.impact(.light)
-                    withAnimation(.nmlStandard) { weatherExpanded.toggle() }
-                } label: {
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack {
-                            cardLabel("Weather")
-                            Spacer()
-                            Image(systemName: weatherExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(p.muted)
-                        }
-                        HStack(alignment: .center, spacing: 14) {
-                            Image(systemName: weather.symbolName)
-                                .font(.system(size: 26, weight: .light))
-                                .foregroundStyle(p.titanium)
-                                .frame(width: 34)
-                            Text("\(Int(weather.temperatureC.rounded()))°")
-                                .font(.nmlMono(40, weight: .ultraLight))
-                                .foregroundStyle(p.ink)
-                                .contentTransition(.numericText())
-                                .animation(.nmlStandard, value: weather.temperatureC)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(weather.conditionDescription)
-                                    .font(.nmlBody(13))
-                                    .foregroundStyle(p.ink)
-                                Text(weatherDetail(weather))
-                                    .font(.nmlMono(11))
-                                    .foregroundStyle(p.muted)
-                            }
-                            Spacer()
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.nmlScale(0.98))
-
-                if weatherExpanded {
-                    weatherDetailGrid(weather)
-                        .padding(.top, 16)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-        }
-    }
 
     @ViewBuilder private func weatherDetailGrid(_ w: OxyWeatherService.OxyWeatherSnapshot) -> some View {
         let cells: [(String, String)] = [
@@ -813,12 +761,67 @@ struct ProactiveView: View {
     }
 
     private func complete(_ reminder: TodayReminder) {
-        HapticManager.shared.impact(.light)
-        // Optimistic removal — drop it from the card immediately, then persist.
-        withAnimation(.nmlFast) {
+        // A soft, rewarding check-off, then the row springs away.
+        HapticManager.shared.impact(.soft)
+        withAnimation(.nmlSpring) {
             reminders.removeAll { $0.id == reminder.id }
         }
         Task { await native.completeReminder(id: reminder.id) }
+    }
+}
+
+/// The hero's atmospheric backdrop. Night = dark gradient with moon + stars;
+/// day = soft light wash. ponytail: 5 broad looks keyed off the SF Symbol name —
+/// expand only if a condition reads wrong in practice.
+private struct HeroSky: View {
+    let condition: String?   // OxyWeatherService symbolName, e.g. "cloud.rain"
+    let light: Bool
+
+    private var isRain: Bool { (condition ?? "").contains("rain") || (condition ?? "").contains("drizzle") }
+    private var isCloud: Bool { (condition ?? "").contains("cloud") }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: skyColors, startPoint: .top, endPoint: .bottom)
+            if !light {
+                // Moon + a few stars only at night.
+                Circle()
+                    .fill(RadialGradient(colors: [Color(white: 0.95), Color(white: 0.78)],
+                                         center: .init(x: 0.38, y: 0.35), startRadius: 1, endRadius: 26))
+                    .frame(width: 44, height: 44)
+                    .blur(radius: 0.3)
+                    .shadow(color: .white.opacity(0.18), radius: 18)
+                    .offset(x: 110, y: -78)
+                ForEach(0..<6, id: \.self) { i in
+                    Circle().fill(Color.white.opacity(0.6))
+                        .frame(width: 1.6, height: 1.6)
+                        .offset(x: [-120, -40, 40, 120, -90, 70][i], y: [-90, -60, -84, -50, -30, -90][i])
+                }
+            }
+            if isRain {
+                // Faint diagonal rain hairlines, monochrome.
+                Canvas { ctx, size in
+                    for i in stride(from: 0, to: Int(size.width), by: 22) {
+                        var path = Path()
+                        path.move(to: CGPoint(x: Double(i), y: 0))
+                        path.addLine(to: CGPoint(x: Double(i) - 10, y: size.height))
+                        ctx.stroke(path, with: .color(.white.opacity(0.06)), lineWidth: 0.5)
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea(edges: .top)
+    }
+
+    private var skyColors: [Color] {
+        if light {
+            return isCloud || isRain
+                ? [Color(white: 0.86), Color(white: 0.94)]
+                : [Color(red: 0.80, green: 0.88, blue: 0.97), Color(white: 0.97)]
+        }
+        return isRain
+            ? [Color(red: 0.10, green: 0.11, blue: 0.13), Color.black]
+            : [Color(red: 0.16, green: 0.19, blue: 0.26), Color.black]
     }
 }
 
