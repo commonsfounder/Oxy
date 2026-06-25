@@ -76,6 +76,9 @@ struct ProactiveView: View {
                 }
                 .refreshable { await loadDashboard() }
                 .hidesTabBarOnScroll()
+                .sheet(isPresented: $editingBoard) {
+                    TodayBoardEditor(layout: layout)
+                }
             }
             // No opaque cap: the aurora gradient runs full-bleed behind the status
             // bar (as in the reference), so content scrolling under it reads as
@@ -513,6 +516,42 @@ struct ProactiveView: View {
             reminders.removeAll { $0.id == reminder.id }
         }
         Task { await native.completeReminder(id: reminder.id) }
+    }
+}
+
+/// Sheet for composing the Today board: reorder via drag, toggle visibility.
+struct TodayBoardEditor: View {
+    @Bindable var layout: TodayLayout
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(layout.order) { kind in
+                    HStack {
+                        Text(kind.title).font(.nmlBody(15)).foregroundStyle(Color.nmlInk)
+                        Spacer()
+                        NamelessToggle(isOn: Binding(
+                            get: { !layout.isHidden(kind) },
+                            set: { _ in layout.toggle(kind) }
+                        ))
+                    }
+                    .listRowBackground(Color.nmlSurface)
+                }
+                .onMove { layout.move(from: $0, to: $1) }
+            }
+            .environment(\.editMode, .constant(.active))
+            .scrollContentBackground(.hidden)
+            .background(Color.nmlObsidian)
+            .navigationTitle("Edit Today")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }.foregroundStyle(Color.nmlInk)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 
