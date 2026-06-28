@@ -30,6 +30,8 @@ const microsoftConnector = require('../connectors/microsoft');
 const spotifyConnector = require('../connectors/spotify');
 const linearConnector = require('../connectors/linear');
 const notionConnector = require('../connectors/notion');
+const calendlyConnector = require('../connectors/calendly');
+const pinterestConnector = require('../connectors/pinterest');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
 const {
@@ -4181,22 +4183,20 @@ app.get('/travel-profile/:userId', requireSessionAuth, async (req, res) => {
 
 // --- End itinerary & profile ---
 
+// Only connectors with a real per-user authentication step belong here — these are
+// the "Apps" the user actually connects. Deeplink/no-auth actions (Uber, Bolt, Maps,
+// Trainline, Wallet, YouTube, Indeed, LinkedIn) still work via their connector modules;
+// they're just not listed as connectable since there's nothing to sign into.
 const CONNECTORS = [
   { id: 'google',    name: 'Google (Gmail + Calendar)', icon: 'google', category: 'Google',        implemented: true },
-  { id: 'uber',      name: 'Uber',                      icon: 'uber', category: 'Transport',     implemented: true },
-  { id: 'bolt',      name: 'Bolt',                      icon: 'bolt', category: 'Transport',     implemented: true },
-  { id: 'wallet',    name: 'Apple Wallet',               icon: 'wallet', category: 'System',      implemented: true },
-  { id: 'maps',      name: 'Maps',                      icon: 'maps', category: 'Travel',        implemented: true },
   { id: 'telegram',  name: 'Telegram',                  icon: 'telegram', category: 'Messages',      implemented: true },
-  { id: 'trainline', name: 'Trainline',                 icon: 'trainline', category: 'Transport',     implemented: true },
   { id: 'github',    name: 'GitHub',                    icon: 'github', category: 'Developer',      implemented: true, auth: 'oauth' },
   { id: 'microsoft', name: 'Outlook (Mail + Calendar)', icon: 'outlook', category: 'Microsoft',     implemented: true, auth: 'oauth' },
   { id: 'notion',    name: 'Notion',                    icon: 'notion', category: 'Productivity',   implemented: true, auth: 'oauth' },
-  { id: 'youtube',   name: 'YouTube',                   icon: 'youtube', category: 'Entertainment', implemented: true },
-  { id: 'indeed',    name: 'Indeed',                    icon: 'indeed', category: 'Jobs',           implemented: true },
-  { id: 'linkedin',  name: 'LinkedIn',                  icon: 'linkedin', category: 'Jobs',           implemented: true },
   { id: 'spotify',   name: 'Spotify',                   icon: 'spotify', category: 'Entertainment', implemented: true, auth: 'oauth' },
   { id: 'linear',    name: 'Linear',                    icon: 'linear', category: 'Developer',      implemented: true, auth: 'oauth' },
+  { id: 'calendly',  name: 'Calendly',                  icon: 'calendly', category: 'Productivity',   implemented: true, auth: 'oauth' },
+  { id: 'pinterest', name: 'Pinterest',                 icon: 'pinterest', category: 'Inspiration',    implemented: true, auth: 'oauth' },
   // Travel search (flights/hotels/activities) is a built-in agent capability, not a
   // user-configurable connector — the assistant dispatches it internally. The provider
   // (Amadeus/Viator) is an implementation detail and deliberately never surfaced.
@@ -6610,6 +6610,109 @@ app.get('/auth/github/callback', async (req, res) => {
         <script>window.opener?.postMessage('github_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
       </body></html>
     `);
+  }
+});
+
+// ── Calendly OAuth ────────────────────────────────────────────────────────────
+
+app.get('/auth/calendly/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.CALENDLY_CLIENT_ID || !process.env.CALENDLY_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Calendly OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/calendly/callback`;
+  const state = signOAuthState(userId, 'calendly');
+  const params = new URLSearchParams({
+    client_id: process.env.CALENDLY_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    state
+  });
+  res.json({ url: `https://auth.calendly.com/oauth/authorize?${params}` });
+});
+
+app.get('/auth/calendly/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'calendly');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+  if (error) return res.send(`<script>window.opener?.postMessage('calendly_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/calendly/callback`;
+    const basic = Buffer.from(`${process.env.CALENDLY_CLIENT_ID}:${process.env.CALENDLY_CLIENT_SECRET}`).toString('base64');
+    const resp = await axios.post('https://auth.calendly.com/oauth/token', new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri
+    }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, timeout: 15000 });
+
+    if (!resp.data?.access_token) throw new Error('No access token returned');
+    await calendlyConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + (resp.data.expires_in || 7200) * 1000
+    });
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff"><p style="font-size:18px">✓ Calendly connected</p><p style="color:#888;font-size:13px">You can close this window</p><script>window.opener?.postMessage('calendly_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script></body></html>`);
+  } catch (err) {
+    console.error('/auth/calendly/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff"><p style="font-size:18px">✗ Connection failed</p><p style="color:#888;font-size:13px">${errMsg}</p><script>window.opener?.postMessage('calendly_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script></body></html>`);
+  }
+});
+
+// ── Pinterest OAuth ───────────────────────────────────────────────────────────
+
+const PINTEREST_SCOPES = 'boards:read,pins:read';
+
+app.get('/auth/pinterest/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.PINTEREST_CLIENT_ID || !process.env.PINTEREST_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Pinterest OAuth is not configured on the server.' });
+  }
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/pinterest/callback`;
+  const state = signOAuthState(userId, 'pinterest');
+  const params = new URLSearchParams({
+    client_id: process.env.PINTEREST_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    scope: PINTEREST_SCOPES,
+    state
+  });
+  res.json({ url: `https://www.pinterest.com/oauth/?${params}` });
+});
+
+app.get('/auth/pinterest/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state, 'pinterest');
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+  if (error) return res.send(`<script>window.opener?.postMessage('pinterest_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/pinterest/callback`;
+    const basic = Buffer.from(`${process.env.PINTEREST_CLIENT_ID}:${process.env.PINTEREST_CLIENT_SECRET}`).toString('base64');
+    const resp = await axios.post('https://api.pinterest.com/v5/oauth/token', new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri
+    }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}` }, timeout: 15000 });
+
+    if (!resp.data?.access_token) throw new Error('No access token returned');
+    await pinterestConnector.saveTokens(userId, {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + (resp.data.expires_in || 2592000) * 1000
+    });
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff"><p style="font-size:18px">✓ Pinterest connected</p><p style="color:#888;font-size:13px">You can close this window</p><script>window.opener?.postMessage('pinterest_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script></body></html>`);
+  } catch (err) {
+    console.error('/auth/pinterest/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.message || err.message);
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff"><p style="font-size:18px">✗ Connection failed</p><p style="color:#888;font-size:13px">${errMsg}</p><script>window.opener?.postMessage('pinterest_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script></body></html>`);
   }
 });
 

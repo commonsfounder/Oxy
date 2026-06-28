@@ -13,6 +13,8 @@ const indeed = require('./indeed');
 const linkedin = require('./linkedin');
 const spotify = require('./spotify');
 const linear = require('./linear');
+const calendly = require('./calendly');
+const pinterest = require('./pinterest');
 const flights = require('./flights');
 const hotels = require('./hotels');
 const activities = require('./activities');
@@ -22,7 +24,7 @@ const activities = require('./activities');
 const MODULES = {
   google, uber, bolt, telegram, trainline, maps, wallet,
   github, microsoft, notion, youtube, indeed, linkedin, spotify, linear,
-  flights, hotels, activities
+  calendly, pinterest, flights, hotels, activities
 };
 
 const registry = {};
