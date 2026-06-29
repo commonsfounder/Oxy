@@ -106,6 +106,10 @@ function computeNextRun(now, { recurrence = 'once', time_of_day, day_of_week, da
 
 function describeSchedule(task) {
   const time = task.time_of_day || '09:00';
+  if (task.recurrence === 'poll') {
+    const mins = task.interval_minutes || 30;
+    return task.condition ? `keep watching until: ${task.condition}` : `check every ${mins} min`;
+  }
   if (task.recurrence === 'daily') return `every day at ${time}`;
   if (task.recurrence === 'weekly') {
     const day = WEEKDAYS[task.day_of_week] || 'the same day each week';
@@ -114,16 +118,37 @@ function describeSchedule(task) {
   return `on ${new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.next_run_at))}`;
 }
 
-async function createScheduledTask(userId, { title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date }) {
+const DEFAULT_POLL_MINUTES = 30;
+const DEFAULT_POLL_EXPIRY_DAYS = 30;
+
+async function createScheduledTask(userId, {
+  title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date,
+  condition = null, interval_minutes, expires_at, budget_cap
+}) {
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) return { success: false, error: 'A title is required.' };
 
+  const cleanCondition = condition ? String(condition).trim() : null;
+  // A condition ("when tickets go on sale") becomes a poll task: re-check on an interval
+  // until the condition is met or it expires.
+  let resolvedRecurrence = cleanCondition ? 'poll'
+    : (recurrence === 'daily' || recurrence === 'weekly' || recurrence === 'poll' ? recurrence : 'once');
+
   let nextRunAt;
-  let resolvedRecurrence = recurrence === 'daily' || recurrence === 'weekly' ? recurrence : 'once';
   let timeOfDay = time || null;
   let dayOfWeek = normalizeDayOfWeek(day_of_week);
+  let intervalMinutes = null;
+  let expiresAt = null;
 
-  if (due_date) {
+  if (resolvedRecurrence === 'poll') {
+    intervalMinutes = Number.isFinite(interval_minutes) && interval_minutes > 0
+      ? Math.round(interval_minutes) : DEFAULT_POLL_MINUTES;
+    const expiry = expires_at ? new Date(expires_at) : null;
+    expiresAt = expiry && !Number.isNaN(expiry.getTime())
+      ? expiry
+      : new Date(Date.now() + DEFAULT_POLL_EXPIRY_DAYS * 86400000);
+    nextRunAt = new Date(Date.now() + intervalMinutes * 60000);
+  } else if (due_date) {
     nextRunAt = new Date(due_date);
     if (Number.isNaN(nextRunAt.getTime())) return { success: false, error: 'due_date is not a valid date.' };
     resolvedRecurrence = 'once';
@@ -133,6 +158,7 @@ async function createScheduledTask(userId, { title, instruction = null, recurren
     nextRunAt = computeNextRun(new Date(), { recurrence: resolvedRecurrence, time_of_day: timeOfDay, day_of_week: dayOfWeek, date });
   }
 
+  const cap = Number(budget_cap);
   const row = {
     user_id: userId,
     title: cleanTitle,
@@ -141,13 +167,17 @@ async function createScheduledTask(userId, { title, instruction = null, recurren
     time_of_day: timeOfDay,
     day_of_week: dayOfWeek,
     next_run_at: nextRunAt.toISOString(),
+    condition: cleanCondition,
+    interval_minutes: intervalMinutes,
+    expires_at: expiresAt ? expiresAt.toISOString() : null,
+    budget_cap: Number.isFinite(cap) && cap > 0 ? cap : null,
     active: true
   };
 
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
     .insert(row)
-    .select('id, title, recurrence, time_of_day, day_of_week, next_run_at')
+    .select('id, title, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
     .single();
   if (error) return { success: false, error: error.message };
 
@@ -198,17 +228,40 @@ async function cancelScheduledTask(userId, { id, title }) {
 async function getDueScheduledTasks(userId, now = new Date()) {
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
-    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at')
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
     .eq('user_id', userId)
     .eq('active', true)
+    .eq('completed', false)
     .lte('next_run_at', now.toISOString());
   if (error) throw new Error(error.message);
   return data || [];
 }
 
+// Mark a one-shot or condition task as fulfilled so a retried sweep can't double-run it.
+async function completeScheduledTask(task, now = new Date()) {
+  await getSupabase().from('scheduled_tasks').update({
+    completed: true,
+    active: false,
+    last_run_at: now.toISOString()
+  }).eq('id', task.id);
+}
+
 async function advanceScheduledTask(task, now = new Date()) {
   if (task.recurrence === 'once') {
     await getSupabase().from('scheduled_tasks').update({ active: false, last_run_at: now.toISOString() }).eq('id', task.id);
+    return;
+  }
+  if (task.recurrence === 'poll') {
+    // Stop polling once we pass the expiry; otherwise schedule the next check.
+    if (task.expires_at && new Date(task.expires_at).getTime() <= now.getTime()) {
+      await getSupabase().from('scheduled_tasks').update({ active: false, last_run_at: now.toISOString() }).eq('id', task.id);
+      return;
+    }
+    const nextRunAt = new Date(now.getTime() + (task.interval_minutes || DEFAULT_POLL_MINUTES) * 60000);
+    await getSupabase().from('scheduled_tasks').update({
+      next_run_at: nextRunAt.toISOString(),
+      last_run_at: now.toISOString()
+    }).eq('id', task.id);
     return;
   }
   const nextRunAt = computeNextRun(now, { recurrence: task.recurrence, time_of_day: task.time_of_day, day_of_week: task.day_of_week });
@@ -224,5 +277,6 @@ module.exports = {
   listScheduledTasks,
   cancelScheduledTask,
   getDueScheduledTasks,
+  completeScheduledTask,
   advanceScheduledTask
 };

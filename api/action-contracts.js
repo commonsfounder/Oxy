@@ -30,9 +30,9 @@ const ACTION_CONTRACTS = {
   create_scheduled_task: {
     risk: 'low',
     required: ['title', 'instruction'],
-    optional: ['recurrence', 'time', 'day_of_week', 'date'],
+    optional: ['recurrence', 'time', 'day_of_week', 'date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap'],
     inputExample: { title: 'Morning traffic check', instruction: "Check traffic for the user's commute and report it.", recurrence: 'daily', time: '07:30' },
-    guidance: 'Use for recurring or scheduled future requests like "every morning at 7:30 check traffic", "every Monday tell me what\'s on my calendar", or "in two hours remind me to call back". recurrence is "daily", "weekly", or "once" — pick "once" only for a single future occurrence, otherwise infer "daily"/"weekly" from the phrasing. time is 24h HH:MM in Europe/London (default 09:00 if unspecified). For weekly, set day_of_week to the day name (e.g. "Monday"). For "once" tasks not due today, set date to an ISO date. instruction is a self-directed note describing what Oxy should do or say when this fires, e.g. "Check the weather and tell the user if they need an umbrella."',
+    guidance: 'Use for recurring, scheduled, or condition-triggered future requests. When the task fires it runs autonomously and CAN take actions (send, book, order, run_browser_task) — instruction is a self-directed note describing what to actually DO, e.g. "Book one Nlove Spells ticket on the venue site." recurrence is "daily", "weekly", or "once". time is 24h HH:MM in Europe/London (default 09:00). For weekly set day_of_week to the day name; for "once" not due today set date to an ISO date. For "when X happens" / "as soon as Y" / "once Z goes on sale" requests, set condition to a plain-English check (e.g. "Nlove Spells tickets are on sale on the venue website") — this makes it a polling task that re-checks until the condition is true, then acts. interval_minutes controls how often to re-check (default 30); expires_at is an ISO datetime to stop polling (default 30 days). For tasks that spend money, set budget_cap to a number in pounds — it auto-pays under the cap and asks for approval over it.',
     successSummary: 'Scheduled task created',
     failureSummary: 'Scheduling failed',
     confirmation: 'none'
