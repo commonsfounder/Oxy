@@ -853,20 +853,23 @@ const DEFAULT_BUDGET_CAP = Number(process.env.OXY_DEFAULT_BUDGET_CAP) || 100;
 // Shared agent loop: model → tools → feed results back → model, until the model emits
 // no action (done), a tool needs the user (paused), or we hit maxSteps. Used by the
 // autonomous scheduler; `onText` lets a streaming caller surface intermediate prose.
+// `generate` and `execute` are injectable so the loop control can be unit-tested without
+// a live model or real action execution; they default to the real model + action runner.
 async function runAgentLoop({
   userId, systemPrompt, contents, context = {}, model = PRIMARY_CHAT_MODEL,
-  maxSteps = 6, budgetCap = null, onText = null
+  maxSteps = 6, budgetCap = null, onText = null,
+  generate = (transcript) => modernGenAI.models.generateContent({
+    model, contents: transcript, config: { systemInstruction: systemPrompt, temperature: 0.4, maxOutputTokens: 2048 }
+  }),
+  execute = (actions) => executeActions(userId, actions, context, context.trace || null),
+  confirm = () => executeAction(userId, 'run_browser_task', {}, { ...context, bypassReview: true })
 }) {
   const trace = context.trace || null;
   const transcript = [...contents];
   let finalSpoken = '';
 
   for (let step = 0; step < maxSteps; step++) {
-    const res = await modernGenAI.models.generateContent({
-      model,
-      contents: transcript,
-      config: { systemInstruction: systemPrompt, temperature: 0.4, maxOutputTokens: 2048 }
-    });
+    const res = await generate(transcript);
     const text = res.text || '';
     let { spoken, actions } = parseActions(text);
     spoken = stripActionMarkupForDisplay(spoken).trim();
@@ -875,7 +878,7 @@ async function runAgentLoop({
     if (!actions.length) return { status: 'done', spoken: finalSpoken, steps: step + 1 };
 
     transcript.push({ role: 'model', parts: [{ text }] });
-    let results = await executeActions(userId, actions, context, trace);
+    let results = await execute(actions);
 
     // Autonomous purchase: when a browser task is poised at payment, apply the budget cap.
     for (const r of results) {
@@ -884,7 +887,7 @@ async function runAgentLoop({
         if (decision === 'pay') {
           // bypassReview routes run_browser_task straight to confirmPayment on the live
           // session, so the input is irrelevant here.
-          const confirmRes = await executeAction(userId, 'run_browser_task', {}, { ...context, bypassReview: true });
+          const confirmRes = await confirm();
           r.result = confirmRes;
           if (trace) trace.log('agent_loop.autopay', `£${amount} within cap`);
         } else {
@@ -6410,47 +6413,57 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           trace.log('actions.complete');
         }
 
-        // For data-fetching actions, stream a follow-up summary
+        // Multi-step agent loop: feed action results back so the model can chain further
+        // actions (look something up, then act on it) or speak a final summary — instead of
+        // stopping after one batch. Deterministic shortcuts skip the model where we already
+        // know the answer. The loop streams each turn: prose shows live, action JSON is held.
+        const MAX_CHAT_STEPS = 5;
         const dataResults = getStructuredDataResults(actionResults);
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
-        } else if (dataResults.length > 0) {
-          sse({ type: 'replace', text: '' });
-          const context = dataResults.map(a => a.text).join('\n\n');
-          const followUpRequest = buildModernGenerateRequest({
-            dynamicSystemPrompt,
-            useSearch,
-            cachedContentName,
-            baseHistory,
-            userContent: { role: 'user', parts: [{ text: message }] }
-          });
-          followUpRequest.contents.push(
-            { role: 'model', parts: [{ text: spoken || '…' }] },
-            { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-          );
-          const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
-            model: chatModel,
-            contents: followUpRequest.contents,
-            config: followUpRequest.config
-          }));
-          spoken = '';
-          heldDisplayText = '';
-          actionMarkupStarted = false;
-          hasStreamedText = false;
-          for await (const chunk of followUp) {
-            const text = chunk.text || '';
-            if (text) {
-              spoken += text;
-              emitSafeDisplayText(text);
-              if (ttsStreamer) ttsStreamer.ingest(spoken);
+        } else if (actionResults.length > 0) {
+          const loopContents = [...initialRequest.contents, { role: 'model', parts: [{ text: fullText }] }];
+          let batch = actionResults;
+          let step = 1;
+          while (true) {
+            // Stop chaining if anything awaits the user (payment review / pending confirm).
+            if (batch.some(r => r.result?.confirmation || r.result?.pending)) break;
+            const resultsText = batch
+              .map(r => `${r.action}: ${JSON.stringify(r.result?.text || r.result?.error || r.result || {}).slice(0, 1200)}`)
+              .join('\n');
+            loopContents.push({ role: 'user', parts: [{ text: `Action results:\n${resultsText}\n\nIf more steps are needed to finish the request, emit the next <action>. If it is fully done, reply with the final answer to the user and no <action>.` }] });
+
+            spoken = ''; heldDisplayText = ''; actionMarkupStarted = false; hasStreamedText = false;
+            sse({ type: 'replace', text: '' });
+            let turnText = '';
+            const turn = await trace.run(`gemini.loop.step${step}`, () => modernGenAI.models.generateContentStream({
+              model: chatModel, contents: loopContents, config: initialRequest.config
+            }));
+            for await (const chunk of turn) {
+              const t = chunk.text || '';
+              if (t) { turnText += t; emitSafeDisplayText(t); if (ttsStreamer && !actionMarkupStarted) ttsStreamer.ingest(stripActionMarkupForDisplay(turnText)); }
             }
+            flushSafeDisplayText();
+            loopContents.push({ role: 'model', parts: [{ text: turnText }] });
+            const parsedTurn = parseActions(turnText);
+            spoken = stripActionMarkupForDisplay(parsedTurn.spoken).trim();
+
+            if (!parsedTurn.actions.length) break;   // model finished and spoke the answer
+            if (step >= MAX_CHAT_STEPS) break;        // safety bound
+
+            const next = normalizeActionResultsForClient(await executeActions(userId, parsedTurn.actions, { userMessage: message, location, nativeHints, trace, sendStatus }, trace, {
+              onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
+              onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), { action: action.type, success: result?.success !== false })
+            }));
+            sse({ type: 'actions', results: next });
+            actionResults = actionResults.concat(next);
+            batch = next;
+            step++;
           }
-          flushSafeDisplayText();
-          spoken = stripActionMarkupForDisplay(parseActions(spoken).spoken || spoken || context).trim();
-          if (!hasStreamedText) sse({ type: 'replace', text: spoken });
-          if (ttsStreamer) ttsStreamer.ingest(spoken);
+          if (spoken && !hasStreamedText) sse({ type: 'replace', text: spoken });
+          if (spoken && ttsStreamer) ttsStreamer.ingest(spoken);
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
         if (actionConfirmation && actionConfirmation !== spoken) {
@@ -6531,29 +6544,36 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 
-    // For data-fetching actions, re-prompt Gemini with results
+    // Multi-step agent loop (non-streaming): feed results back so the model can chain
+    // further actions or speak a final summary, instead of stopping after one batch.
+    const MAX_CHAT_STEPS = 5;
     const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
-    } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.text).join('\n\n');
-      const followUpRequest = buildModernGenerateRequest({
-        dynamicSystemPrompt,
-        useSearch,
-        cachedContentName,
-        baseHistory,
-        userContent: { role: 'user', parts: [{ text: message }] }
-      });
-      followUpRequest.contents.push(
-        { role: 'model', parts: [{ text: spoken || '…' }] },
-        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-      );
-      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
-        model: chatModel,
-        contents: followUpRequest.contents,
-        config: followUpRequest.config
-      }));
-      spoken = parseActions(followUp.text || '').spoken || context;
+    } else if (actionResults.length > 0) {
+      const loopContents = [...initialRequest.contents, { role: 'model', parts: [{ text: rawText }] }];
+      let batch = actionResults;
+      let step = 1;
+      while (true) {
+        if (batch.some(r => r.result?.confirmation || r.result?.pending)) break;
+        const resultsText = batch
+          .map(r => `${r.action}: ${JSON.stringify(r.result?.text || r.result?.error || r.result || {}).slice(0, 1200)}`)
+          .join('\n');
+        loopContents.push({ role: 'user', parts: [{ text: `Action results:\n${resultsText}\n\nIf more steps are needed to finish the request, emit the next <action>. If it is fully done, reply with the final answer to the user and no <action>.` }] });
+        const turn = await trace.run(`gemini.loop_nonstream.step${step}`, () => modernGenAI.models.generateContent({
+          model: chatModel, contents: loopContents, config: initialRequest.config
+        }));
+        const turnText = turn.text || '';
+        loopContents.push({ role: 'model', parts: [{ text: turnText }] });
+        const parsedTurn = parseActions(turnText);
+        spoken = stripActionMarkupForDisplay(parsedTurn.spoken).trim();
+        if (!parsedTurn.actions.length) break;
+        if (step >= MAX_CHAT_STEPS) break;
+        const next = normalizeActionResultsForClient(await executeActions(userId, parsedTurn.actions, { userMessage: message, location, nativeHints, trace }, trace));
+        actionResults = actionResults.concat(next);
+        batch = next;
+        step++;
+      }
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) spoken = actionConfirmation;
@@ -7504,3 +7524,4 @@ module.exports.mentionsActionCommitment = mentionsActionCommitment;
 // Budget-cap money path — pure logic exposed for unit tests.
 module.exports.parsePrice = parsePrice;
 module.exports.decidePaymentByCap = decidePaymentByCap;
+module.exports.runAgentLoop = runAgentLoop;
