@@ -13,7 +13,7 @@ struct LegalConsentView: View {
 
     var body: some View {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            Color.edCanvas.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)

@@ -26,8 +26,9 @@ struct ChatHomeView: View {
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
 
-    // Same time-based finish as the Today tab.
-    private var lightMode: Bool { TodayFinish.isLight }
+    // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
 
     private let sidebarWidth: CGFloat = 312
     private var edgeWidth: CGFloat { 22 }
@@ -84,7 +85,6 @@ struct ChatHomeView: View {
                 .gesture(drawerCloseGesture)
         }
         .animation(.nmlSpring, value: sidebarOpen)
-        .environment(\.colorScheme, lightMode ? .light : .dark)
         .task { await loadSessions() }
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {

@@ -12,7 +12,7 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            Color.edCanvas.ignoresSafeArea()
 
             // Straight to the sign-in form — no intro carousel, no mic slide.
             LoginFormPage(

@@ -23,7 +23,7 @@ struct PendantStatusView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.mgBg.ignoresSafeArea()
+                Color.edCanvas.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Pendant", onBack: { dismiss() })

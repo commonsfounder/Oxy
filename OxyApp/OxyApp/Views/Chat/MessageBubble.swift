@@ -25,14 +25,14 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.pending }
     }
 
-    // Outer corners (trailing edge) stay fully round; inner corners (leading edge)
-    // tighten when this message is adjacent to another in the same run.
+    // Minimal, near-square corners — a quiet tonal block, not a chat bubble. Inner
+    // (leading) corners tighten further when adjacent to another in the same run.
     private var userBubbleShape: UnevenRoundedRectangle {
         UnevenRoundedRectangle(
-            topLeadingRadius: isGroupStart ? NMLRadius.bubble : NMLRadius.sm,
-            bottomLeadingRadius: isGroupEnd  ? NMLRadius.bubble : NMLRadius.sm,
-            bottomTrailingRadius: NMLRadius.bubble,
-            topTrailingRadius: NMLRadius.bubble,
+            topLeadingRadius: isGroupStart ? 6 : 3,
+            bottomLeadingRadius: isGroupEnd  ? 6 : 3,
+            bottomTrailingRadius: 6,
+            topTrailingRadius: 6,
             style: .continuous
         )
     }

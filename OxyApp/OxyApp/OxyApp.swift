@@ -5,6 +5,13 @@ import UIKit
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
+    // The single source of truth for light/dark. `.system` follows iOS; light/dark
+    // are the user's manual override (Settings → Appearance). Changing it re-renders
+    // the root, re-applies preferredColorScheme, and every screen reads the result
+    // from its environment colorScheme.
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+
+    private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
 
     init() {
         // Slider's unfilled track is near-invisible on pure black by default; give it a
@@ -17,7 +24,7 @@ struct OxyApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(appearance.colorScheme)
                 .tint(Color.oxyStone)
         }
     }

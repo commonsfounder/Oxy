@@ -22,10 +22,13 @@ struct ConnectorsView: View {
         case idle, connecting, connected, needsReconnect, error
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
+
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.mgBg.ignoresSafeArea()
+                Color.edCanvas.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Apps", onBack: { dismiss() })
@@ -53,7 +56,7 @@ struct ConnectorsView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     MilgrainSectionHeader(title: "On This Device")
                                         .padding(.bottom, 12)
-                                    deviceSection(caps)
+                                    TodayCard { deviceSection(caps) }
                                 }
                                 .opacity(cardsVisible ? 1 : 0)
                                 .offset(y: cardsVisible ? 0 : 18)
@@ -68,11 +71,15 @@ struct ConnectorsView: View {
                                 let visible = connectors.filter { $0.implemented && !hiddenConnectorIDs.contains($0.id) }
                                 let others = visible.filter { $0.id != "google" }
 
-                                googleSection
-                                if !others.isEmpty {
-                                    ForEach(others) { connector in
-                                        MilgrainDivider()
-                                        integrationRow(connector)
+                                TodayCard {
+                                    VStack(spacing: 0) {
+                                        googleSection
+                                        if !others.isEmpty {
+                                            ForEach(others) { connector in
+                                                MilgrainDivider()
+                                                integrationRow(connector)
+                                            }
+                                        }
                                     }
                                 }
                             }

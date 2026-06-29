@@ -19,10 +19,13 @@ struct ProfileView: View {
     @State private var accountStatusText: String?
     @State private var sharePayload: SharePayload?
 
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
+
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.mgBg.ignoresSafeArea()
+                Color.edCanvas.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
@@ -155,7 +158,7 @@ struct ProfileView: View {
         VStack(alignment: .leading, spacing: 4) {
             MilgrainSectionHeader(title: title)
                 .padding(.bottom, 10)
-            VStack(spacing: 0) { content() }
+            TodayCard { VStack(spacing: 0) { content() } }
         }
     }
 

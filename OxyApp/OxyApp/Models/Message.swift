@@ -274,6 +274,11 @@ struct Briefing: Codable, Identifiable, Equatable {
 
     var lead: String? { metadata?.lead }
     var signals: [BriefingSignal] { metadata?.signals ?? [] }
+
+    /// Editorial day narrative for the Today hero ("This evening" voice). Server prose.
+    var narrative: String? { metadata?.narrative?.nonEmpty }
+    /// One-line wellbeing reflection grounded in the day's health data. Server prose.
+    var wellbeing: String? { metadata?.wellbeing?.nonEmpty }
 }
 
 struct BriefingMetadata: Codable, Equatable {
@@ -281,6 +286,16 @@ struct BriefingMetadata: Codable, Equatable {
     let incoming: [BriefingIncoming]?
     let lead: String?
     let signals: [BriefingSignal]?
+    let narrative: String?
+    let wellbeing: String?
+}
+
+private extension String {
+    /// nil when empty/whitespace, so the UI can fall back to local copy.
+    var nonEmpty: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
 }
 
 /// One ranked "what matters today" item. `status` is server-set:

@@ -10,14 +10,13 @@ struct MainTabView: View {
     // natural "swipe near that area to bring it back" gesture.
     @State private var keyboardUp = false
     @State private var tabBar = TabBarVisibility()
-    // Light by day, dark at night (see TodayFinish).
-    private var lightMode: Bool { TodayFinish.isLight }
+    // Resolved from the app-wide appearance setting (Settings → Appearance) via the root's
+    // preferredColorScheme; .system follows iOS.
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
 
     // Tucked away either while typing (keyboard up) or while scrolling down into content.
     private var barTucked: Bool { keyboardUp || tabBar.hidden }
-
-    // The whole app carries the chosen finish, including More and its sub-screens.
-    private var canvasIsLight: Bool { lightMode }
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -44,9 +43,9 @@ struct MainTabView: View {
         // areas, so it bleeds edge-to-edge — under the status bar and behind the floating
         // tab bar. The pages themselves are transparent (More paints its own dark canvas).
         ZStack {
-            // One canvas for every tab — the aurora in the chosen finish, so More shares
-            // the same light-by-day / dark-by-night language as Today and Chat.
-            TodayAuroraBackground(light: lightMode)
+            // One clean editorial canvas for every tab — warm-white by day, true black at
+            // night. Colour/atmosphere lives only in Today's own sky hero, layered on top.
+            Color.edCanvas.ignoresSafeArea()
 
             // A true paged TabView for buttery 1:1 horizontal swiping. The native
             // page style hides the system tab bar, so a slim custom bar is added via
@@ -64,7 +63,6 @@ struct MainTabView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 if !barTucked {
                     bottomBar
-                        .environment(\.colorScheme, canvasIsLight ? .light : .dark)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -158,7 +156,8 @@ struct MoreView: View {
     @State private var appeared = false
 
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
-    private var lightMode: Bool { TodayFinish.isLight }
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
 
     enum MoreDestination: Identifiable {
         case profile, pendant, connectors, memory, settings
@@ -217,7 +216,6 @@ struct MoreView: View {
                 Text("Are you sure you want to sign out?")
             }
         }
-        .environment(\.colorScheme, lightMode ? .light : .dark)
     }
 
     // MARK: - Identity header (Milgrain editorial)

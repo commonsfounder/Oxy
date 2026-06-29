@@ -2119,6 +2119,13 @@ final class NativeIntegrationManager: NSObject {
 
     func requestHealthAccess() async {
         await requestHealthPermission()
+        UserDefaults.standard.set(true, forKey: "oxy_today_health_asked")
+    }
+
+    /// Whether we've already asked iOS for Health access — read status isn't reliably
+    /// queryable, so this is the only signal the Today card has for "asked vs never asked".
+    var healthPermissionRequested: Bool {
+        UserDefaults.standard.bool(forKey: "oxy_today_health_asked")
     }
 
     func requestRemindersAccess() async {
@@ -2202,8 +2209,15 @@ final class NativeIntegrationManager: NSObject {
         return reminders
             .filter { !excludedListIDs.contains($0.calendar.calendarIdentifier) }
             .compactMap { reminder -> TodayReminder? in
-                guard let comps = reminder.dueDateComponents, let due = cal.date(from: comps),
-                      due <= endOfDay, due >= overdueFloor else { return nil }
+                // No due date at all (plain to-do, the common case) still belongs on
+                // today's list — only reminders with a due date get windowed.
+                let due: Date?
+                if let comps = reminder.dueDateComponents, let parsed = cal.date(from: comps) {
+                    guard parsed <= endOfDay, parsed >= overdueFloor else { return nil }
+                    due = parsed
+                } else {
+                    due = nil
+                }
                 // Reminders created elsewhere (or by an older path) can carry a dangling
                 // time preposition with no object — "call mum at". Trim a trailing
                 // at/on/by/for so the card never shows a sentence missing its tail.
@@ -2212,7 +2226,7 @@ final class NativeIntegrationManager: NSObject {
                     .replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
                     .trimmingCharacters(in: .whitespaces)
                 guard seen.insert(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)).inserted else { return nil }
-                return TodayReminder(id: reminder.calendarItemIdentifier, title: title, due: due, overdue: due < now)
+                return TodayReminder(id: reminder.calendarItemIdentifier, title: title, due: due, overdue: (due ?? .distantFuture) < now)
             }
             .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
             .prefix(5)

@@ -34,12 +34,14 @@ const calendlyConnector = require('../connectors/calendly');
 const pinterestConnector = require('../connectors/pinterest');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
+const { streamBrain, getBrainProvider } = require('./services/brain-provider');
 const {
   createScheduledTask,
   listScheduledTasks,
   cancelScheduledTask,
   getDueScheduledTasks,
   advanceScheduledTask,
+  completeScheduledTask,
   describeSchedule
 } = require('./services/scheduled-tasks');
 const { runOrderingTurn, confirmPayment, getSession, closeSession } = require('./services/browser-task');
@@ -749,22 +751,171 @@ function normalizeGeminiHistory(history) {
 }
 
 function parseActions(fullResponse) {
-  const match = fullResponse.match(/<action>([\s\S]*?)<\/action>/);
   const spoken = fullResponse.replace(/<action>[\s\S]*?<\/action>/g, '').trim();
-  let actions = [];
+  const actions = [];
+  // parseError is true when the model emitted an <action> block we couldn't parse —
+  // the caller uses it to trigger recovery instead of silently dropping the action.
+  let parseError = false;
 
-  if (match) {
+  // Capture every block, not just the first: multi-intent replies can emit more than one.
+  for (const match of fullResponse.matchAll(/<action>([\s\S]*?)<\/action>/g)) {
     try {
       // Strip markdown code fences Gemini sometimes wraps around JSON
       const raw = match[1].trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
       const parsed = JSON.parse(raw);
-      actions = parsed.actions || [];
+      if (Array.isArray(parsed.actions)) actions.push(...parsed.actions);
     } catch (e) {
+      parseError = true;
       console.warn('[parseActions] failed:', e.message, '| raw:', match[1].trim().slice(0, 200));
     }
   }
 
-  return { spoken, actions };
+  return { spoken, actions, parseError };
+}
+
+// The model sometimes promises an action in prose ("I'll set that reminder") but
+// forgets the <action> block, or emits one we can't parse. Detect the promise so we
+// can re-prompt for the missing block instead of streaming a phantom confirmation.
+const COMMITMENT_VERB = 'set|send|schedule|add|create|remind|book|order|text|email|message|play|queue|put|save|cancel|delete|move|draft|reply|forward|turn on|turn off';
+const COMMITMENT_RE = new RegExp(`\\b(i'?ll|i will|i'?m going to|let me|going to)\\b[^.?!]{0,40}\\b(${COMMITMENT_VERB})\\b`, 'i');
+const DONE_RE = /\b(reminder set|all set|i'?ve (just )?(set|sent|added|scheduled|created|booked|ordered|cancelled|canceled|saved))\b/i;
+function mentionsActionCommitment(spoken) {
+  if (!spoken) return false;
+  return COMMITMENT_RE.test(spoken) || DONE_RE.test(spoken);
+}
+
+// Re-prompt the model with its own reply when it promised an action but emitted no
+// runnable block. Returns the recovered actions, or [] if none are actually needed.
+async function recoverMissingAction({ model, initialRequest, message, spoken, trace = null }) {
+  const recoveryRequest = {
+    config: {
+      ...initialRequest.config,
+      temperature: 0.1,
+      maxOutputTokens: Math.max(initialRequest.config.maxOutputTokens || 0, 512)
+    },
+    contents: [
+      ...initialRequest.contents,
+      { role: 'model', parts: [{ text: spoken }] },
+      {
+        role: 'user',
+        parts: [{
+          text: [
+            'Your reply above promised an action but did not include a valid <action> block, so nothing actually ran.',
+            'If an action is genuinely required, reply with ONLY the <action> block (valid JSON) to perform it now.',
+            'If no action is actually needed, reply with exactly: NO_ACTION',
+            '',
+            `Original user message: ${message}`
+          ].join('\n')
+        }]
+      }
+    ]
+  };
+  try {
+    const response = trace
+      ? await trace.run('gemini.generateContent.missing_action_recovery', () => modernGenAI.models.generateContent({
+        model, contents: recoveryRequest.contents, config: recoveryRequest.config
+      }))
+      : await modernGenAI.models.generateContent({
+        model, contents: recoveryRequest.contents, config: recoveryRequest.config
+      });
+    const text = (response.text || '').trim();
+    if (/^NO_ACTION/i.test(text) && !text.includes('<action>')) return [];
+    return parseActions(text).actions;
+  } catch (error) {
+    if (trace) trace.log('gemini.missing_action_recovery_fail', error.message);
+    return [];
+  }
+}
+
+// Pull a number out of a price string as shown on a checkout page ("£150", "$5.00",
+// "1,299.99 USD"). Returns null when there is no parseable amount — callers treat
+// null as "can't verify the price" and therefore pause rather than auto-pay.
+function parsePrice(raw) {
+  const text = String(raw || '');
+  const match = text.match(/\d[\d,]*(?:\.\d+)?/);
+  if (!match) return null;
+  const value = Number(match[0].replace(/,/g, ''));
+  return Number.isFinite(value) ? value : null;
+}
+
+// Budget-cap decision for an autonomous purchase at the payment step.
+// 'pay'    — total is known and within cap → confirm automatically.
+// 'approve'— over cap or unparseable → do not pay, ask the user.
+function decidePaymentByCap(totalText, cap) {
+  const amount = parsePrice(totalText);
+  if (amount === null) return { decision: 'approve', amount: null, reason: 'price unclear' };
+  if (!(Number.isFinite(cap) && cap > 0)) return { decision: 'approve', amount, reason: 'no cap set' };
+  if (amount <= cap) return { decision: 'pay', amount, reason: 'within cap' };
+  return { decision: 'approve', amount, reason: 'over cap' };
+}
+
+const DEFAULT_BUDGET_CAP = Number(process.env.OXY_DEFAULT_BUDGET_CAP) || 100;
+
+// Shared agent loop: model → tools → feed results back → model, until the model emits
+// no action (done), a tool needs the user (paused), or we hit maxSteps. Used by the
+// autonomous scheduler; `onText` lets a streaming caller surface intermediate prose.
+// `generate` and `execute` are injectable so the loop control can be unit-tested without
+// a live model or real action execution; they default to the real model + action runner.
+async function runAgentLoop({
+  userId, systemPrompt, contents, context = {}, model = PRIMARY_CHAT_MODEL,
+  maxSteps = 6, budgetCap = null, onText = null,
+  generate = (transcript) => modernGenAI.models.generateContent({
+    model, contents: transcript, config: { systemInstruction: systemPrompt, temperature: 0.4, maxOutputTokens: 2048 }
+  }),
+  execute = (actions) => executeActions(userId, actions, context, context.trace || null),
+  confirm = () => executeAction(userId, 'run_browser_task', {}, { ...context, bypassReview: true })
+}) {
+  const trace = context.trace || null;
+  const transcript = [...contents];
+  let finalSpoken = '';
+
+  for (let step = 0; step < maxSteps; step++) {
+    const res = await generate(transcript);
+    const text = res.text || '';
+    let { spoken, actions } = parseActions(text);
+    spoken = stripActionMarkupForDisplay(spoken).trim();
+    if (spoken) { finalSpoken = spoken; if (onText) onText(spoken); }
+
+    if (!actions.length) return { status: 'done', spoken: finalSpoken, steps: step + 1 };
+
+    transcript.push({ role: 'model', parts: [{ text }] });
+    let results = await execute(actions);
+
+    // Autonomous purchase: when a browser task is poised at payment, apply the budget cap.
+    for (const r of results) {
+      if (r.action === 'run_browser_task' && r.result?.confirmation === 'review_required') {
+        const { decision, amount } = decidePaymentByCap(r.result.total, budgetCap ?? DEFAULT_BUDGET_CAP);
+        if (decision === 'pay') {
+          // bypassReview routes run_browser_task straight to confirmPayment on the live
+          // session, so the input is irrelevant here.
+          const confirmRes = await confirm();
+          r.result = confirmRes;
+          if (trace) trace.log('agent_loop.autopay', `£${amount} within cap`);
+        } else {
+          return {
+            status: 'paused',
+            spoken: finalSpoken,
+            reason: amount === null
+              ? `Couldn't read the price, so I didn't pay. ${r.result.text || ''}`.trim()
+              : `That comes to ${r.result.total || amount}, over your budget cap — approve and I'll place it.`,
+            results
+          };
+        }
+      }
+    }
+
+    const pause = results.find(r => r.result?.confirmation === 'review_required' || r.result?.needsApproval);
+    if (pause) return { status: 'paused', spoken: finalSpoken, reason: pause.result.text || 'needs approval', results };
+
+    const resultsText = results
+      .map(r => `${r.action}: ${JSON.stringify(r.result?.text || r.result?.error || r.result || {}).slice(0, 1200)}`)
+      .join('\n');
+    transcript.push({
+      role: 'user',
+      parts: [{ text: `Action results:\n${resultsText}\n\nContinue toward the goal. When it is fully done, give a short final confirmation and emit no <action>.` }]
+    });
+  }
+  return { status: 'maxSteps', spoken: finalSpoken };
 }
 
 function containsUrl(text) {
@@ -2335,7 +2486,9 @@ async function executeAction(userId, action, params, context = {}) {
             text: `Ready to order: ${outcome.summary}.${total} Say "confirm" to place it or "cancel" to stop.`,
             cardText: title,
             actionSummary: 'Awaiting payment confirmation',
-            confirmation: 'review_required'
+            confirmation: 'review_required',
+            // Raw price string (e.g. "£150") so the autonomous budget-cap check can compare it.
+            total: outcome.total || ''
           };
         }
         default:
@@ -2372,7 +2525,11 @@ async function executeAction(userId, action, params, context = {}) {
         recurrence: params?.recurrence,
         time: params?.time,
         day_of_week: params?.day_of_week,
-        date: params?.date
+        date: params?.date,
+        condition: params?.condition,
+        interval_minutes: params?.interval_minutes,
+        expires_at: params?.expires_at,
+        budget_cap: params?.budget_cap
       });
       if (!created.success) return { success: false, error: created.error };
       return {
@@ -2964,6 +3121,8 @@ function backfillSessionTitles(userId, sessions, storedTitles) {
 async function saveMessage(userId, role, content, trace = null) {
   // Incognito ("shadow") turns are never persisted.
   if (trace?.incognito) return;
+  // Latency-benchmark turns (test/bench/latency.js) read context but never persist.
+  if (String(userId).startsWith('bench-')) return;
   const insertMessage = () => supabase
     .from('conversations')
     .insert({
@@ -5131,16 +5290,19 @@ function parseSignalsResponse(raw) {
     try {
       const obj = JSON.parse(jsonText);
       // Only trust it if it's actually our shape; a stray {...} in prose falls through.
-      if (obj && (Array.isArray(obj.signals) || typeof obj.lead === 'string')) {
+      if (obj && (Array.isArray(obj.signals) || typeof obj.lead === 'string' ||
+                  typeof obj.narrative === 'string' || typeof obj.wellbeing === 'string')) {
         const lead = typeof obj.lead === 'string' ? obj.lead.trim() : '';
+        const narrative = typeof obj.narrative === 'string' ? obj.narrative.trim() : '';
+        const wellbeing = typeof obj.wellbeing === 'string' ? obj.wellbeing.trim() : '';
         const signals = Array.isArray(obj.signals)
           ? obj.signals.slice(0, 4).map(normalizeSignal).filter(Boolean)
           : [];
-        return { lead, signals };
+        return { lead, narrative, wellbeing, signals };
       }
     } catch { /* fall through to prose */ }
   }
-  return { lead: stripActionMarkupForDisplay(text).trim(), signals: [] };
+  return { lead: stripActionMarkupForDisplay(text).trim(), narrative: '', wellbeing: '', signals: [] };
 }
 
 // How to reverse a safe action, when it's reversible. cancel_scheduled_task matches by the
@@ -5221,6 +5383,8 @@ Ground everything in what's actually real: the calendar, reminders, emails, loca
 Return ONLY a JSON object, no prose around it, in exactly this shape:
 {
   "lead": "One short warm sentence framing the day. May be empty string if there's nothing to frame.",
+  "narrative": "One or two unhurried, literary sentences for the evening — what the rest of the day holds, in a warm editorial voice (e.g. 'Nothing after five — a rare quiet night ahead.'). Empty string if the day is unremarkable.",
+  "wellbeing": "One gentle sentence reflecting their rest and movement from the health data below — never clinical, never a readout (e.g. 'You slept well and you're already ahead on steps — a good day to be kind to yourself.'). Empty string if no health data.",
   "signals": [
     { "title": "Short imperative headline (<10 words)",
       "detail": "One line on why it matters now.",
@@ -5243,9 +5407,10 @@ Hard rules:
 - Be specific and real. Do NOT invent calendar events, emails, weather, deadlines, or tasks beyond what's shown or what search returns.
 - Never mention weather, temperature, or forecast. The Today screen shows it.
 - No life-coaching or motivational filler. Useful and personal, never preachy.
+- "narrative" and "wellbeing" are warm editorial prose, not data — never list numbers, never mention weather, never sound like a fitness tracker. One or two sentences each, or empty.
 - Refer to calendar events by their literal title and time. Don't guess who a meeting is "with" unless an attendee is named.
 - Emails shown are the user's Primary inbox and are ALSO displayed separately. Don't enumerate them — only raise one as a signal if it's genuinely urgent or time-sensitive.
-- If there is truly nothing real worth surfacing, return: {"lead":"","signals":[]}
+- If there is truly nothing real worth surfacing, return: {"lead":"","narrative":"","wellbeing":"","signals":[]}
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}
@@ -5310,15 +5475,15 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
   const fresh = state.at && (now.getTime() - new Date(state.at).getTime()) < BRIEFING_MAX_AGE_MS;
   if (!force && state.sig === sig && fresh) return null;
 
-  const { lead } = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
-  // Today no longer surfaces AI "what matters" signals (2026-06-25 redesign).
-  // Keep `lead` for legacy/body text only; drop signal generation + auto-execution.
+  const { lead, narrative, wellbeing } = await buildIntervalBriefing(userId, window, nativeContext, now, ctx);
+  // Today surfaces editorial prose (narrative + wellbeing), not "what matters" signal cards.
   const signals = [];
   const executed = Array.isArray(state.executed) ? state.executed : [];
 
-  // No concrete content right now — record the signature (and any executed sigs) so we don't
-  // re-call the model until something changes, but never permanently lock the window.
-  const hasContent = signals.length > 0 || (lead && lead.length >= 12);
+  // Content now includes the editorial prose, the emails/incoming we always carry, or a lead.
+  // Record the signature either way so we don't re-call the model until something changes.
+  const hasProse = (lead && lead.length >= 12) || (narrative && narrative.length >= 8) || (wellbeing && wellbeing.length >= 8);
+  const hasContent = hasProse || (ctx.emails || []).length > 0 || (ctx.incoming || []).length > 0;
   if (!hasContent) {
     await setPreferenceValue(userId, key, JSON.stringify({ id: state.id, sig, at: now.toISOString(), executed }));
     return null;
@@ -5326,8 +5491,8 @@ async function maybeCreateIntervalBriefing(userId, now = new Date(), { force = f
 
   // `body` keeps a plain-text summary so older clients (and the chat "Ask about this") still
   // read something; the structured feed rides in metadata.
-  const body = lead || signals.map(s => s.title).join(' · ');
-  const metadata = { window: window.id, date: todayKey, emails: ctx.emails, incoming: ctx.incoming, lead, signals };
+  const body = narrative || lead || signals.map(s => s.title).join(' · ');
+  const metadata = { window: window.id, date: todayKey, emails: ctx.emails, incoming: ctx.incoming, lead, narrative, wellbeing, signals };
 
   let briefing;
   if (state.id) {
@@ -5497,22 +5662,25 @@ async function maybeCreateFailedActionFollowUp(userId, now = new Date()) {
   return { type: 'failed_action_followup', text: followUpText };
 }
 
-async function buildScheduledTaskResponse(userId, task, now = new Date()) {
+// Run a scheduled instruction-task through the agent loop so it can actually act
+// (send, book, order) — not just narrate. Condition tasks check first and stay quiet
+// until the condition is true. Returns what to deliver and whether the task is finished.
+async function runScheduledAgentTask(userId, task, now = new Date()) {
   const [memory, preferences, ctx] = await Promise.all([
     getMemory(userId),
     getPreferences(userId),
     gatherProactiveContext(userId, now)
   ]);
-
-  const health = ctx.health;
   const location = ctx.location;
-  const systemPrompt = `The user previously asked you to do this on a schedule:
-"${task.instruction}"
+  const cap = Number(task.budget_cap) || DEFAULT_BUDGET_CAP;
 
-Fulfil it now. Use the real calendar events, emails, and context below, and Google Search
-grounding for anything current (weather for their location, news, facts). Use their location
-for weather. Don't invent calendar events or emails beyond what's shown. Write a short spoken
-message (under 60 words) as if reaching out to the user proactively.
+  const systemPrompt = `${OXCY_SYSTEM_PROMPT}
+
+You are running an AUTONOMOUS scheduled task with no user present. Use actions to do the
+work, not just describe it. You may chain actions across steps. For any purchase, build the
+cart and reach payment — the system applies the user's budget cap of £${cap} automatically
+(it pays under the cap, or pauses for approval over it). Never invent calendar events or
+emails beyond the context below. Keep any final message under 60 words.
 
 Today's calendar:
 ${ctx.calendarText || 'No calendar data available.'}
@@ -5526,13 +5694,37 @@ ${memory || 'none'}
 Preferences:
 ${preferences || 'none'}
 
-Native context:
 Location: ${formatLocationForPrompt(location)}
-Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
-  const text = await generateGroundedBriefing(systemPrompt, task.title);
-  return stripActionMarkupForDisplay(text).trim();
+  let goal = task.instruction;
+  if (task.condition) {
+    goal = `First determine whether this condition is TRUE right now: "${task.condition}".
+Use actions (search, or run_browser_task to look) if you need to check.
+If it is NOT true yet, reply with exactly NOT_MET and emit no <action>.
+If it IS true, carry out this task using actions, then give a short confirmation:
+"${task.instruction}"`;
+  }
+
+  const result = await runAgentLoop({
+    userId,
+    systemPrompt,
+    contents: [{ role: 'user', parts: [{ text: goal }] }],
+    context: { userMessage: task.instruction, location },
+    budgetCap: cap
+  });
+
+  // Condition not yet met — stay quiet and keep polling.
+  if (task.condition && /\bNOT_MET\b/i.test(result.spoken || '') && result.status === 'done') {
+    return { body: null, completed: false };
+  }
+  if (result.status === 'paused') {
+    // Over-cap / needs-approval: notify and stop a one-shot/condition task from re-prompting.
+    return { body: result.reason || 'This task needs your approval to continue.', completed: !!task.condition || task.recurrence === 'once' };
+  }
+  // Done (or maxSteps): one-shot and condition tasks are finished; recurring tasks repeat.
+  const finished = task.recurrence === 'once' || task.recurrence === 'poll';
+  return { body: result.spoken || task.title, completed: finished };
 }
 
 async function runDueScheduledTasksForUser(userId, now = new Date()) {
@@ -5540,7 +5732,15 @@ async function runDueScheduledTasksForUser(userId, now = new Date()) {
   const dueTasks = await getDueScheduledTasks(userId, now);
   for (const task of dueTasks) {
     const isReminder = !task.instruction;
-    const body = isReminder ? task.title : await buildScheduledTaskResponse(userId, task, now);
+    let completed = false;
+    let body;
+    if (isReminder) {
+      body = task.title;
+    } else {
+      const outcome = await runScheduledAgentTask(userId, task, now);
+      body = outcome.body;
+      completed = outcome.completed;
+    }
     if (body) {
       await createBriefing(userId, {
         kind: isReminder ? 'reminder' : 'scheduled_task',
@@ -5552,7 +5752,9 @@ async function runDueScheduledTasksForUser(userId, now = new Date()) {
     }
     if (isReminder) summary.reminders += 1;
     else summary.scheduledTasks += 1;
-    await advanceScheduledTask(task, now);
+    // Mark finished tasks complete (idempotent against retried sweeps); otherwise reschedule.
+    if (completed) await completeScheduledTask(task, now);
+    else await advanceScheduledTask(task, now);
   }
   return summary;
 }
@@ -5761,6 +5963,8 @@ function getStructuredDataResults(actionResults) {
 function postResponseTasks(userId, message, trace = null) {
   // Incognito turns leave no trace: no memory, no learned preferences.
   if (trace?.incognito) return;
+  // Latency-benchmark turns never write memory/preferences.
+  if (String(userId).startsWith('bench-')) return;
   // Deterministically capture personal-place statements ("my school is X") so
   // directions to "school"/"work"/"home" resolve to the user's real location.
   const msg = String(message || '');
@@ -6108,8 +6312,13 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
       try {
         sendStatus('thinking_start', 'Thinking');
-        // Stream Gemini response token-by-token
-        const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
+        // Stream the brain token-by-token. Provider is Gemini by default; the
+        // OXY_BRAIN_PROVIDER flag can route this one call to Groq for A/B latency
+        // tests without changing the consumer below.
+        const brainProvider = getBrainProvider();
+        if (brainProvider !== 'gemini') trace.log('brain.provider', brainProvider);
+        const stream = await trace.run('gemini.generateContentStream.initial', () => streamBrain({
+          provider: brainProvider,
           model: chatModel,
           contents: initialRequest.contents,
           config: initialRequest.config
@@ -6177,7 +6386,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           if (fullText) trace.log('gemini.empty_recovery_success');
         }
 
-        let { spoken, actions } = parseActions(fullText);
+        let { spoken, actions, parseError } = parseActions(fullText);
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
@@ -6186,6 +6395,16 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             ({ spoken, actions } = parseActions(fullText));
             spoken = stripActionMarkupForDisplay(spoken).trim();
             trace.log('gemini.blank_spoken_recovery_success');
+          }
+        }
+
+        // Promised an action but emitted no runnable block (forgotten or malformed) —
+        // re-prompt for it instead of streaming a confirmation for work that never ran.
+        if (!actions.length && (parseError || mentionsActionCommitment(spoken))) {
+          const recoveredActions = await recoverMissingAction({ model: chatModel, initialRequest, message, spoken, trace });
+          if (recoveredActions.length) {
+            actions = recoveredActions;
+            trace.log('gemini.missing_action_recovery_success', String(actions.length));
           }
         }
 
@@ -6204,47 +6423,57 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           trace.log('actions.complete');
         }
 
-        // For data-fetching actions, stream a follow-up summary
+        // Multi-step agent loop: feed action results back so the model can chain further
+        // actions (look something up, then act on it) or speak a final summary — instead of
+        // stopping after one batch. Deterministic shortcuts skip the model where we already
+        // know the answer. The loop streams each turn: prose shows live, action JSON is held.
+        const MAX_CHAT_STEPS = 5;
         const dataResults = getStructuredDataResults(actionResults);
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
-        } else if (dataResults.length > 0) {
-          sse({ type: 'replace', text: '' });
-          const context = dataResults.map(a => a.text).join('\n\n');
-          const followUpRequest = buildModernGenerateRequest({
-            dynamicSystemPrompt,
-            useSearch,
-            cachedContentName,
-            baseHistory,
-            userContent: { role: 'user', parts: [{ text: message }] }
-          });
-          followUpRequest.contents.push(
-            { role: 'model', parts: [{ text: spoken || '…' }] },
-            { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-          );
-          const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
-            model: chatModel,
-            contents: followUpRequest.contents,
-            config: followUpRequest.config
-          }));
-          spoken = '';
-          heldDisplayText = '';
-          actionMarkupStarted = false;
-          hasStreamedText = false;
-          for await (const chunk of followUp) {
-            const text = chunk.text || '';
-            if (text) {
-              spoken += text;
-              emitSafeDisplayText(text);
-              if (ttsStreamer) ttsStreamer.ingest(spoken);
+        } else if (actionResults.length > 0) {
+          const loopContents = [...initialRequest.contents, { role: 'model', parts: [{ text: fullText }] }];
+          let batch = actionResults;
+          let step = 1;
+          while (true) {
+            // Stop chaining if anything awaits the user (payment review / pending confirm).
+            if (batch.some(r => r.result?.confirmation || r.result?.pending)) break;
+            const resultsText = batch
+              .map(r => `${r.action}: ${JSON.stringify(r.result?.text || r.result?.error || r.result || {}).slice(0, 1200)}`)
+              .join('\n');
+            loopContents.push({ role: 'user', parts: [{ text: `Action results:\n${resultsText}\n\nIf more steps are needed to finish the request, emit the next <action>. If it is fully done, reply with the final answer to the user and no <action>.` }] });
+
+            spoken = ''; heldDisplayText = ''; actionMarkupStarted = false; hasStreamedText = false;
+            sse({ type: 'replace', text: '' });
+            let turnText = '';
+            const turn = await trace.run(`gemini.loop.step${step}`, () => modernGenAI.models.generateContentStream({
+              model: chatModel, contents: loopContents, config: initialRequest.config
+            }));
+            for await (const chunk of turn) {
+              const t = chunk.text || '';
+              if (t) { turnText += t; emitSafeDisplayText(t); if (ttsStreamer && !actionMarkupStarted) ttsStreamer.ingest(stripActionMarkupForDisplay(turnText)); }
             }
+            flushSafeDisplayText();
+            loopContents.push({ role: 'model', parts: [{ text: turnText }] });
+            const parsedTurn = parseActions(turnText);
+            spoken = stripActionMarkupForDisplay(parsedTurn.spoken).trim();
+
+            if (!parsedTurn.actions.length) break;   // model finished and spoke the answer
+            if (step >= MAX_CHAT_STEPS) break;        // safety bound
+
+            const next = normalizeActionResultsForClient(await executeActions(userId, parsedTurn.actions, { userMessage: message, location, nativeHints, trace, sendStatus }, trace, {
+              onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
+              onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), { action: action.type, success: result?.success !== false })
+            }));
+            sse({ type: 'actions', results: next });
+            actionResults = actionResults.concat(next);
+            batch = next;
+            step++;
           }
-          flushSafeDisplayText();
-          spoken = stripActionMarkupForDisplay(parseActions(spoken).spoken || spoken || context).trim();
-          if (!hasStreamedText) sse({ type: 'replace', text: spoken });
-          if (ttsStreamer) ttsStreamer.ingest(spoken);
+          if (spoken && !hasStreamedText) sse({ type: 'replace', text: spoken });
+          if (spoken && ttsStreamer) ttsStreamer.ingest(spoken);
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
         if (actionConfirmation && actionConfirmation !== spoken) {
@@ -6304,12 +6533,18 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }));
 
     const rawText = geminiRes.text || '';
-    let { spoken, actions } = parseActions(rawText);
+    let { spoken, actions, parseError } = parseActions(rawText);
     if (!rawText.trim() || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions } = parseActions(recovered));
       }
+    }
+
+    // Promised an action but emitted no runnable block — re-prompt for it.
+    if (!actions.length && (parseError || mentionsActionCommitment(spoken))) {
+      const recoveredActions = await recoverMissingAction({ model: chatModel, initialRequest, message, spoken, trace });
+      if (recoveredActions.length) actions = recoveredActions;
     }
 
     // Execute actions in parallel instead of sequentially
@@ -6319,29 +6554,36 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 
-    // For data-fetching actions, re-prompt Gemini with results
+    // Multi-step agent loop (non-streaming): feed results back so the model can chain
+    // further actions or speak a final summary, instead of stopping after one batch.
+    const MAX_CHAT_STEPS = 5;
     const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
-    } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.text).join('\n\n');
-      const followUpRequest = buildModernGenerateRequest({
-        dynamicSystemPrompt,
-        useSearch,
-        cachedContentName,
-        baseHistory,
-        userContent: { role: 'user', parts: [{ text: message }] }
-      });
-      followUpRequest.contents.push(
-        { role: 'model', parts: [{ text: spoken || '…' }] },
-        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
-      );
-      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
-        model: chatModel,
-        contents: followUpRequest.contents,
-        config: followUpRequest.config
-      }));
-      spoken = parseActions(followUp.text || '').spoken || context;
+    } else if (actionResults.length > 0) {
+      const loopContents = [...initialRequest.contents, { role: 'model', parts: [{ text: rawText }] }];
+      let batch = actionResults;
+      let step = 1;
+      while (true) {
+        if (batch.some(r => r.result?.confirmation || r.result?.pending)) break;
+        const resultsText = batch
+          .map(r => `${r.action}: ${JSON.stringify(r.result?.text || r.result?.error || r.result || {}).slice(0, 1200)}`)
+          .join('\n');
+        loopContents.push({ role: 'user', parts: [{ text: `Action results:\n${resultsText}\n\nIf more steps are needed to finish the request, emit the next <action>. If it is fully done, reply with the final answer to the user and no <action>.` }] });
+        const turn = await trace.run(`gemini.loop_nonstream.step${step}`, () => modernGenAI.models.generateContent({
+          model: chatModel, contents: loopContents, config: initialRequest.config
+        }));
+        const turnText = turn.text || '';
+        loopContents.push({ role: 'model', parts: [{ text: turnText }] });
+        const parsedTurn = parseActions(turnText);
+        spoken = stripActionMarkupForDisplay(parsedTurn.spoken).trim();
+        if (!parsedTurn.actions.length) break;
+        if (step >= MAX_CHAT_STEPS) break;
+        const next = normalizeActionResultsForClient(await executeActions(userId, parsedTurn.actions, { userMessage: message, location, nativeHints, trace }, trace));
+        actionResults = actionResults.concat(next);
+        batch = next;
+        step++;
+      }
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) spoken = actionConfirmation;
@@ -7286,3 +7528,10 @@ module.exports.executeActions = executeActions;
 module.exports.parseSignalsResponse = parseSignalsResponse;
 module.exports.classifySignalTier = classifySignalTier;
 module.exports.executeSafeSignals = executeSafeSignals;
+// Action parsing + phantom-promise detection — pure logic exposed for unit tests.
+module.exports.parseActions = parseActions;
+module.exports.mentionsActionCommitment = mentionsActionCommitment;
+// Budget-cap money path — pure logic exposed for unit tests.
+module.exports.parsePrice = parsePrice;
+module.exports.decidePaymentByCap = decidePaymentByCap;
+module.exports.runAgentLoop = runAgentLoop;
