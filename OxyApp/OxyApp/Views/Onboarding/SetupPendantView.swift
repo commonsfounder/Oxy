@@ -6,7 +6,7 @@ import SwiftUI
 struct SetupPendantView: View {
     var body: some View {
         ZStack {
-            Color.nmlObsidian.ignoresSafeArea()
+            Color.edCanvas.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()

@@ -34,6 +34,7 @@ const calendlyConnector = require('../connectors/calendly');
 const pinterestConnector = require('../connectors/pinterest');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
+const { streamBrain, getBrainProvider } = require('./services/brain-provider');
 const {
   createScheduledTask,
   listScheduledTasks,
@@ -3120,6 +3121,8 @@ function backfillSessionTitles(userId, sessions, storedTitles) {
 async function saveMessage(userId, role, content, trace = null) {
   // Incognito ("shadow") turns are never persisted.
   if (trace?.incognito) return;
+  // Latency-benchmark turns (test/bench/latency.js) read context but never persist.
+  if (String(userId).startsWith('bench-')) return;
   const insertMessage = () => supabase
     .from('conversations')
     .insert({
@@ -5960,6 +5963,8 @@ function getStructuredDataResults(actionResults) {
 function postResponseTasks(userId, message, trace = null) {
   // Incognito turns leave no trace: no memory, no learned preferences.
   if (trace?.incognito) return;
+  // Latency-benchmark turns never write memory/preferences.
+  if (String(userId).startsWith('bench-')) return;
   // Deterministically capture personal-place statements ("my school is X") so
   // directions to "school"/"work"/"home" resolve to the user's real location.
   const msg = String(message || '');
@@ -6307,8 +6312,13 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
       try {
         sendStatus('thinking_start', 'Thinking');
-        // Stream Gemini response token-by-token
-        const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
+        // Stream the brain token-by-token. Provider is Gemini by default; the
+        // OXY_BRAIN_PROVIDER flag can route this one call to Groq for A/B latency
+        // tests without changing the consumer below.
+        const brainProvider = getBrainProvider();
+        if (brainProvider !== 'gemini') trace.log('brain.provider', brainProvider);
+        const stream = await trace.run('gemini.generateContentStream.initial', () => streamBrain({
+          provider: brainProvider,
           model: chatModel,
           contents: initialRequest.contents,
           config: initialRequest.config

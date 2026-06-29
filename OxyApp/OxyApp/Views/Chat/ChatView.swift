@@ -33,8 +33,9 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
-    // Same time-based finish as the Today tab.
-    private var lightMode: Bool { TodayFinish.isLight }
+    // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
 
     /// True the instant the last message is a finished assistant reply — the trigger for the

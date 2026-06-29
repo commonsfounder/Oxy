@@ -32,9 +32,12 @@ struct MemoryView: View {
         }
     }
 
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
+
     private var memoryContent: some View {
         ZStack {
-            Color.mgBg.ignoresSafeArea()
+            Color.edCanvas.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if !embedded {

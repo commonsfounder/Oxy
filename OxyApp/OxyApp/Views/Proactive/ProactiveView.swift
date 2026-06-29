@@ -24,7 +24,8 @@ struct ProactiveView: View {
     @State private var editingBoard = false
 
     // Light by day, dark at night — tracks the clock, not a manual switch.
-    private var lightMode: Bool { TodayFinish.isLight }
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
     private var p: TodayPalette { lightMode ? .light : .dark }
 
     private let service = ChatService()
@@ -39,46 +40,45 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Canvas is the app-level aurora (see MainTabView) so it bleeds full-screen.
-                Color.clear
+                // The page canvas: warm-white by day, true black at night.
+                Color.edCanvas.ignoresSafeArea()
+                // Weather is the backdrop — a painterly sky that fades into the canvas.
+                // No box, no icons; colour lives only here.
+                AtmosphereSky(condition: weather?.symbolName)
+                    .allowsHitTesting(false)
 
                 ScrollView {
-                  nmlGlassContainer(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 0) {
                         if let errorMessage {
-                            ErrorBanner(message: errorMessage)
+                            ErrorBanner(message: errorMessage).padding(.bottom, 16)
                         }
 
                         hero
 
                         if isLoading && events.isEmpty && weather == nil && visibleBriefings.isEmpty {
-                            loadingSkeleton
+                            loadingSkeleton.padding(.top, 16)
                         } else {
-                            // removed: AI "what matters"/activity cards — 2026-06-25 redesign
+                            // Composable, but rendered as flat editorial sections (the board
+                            // editor still controls which appear and in what order).
                             ForEach(Array(layout.visibleOrdered().enumerated()), id: \.element) { idx, kind in
                                 card(for: kind, index: idx)
                             }
-
-                            addCardRow
-
-                            if !hasAnyContent {
-                                EmptyProactiveState(palette: p)
-                                    .opacity(contentAppeared ? 1 : 0)
-                                    .offset(y: contentAppeared ? 0 : 14)
-                                    .animation(.nmlSpring.delay(0.06), value: contentAppeared)
-                            }
+                            eveningPlate
+                            editBoardLink
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 12)
-                    .padding(.bottom, 36)
-                  }
+                    .padding(.horizontal, 22)
+                    .padding(.top, 16)
+                    .padding(.bottom, 44)
                 }
                 .refreshable { await loadDashboard() }
                 .hidesTabBarOnScroll()
                 .sheet(isPresented: $editingBoard, onDismiss: { Task { await loadDashboard() } }) {
                     TodayBoardEditor(layout: layout, native: native)
                 }
+
+                // Paper grain over the whole screen for materiality — barely there.
+                PaperGrain().ignoresSafeArea().allowsHitTesting(false)
             }
             // No opaque cap: the aurora gradient runs full-bleed behind the status
             // bar (as in the reference), so content scrolling under it reads as
@@ -90,7 +90,6 @@ struct ProactiveView: View {
                 failed ? .warning : nil
             }
         }
-        .environment(\.colorScheme, lightMode ? .light : .dark)
         .task {
             await native.prepareTodayAccess()
             await loadDashboard()
@@ -101,87 +100,55 @@ struct ProactiveView: View {
         }
     }
 
-    private var hasAnyContent: Bool {
-        weather != nil || !events.isEmpty || !reminders.isEmpty || !visibleBriefings.isEmpty
-    }
-
-    // MARK: - Hero (living weather)
+    // MARK: - Hero (editorial greeting + weather spoken as a line)
 
     private var hero: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Fills the card; the parent ZStack frame + clipShape give it its rounded shape.
-            HeroSky(condition: weather?.symbolName, light: lightMode)
-
-            // Top row: day/night glyph + refresh, pinned top-trailing.
-            VStack {
-                HStack {
-                    Spacer()
-                    Image(systemName: lightMode ? "sun.max" : "moon.stars")
-                        .font(.system(size: 14))
-                        .foregroundStyle(p.muted)
-                    Button(action: { Task { await checkNow() } }) {
-                        if isChecking { ProgressView().scaleEffect(0.7).tint(p.muted) }
-                        else { Image(systemName: "arrow.clockwise").font(.system(size: 15)).foregroundStyle(p.titanium) }
-                    }
-                    .buttonStyle(.nmlScale).disabled(isChecking).accessibilityLabel("Refresh")
-                }
+        VStack(alignment: .leading, spacing: 0) {
+            // Date kicker + a discreet refresh — the only control up here.
+            HStack(alignment: .firstTextBaseline) {
+                Text(dateLine)
+                    .font(.nmlBody(11, weight: .regular)).tracking(2)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.edMuted)
                 Spacer()
-            }
-            .padding(.top, 16)
-            .padding(.trailing, 18)
-
-            // Greeting + temperature, bottom-leading. Whole hero is the tap target.
-            Button {
-                guard weather != nil else { return }
-                HapticManager.shared.impact(.light)
-                withAnimation(.nmlStandard) { weatherExpanded.toggle() }
-            } label: {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(greeting)
-                        .font(.nmlDisplay(31, weight: .light))
-                        .foregroundStyle(p.ink)
-                        // Bound to the hero width so a long name wraps (then scales) instead
-                        // of running off the right edge.
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.6)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(dateLine)
-                        .font(.nmlBody(12)).tracking(0.5).foregroundStyle(p.muted)
-                        .padding(.top, 6)
-                    if let weather {
-                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text("\(Int(weather.temperatureC.rounded()))")
-                                .font(.nmlDisplay(56, weight: .light))
-                                .foregroundStyle(p.ink)
-                                .contentTransition(.numericText())
-                            Text("°").font(.nmlDisplay(24, weight: .light)).foregroundStyle(p.ink)
-                            Text("  \(weather.conditionDescription) · feels \(Int(weather.apparentC.rounded()))°")
-                                .font(.nmlBody(13)).foregroundStyle(p.muted)
-                        }
-                        .padding(.top, 14)
-                    }
-                    if weatherExpanded, let weather {
-                        weatherDetailGrid(weather)
-                            .padding(.top, 14)
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
+                Button(action: { Task { await checkNow() } }) {
+                    if isChecking { ProgressView().scaleEffect(0.6).tint(Color.edMuted) }
+                    else { Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .light)).foregroundStyle(Color.edMuted) }
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.nmlScale).disabled(isChecking).accessibilityLabel("Refresh")
             }
-            .buttonStyle(.nmlScale(0.99))
-            .padding(20)
+            .padding(.top, 8)
+
+            // Big Didot greeting, set well down the hero so the sky breathes above it.
+            Text(greeting)
+                .font(.nmlDisplay(40))
+                .foregroundStyle(Color.edInk)
+                .lineLimit(3)
+                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 60)
+
+            if let weather {
+                Text(weatherLine(weather))
+                    .font(.custom("Didot", size: 17)).italic()
+                    .foregroundStyle(Color.edInk.opacity(0.72))
+                    .padding(.top, 16)
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 264, alignment: .bottomLeading)
-        // A contained, rounded hero card that floats on the aurora canvas — matches the
-        // card language of the rest of the board instead of a sharp top-bleed block.
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(p.hairline, lineWidth: 0.5)
-        )
-        .shadow(color: Color.black.opacity(lightMode ? 0.08 : 0.0), radius: 18, y: 8)
+        .padding(.bottom, 10)
     }
+
+    /// Weather spoken as an editorial line, e.g. "Clear — thirty-two degrees."
+    private func weatherLine(_ w: OxyWeatherService.OxyWeatherSnapshot) -> String {
+        let t = Int(w.temperatureC.rounded())
+        let spelled = Self.spellOutFormatter.string(from: NSNumber(value: t)) ?? "\(t)"
+        return "\(w.conditionDescription) — \(spelled) degrees."
+    }
+
+    private static let spellOutFormatter: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .spellOut; return f
+    }()
 
     private var greeting: String {
         let base: String
@@ -216,98 +183,74 @@ struct ProactiveView: View {
 
     // MARK: - Cards
 
-    @ViewBuilder private func weatherDetailGrid(_ w: OxyWeatherService.OxyWeatherSnapshot) -> some View {
-        let cells: [(String, String)] = [
-            w.precipProbability.map { ("Rain", "\($0)%") },
-            w.uvBand.map { ("UV", $0) },
-            w.humidity.map { ("Humidity", "\($0)%") },
-            w.windSpeed.map { ("Wind", "\(Int($0.rounded())) km/h") },
-            (w.highC).map { ("High", "\(Int($0.rounded()))°") },
-            (w.lowC).map { ("Low", "\(Int($0.rounded()))°") }
-        ].compactMap { $0 }
-
-        VStack(spacing: 0) {
-            Rectangle().fill(p.hairline).frame(height: 0.5)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 16) {
-                ForEach(cells, id: \.0) { cell in
-                    VStack(spacing: 4) {
-                        Text(cell.0.uppercased())
-                            .font(.nmlMono(9))
-                            .tracking(0.8)
-                            .foregroundStyle(p.muted)
-                        Text(cell.1)
-                            .font(.nmlMono(15, weight: .regular))
-                            .foregroundStyle(p.ink)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.top, 16)
-        }
-    }
-
-    private func weatherDetail(_ w: OxyWeatherService.OxyWeatherSnapshot) -> String {
-        var parts = ["Feels \(Int(w.apparentC.rounded()))°"]
-        if let hi = w.highC, let lo = w.lowC {
-            parts.append("H:\(Int(hi.rounded()))  L:\(Int(lo.rounded()))")
-        }
-        return parts.joined(separator: "   ")
+    /// Flat editorial section — a Didot title + content on the bare canvas, no fill or
+    /// border. Sections are separated by an `EditorialRule` drawn in `card(for:)`.
+    @ViewBuilder private func boardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 22)
     }
 
     private var agendaCard: some View {
-        TodayCard {
-            cardLabel("Agenda")
+        boardSection {
+            cardLabel("Your day")
             if events.isEmpty {
-                Text("Nothing scheduled today.")
-                    .font(.nmlBody(13))
-                    .foregroundStyle(p.muted)
+                Text("Nothing scheduled — the day is yours.")
+                    .font(.nmlBody(15, weight: .light))
+                    .foregroundStyle(Color.edMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(events) { event in
                         Button {
                             HapticManager.shared.impact(.light)
                             openCalendar(at: event.start)
                         } label: {
-                            HStack(alignment: .top, spacing: 12) {
+                            HStack(alignment: .top, spacing: 16) {
                                 Text(event.isAllDay ? "all-day" : timeString(event.start))
-                                    .font(.nmlMono(12))
-                                    .foregroundStyle(p.titanium)
-                                    .frame(width: 62, alignment: .leading)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(event.title)
-                                        .font(.nmlBody(14))
-                                        .foregroundStyle(p.ink)
-                                        .lineLimit(2)
-                                    if let location = event.location {
-                                        Text(location)
-                                            .font(.nmlBody(11))
-                                            .foregroundStyle(p.muted)
-                                    }
-                                }
+                                    .font(.nmlBody(13)).foregroundStyle(Color.edMuted)
+                                    .frame(width: 52, alignment: .leading)
+                                Text(eventLine(event))
+                                    .font(.nmlBody(16, weight: .light))
+                                    .foregroundStyle(Color.edInk)
+                                    .lineLimit(2)
                                 Spacer(minLength: 0)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(p.muted)
-                                    .offset(y: 2)
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.nmlScale(0.98))
+                        .buttonStyle(.nmlScale(0.99))
                     }
                 }
             }
         }
     }
 
+    /// "Lunch with Amara · Mayfair" — title with the place set muted inline.
+    private func eventLine(_ event: TodayEvent) -> AttributedString {
+        var a = AttributedString(event.title)
+        a.foregroundColor = .edInk
+        if let location = event.location, !location.isEmpty {
+            var place = AttributedString("  ·  \(location)")
+            place.foregroundColor = .edMuted
+            a.append(place)
+        }
+        return a
+    }
+
     @ViewBuilder private func card(for kind: TodayCardKind, index: Int) -> some View {
-        Group {
-            switch kind {
-            case .incoming:  IncomingCard(items: incomingItems, palette: p)
-            case .inbox:     inboxCard
-            case .agenda:    agendaCard
-            case .health:    healthCard
-            case .reminders: remindersCard
+        VStack(spacing: 0) {
+            // A centred-dot editorial rule between sections — the only separator.
+            if index > 0 {
+                EditorialRule()
+            }
+            Group {
+                switch kind {
+                case .incoming:  IncomingCard(items: incomingItems)
+                case .inbox:     inboxCard
+                case .agenda:    agendaCard
+                case .health:    healthCard
+                case .reminders: remindersCard
+                }
             }
         }
         .opacity(contentAppeared ? 1 : 0)
@@ -320,19 +263,49 @@ struct ProactiveView: View {
         visibleBriefings.first?.incoming ?? []
     }
 
-    private var addCardRow: some View {
-        Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "plus").font(.system(size: 15))
-                Text("Add a card").font(.nmlBody(14))
+    /// The "This evening" plate — the day's narrative voice from the briefing, or a quiet
+    /// local line. A tonal grained block, the one place the canvas lifts.
+    @ViewBuilder private var eveningPlate: some View {
+        if let line = eveningLine {
+            VStack(spacing: 0) {
+                EditorialRule()
+                EditorialPlate {
+                    Text("THIS EVENING")
+                        .font(.nmlBody(11)).tracking(1.8)
+                        .foregroundStyle(Color.edMuted)
+                    Text(line)
+                        .font(.custom("Didot", size: 21)).italic()
+                        .foregroundStyle(Color.edInk)
+                        .lineSpacing(3)
+                        .padding(.top, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.top, 22)
             }
-            .foregroundStyle(p.muted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-            .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
-                .strokeBorder(p.hairline, style: StrokeStyle(lineWidth: 0.5, dash: [4, 4])))
         }
-        .buttonStyle(.nmlScale(0.99))
+    }
+
+    /// Server narrative if present; otherwise a gentle local reflection on the evening.
+    private var eveningLine: String? {
+        if let n = visibleBriefings.first?.narrative { return n }
+        let openEvening = !events.contains { !$0.isAllDay && Calendar.current.component(.hour, from: $0.start) >= 17 }
+        return openEvening ? "Nothing after five — a rare quiet night ahead." : nil
+    }
+
+    /// A quiet, text-only way into the board editor — no boxed "add a card" affordance.
+    private var editBoardLink: some View {
+        VStack(spacing: 0) {
+            EditorialRule()
+            Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
+                Text("Edit board")
+                    .font(.nmlBody(13, weight: .light))
+                    .foregroundStyle(Color.edMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.nmlScale(0.99))
+        }
     }
 
     private var inboxEmails: [BriefingEmail] {
@@ -353,40 +326,28 @@ struct ProactiveView: View {
     @ViewBuilder private var inboxCard: some View {
         let emails = inboxEmails
         if !emails.isEmpty {
-            TodayCard {
+            boardSection {
                 cardLabel("Inbox")
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(emails.enumerated()), id: \.element.id) { index, email in
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(emails) { email in
                         Button {
                             HapticManager.shared.impact(.light)
                             openMail()
                         } label: {
-                            HStack(alignment: .center, spacing: 8) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(email.cleanFrom)
-                                        .font(.nmlBody(13, weight: .medium))
-                                        .foregroundStyle(p.ink)
-                                        .lineLimit(1)
-                                    Text(email.cleanSubject)
-                                        .font(.nmlBody(13, weight: .light))
-                                        .foregroundStyle(p.muted)
-                                        .lineLimit(1)
-                                }
-                                Spacer(minLength: 8)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(p.muted)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(email.cleanFrom)
+                                    .font(.nmlBody(14, weight: .regular))
+                                    .foregroundStyle(Color.edInk)
+                                    .lineLimit(1)
+                                Text(email.cleanSubject)
+                                    .font(.nmlBody(14, weight: .light))
+                                    .foregroundStyle(Color.edMuted)
+                                    .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
-                            .padding(.vertical, 12)
                         }
-                        .buttonStyle(.nmlScale(0.98))
-                        if index < emails.count - 1 {
-                            // .overlay tints the divider line itself; .background only paints
-                            // behind it and leaves the default ~1pt system separator showing.
-                            Divider().overlay(p.hairline)
-                        }
+                        .buttonStyle(.nmlScale(0.99))
                     }
                 }
             }
@@ -413,82 +374,83 @@ struct ProactiveView: View {
     // removed: AI "what matters"/activity cards — 2026-06-25 redesign
 
     private var remindersCard: some View {
-        TodayCard {
+        boardSection {
             cardLabel("Reminders")
             if reminders.isEmpty {
-                Text("Nothing due today.")
-                    .font(.nmlBody(13))
-                    .foregroundStyle(p.muted)
+                Text("Nothing to carry today.")
+                    .font(.nmlBody(15, weight: .light))
+                    .foregroundStyle(Color.edMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(reminders) { reminder in
                         Button {
                             complete(reminder)
                         } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Circle()
-                                    .strokeBorder(p.muted, lineWidth: 1)
-                                    .frame(width: 16, height: 16)
-                                    .offset(y: 1)
+                                    .strokeBorder(Color.edMuted, lineWidth: 1)
+                                    .frame(width: 15, height: 15)
+                                    .offset(y: 2)
                                 Text(reminder.title)
-                                    .font(.nmlBody(14))
-                                    .foregroundStyle(p.ink)
+                                    .font(.nmlBody(16, weight: .light))
+                                    .foregroundStyle(Color.edInk)
                                 Spacer(minLength: 8)
                                 if let due = reminder.due {
                                     Text(reminder.overdue ? "overdue" : timeString(due))
-                                        .font(.nmlMono(11, weight: reminder.overdue ? .semibold : .regular))
-                                        // Amber = attention-needed; red is reserved for destructive actions.
-                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : p.muted)
+                                        .font(.nmlBody(12))
+                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.edMuted)
                                 }
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.nmlScale(0.98))
+                        .buttonStyle(.nmlScale(0.99))
                     }
                 }
             }
         }
     }
 
-    /// Today's vitals from HealthKit — only the metrics that have data; a quiet line
-    /// when nothing's available (simulator, no permission, or no samples yet).
+    /// Wellbeing — the day's rest and movement spoken as a quiet reflection, not a row of
+    /// gauges. Server prose when available, a gentle local sentence otherwise, and a soft
+    /// connect prompt when there's no health data at all.
     private var healthCard: some View {
-        let cells: [(String, String)] = [
-            layout.isOptionEnabled(HealthMetric.steps.id, for: .health) ? steps.map { ("Steps", $0.formatted()) } : nil,
-            layout.isOptionEnabled(HealthMetric.sleep.id, for: .health) ? sleepMinutes.map { ("Sleep", sleepLabel($0)) } : nil,
-            layout.isOptionEnabled(HealthMetric.restingHR.id, for: .health) ? restingHR.map { ("Resting HR", "\($0) bpm") } : nil
-        ].compactMap { $0 }
-
-        return TodayCard {
-            cardLabel("Health")
-            if cells.isEmpty {
-                Text("Connect Health to see your vitals.")
-                    .font(.nmlBody(13))
-                    .foregroundStyle(p.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        boardSection {
+            cardLabel("Wellbeing")
+            if let prose = wellbeingProse {
+                DropCapText(text: prose)
             } else {
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(cells, id: \.0) { cell in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(cell.0.uppercased())
-                                .font(.nmlMono(9)).tracking(0.8)
-                                .foregroundStyle(p.muted)
-                            Text(cell.1)
-                                .font(.nmlMono(18, weight: .regular))
-                                .foregroundStyle(p.ink)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    if native.healthPermissionRequested {
+                        if let url = URL(string: "x-apple-health://") { UIApplication.shared.open(url) }
+                    } else {
+                        Task { await native.requestHealthAccess(); await loadDashboard() }
                     }
+                } label: {
+                    Text("Connect Health to weave your rest and movement into the day.")
+                        .font(.nmlBody(15, weight: .light))
+                        .foregroundStyle(Color.edMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .buttonStyle(.plain)
             }
         }
     }
 
-    /// "7h 32m" / "48m" from whole minutes.
-    private func sleepLabel(_ minutes: Int) -> String {
-        let h = minutes / 60, m = minutes % 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    /// Server wellbeing prose if present; otherwise a gentle local sentence composed from
+    /// whatever health metrics exist. Nil when there's nothing to say.
+    private var wellbeingProse: String? {
+        if let w = visibleBriefings.first?.wellbeing { return w }
+        var parts: [String] = []
+        if let s = sleepMinutes, s > 0 {
+            let h = s / 60, m = s % 60
+            parts.append(m > 0 ? "you slept \(h) hours and \(m) minutes" : "you slept \(h) hours")
+        }
+        if let st = steps, st > 0 { parts.append("you're already at \(st.formatted()) steps") }
+        if let hr = restingHR, hr > 0 { parts.append("your resting heart rate is steady at \(hr)") }
+        guard !parts.isEmpty else { return nil }
+        let sentence = parts.joined(separator: ", ") + "."
+        return sentence.prefix(1).uppercased() + sentence.dropFirst()
     }
 
     /// Cold-start placeholder: the hero + two cards in skeleton form, shimmering.
@@ -507,7 +469,7 @@ struct ProactiveView: View {
     }
 
     private func cardLabel(_ text: String) -> some View {
-        Text(text).nmlEyebrow().padding(.bottom, 14)
+        EditorialSectionTitle(text).padding(.bottom, 14)
     }
 
     private func timeString(_ date: Date) -> String {
@@ -718,6 +680,7 @@ private struct HeroSky: View {
     var body: some View {
         ZStack {
             LinearGradient(colors: skyColors, startPoint: .top, endPoint: .bottom)
+                .mask(LinearGradient(colors: [.black, .black, .clear], startPoint: .top, endPoint: .bottom))
             if !light {
                 // Moon + a few stars only at night.
                 Circle()

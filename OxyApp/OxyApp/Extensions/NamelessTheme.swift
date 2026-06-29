@@ -147,10 +147,13 @@ extension Font {
     // setting entirely, so the passed `size` is the point size at the Large default and
     // scales from there.
 
-    /// Editorial display face (Fraunces) — high-contrast serif with real personality.
-    /// Reserved for titles and hero copy: the one place the type gets to have a voice.
+    /// Editorial display face (Didot) — iOS's built-in high-contrast Modern serif, the
+    /// app-wide headline/identity voice per the Silent Luxury spec. Didot ships only
+    /// Regular + Bold faces, so bold-ish weights map to Didot-Bold and everything else
+    /// to Didot; `relativeTo:` keeps it scaling with Dynamic Type.
     static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .custom("Fraunces", size: size, relativeTo: .title).weight(weight)
+        let bolds: Set<Font.Weight> = [.semibold, .bold, .heavy, .black]
+        return .custom(bolds.contains(weight) ? "Didot-Bold" : "Didot", size: size, relativeTo: .title)
     }
 
     /// Body / UI face (Inter) — a clean, even grotesque for running text and labels.
@@ -307,43 +310,6 @@ struct NamelessToggle: View {
     }
 }
 
-/// One reusable multi-option control: a shared hairline-bordered track with the
-/// options sitting *inside* it, the selected one filled with a soft capsule. The
-/// single source of truth for every segmented toggle (Wakeword, Haptic Force, …)
-/// so they all read as one grouped control instead of loose floating labels.
-struct NamelessSegmentedControl: View {
-    let options: [String]
-    @Binding var selection: String
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(options, id: \.self) { option in
-                let isSelected = selection == option
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { selection = option }
-                } label: {
-                    Text(option)
-                        .font(.nmlBody(12, weight: .medium))
-                        .tracking(0.3)
-                        .foregroundStyle(isSelected ? Color.nmlInk : Color.nmlMuted.opacity(0.7))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
-                        .background {
-                            if isSelected {
-                                Capsule().fill(Color.white.opacity(0.12))
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(Capsule().fill(Color.white.opacity(0.04)))
-        .overlay(Capsule().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
-    }
-}
-
 /// A single-line text field with no box — just a thin bottom rule that brightens
 /// softly while editing. Used for every text input in this language.
 struct NamelessLineField: View {
@@ -406,7 +372,10 @@ struct NamelessPrimaryButton: View {
             Text(title)
                 .font(.system(size: 14, weight: .semibold))
                 .tracking(1.5)
-                .foregroundStyle(Color.nmlObsidian)
+                // On-ink: contrasts with nmlInk in BOTH modes (white text on a dark fill in
+                // light mode, black text on a light fill in dark mode). nmlObsidian was always
+                // black and went invisible once light mode became real.
+                .foregroundStyle(Color.edCanvas)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
                 .background(Color.nmlInk)
@@ -606,10 +575,9 @@ extension View {
 // titanium hairlines) so Chat / Today / Onboarding are left untouched.
 
 extension Color {
-    // Adaptive so the settings family follows the same TodayFinish (light-by-day /
-    // dark-by-night) as Today and Chat. Dark values are the Milgrain spec; light values
-    // are the inverted equivalents. Resolve via the same colorScheme override the other
-    // screens apply (.environment(\.colorScheme, lightMode ? .light : .dark)).
+    // Adaptive: resolves light/dark from the environment colorScheme, which the app root
+    // drives from the user's AppAppearance setting (.system follows iOS). Dark values are
+    // the Milgrain spec; light values are the inverted equivalents.
     static let mgBg = nmlAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
                                   light: Color(red: 250 / 255, green: 250 / 255, blue: 249 / 255)) // near-white
     static let mgDivider = nmlAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
@@ -643,15 +611,14 @@ struct MilgrainDivider: View {
     }
 }
 
-/// Plain uppercase, letter-spaced caption section header in #555. Left-aligned, no
-/// background. Sans, not Didot — Didot is illegible at 11pt.
+/// Editorial section header — a Didot title in editorial ink, Title-case, left-aligned,
+/// no background. The settings-family counterpart to `EditorialSectionTitle`.
 struct MilgrainSectionHeader: View {
     let title: String
     var body: some View {
-        Text(title.uppercased())
-            .font(.system(size: 11, weight: .semibold))
-            .tracking(2.0)
-            .foregroundStyle(Color.mgCaption)
+        Text(title)
+            .font(.nmlDisplay(20))
+            .foregroundStyle(Color.edInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -683,10 +650,9 @@ struct MilgrainToggle: View {
     }
 }
 
-/// White-on / muted-off segmented control in the Milgrain greyscale — the `mg*`
-/// counterpart to `NamelessSegmentedControl`. Replaces stock `Picker`/`Slider` in the
-/// settings family so option pickers stay in-language (the system menu/slider chrome
-/// is the same kind of stock control the green `Toggle` ban exists to keep out).
+/// Flat multi-option picker — plain text options side by side, separated by 0.5pt
+/// vertical hairlines, the selected one in heading colour and the rest in secondary.
+/// No capsule track, no fill, no pill (per the Silent Luxury spec: zero pill shapes).
 /// `options` holds the stored values; pass `labels` when the display text differs.
 struct MilgrainSegmentedControl: View {
     let options: [String]
@@ -701,29 +667,27 @@ struct MilgrainSegmentedControl: View {
     var body: some View {
         HStack(spacing: 0) {
             ForEach(Array(options.enumerated()), id: \.element) { index, option in
+                if index > 0 {
+                    Rectangle()
+                        .fill(Color.mgDivider)
+                        .frame(width: 0.5, height: 18)
+                }
                 let isSelected = selection == option
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { selection = option }
                     HapticManager.shared.impact(.light)
                 } label: {
                     Text(label(index))
-                        .font(.system(size: 12, weight: .semibold))
-                        .tracking(0.3)
-                        .foregroundStyle(isSelected ? Color.mgBg : Color.mgSecondary)
+                        .font(.system(size: 14, weight: .light))
+                        .foregroundStyle(isSelected ? Color.mgHeading : Color.mgSecondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background {
-                            if isSelected { Capsule().fill(Color.mgHeading) }
-                        }
-                        .contentShape(Capsule())
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
             }
         }
-        .padding(3)
-        .background(Capsule().fill(Color.mgOff.opacity(0.4)))
-        .overlay(Capsule().strokeBorder(Color.mgDivider, lineWidth: 0.5))
     }
 }
 
@@ -735,13 +699,32 @@ struct MilgrainSegmentedControl: View {
 // light pastel finish; cards read `p.ink` / `p.muted` etc. so a single bool
 // flips the whole screen.
 
-/// The Today/Chat finish follows the time of day automatically: the light pastel
-/// finish by day, the dark aurora at night. Not user-toggled — it tracks the clock.
-enum TodayFinish {
-    static var isLight: Bool {
-        let hour = Calendar.current.component(.hour, from: Date())
-        return (7..<19).contains(hour)   // 07:00–18:59 = day
+/// The user's chosen appearance, persisted in UserDefaults. Drives `.preferredColorScheme`
+/// at the app root; every screen then reads the resolved `\.colorScheme` from the
+/// environment rather than computing its own finish. `.system` follows the iOS setting.
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "System"
+        case .light:  return "Light"
+        case .dark:   return "Dark"
+        }
     }
+
+    /// nil = follow the system (the `.preferredColorScheme` "no preference" value).
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+
+    static let storageKey = "oxy_appearance"
 }
 
 struct TodayPalette {
@@ -912,5 +895,216 @@ struct NamelessOutlineButton: View {
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         }
         .buttonStyle(.nmlScale)
+    }
+}
+
+// MARK: - Editorial language (de-gadgeted, whole-app)
+//
+// The product reads as a beautifully made editorial object, not a device dashboard.
+// Colour lives only in the painterly weather sky; the canvas stays warm-white (light)
+// or true black (dark) and all content is monochrome, tone-adaptive. These tokens and
+// primitives are the shared vocabulary for every screen.
+
+extension Color {
+    /// Warm-white by day, true black at night — the page canvas the whole app sits on.
+    static let edCanvas = nmlAdaptive(dark: .black,
+                                      light: Color(red: 255 / 255, green: 253 / 255, blue: 249 / 255))
+    /// Primary editorial ink — soft off-white on black, warm near-black on white.
+    static let edInk = nmlAdaptive(dark: Color(red: 236 / 255, green: 234 / 255, blue: 228 / 255),
+                                   light: Color(red: 42 / 255, green: 36 / 255, blue: 29 / 255))
+    /// Muted secondary — captions, times, metadata. Warm taupe on white, cool grey on black.
+    static let edMuted = nmlAdaptive(dark: Color(red: 124 / 255, green: 122 / 255, blue: 128 / 255),
+                                     light: Color(red: 168 / 255, green: 154 / 255, blue: 134 / 255))
+    /// Tonal plate fill for featured blocks — deep charcoal on black, warm taupe on white.
+    static let edPlate = nmlAdaptive(dark: Color(red: 16 / 255, green: 15 / 255, blue: 13 / 255),
+                                     light: Color(red: 239 / 255, green: 230 / 255, blue: 216 / 255))
+    /// Hairline rule for editorial dividers.
+    static let edRule = nmlAdaptive(dark: Color.white.opacity(0.10),
+                                    light: Color(red: 230 / 255, green: 221 / 255, blue: 207 / 255))
+}
+
+/// A tiny deterministic RNG so the paper grain is stable across redraws (no per-frame
+/// shimmer). Splitmix64 — good enough for scattering specks.
+struct EditorialSeededRNG: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        return z ^ (z >> 31)
+    }
+}
+
+/// Faint paper-grain overlay for materiality — dark specks multiplied onto a light
+/// canvas, light specks screened onto a dark one. Static (seeded), never animated.
+struct PaperGrain: View {
+    @Environment(\.colorScheme) private var scheme
+    var intensity: Double = 0.05
+
+    var body: some View {
+        Canvas { ctx, size in
+            var rng = EditorialSeededRNG(seed: 0x5EED_1234)
+            let speck = scheme == .dark ? Color.white : Color.black
+            let count = Int((size.width * size.height) / 700)
+            for _ in 0..<max(count, 0) {
+                let x = Double.random(in: 0...size.width, using: &rng)
+                let y = Double.random(in: 0...size.height, using: &rng)
+                let o = Double.random(in: 0.2...1.0, using: &rng) * intensity
+                ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.1, height: 1.1)),
+                         with: .color(speck.opacity(o)))
+            }
+        }
+        .blendMode(scheme == .dark ? .screen : .multiply)
+        .allowsHitTesting(false)
+    }
+}
+
+/// The painterly weather sky that fades into the canvas — replaces the old boxed
+/// `HeroSky`. Light mode is a warm day wash with drifting mist; dark mode is a deep
+/// night that falls to black with a soft moon-glow and a few quiet stars. The bottom
+/// of the gradient is clear so the page canvas shows through beneath it. No icons.
+struct AtmosphereSky: View {
+    @Environment(\.colorScheme) private var scheme
+    /// OxyWeatherService symbolName, e.g. "cloud.rain" — only used to cool the palette.
+    var condition: String?
+
+    private var isRain: Bool { (condition ?? "").contains("rain") || (condition ?? "").contains("drizzle") }
+    private var light: Bool { scheme != .dark }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 12.0, paused: false)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            ZStack(alignment: .top) {
+                LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
+
+                if light {
+                    // Two soft mist banks drifting at different speeds.
+                    mist(width: 220, y: 150, phase: t * 0.05, amp: 22, opacity: 0.55)
+                    mist(width: 180, y: 104, phase: -t * 0.04 + 2, amp: 18, opacity: 0.4)
+                } else {
+                    // A low moon glow + a scatter of faint, slowly breathing stars.
+                    Circle()
+                        .fill(RadialGradient(colors: [Color(white: 0.96), Color(white: 0.96).opacity(0)],
+                                             center: .center, startRadius: 1, endRadius: 60))
+                        .frame(width: 120, height: 120)
+                        .offset(x: 96, y: 30)
+                    ForEach(0..<7, id: \.self) { i in
+                        let p = Double(i)
+                        Circle()
+                            .fill(Color.white)
+                            .frame(width: 1.6, height: 1.6)
+                            .opacity(0.25 + 0.55 * (0.5 + 0.5 * sin(t * 0.6 + p * 1.3)))
+                            .offset(x: [-120, -40, 40, 120, -90, 70, 10][i],
+                                    y: [40, 70, 52, 86, 120, 96, 150][i])
+                    }
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private func mist(width: CGFloat, y: CGFloat, phase: Double, amp: CGFloat, opacity: Double) -> some View {
+        Ellipse()
+            .fill(RadialGradient(colors: [Color.white.opacity(opacity), Color.white.opacity(0)],
+                                 center: .center, startRadius: 1, endRadius: width / 2))
+            .frame(width: width, height: width * 0.3)
+            .offset(x: CGFloat(sin(phase)) * amp, y: y)
+    }
+
+    private var stops: [Gradient.Stop] {
+        if light {
+            if isRain {
+                return [.init(color: Color(red: 0.79, green: 0.80, blue: 0.82), location: 0),
+                        .init(color: Color(red: 0.91, green: 0.90, blue: 0.88), location: 0.34),
+                        .init(color: .clear, location: 0.72)]
+            }
+            return [.init(color: Color(red: 0.95, green: 0.76, blue: 0.42), location: 0),
+                    .init(color: Color(red: 0.96, green: 0.86, blue: 0.71), location: 0.32),
+                    .init(color: Color(red: 0.98, green: 0.94, blue: 0.88), location: 0.55),
+                    .init(color: .clear, location: 0.78)]
+        }
+        if isRain {
+            return [.init(color: Color(red: 0.06, green: 0.09, blue: 0.13), location: 0),
+                    .init(color: Color(red: 0.03, green: 0.05, blue: 0.08), location: 0.4),
+                    .init(color: .clear, location: 0.74)]
+        }
+        return [.init(color: Color(red: 0.055, green: 0.114, blue: 0.188), location: 0),
+                .init(color: Color(red: 0.043, green: 0.082, blue: 0.141), location: 0.34),
+                .init(color: Color(red: 0.027, green: 0.043, blue: 0.078), location: 0.6),
+                .init(color: .clear, location: 0.82)]
+    }
+}
+
+/// A Didot section title — the editorial counterpart to a small-caps header.
+struct EditorialSectionTitle: View {
+    let text: String
+    var size: CGFloat = 22
+    init(_ text: String, size: CGFloat = 22) { self.text = text; self.size = size }
+    var body: some View {
+        Text(text)
+            .font(.nmlDisplay(size))
+            .foregroundStyle(Color.edInk)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Hairline rule with a small centred dot — the only divider ornament the language uses.
+struct EditorialRule: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.edRule).frame(height: 0.5)
+            Circle().fill(Color.edMuted.opacity(0.55)).frame(width: 3, height: 3)
+            Rectangle().fill(Color.edRule).frame(height: 0.5)
+        }
+    }
+}
+
+/// A tonal, grained plate for featured blocks (e.g. "This evening"). No border, no
+/// shadow — it reads as a different stock of paper laid on the canvas.
+struct EditorialPlate<Content: View>: View {
+    var padding: CGFloat = 22
+    @ViewBuilder var content: Content
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(padding)
+            .background {
+                ZStack {
+                    Color.edPlate
+                    PaperGrain(intensity: 0.06)
+                }
+            }
+            .clipShape(shape)
+    }
+}
+
+/// Editorial body text with a raised Didot initial (a versal). Not a true wrapping
+/// drop cap — SwiftUI has no `::first-letter` — but it gives the paragraph an
+/// editorial opening. `dropSize` is the initial's point size.
+struct DropCapText: View {
+    let text: String
+    var bodySize: CGFloat = 16
+    var dropSize: CGFloat = 38
+    var color: Color = .edMuted
+
+    private var attributed: AttributedString {
+        var a = AttributedString(text)
+        a.font = .system(size: bodySize, weight: .regular)
+        a.foregroundColor = color
+        if !a.characters.isEmpty {
+            let end = a.index(a.startIndex, offsetByCharacters: 1)
+            a[a.startIndex..<end].font = .custom("Didot", size: dropSize)
+            a[a.startIndex..<end].foregroundColor = .edInk
+        }
+        return a
+    }
+
+    var body: some View {
+        Text(attributed)
+            .lineSpacing(4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

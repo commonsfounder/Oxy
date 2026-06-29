@@ -11,17 +11,40 @@ struct SettingsView: View {
     @State private var showBackendURLEditor = false
     @State private var versionTapCount = 0
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
+    // Light/dark/system — the single source of truth read by the app root's
+    // preferredColorScheme. Writing it re-themes the whole app live.
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
+
+    // Same living aurora as Today/Chat — the glass cards below need it behind them
+    // to refract, otherwise they're just dark blobs on black.
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.mgBg.ignoresSafeArea()
+                Color.edCanvas.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
+                    nmlGlassContainer(spacing: 24) {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Theme")
+                                    .font(.system(size: 14, weight: .regular))
+                                    .foregroundStyle(Color.mgHeading)
+                                MilgrainSegmentedControl(
+                                    options: AppAppearance.allCases.map(\.rawValue),
+                                    labels: AppAppearance.allCases.map(\.label),
+                                    selection: $appearanceRaw
+                                )
+                            }
+                            .padding(.vertical, 16)
+
+                            MilgrainDivider()
+
                             segmentRow(
                                 "Bubbles",
                                 options: ["comfort", "compact"],
@@ -36,7 +59,7 @@ struct SettingsView: View {
 
                             MilgrainDivider()
 
-                            settingRow(label: "Briefings", description: nil) {
+                            settingRow(label: "Briefings", description: "Proactive check-ins through the day.") {
                                 MilgrainToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
@@ -61,7 +84,7 @@ struct SettingsView: View {
 
                             MilgrainDivider()
 
-                            settingRow(label: "Confirm Sensitive Apps", description: nil) {
+                            settingRow(label: "Confirm Sensitive Apps", description: "Ask before opening banking, health, or other private apps.") {
                                 MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
@@ -95,6 +118,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 24)
                     .padding(.top, 12)
                     }
+                    }
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -116,12 +140,11 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            MilgrainSectionHeader(title: title)
-                .padding(.bottom, 10)
-            VStack(spacing: 0) {
-                content()
-            }
+        // Flat editorial section — Didot title, no glass card. Rows sit on the canvas,
+        // split by hairlines, the way the rest of the app now reads.
+        VStack(alignment: .leading, spacing: 10) {
+            EditorialSectionTitle(title, size: 20)
+            VStack(spacing: 0) { content() }
         }
     }
 
