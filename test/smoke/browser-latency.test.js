@@ -42,6 +42,11 @@ test('directSearchUrl jumps to the results page for a known site root', () => {
   assert.equal(url, 'https://www.johnlewis.com/search?search-term=adidas%20joggers');
 });
 
+test('directSearchUrl builds the Selfridges results URL from a goal', () => {
+  const url = directSearchUrl('https://www.selfridges.com', "find a men's wool coat and tell me the price");
+  assert.equal(url, "https://www.selfridges.com/GB/en/cat/?freeText=men's%20wool%20coat&srch=Y");
+});
+
 test('directSearchUrl ignores deep links — the caller meant to land there', () => {
   assert.equal(directSearchUrl('https://www.johnlewis.com/browse/men', 'find joggers'), null);
   assert.equal(directSearchUrl('https://www.johnlewis.com/product/12345', 'find joggers'), null);

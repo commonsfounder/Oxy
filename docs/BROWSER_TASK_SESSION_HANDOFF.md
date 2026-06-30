@@ -86,6 +86,26 @@ Next: the only remaining big controllable lever is the model call — A/B `OXY_B
 lower (256→128/0), but that's the reliability-critical knob, so gate hard on E2E. Add more sites
 to `SEARCH_SITES` (Argos is bot-walled → needs `BROWSER_REMOTE_ENDPOINT`, not a registry entry).
 
+## UPDATE 2026-07-01 (b) — cross-site reliability
+Validated more sites with `browser-task-e2e.js` and fixed general loop weaknesses:
+- **Selfridges**: works; added fast-path (`/GB/en/cat/?freeText=…&srch=Y`) → ~4.5s, 1 step.
+- **Uber Eats**: NOT bot-walled. Address → restaurant → in-store search → open item → item
+  modal all work now. Two general fixes came out of it:
+  - **Modal-scoped perception** (`extractClickableElements`): when a `[role=dialog]`/`[aria-modal]`
+    larger than 15% of the viewport is open, only extract elements *inside* it. Previously badges
+    were drawn over the menu behind the modal, mis-aligned, and the model re-clicked the tile
+    behind the dialog forever. `locatorIndex` still = full-document order, so clicks are unchanged.
+  - **Repeat-action guard**: a click on a *valid* element "succeeds" even when nothing changes,
+    so the bad-decision guard never tripped on an infinite re-click. Now nudge after 3 identical
+    actions, trip "stuck" after more.
+  - **Model-call timeout + 1 retry** (`decideNextAction`): a transient Gemini "fetch failed" was
+    hanging the SDK 60–130s and blowing the turn watchdog. Bounded to `OXY_BROWSER_MODEL_TIMEOUT_MS`
+    (20s) with one retry, degrading to a recoverable "invalid" instead of killing the turn.
+  - **STILL FLAKY on Uber Eats**: the *final cart-commit* doesn't always register (cart stays 0
+    after "Add to order"/"Save") and the model can act on a half-loaded results page. Needs more
+    diagnostic runs — likely a required-option gate or force-click not firing Uber's handler, plus
+    a "wait until the store page actually has products" check. Argos remains bot-walled.
+
 ## NEXT (original) — latency roadmap
 Equation: `latency ≈ browser_open + (n_steps × model_latency)`. Three levers:
 - **Tier 1 → ~8–12s (no model change):** warm browser pool (kills ~4s cold open); slim the

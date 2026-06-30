@@ -308,18 +308,33 @@ async function extractClickableElements(page) {
       const r = el.getBoundingClientRect();
       return r.width > 0 && r.height > 0; // zero-size also catches display:none ancestors
     };
-    const nodes = document.querySelectorAll(selector);
+    // Full-document order is what Playwright's locator(selector).nth(i) indexes, so the
+    // click/fill site can re-find an element by `locatorIndex`. Keep this list as the source
+    // of truth for indices even when we scope perception to a modal below.
+    const allNodes = Array.from(document.querySelectorAll(selector));
+    // If a modal/dialog covers the page, only its controls matter — badges drawn on the
+    // elements behind it land mis-aligned and the model re-clicks the tile behind the dialog
+    // (the Uber Eats "add item" modal failure). Scope to the largest visible dialog, if any.
+    const vw = window.innerWidth * window.innerHeight;
+    const dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+      .filter(visible)
+      .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
+      .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
+      .sort((a, b) => b.area - a.area)[0];
+    const scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
     const out = [];
-    for (let i = 0; i < nodes.length && out.length < max; i++) {
-      const el = nodes[i];
+    for (const el of scope) {
+      if (out.length >= max) break;
       if (!visible(el)) continue;
       const raw = (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
       const text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
       if (!text) continue;
+      const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
+      if (locatorIndex === -1) continue;
       const r = el.getBoundingClientRect();
       // box is viewport-relative so it lines up with the screenshot; off-viewport elements
       // keep their (off-screen) coords and simply get no visible badge, as before.
-      out.push({ id: out.length, text, locatorIndex: i, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
+      out.push({ id: out.length, text, locatorIndex, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
     }
     return out;
   }, { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS }).catch(() => []);
@@ -410,19 +425,40 @@ async function dismissConsent(page) {
   return false;
 }
 
+// Hard cap on a single model call. A transient Gemini "fetch failed" was hanging the SDK's
+// internal retry/backoff for 60–130s, blowing the whole-turn watchdog on one blip. Bound it
+// and let decideNextAction's own retry handle recovery.
+const MODEL_CALL_TIMEOUT_MS = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+function withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
 async function decideNextAction(goal, history, elements, screenshotB64, correction = '') {
   const model = getGemini().getGenerativeModel({ model: BROWSER_MODEL });
   const parts = [{ text: buildDecisionPrompt(goal, history, elements, correction) }];
   if (screenshotB64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: screenshotB64 } });
-  const response = await model.generateContent({
+  const request = {
     contents: [{ role: 'user', parts }],
     // Headroom: the reasoning model spends output tokens thinking before it emits the
     // JSON — 300 truncated it to an empty/partial object on most steps. 2048 leaves room
     // for the thinking pass plus the (tiny) action object. browserThinkingConfig() caps
     // how much of that the model spends reasoning, the largest single chunk of step latency.
     generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', ...browserThinkingConfig() }
-  });
-  return parseModelDecision(response.response.text());
+  };
+  // One bounded retry. A transient API error or timeout shouldn't end the turn — degrade to
+  // a recoverable "invalid" (the loop nudges + re-perceives) only after both attempts fail.
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await withTimeout(model.generateContent(request), MODEL_CALL_TIMEOUT_MS, 'model call');
+      return parseModelDecision(response.response.text());
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  return { action: 'invalid', error: `model call failed: ${String(lastErr && lastErr.message || lastErr).split('\n')[0].slice(0, 120)}` };
 }
 
 // --- Direct-search fast-paths -------------------------------------------------------------
@@ -434,6 +470,10 @@ const SEARCH_SITES = {
   'johnlewis.com': {
     names: ['john lewis', 'johnlewis'],
     searchUrl: (term) => `https://www.johnlewis.com/search?search-term=${encodeURIComponent(term)}`
+  },
+  'selfridges.com': {
+    names: ['selfridges'],
+    searchUrl: (term) => `https://www.selfridges.com/GB/en/cat/?freeText=${encodeURIComponent(term)}&srch=Y`
   }
 };
 
@@ -598,6 +638,11 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   let steps = 0;
   let consecutiveBadDecisions = 0;
   let consecutiveWaits = 0;
+  // A click on a VALID element "succeeds" even when it achieves nothing, so the bad-decision
+  // guard never trips on a model that re-clicks the same tile forever (seen on the Uber Eats
+  // item modal). Track the last action's signature and nudge, then trip, on repeats.
+  let lastActionSig = '';
+  let repeatActionCount = 0;
   // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
   // price read off the screen), we feed a pointed correction into the NEXT decision so it
   // can fix itself — instead of silently re-asking the identical prompt against the same
@@ -769,6 +814,24 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0; // a real action broke the wait streak
+        // Detect a no-progress spin: the same action on the same element, repeatedly. Some
+        // repeats are legitimate (a "+" quantity button), so we don't block — we nudge after
+        // a few, then count toward "stuck" if it keeps going. value is included so re-typing
+        // the same field counts but a different value doesn't.
+        const sig = `${decision.action}:${target.locatorIndex}:${decision.action === 'fill' ? String(decision.value || '') : ''}`;
+        if (sig === lastActionSig) {
+          repeatActionCount += 1;
+          if (repeatActionCount >= 2) {
+            pendingCorrection = `You have just done the SAME action ("${decision.action}" on "${target.text}") ${repeatActionCount + 1} times and the page isn't advancing. It is not working — do something DIFFERENT: pick another element, scroll to reveal a control (like an "Add"/"Save"/"Continue" button often at the bottom of a dialog), or choose a required option first.`;
+          }
+          if (repeatActionCount >= 4) {
+            consecutiveBadDecisions += 1;
+            if (consecutiveBadDecisions >= 3) return STUCK;
+          }
+        } else {
+          lastActionSig = sig;
+          repeatActionCount = 0;
+        }
         touchSession(userId);
         await persistStorage(userId, session);
       } catch (actionErr) {
