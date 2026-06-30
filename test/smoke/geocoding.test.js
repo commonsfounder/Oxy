@@ -115,3 +115,48 @@ test('explicit nearby place lookup uses distance-ranked Nearby Search before tex
     else process.env.GOOGLE_PLACES_API_KEY = oldPlaces;
   }
 });
+
+test('named place with no nearby match never resolves to the nearest unrelated place', async () => {
+  // Regression: "john lewis" with no John Lewis nearby used to confidently return the
+  // closest unrelated shop (a Tesco) as if it were the answer. It must NOT do that — it
+  // should fail honestly (and fall through to a plain geocode), never hand back Tesco.
+  const oldPlaces = process.env.GOOGLE_PLACES_API_KEY;
+  const oldMaps = process.env.GOOGLE_MAPS_API_KEY;
+  const oldPost = mockAxios.post;
+  const oldGet = mockAxios.get;
+
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    delete process.env.GOOGLE_MAPS_API_KEY; // force geocode fallback to fail loudly
+    // searchText for "john lewis" returns only an unrelated nearby Tesco.
+    mockAxios.post = async () => ({
+      data: {
+        places: [
+          {
+            displayName: { text: 'Tesco Extra' },
+            formattedAddress: 'Swan shopping centre, Coventry Rd',
+            location: { latitude: 52.0001, longitude: -1.9999 },
+            businessStatus: 'OPERATIONAL',
+            types: ['supermarket', 'store']
+          }
+        ]
+      }
+    });
+    mockAxios.get = async () => ({ data: {} }); // geocode + nominatim both find nothing
+
+    await assert.rejects(
+      () => resolvePlaceDestination('john lewis', { location: { latitude: 52, longitude: -2 } }),
+      (err) => {
+        assert.doesNotMatch(err.message, /tesco/i, 'must not surface the unrelated Tesco');
+        return true;
+      }
+    );
+  } finally {
+    mockAxios.post = oldPost;
+    mockAxios.get = oldGet;
+    if (oldPlaces === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = oldPlaces;
+    if (oldMaps === undefined) delete process.env.GOOGLE_MAPS_API_KEY;
+    else process.env.GOOGLE_MAPS_API_KEY = oldMaps;
+  }
+});

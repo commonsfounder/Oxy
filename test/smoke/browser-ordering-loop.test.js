@@ -125,6 +125,43 @@ test('parseModelDecision rejects an unrecognized action name', () => {
   assert.equal(result.action, 'invalid');
 });
 
+// Reasoning models often wrap the object in ```json fences or prepend prose despite the
+// JSON mime type. The loop must recover the action instead of stalling on "invalid".
+test('parseModelDecision strips ```json fences', () => {
+  const result = parseModelDecision('```json\n{"action":"click","elementId":2}\n```');
+  assert.deepEqual(result, { action: 'click', elementId: 2 });
+});
+
+test('parseModelDecision extracts the JSON object from leading prose', () => {
+  const result = parseModelDecision('Here is the JSON requested:\n{"action":"fill","elementId":1,"value":"SW1A 1AA"}');
+  assert.equal(result.action, 'fill');
+  assert.equal(result.elementId, 1);
+  assert.equal(result.value, 'SW1A 1AA');
+});
+
+test('parseModelDecision still fails cleanly when there is no JSON object at all', () => {
+  const result = parseModelDecision('I think I should click the search box next.');
+  assert.equal(result.action, 'invalid');
+  assert.ok(result.error);
+});
+
+// The hallucinated-id recovery path: a correction is threaded into the next prompt so the
+// model is told which ids are real instead of silently re-asking the identical question.
+test('buildDecisionPrompt surfaces a correction and the valid id range', () => {
+  const prompt = buildDecisionPrompt('order a pizza', [], [
+    { id: 0, text: 'Search' },
+    { id: 1, text: 'Add to basket' }
+  ], 'elementId 17 is NOT on this page. Valid ids are 0 to 1.');
+  assert.match(prompt, /CORRECTION/);
+  assert.match(prompt, /elementId 17 is NOT on this page/);
+  assert.match(prompt, /0 to 1/);
+});
+
+test('buildDecisionPrompt omits the correction block when there is no correction', () => {
+  const prompt = buildDecisionPrompt('order a pizza', [], [{ id: 0, text: 'Search' }]);
+  assert.doesNotMatch(prompt, /CORRECTION/);
+});
+
 test('findElementByText finds an exact match case-insensitively', () => {
   const elements = [{ id: 0, text: 'Add to basket' }, { id: 1, text: 'Place order' }];
   const found = findElementByText(elements, 'place order');

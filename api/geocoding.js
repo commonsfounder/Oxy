@@ -136,7 +136,14 @@ function rankedGooglePlaceCandidates(places, location, query = '') {
       return a.distanceMeters - b.distanceMeters;
     });
   const matched = candidates.filter(place => place.queryMatch);
-  return matched.length ? matched : candidates;
+  // When the query carries a real name (meaningful tokens) and NOTHING matches it,
+  // return the empty match list rather than the nearest unrelated place. Otherwise a
+  // search for "John Lewis" with no John Lewis nearby would confidently hand back the
+  // closest building (e.g. a Tesco) as if it were the answer. With empty tokens (a
+  // generic category search like "supermarket") every candidate matches, so this still
+  // returns the full distance-ranked list.
+  if (matched.length) return matched;
+  return meaningfulPlaceTokens(query).length ? [] : candidates;
 }
 
 function googlePlaceResult(place, query) {
