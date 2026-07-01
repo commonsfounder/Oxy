@@ -213,6 +213,44 @@ function isTechnicalAsk(question) {
   return TECHNICAL_ASK_PATTERN.test(String(question || ''));
 }
 
+// Re-auth detection. A stored login (storageState) eventually expires — the merchant
+// invalidates the cookie (days/weeks, or on a new IP / 2FA challenge). When that happens
+// the agent lands on a sign-in wall and, blind to it, burns its whole step budget trying
+// to "order" behind the login before returning a vague "I got stuck". Detecting the wall
+// lets us stop immediately and ask the user to reconnect — a clean handoff, not a flail.
+const LOGIN_URL_PATTERN = /\/(login|log-?in|signin|sign-?in|auth|authenticate|account\/(login|signin))(\b|\/|\?|$)/i;
+// Copy that, TOGETHER with a password field, marks a page as a login wall (not a header
+// "Sign in" link on an otherwise-normal shopping page). Kept tight to avoid false pauses.
+const LOGIN_COPY_PATTERN = /\b(sign in to|log in to|enter your password|incorrect password|forgot your password|keep me signed in|sign in to your account)\b/i;
+const PASSWORD_FIELD_SELECTOR = 'input[type="password"]';
+
+// Pure so it's unit-testable without a live page. A wall is either (a) the URL is a login
+// route, or (b) there's a real password field AND login copy on the page. A password field
+// alone (inline "create account" upsell) or login copy alone (a "Sign in" nav link) is not
+// enough — both together, or a login URL, are.
+function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
+  const u = String(url || '');
+  if (LOGIN_URL_PATTERN.test(u)) return true;
+  if (hasPasswordField && LOGIN_COPY_PATTERN.test(String(bodyText || ''))) return true;
+  return false;
+}
+
+// Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
+// failure degrades to "not a wall" so a flaky read never blocks a legitimate order.
+async function detectLoginWall(page, goal) {
+  try {
+    const url = page.url();
+    // Fast path: a login URL needs no DOM read at all.
+    if (LOGIN_URL_PATTERN.test(url)) return true;
+    const hasPasswordField = await page.locator(PASSWORD_FIELD_SELECTOR).first().count().then(c => c > 0).catch(() => false);
+    if (!hasPasswordField) return false; // no password field ⇒ can't be a login wall by rule (b)
+    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => '');
+    return looksLikeLoginWall({ url, bodyText, hasPasswordField, goal });
+  } catch {
+    return false;
+  }
+}
+
 // Goals that mean "place an order" — for these, "done" is ALWAYS premature inside the
 // loop: a real order only completes through ready_for_payment → confirmPayment, so an
 // early "done" (e.g. right after setting the address) must not close the browser.
@@ -515,6 +553,32 @@ const SEARCH_SITES = {
   'waitrose.com': {
     names: ['waitrose'],
     searchUrl: (term) => `https://www.waitrose.com/ecom/shop/search?searchTerm=${encodeURIComponent(term)}`
+  },
+  // Electronics / DIY / sportswear. Each direct-nav-probed 2026-07-01 (search URL opened cold,
+  // returns a real results page with the query term present — not an Access-Denied/Cloudflare
+  // shell). NOTE: verified from a residential IP; a datacenter IP (Cloud Run) may still get
+  // walled on some — that's the BROWSER_REMOTE_ENDPOINT (managed browser) lever, not a bad seed.
+  // Deliberately NOT seeded (bot-wall direct nav): Boots (empty JS shell), Decathlon, Zara,
+  // Tesco, H&M, Superdrug, Very — plus Next/Argos from earlier. They still work via normal open.
+  'currys.co.uk': {
+    names: ['currys', 'currys pc world'],
+    searchUrl: (term) => `https://www.currys.co.uk/search?q=${encodeURIComponent(term)}`
+  },
+  'screwfix.com': {
+    names: ['screwfix'],
+    searchUrl: (term) => `https://www.screwfix.com/search?search=${encodeURIComponent(term)}`
+  },
+  'wickes.co.uk': {
+    names: ['wickes'],
+    searchUrl: (term) => `https://www.wickes.co.uk/search?text=${encodeURIComponent(term)}`
+  },
+  'toolstation.com': {
+    names: ['toolstation'],
+    searchUrl: (term) => `https://www.toolstation.com/search?q=${encodeURIComponent(term)}`
+  },
+  'nike.com': {
+    names: ['nike'],
+    searchUrl: (term) => `https://www.nike.com/gb/w?q=${encodeURIComponent(term)}`
   }
 };
 
@@ -737,6 +801,19 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
       }
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
+
+      // Logged-out wall: a stored login expired (or the merchant issued a fresh challenge)
+      // and we've landed on a sign-in page. Detect it BEFORE the model wastes the step
+      // budget "ordering" behind the wall, and hand off cleanly — asking the user to
+      // reconnect the site — instead of returning a vague "I got stuck". Session stays
+      // open so a later reconnect can resume the same order from persisted context.
+      if (!session.reauthChecked) {
+        session.reauthChecked = true; // check once per turn — a wall shows up immediately, not mid-order
+        if (await detectLoginWall(session.page, session.goal)) {
+          const siteName = session.site ? session.site.replace(/\.(com|co\.uk|co|net|org)$/i, '') : 'the site';
+          return { type: 'reauth', site: session.site, question: `I need you to sign in to ${siteName} again — the saved session has expired. Once you've reconnected it, say "keep going" and I'll pick your order back up.` };
+        }
+      }
 
       // Blocked/empty shell: a near-empty page with almost no text means the site served
       // a stripped page (common when a datacenter IP is blocked). Fail once, cleanly.
@@ -979,6 +1056,7 @@ module.exports = {
   directSearchUrl,
   matchesPaymentKeyword,
   isTechnicalAsk,
+  looksLikeLoginWall,
   isOrderGoal,
   buildDecisionPrompt,
   parseModelDecision,

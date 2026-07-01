@@ -2466,7 +2466,7 @@ async function executeAction(userId, action, params, context = {}) {
       const liveSession = getSession(userId);
       // ask/awaiting_more clearly await a reply; a recoverable error leaves the session
       // open too, so route the user's "keep going" straight back into the loop.
-      if (liveSession) liveSession.awaitingInput = (outcome.type === 'ask' || outcome.type === 'awaiting_more' || outcome.type === 'error');
+      if (liveSession) liveSession.awaitingInput = (outcome.type === 'ask' || outcome.type === 'awaiting_more' || outcome.type === 'error' || outcome.type === 'reauth');
 
       switch (outcome.type) {
         case 'error':
@@ -2475,6 +2475,10 @@ async function executeAction(userId, action, params, context = {}) {
           return { success: true, text: outcome.text, cardText: title, actionSummary: 'Browser task finished' };
         case 'ask':
           return { success: true, text: outcome.question, cardText: title, actionSummary: 'Needs your input' };
+        case 'reauth':
+          // The saved login for this site expired. Surface a clean "reconnect" prompt; the
+          // session stays open so a "keep going" after the user re-links routes back in.
+          return { success: true, text: outcome.question, cardText: title, actionSummary: 'Sign-in needed' };
         case 'awaiting_more':
           return { success: true, text: outcome.summary, cardText: title, actionSummary: 'Browser task paused' };
         case 'ready_for_payment': {
