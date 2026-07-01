@@ -21,6 +21,24 @@ function looksLikeLocalPlaceRequest(message) {
   return LOCAL_PLACE_TERMS.test(text);
 }
 
+// Retailer names double as LOCAL_PLACE_TERMS ("john lewis"), so "get me pyjamas ON john
+// lewis" wrongly matched a place lookup. A request to BUY/GET a product — especially
+// "<product> on/from/at <retailer>" — is an online-shopping task (→ browser task), never a
+// request to locate a nearby branch. High precision on purpose: "nearest john lewis" has no
+// purchase verb and no on/from/at source, so it stays a place request.
+const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
+const RETAILER_SOURCE = /\b(?:on|from|at)\s+(john\s*lewis|asos|selfridges|marks\s*(?:and|&)\s*spencer|m&s|currys|nike|screwfix|wickes|toolstation|sainsbury'?s?|waitrose|amazon|argos|next|boots|zara|very|h&m|deliveroo|just\s*eat|uber\s*eats|dominos?)\b/i;
+
+function looksLikeShoppingRequest(message) {
+  const text = normalizeText(message);
+  if (!text) return false;
+  if (SHOPPING_VERB.test(text)) return true;
+  // "get/grab/find/order me <product> on/from/at <retailer>" — the acquire lead + a named
+  // retailer source together mean shopping, not navigation.
+  if (/\b(get|grab|find|order|want|need)\b/i.test(text) && RETAILER_SOURCE.test(text)) return true;
+  return false;
+}
+
 function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
 }
@@ -204,6 +222,11 @@ function inferDeterministicAction(message, options = {}) {
       actions: [{ type: 'get_directions', input }]
     };
   }
+
+  // Buying a product from a named retailer must NOT deterministically become a place lookup —
+  // defer to the LLM/browser-task path. Placed after the ride & directions guards so
+  // "order me an uber" / "directions to john lewis" still route correctly.
+  if (looksLikeShoppingRequest(text)) return null;
 
   if (!looksLikeLocalPlaceRequest(text)) return null;
 
