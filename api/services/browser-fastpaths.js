@@ -36,4 +36,51 @@ function applyTemplate(template, term) {
   return template.replace(TERM, encodeURIComponent(String(term)));
 }
 
-module.exports = { learnTemplateFromUrl, applyTemplate, TERM, FAIL_DISABLE_THRESHOLD };
+// In-memory store backed by injected persistence (loadRows/saveRow). The hot path
+// (getLearnedSearchUrl) is synchronous and never awaits the DB; persistence is best-effort.
+function createFastpathStore({ loadRows, saveRow } = {}) {
+  const map = new Map(); // host -> { template, param, failCount, disabled }
+
+  async function load() {
+    if (!loadRows) return;
+    try {
+      const rows = await loadRows();
+      for (const r of rows || []) {
+        const failCount = r.fail_count || 0;
+        map.set(r.host, { template: r.url_template, param: r.param, failCount, disabled: failCount >= FAIL_DISABLE_THRESHOLD });
+      }
+    } catch { /* boot-time load is best-effort; the loop works without it */ }
+  }
+
+  function getLearnedSearchUrl(host, term) {
+    const e = map.get(host);
+    if (!e || e.disabled) return null;
+    return applyTemplate(e.template, term);
+  }
+
+  function persist(host) {
+    if (!saveRow) return;
+    const e = map.get(host);
+    Promise.resolve(saveRow({ host, url_template: e.template, param: e.param, fail_count: e.failCount })).catch(() => {});
+  }
+
+  function learn(host, param, template) {
+    const existing = map.get(host);
+    if (existing && existing.template === template && !existing.disabled) return false; // already known
+    map.set(host, { template, param, failCount: 0, disabled: false });
+    persist(host);
+    return true;
+  }
+
+  function recordOutcome(host, ok) {
+    const e = map.get(host);
+    if (!e) return;
+    e.failCount = ok ? 0 : e.failCount + 1;
+    e.disabled = e.failCount >= FAIL_DISABLE_THRESHOLD;
+    persist(host);
+  }
+
+  return { load, getLearnedSearchUrl, learn, recordOutcome, _map: map };
+}
+
+module.exports = { learnTemplateFromUrl, applyTemplate, createFastpathStore, TERM, FAIL_DISABLE_THRESHOLD };
