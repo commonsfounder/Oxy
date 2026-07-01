@@ -138,3 +138,11 @@ test('nextRecipeMove records a miss and returns null when the step resolves to n
   assert.equal(move, null);
   assert.equal(health.isDisabled('johnlewis.com', 'add'), true);
 });
+
+test('recipe CLICKABLE_SELECTOR equals the one browser-task uses', () => {
+  const recipes = require('../../api/services/browser-recipes');
+  // browser-task.js keeps CLICKABLE_SELECTOR private; it re-exports it for this guard in Task 5.
+  const bt = require('../../api/services/browser-task');
+  assert.equal(recipes.CLICKABLE_SELECTOR, bt.CLICKABLE_SELECTOR,
+    'the two clickable-selector copies must stay identical');
+});

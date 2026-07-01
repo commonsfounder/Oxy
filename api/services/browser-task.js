@@ -2,6 +2,9 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
+const { nextRecipeMove, RECIPES, recipeHealth } = require('./browser-recipes');
+// Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
+const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
 
 chromium.use(stealth);
 
@@ -829,14 +832,25 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
       }
 
-      const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
-      // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
-      // at each step, to eyeball that badges land on real controls. No-op when unset.
-      if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
-        require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
+      // Tier-2 deterministic recipe: on stable steps (size → add → basket → checkout) a
+      // hand-written selector move replaces the vision call. Cheap; falls through to the
+      // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
+      let decision, recipeStepName = null;
+      const recipe = RECIPES_ENABLED ? RECIPES[session.site] : null;
+      const recipeMove = recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
+      if (recipeMove) {
+        decision = recipeMove;
+        recipeStepName = recipeMove.stepName;
+      } else {
+        const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
+        // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
+        // at each step, to eyeball that badges land on real controls. No-op when unset.
+        if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
+          require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
+        }
+        decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection));
+        pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
       }
-      const decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection));
-      pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
 
       if (decision.action === 'invalid') {
         consecutiveBadDecisions += 1;
@@ -914,15 +928,23 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       // almost always a hallucinated id (the model used a price/quantity it read off the
       // page). Don't just retry the identical prompt — raise a correction so the next
       // decision is told the id was invalid and which ids are real, then it can recover.
-      const lastId = elements.length ? elements.length - 1 : 0;
-      const idIsValid = Number.isInteger(decision.elementId) && decision.elementId >= 0 && decision.elementId <= lastId;
-      const target = idIsValid ? elements.find(el => el.id === decision.elementId) : null;
-      if (!target) {
-        consecutiveBadDecisions += 1;
-        pendingCorrection = `Your last reply used elementId ${decision.elementId}, which is NOT on this page. Valid element ids are 0 to ${lastId}. Look at the numbered badges in the screenshot and choose one of those — do not use any other number.`;
-        session.history.push(`Step ${steps}: model chose elementId ${decision.elementId}, which is not on the page (valid 0-${lastId}); asked it to pick a real one`);
-        if (consecutiveBadDecisions >= 3) return STUCK;
-        continue;
+      // A recipe move already carries a full-DOM locatorIndex + the element's text, so it
+      // bypasses the elementId→element lookup the vision path uses. A vision move still maps
+      // its badge elementId (0..lastId) to the extracted element; a miss there is a hallucination.
+      let target;
+      if (recipeStepName) {
+        target = { id: -1, text: decision.text || '', locatorIndex: decision.locatorIndex };
+      } else {
+        const lastId = elements.length ? elements.length - 1 : 0;
+        const idIsValid = Number.isInteger(decision.elementId) && decision.elementId >= 0 && decision.elementId <= lastId;
+        target = idIsValid ? elements.find(el => el.id === decision.elementId) : null;
+        if (!target) {
+          consecutiveBadDecisions += 1;
+          pendingCorrection = `Your last reply used elementId ${decision.elementId}, which is NOT on this page. Valid element ids are 0 to ${lastId}. Look at the numbered badges in the screenshot and choose one of those — do not use any other number.`;
+          session.history.push(`Step ${steps}: model chose elementId ${decision.elementId}, which is not on the page (valid 0-${lastId}); asked it to pick a real one`);
+          if (consecutiveBadDecisions >= 3) return STUCK;
+          continue;
+        }
       }
 
       if (matchesPaymentKeyword(target.text)) {
@@ -942,7 +964,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // above means the loop never force-clicks a pay button.
           await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
           await locator.click({ timeout: 10000, force: true });
-          session.history.push(`Step ${steps}: clicked "${target.text}"`);
+          session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}clicked "${target.text}"`);
         } else if (decision.action === 'fill') {
           onProgress(`Typing into "${target.text}"…`);
           const value = String(decision.value || '');
@@ -962,7 +984,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
               await session.page.keyboard.type(value, { delay: 10 });
             }
           }
-          session.history.push(`Step ${steps}: filled "${target.text}" with "${value}"`);
+          session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}filled "${target.text}" with "${value}"`);
           // Remember what we typed into a SEARCH box so the next iterations can detect a
           // search-results navigation and learn this site's fast-path template. Gated to
           // search fields so we never mis-learn a filter/quantity/address as a search URL.
@@ -1066,6 +1088,7 @@ module.exports = {
   touchSession,
   closeSession,
   extractClickableElements,
+  CLICKABLE_SELECTOR,
   runOrderingTurn,
   confirmPayment,
   cancelPayment
