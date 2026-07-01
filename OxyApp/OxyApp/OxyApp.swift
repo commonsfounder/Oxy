@@ -25,7 +25,7 @@ struct OxyApp: App {
             RootView()
                 .environment(appState)
                 .preferredColorScheme(appearance.colorScheme)
-                .tint(Color.oxyStone)
+                .tint(Color.appAccent)
         }
     }
 }
@@ -40,7 +40,7 @@ struct RootView: View {
                 // Hold on a plain black screen until the keychain session check
                 // finishes, so a returning user never sees a flash of the login
                 // screen on cold launch.
-                Color.nmlObsidian.ignoresSafeArea()
+                Color.appBackground.ignoresSafeArea()
             } else if appState.isAuthenticated {
                 MainTabView()
             } else {
