@@ -112,19 +112,72 @@ function siteKeyFromUrl(url) {
   catch { return 'unknown'; }
 }
 
-// Launches local stealth Chromium by default. Set BROWSER_REMOTE_ENDPOINT to a
-// managed scraping-browser CDP endpoint (Bright Data, Browserbase, etc.) to
-// swap in proxy/fingerprint-rotation reliability without touching call sites.
+// --- Local vs managed (remote) browser --------------------------------------------------
+// Local stealth Chromium is FREE but runs on this box's IP — a datacenter IP on Cloud Run,
+// which anti-bot walls (Cloudflare/PerimeterX/"Access Denied") block on ~a third of sites
+// (Next, H&M, Argos, Nike, Just Eat in the reliability benchmark). A managed scraping browser
+// (Bright Data, Browserbase, …) routes through residential IPs + real fingerprints and clears
+// those walls — but it's METERED ($/GB or $/browser-hour), so we do NOT want every task on it.
+//
+// Cost control: route ONLY the hosts that actually need residential through the managed
+// browser; keep the ~two-thirds that work on datacenter IP on the free local pool. Which
+// hosts are "remote" is a pure, testable decision (shouldUseRemoteForHost) driven by env.
 function usingRemoteBrowser() {
   return Boolean(process.env.BROWSER_REMOTE_ENDPOINT);
 }
 
-async function launchBrowser() {
-  const remoteEndpoint = process.env.BROWSER_REMOTE_ENDPOINT;
-  if (remoteEndpoint) return chromium.connectOverCDP(remoteEndpoint);
+// Empirically bot-walled on a datacenter IP (from test/dev/reliability-benchmark.js — these
+// are the sites that returned Access-Denied/Cloudflare, NOT my a-priori guesses: Tesco and
+// Zara actually pass on datacenter IP, so they're deliberately absent). Bare hosts, no www.
+// Override wholesale with BROWSER_REMOTE_HOSTS; force everything remote with BROWSER_REMOTE_ALWAYS=true.
+const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk'];
+
+// Pure so it's unit-testable. Decide whether a given host should use the managed browser:
+//  - no endpoint configured                 → never (free local, today's behaviour)
+//  - BROWSER_REMOTE_ALWAYS=true              → always
+//  - BROWSER_REMOTE_HOSTS set                → only those hosts (comma list)
+//  - else                                    → the empirical bot-wall default set
+// Matches the host itself or any subdomain of it (h === entry || h endsWith '.'+entry).
+function shouldUseRemoteForHost(host, env = process.env) {
+  if (!env.BROWSER_REMOTE_ENDPOINT) return false;
+  if (String(env.BROWSER_REMOTE_ALWAYS).toLowerCase() === 'true') return true;
+  const list = env.BROWSER_REMOTE_HOSTS
+    ? env.BROWSER_REMOTE_HOSTS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : DEFAULT_REMOTE_HOSTS;
+  const h = String(host || '').replace(/^www\./, '').toLowerCase();
+  return list.some((entry) => h === entry || h.endsWith('.' + entry));
+}
+
+// Always launches a LOCAL stealth Chromium (the warm pool + the non-remote path). Never
+// touches the managed endpoint — remote is a separate, per-host connect (connectRemoteBrowser).
+async function launchLocalBrowser() {
   // ponytail: headless:true in prod; BROWSER_HEADLESS=false lets a local debug run pop
   // a real window so you can watch the loop click around, instead of trusting logs.
   return chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
+}
+
+// Connect to the managed scraping browser over CDP. Bounded — a wrong/down endpoint must
+// fail fast so acquireBrowser can fall back to local instead of hanging the whole turn.
+const REMOTE_CONNECT_TIMEOUT_MS = envInt('OXY_BROWSER_REMOTE_CONNECT_TIMEOUT_MS', 15000);
+async function connectRemoteBrowser() {
+  const endpoint = process.env.BROWSER_REMOTE_ENDPOINT;
+  return withTimeout(chromium.connectOverCDP(endpoint), REMOTE_CONNECT_TIMEOUT_MS, 'remote browser connect');
+}
+
+// Get a browser for a specific host: the managed one when the host needs residential (and an
+// endpoint is configured), otherwise the free local warm pool. A remote connect failure
+// degrades to local — a bot-walled host will then fail as it does today, which is strictly
+// better than hanging on a dead endpoint. Returns { browser, remote } so the caller knows
+// whether to expect a metered session (and skips the warm-pool return path for it).
+async function acquireBrowser(host) {
+  if (shouldUseRemoteForHost(host)) {
+    try {
+      return { browser: await connectRemoteBrowser(), remote: true };
+    } catch (err) {
+      console.warn(`[browser-task] managed browser connect failed for ${host}, falling back to local:`, err.message);
+    }
+  }
+  return { browser: await getWarmBrowser(), remote: false };
 }
 
 // Warm browser pool: launching Chromium cold is ~4s — paid on the FIRST step of a turn,
@@ -132,13 +185,17 @@ async function launchBrowser() {
 // turn grabs it instantly, then relaunch a replacement in the background for next time.
 // One spare is enough at personal-assistant concurrency (one user, mostly one task at a
 // time); if a second turn lands while the spare is in use it just launches cold as before.
-const WARM_POOL_ENABLED = process.env.OXY_BROWSER_WARM_POOL !== 'false' && !usingRemoteBrowser();
+// Keep the local warm pool alive even when a managed endpoint is configured — selective
+// routing still sends the ~two-thirds of (non-walled) hosts through local, so they still
+// benefit from the warm spare. Only BROWSER_REMOTE_ALWAYS (everything remote) disables it.
+const WARM_POOL_ENABLED = process.env.OXY_BROWSER_WARM_POOL !== 'false' &&
+  String(process.env.BROWSER_REMOTE_ALWAYS).toLowerCase() !== 'true';
 let warmSpare = null;      // a launched, idle Browser waiting to be claimed
 let warmingPromise = null; // in-flight launch, so we never start two at once
 
 function primeWarmBrowser() {
   if (!WARM_POOL_ENABLED || warmSpare || warmingPromise) return;
-  warmingPromise = launchBrowser()
+  warmingPromise = launchLocalBrowser()
     .then((b) => { warmSpare = b; })
     .catch((err) => { console.warn('[browser-task] warm launch failed:', err.message); })
     .finally(() => { warmingPromise = null; });
@@ -158,7 +215,7 @@ async function getWarmBrowser() {
     // Spare died while idle (crash, OS reaped it) — drop it and fall through to a fresh launch.
     spare.close().catch(() => {});
   }
-  const browser = await launchBrowser();
+  const browser = await launchLocalBrowser();
   primeWarmBrowser(); // nothing was warm; warm one for next time
   return browser;
 }
@@ -238,6 +295,36 @@ function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
   return false;
 }
 
+// Anti-automation interstitials: a datacenter IP (Cloud Run) trips these on many sites.
+// The page LOADS with real bytes — so the empty-shell size guard misses it — but every real
+// control is replaced by an "Access Denied" / Cloudflare / "verify you're human" challenge.
+// Left undetected, the loop clicks around the dead page for its whole step budget, returns
+// awaiting_more, and the client AUTO-CONTINUES — a bot-walled Just Eat ran 6 turns / ~13min
+// before this landed. Detecting the copy lets us bail on the first step that shows it.
+const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|hcaptcha|recaptcha challenge|cf-challenge/i;
+
+// Pure so it's unit-testable. A wall page is SMALL (a challenge, not a shop) AND contains the
+// copy — gating on length keeps a normal 5k-char product page that merely mentions "captcha"
+// in a footer link from tripping it. bodyLen is the FULL innerText length; text is a prefix.
+function looksLikeBlockWall({ text, bodyLen } = {}) {
+  if (!text) return false;
+  if (Number.isFinite(bodyLen) && bodyLen > 1500) return false; // a real page, not a wall
+  return BLOCK_WALL_PATTERN.test(String(text));
+}
+
+// Live probe: one short innerText read. Best-effort — a failed read degrades to "not a wall".
+async function detectBlockWall(page) {
+  try {
+    const { text, bodyLen } = await page.evaluate(() => {
+      const it = document.body?.innerText || '';
+      return { text: it.slice(0, 1500), bodyLen: it.length };
+    });
+    return looksLikeBlockWall({ text, bodyLen });
+  } catch {
+    return false;
+  }
+}
+
 // Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
 // failure degrades to "not a wall" so a flaky read never blocks a legitimate order.
 async function detectLoginWall(page, goal) {
@@ -261,6 +348,16 @@ const ORDER_GOAL_PATTERN = /\b(order|deliver(?:y|ed)?|buy|cart|basket|checkout|f
 
 function isOrderGoal(goal) {
   return ORDER_GOAL_PATTERN.test(String(goal || ''));
+}
+
+// A model "ask" whose text is really "I've hit a bot/security wall" — Cloudflare and similar
+// challenges often render in an IFRAME, so detectBlockWall's top-document innerText probe
+// can't see them, but the model DOES (it's in the screenshot) and tries to ask the user how
+// to proceed. Convert that to a clean bail instead of surfacing a confusing technical ask.
+const SECURITY_WALL_ASK_PATTERN = /security (?:verification|check)|cloudflare|\bcaptcha\b|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|access denied|blocking automated|robot check|press (?:&|and) hold/i;
+
+function describesBlockWall(question) {
+  return SECURITY_WALL_ASK_PATTERN.test(String(question || ''));
 }
 
 function buildDecisionPrompt(goal, history, elements, correction = '') {
@@ -634,7 +731,10 @@ function directSearchUrl(url, goal) {
 async function openNewSession(userId, url, goal) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
-  const browser = await getWarmBrowser();
+  // Route bot-walled hosts through the managed (residential) browser, everything else
+  // through the free local warm pool. `remote` is carried on the session so close paths and
+  // logs know it was a metered session.
+  const { browser, remote } = await acquireBrowser(site);
   // A smaller viewport means a smaller screenshot — fewer bytes and fewer pixels for the
   // model to read each step (the dominant per-step cost). 1024×768 still shows enough of a
   // commercial page to find a search box / first result.
@@ -653,7 +753,7 @@ async function openNewSession(userId, url, goal) {
   // page, not a cookie banner it'll waste steps on.
   await timed('open.consent', () => dismissConsent(page).catch(() => {}));
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
-  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null });
+  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null, remote });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -686,6 +786,16 @@ async function loadResumeContext(userId) {
     .limit(1)
     .maybeSingle();
   return data?.last_url ? data : null;
+}
+
+// One place for the "site is blocking us" bail: mark a used fast-path as failed (so a stale
+// learned template self-heals) and return the calm, order-aware copy the classifier reads as
+// a bot-wall ceiling rather than a loop bug.
+function blockedPageResult(session) {
+  if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, false);
+  return { type: 'error', error: session.isOrder
+    ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try Deliveroo or Just Eat instead?'
+    : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
 }
 
 async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
@@ -818,18 +928,16 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
       }
 
-      // Blocked/empty shell: a near-empty page with almost no text means the site served
-      // a stripped page (common when a datacenter IP is blocked). Fail once, cleanly.
-      if (steps === 1 && elements.length < 3) {
-        const bodyLen = await session.page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0);
-        if (bodyLen < 200) {
-          // A learned fast-path that lands on a stripped/blocked page is stale — count it
-          // against the pattern so it self-heals (disabled after repeated failures).
-          if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, false);
-          return { type: 'error', error: session.isOrder
-            ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try Deliveroo or Just Eat instead?'
-            : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
-        }
+      // Bail on a blocked page — two shapes, both meaning "the site won't serve us a real
+      // page". (a) An empty/stripped shell on the FIRST step (near-zero text). (b) An
+      // anti-automation interstitial on ANY step: many sites serve a full page, then swap in
+      // an "Access Denied"/Cloudflare challenge AFTER a search (Next & Argos did exactly
+      // this), which the size guard misses because the wall page isn't empty. Detecting the
+      // copy stops the loop auto-continuing for turns against a dead page.
+      const emptyShell = steps === 1 && elements.length < 3 &&
+        (await session.page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0)) < 200;
+      if (emptyShell || await detectBlockWall(session.page)) {
+        return blockedPageResult(session);
       }
 
       // Tier-2 deterministic recipe: on stable steps (size → add → basket → checkout) a
@@ -901,6 +1009,13 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       if (decision.action === 'ask') {
+        // The model hit a bot/security wall (often a Cloudflare iframe detectBlockWall can't
+        // read) and is asking the user what to do. Don't surface a confusing technical ask —
+        // bail cleanly, same as a detected wall, so the user gets "try another site", not
+        // "there's a Cloudflare screen".
+        if (describesBlockWall(decision.question)) {
+          return blockedPageResult(session);
+        }
         // Never surface a technical question. Treat it as a stuck step and retry instead.
         if (isTechnicalAsk(decision.question)) {
           consecutiveBadDecisions += 1;
@@ -1074,11 +1189,15 @@ module.exports = {
   primeFastpaths,
   _fastpathStore: fastpathStore,
   getWarmBrowser,
+  shouldUseRemoteForHost,
+  usingRemoteBrowser,
   deriveSearchTerm,
   directSearchUrl,
   matchesPaymentKeyword,
   isTechnicalAsk,
   looksLikeLoginWall,
+  looksLikeBlockWall,
+  describesBlockWall,
   isOrderGoal,
   buildDecisionPrompt,
   parseModelDecision,

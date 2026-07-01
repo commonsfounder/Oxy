@@ -159,3 +159,73 @@ direct-search fast-path, then re-measure with `test/dev/browser-task-e2e.js`.
   Run's datacenter IP makes this worse. One-env-var flip once an account exists.
 - Only John Lewis is proven E2E. Validate a Deliveroo order (with managed browser) + an Argos
   search before calling it broadly solid.
+
+## UPDATE 2026-07-01 (d) — cross-site benchmark + bot-wall fast-bail + cost-aware managed browser
+Shift in framing: John Lewis is proven, but the ask is **reliability across ~90% of sites**. Key
+realisation — breadth is NOT "write more per-host recipes"; it's (1) a measured baseline, (2)
+hardening the universal vision loop, and (3) an infra lever for the datacenter-IP ceiling.
+
+### 1. Batch reliability benchmark (the number we never had)
+`test/dev/reliability-benchmark.js` + `reliability-fixtures.js` (19 UK sites, fashion/grocery/
+electronics/DIY/delivery) + `reliability-classify.js` (pure, unit-tested outcome bucketer).
+Runs the REAL loop across the basket, auto-continue chain per case, prints a scorecard:
+**overall pass** and **LOOP pass** (excludes bot-wall/reauth infra ceilings — the number we can
+move). This is the aggregate; `browser-task-e2e.js` stays the single-shot debugger.
+
+**Baseline measured: 63% overall, 71% LOOP pass (12/17).** Failures cluster into 3 causes, none
+fixed by more recipes:
+- **Datacenter-IP bot-walls (Next, H&M, Argos, Nike):** "Access Denied"/Cloudflare after search.
+  Infra ceiling, not a loop bug. → the managed-browser lever (below). Tesco & Zara actually PASS
+  on datacenter IP (so they're NOT in the remote-routing default set).
+- **Delivery cart-commit (Uber Eats, Deliveroo):** got deep (found Pizza Hut / added a £13 burger)
+  then stalled on the pay-button/ask. Real loop bug — still the top loop-quality TODO.
+- **Runaway (Just Eat ran 817s / 6 turns):** fixed below.
+
+### 2. Bot-wall fast-bail (`browser-task.js`)
+`looksLikeBlockWall`/`detectBlockWall` catch "Access Denied"/Cloudflare/"verify you're human" copy
+on ANY step (not just the step-1 empty-shell guard), gated on a small page so a normal product
+page mentioning "captcha" doesn't trip. `describesBlockWall` catches the case where the wall is a
+Cloudflare IFRAME the text-probe can't read — the model recognises it and would surface a
+confusing ask; we convert that to a clean bail. Shared `blockedPageResult(session)`. Result:
+**Just Eat 817s → 13s**, Next/Argos now bail in 1 turn as `botwall`. New tests in
+`browser-reauth.test.js`.
+
+### 3. Cost-aware managed browser (`browser-task.js`, `.env.example`)
+`BROWSER_REMOTE_ENDPOINT` was a one-liner; now it's **selective per-host routing** so we only pay
+for residential on the sites that need it. `shouldUseRemoteForHost(host)` (pure, tested) routes the
+empirical bot-wall set (`next.co.uk,hm.com,nike.com,argos.co.uk,just-eat.co.uk,deliveroo.co.uk`)
+to the managed browser and keeps the ~⅔ that work on datacenter IP on the FREE local warm pool.
+`acquireBrowser(host)` connects remote (bounded 15s, falls back to local on failure) or hands out
+a warm local. Knobs: `BROWSER_REMOTE_ALWAYS` (everything remote), `BROWSER_REMOTE_HOSTS` (override
+the set), `OXY_BROWSER_REMOTE_CONNECT_TIMEOUT_MS`. Warm pool now stays alive for the local majority
+(was disabled whenever an endpoint was set). `launchBrowser`→`launchLocalBrowser` (always local) +
+`connectRemoteBrowser` (CDP). **UNVERIFIED against a real provider** — code path is wired + unit-
+tested, but needs a Bright Data/Browserbase key to E2E. Verify with:
+`BROWSER_REMOTE_ENDPOINT=… node test/dev/reliability-benchmark.js next argos just-eat` (should flip
+botwall→pass). Rec at scale: **Bright Data $/GB** (Browserbase concurrency ceilings bite at 1000s
+of users). Smoke suite 221 → **243 pass**.
+
+### Cost model (thousands of users)
+Per END-TO-END task (one completed user request, ~3–12 vision steps): model (Gemini 3 Flash
+Preview @ $0.50/$3.00 per M) ≈ **$0.01–0.02**; managed browser on a walled task (residential
+~$8/GB, ~5–20MB) ≈ **$0.05–0.15**; local compute ~$0. **Blended ~$0.03–0.05/task** (⅓ walled),
+→ **~$1–2/user/mo at 50 tasks** (50 = heavy-user ceiling; real avg likely 10–20 → ~$0.30–1.00).
+85% of cost is the residential proxy on walled tasks — the levers are (a) shrink the walled
+fraction, (b) block images/media on the managed browser (−50–70% GB). GB/journey is still
+ESTIMATED — instrumenting the benchmark to log bytes/journey is the way to make it a hard number.
+
+### NEXT (recommended order)
+1. **No-browser "Tier 0" for read-only lookups** (user's idea, PROVEN in a probe): most retailers
+   SSR `schema.org/Product` JSON-LD, so 2 plain HTTP GETs (search → first product URL → parse
+   `offers.price`) return a price with **no browser, no Gemini, no proxy, <1s**. Verified live on
+   John Lewis (£39.99) and Screwfix; ASOS/Currys/Argos bot-wall the fetch too so they fall through
+   to the browser as today. Build: a pure JSON-LD/og:price parser (unit-testable) + a fetch tier
+   before `openNewSession` for non-order goals. Optional later fallback for walled lookups: a
+   shopping-search API (SerpAPI/Google Shopping ≈ $5–15/1k). This strips a browser+vision spin off
+   a large share of tasks — biggest cost/latency/reliability win on the board.
+2. **Generic pattern-recipes** — lift the Tier-2 deterministic layer from host-keyed
+   (`RECIPES[host]`, only John Lewis) to convention-keyed (common `data-testid`/aria/button-text
+   for size→add→cart→checkout) so the mechanical tail works on MANY sites, not one. Vision loop
+   stays the per-step fallback; per-step health disables a flapping generic step.
+3. **Delivery cart-commit fix** (Uber Eats/Deliveroo) — the remaining named loop bug.
+4. **Managed-browser E2E** once a provider key exists; then optionally block media to cut GB.
