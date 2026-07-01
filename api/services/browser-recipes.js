@@ -87,4 +87,29 @@ function phaseFromUrl(recipe, url) {
   return null;
 }
 
-module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl };
+const RECIPE_FAIL_DISABLE_THRESHOLD = 3;
+
+// In-memory per-(host,step) health. A step whose selectors keep missing self-disables so a
+// site redesign degrades to the vision loop instead of stalling. Not persisted (YAGNI).
+function createRecipeHealth(threshold = RECIPE_FAIL_DISABLE_THRESHOLD) {
+  const misses = new Map(); // `${host}:${step}` -> consecutive miss count
+  const key = (host, step) => `${host}:${step}`;
+  return {
+    isDisabled: (host, step) => (misses.get(key(host, step)) || 0) >= threshold,
+    recordMiss: (host, step) => { const k = key(host, step); misses.set(k, (misses.get(k) || 0) + 1); },
+    recordHit:  (host, step) => { misses.set(key(host, step), 0); },
+  };
+}
+
+// First step for this phase whose gate (when) passes and which isn't health-disabled.
+function selectStep(recipe, phase, ctx, health, host) {
+  for (const step of recipe.steps) {
+    if (step.phase !== phase) continue;
+    if (step.when && !step.when(ctx)) continue;
+    if (health && health.isDisabled(host, step.name)) continue;
+    return step;
+  }
+  return null;
+}
+
+module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD };

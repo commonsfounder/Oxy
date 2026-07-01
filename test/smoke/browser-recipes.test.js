@@ -55,3 +55,37 @@ test('phaseFromUrl classifies John Lewis product / basket / checkout urls', () =
   assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/search?search-term=joggers'), null);
   assert.equal(phaseFromUrl(jl, 'not a url'), null);
 });
+
+const { createRecipeHealth, selectStep } = require('../../api/services/browser-recipes');
+
+test('selectStep picks the first matching, enabled step for the phase', () => {
+  const jl = RECIPES['johnlewis.com'];
+  const health = createRecipeHealth();
+  // On product page, size still needed → the size step.
+  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: true }, health, 'johnlewis.com').name, 'size');
+  // Size satisfied → skip to add.
+  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false }, health, 'johnlewis.com').name, 'add');
+  // Basket phase → checkout.
+  assert.equal(selectStep(jl, 'basket', {}, health, 'johnlewis.com').name, 'checkout');
+  // No step for a phase the recipe doesn't cover.
+  assert.equal(selectStep(jl, 'search', {}, health, 'johnlewis.com'), null);
+});
+
+test('selectStep skips a step that health has disabled', () => {
+  const jl = RECIPES['johnlewis.com'];
+  const health = createRecipeHealth(2);
+  health.recordMiss('johnlewis.com', 'add');
+  health.recordMiss('johnlewis.com', 'add'); // disabled at threshold 2
+  // size not needed, add disabled → fall to go-to-basket
+  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false }, health, 'johnlewis.com').name, 'go-to-basket');
+});
+
+test('recipe health disables after N misses and a hit resets the streak', () => {
+  const health = createRecipeHealth(3);
+  health.recordMiss('h', 's'); health.recordMiss('h', 's');
+  assert.equal(health.isDisabled('h', 's'), false);
+  health.recordMiss('h', 's');
+  assert.equal(health.isDisabled('h', 's'), true);
+  health.recordHit('h', 's'); // one success re-enables
+  assert.equal(health.isDisabled('h', 's'), false);
+});
