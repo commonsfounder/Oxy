@@ -530,13 +530,16 @@ function directSearchUrl(url, goal) {
   if (process.env.OXY_BROWSER_FASTPATH === 'false') return null; // kill-switch / A-B isolation
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
-  const site = SEARCH_SITES[parsed.hostname.replace(/^www\./, '')];
-  if (!site) return null;
   // Only short-circuit a homepage/root. If the url is already a deep link (a search,
   // product, or category page) the caller meant to land there — don't override it.
   if (parsed.pathname.replace(/\/+$/, '') !== '') return null;
-  const term = deriveSearchTerm(goal, site);
-  return term ? site.searchUrl(term) : null;
+  const host = parsed.hostname.replace(/^www\./, '');
+  const site = SEARCH_SITES[host];
+  // For a curated site, use its names to strip; otherwise strip using the host's brand word.
+  const term = deriveSearchTerm(goal, site || { names: [host.split('.')[0]] });
+  if (!term) return null;
+  if (site) return site.searchUrl(term);          // curated seed wins
+  return fastpathStore.getLearnedSearchUrl(host, term); // else a learned template, or null
 }
 
 async function openNewSession(userId, url, goal) {
@@ -550,7 +553,8 @@ async function openNewSession(userId, url, goal) {
   const page = await context.newPage();
   // Jump straight to a search-results page on sites we know how to query (skips the
   // find-box → fill → submit steps); falls back to the given url when we can't.
-  const openUrl = directSearchUrl(url, goal) || url;
+  const directUrl = directSearchUrl(url, goal);
+  const openUrl = directUrl || url;
   await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
   // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
   // and the model thinks there's no search bar. A longer beat here (first paint is the
@@ -560,7 +564,7 @@ async function openNewSession(userId, url, goal) {
   // page, not a cookie banner it'll waste steps on.
   await timed('open.consent', () => dismissConsent(page).catch(() => {}));
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
-  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal) });
+  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -678,6 +682,17 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       steps += 1;
       onProgress('Looking at the page…');
       await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
+      // Learn a fast-path: if the last thing we typed now shows up as a query param in the
+      // URL, we've discovered this site's search-results template. Don't override a code seed.
+      if (session.lastFilledValue) {
+        const learned = learnTemplateFromUrl(session.page.url(), session.lastFilledValue);
+        if (learned && !SEARCH_SITES[learned.host]) {
+          fastpathStore.learn(learned.host, learned.param, learned.template);
+          session.lastFilledValue = null; // captured — stop probing for it
+        }
+        // else keep it: a search box is often filled one step and submitted the next, so the
+        // results URL may not exist yet. A later fill overwrites it; it never overrides a seed.
+      }
       // Consent walls are often injected LATE — after the initial open-time dismiss has
       // already run — and they overlay the real page, so the model wastes every step
       // choosing banner junk. Keep trying until one is caught, then stop (cheap no-op
@@ -698,6 +713,9 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       if (steps === 1 && elements.length < 3) {
         const bodyLen = await session.page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0);
         if (bodyLen < 200) {
+          // A learned fast-path that lands on a stripped/blocked page is stale — count it
+          // against the pattern so it self-heals (disabled after repeated failures).
+          if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, false);
           return { type: 'error', error: session.isOrder
             ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try Deliveroo or Just Eat instead?'
             : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
@@ -749,6 +767,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           }
           continue;
         }
+        // Goal answered via a fast-path → the learned/seed template worked; reward it.
+        if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, true);
         await closeSession(userId);
         return { type: 'done', text: decision.summary || 'Done.' };
       }
@@ -830,6 +850,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
             }
           }
           session.history.push(`Step ${steps}: filled "${target.text}" with "${value}"`);
+          // Remember what we typed into a SEARCH box so the next iterations can detect a
+          // search-results navigation and learn this site's fast-path template. Gated to
+          // search fields so we never mis-learn a filter/quantity/address as a search URL.
+          if (/search/i.test(target.text)) session.lastFilledValue = value;
         }
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0; // a real action broke the wait streak

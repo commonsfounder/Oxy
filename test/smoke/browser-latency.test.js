@@ -75,3 +75,14 @@ test('browser-task exposes the fast-path store and boot primer', () => {
   assert.equal(typeof bt.primeFastpaths, 'function');
   assert.ok(bt._fastpathStore && typeof bt._fastpathStore.getLearnedSearchUrl === 'function');
 });
+
+test('directSearchUrl uses a LEARNED template when no code seed matches', () => {
+  // Nothing seeded for example-shop.com; teach the live store, then expect directSearchUrl to use it.
+  bt._fastpathStore.learn('example-shop.com', 'q', 'https://example-shop.com/s?q={{term}}');
+  const url = directSearchUrl('https://example-shop.com', 'find a wool coat and tell me the price');
+  assert.equal(url, 'https://example-shop.com/s?q=wool%20coat');
+});
+
+test('directSearchUrl still returns null for a truly unknown host', () => {
+  assert.equal(directSearchUrl('https://never-seen-this.example', 'find a wool coat'), null);
+});
