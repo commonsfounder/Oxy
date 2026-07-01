@@ -7,7 +7,9 @@ const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 // Pull a size the user has already specified out of the goal/history text. Conservative:
 // only recognised shapes, word-boundary anchored so "small" doesn't match "smallish".
 // Returns a normalized token, or null when the user didn't say a size (→ the loop asks).
-function parseSizeFromGoal(text) {
+function parseSizeFromGoal(text, goalContext) {
+  if (goalContext && typeof goalContext === 'object' && goalContext.size) return norm(goalContext.size);
+  // also support when caller passes full context object from session
   const t = norm(text);
   if (!t) return null;
   // "size 10", "size m", "size uk 9"
@@ -179,7 +181,7 @@ async function resolveSelectorIndex(page, selectorAny, clickableSelector, tag) {
 // ask. Reads chip labels from the page and maps the chosen one to a locatorIndex. Takes the
 // single args bag the executor hands every resolve fn: { page, session, recipe, ctx, clickable }.
 async function resolveSizeMove({ page, session, recipe, clickable }) {
-  const want = parseSizeFromGoal(`${session.goal || ''} ${(session.history || []).join(' ')}`);
+  const want = parseSizeFromGoal(`${session.goal || ''} ${(session.history || []).join(' ')}`, session.goalContext);
   if (!want) return { action: 'ask', question: 'What size would you like?', stepName: 'size' };
   const chips = await page.evaluate(({ probe, chipSel, clickableSelector }) => {
     void probe;

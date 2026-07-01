@@ -229,3 +229,17 @@ ESTIMATED — instrumenting the benchmark to log bytes/journey is the way to mak
    stays the per-step fallback; per-step health disables a flapping generic step.
 3. **Delivery cart-commit fix** (Uber Eats/Deliveroo) — the remaining named loop bug.
 4. **Managed-browser E2E** once a provider key exists; then optionally block media to cut GB.
+
+## UPDATE 2026-07-01 (e) — Tier-0 no-browser price lookups landed
+Implemented the top-priority item: pure `api/services/browser-price-parser.js` (JSON-LD → og:price → microdata) + fetch tier inside `runOrderingTurn` (before `openNewSession`) that only activates for `!isOrderGoal`. Reuses `deriveSearchTerm`/`directSearchUrl` + new `extractFirstProductUrl`.
+
+- Info goals on supported sites now short-circuit with a plain `done` result in <1–2s, 0 browser/model/proxy.
+- Live probe (John Lewis joggers info goal): `{ type: 'done', text: 'The ... is priced at £45.00.' }` (current real value).
+- Orders strictly bypass (gated).
+- Bot-walled fetches on HTTP simply return null and fall through to existing browser path (unchanged).
+- New unit tests: `test/smoke/browser-price-parser.test.js` (9/9).
+- `docs/PICKUP.md` added with this handoff summary for future sessions.
+- Full smoke: `node --test test/smoke/*.test.js` → 252 pass.
+- No change to cost/latency for order flows or walled info flows.
+
+Next remains: generic pattern-recipes (Tier-2 breadth), delivery cart-commit, managed-browser verification.

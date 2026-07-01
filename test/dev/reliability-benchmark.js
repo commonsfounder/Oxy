@@ -77,7 +77,9 @@ async function runCase(c) {
   const trace = sess ? sess.history.slice(-3) : [];
   await closeSession(user).catch(() => {});
   const finalOutcome = threw ? { type: 'threw', error: threw } : outcome;
-  return { case: c, outcome: finalOutcome, turns, ms: Date.now() - t0, trace };
+  // Detect Tier-0 wins (no browser session left open + quick done on an info goal)
+  const usedTier0 = !sess && outcome && outcome.type === 'done' && c.expect === 'answer';
+  return { case: c, outcome: finalOutcome, turns, ms: Date.now() - t0, trace, usedTier0 };
 }
 
 // A short human reason for the scorecard row.
@@ -99,7 +101,8 @@ function reasonOf(r) {
     r.bucket = classifyOutcome(c.expect, r.outcome);
     results.push(r);
     const mark = r.bucket === 'pass' ? '✅' : INFRA_BUCKETS.has(r.bucket) ? '⛔' : '❌';
-    console.log(`${mark} ${r.bucket.padEnd(10)} (${r.turns}t, ${(r.ms / 1000).toFixed(1)}s)`);
+    const tier0 = r.usedTier0 ? ' ⚡tier0' : '';
+    console.log(`${mark} ${r.bucket.padEnd(10)} (${r.turns}t, ${(r.ms / 1000).toFixed(1)}s)${tier0}`);
   }
 
   // --- scorecard ---

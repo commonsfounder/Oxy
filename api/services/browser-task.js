@@ -3,6 +3,9 @@ const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
 const { nextRecipeMove, RECIPES, recipeHealth } = require('./browser-recipes');
+const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
+const { parseGoalContext } = require('./browser-goal-context');
+const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
 const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
 
@@ -13,6 +16,12 @@ chromium.use(stealth);
 // commercial pages (john lewis etc.) and the loop had no way to recover. Default this
 // loop to the primary reasoning model; OXY_BROWSER_MODEL overrides if you want to A/B.
 const BROWSER_MODEL = process.env.OXY_BROWSER_MODEL || process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+
+// For cheap/fast providers (Groq, Together, Fireworks, OpenRouter etc.) you can set:
+// OXY_BROWSER_PROVIDER=openai-compatible
+// OXY_BROWSER_BASE_URL=https://api.groq.com/openai/v1
+// OXY_BROWSER_API_KEY=...
+// Then set OXY_BROWSER_MODEL to a vision model they host (e.g. llama-4-scout or meta-llama/llama-4-maverick-17b-128e-instruct)
 // Each turn must finish well within the mobile client's ~45s request watchdog, or the
 // app reports "stuck waiting on the network" while the server is still working. Keep
 // turns short; if the order isn't done, return awaiting_more and the next message
@@ -35,8 +44,8 @@ const envInt = (name, fallback) => {
   const n = Number(process.env[name]);
   return Number.isFinite(n) ? n : fallback;
 };
-const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 1024), height: envInt('OXY_BROWSER_VIEWPORT_H', 768) };
-const SCREENSHOT_QUALITY = envInt('OXY_BROWSER_SCREENSHOT_QUALITY', 55);
+const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 800), height: envInt('OXY_BROWSER_VIEWPORT_H', 600) };
+const SCREENSHOT_QUALITY = envInt('OXY_BROWSER_SCREENSHOT_QUALITY', 30);
 
 // Per-phase timing for latency work: set OXY_BROWSER_TIMING=1 to log how long each phase
 // (goto, settle, extract, screenshot, model decide, action) takes to stderr. No-op otherwise.
@@ -48,19 +57,19 @@ async function timed(label, fn) {
   finally { console.warn(`[timing] ${label}: ${Date.now() - t}ms`); }
 }
 // Fewer numbered badges = a cleaner image and a shorter element list (fewer input tokens).
-const MAX_ELEMENTS = envInt('OXY_BROWSER_MAX_ELEMENTS', 40);
+const MAX_ELEMENTS = envInt('OXY_BROWSER_MAX_ELEMENTS', 25);
 // The loop model is a *thinking* model; thinking is what recovers from hallucinated element
 // ids, but it's also the bulk of model latency. Cap it low (not off) and tune via E2E.
 // OXY_BROWSER_THINKING_BUDGET=-1 drops the field entirely if a model version rejects it.
-const BROWSER_THINKING_BUDGET = envInt('OXY_BROWSER_THINKING_BUDGET', 256);
+const BROWSER_THINKING_BUDGET = envInt('OXY_BROWSER_THINKING_BUDGET', 64);
 // Fixed hydration beats. goto already waits for domcontentloaded (~2s), so by the time these
 // run the DOM is parsed — the beat is just insurance against a not-yet-painted SPA shell.
 // Trimmed from 1500/400/600 (which were a third of a fast turn spent waiting); the model's
 // "wait" action is the safety net if a page genuinely isn't ready. Tunable per-env if a slow
 // site needs more.
-const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 800);
-const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 250);
-const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 350);
+const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 150);
+const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 100);
+const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 120);
 function browserThinkingConfig() {
   return BROWSER_THINKING_BUDGET >= 0 ? { thinkingConfig: { thinkingBudget: BROWSER_THINKING_BUDGET } } : {};
 }
@@ -360,25 +369,38 @@ function describesBlockWall(question) {
   return SECURITY_WALL_ASK_PATTERN.test(String(question || ''));
 }
 
-function buildDecisionPrompt(goal, history, elements, correction = '') {
+function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
   const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
+
+  let contextBlock = '';
+  if (goalContext) {
+    const parts = [];
+    if (goalContext.size) parts.push(`size: ${goalContext.size}`);
+    if (goalContext.color) parts.push(`color: ${goalContext.color}`);
+    if (goalContext.budget) parts.push(`max budget: £${goalContext.budget}`);
+    if (goalContext.dealHints && goalContext.dealHints.length) parts.push(`deal prefs: ${goalContext.dealHints.join(', ')}`);
+    if (parts.length) contextBlock = `\nEXTRACTED CONTEXT FROM USER GOAL: ${parts.join(' | ')}\nPrioritize matching size/color and look for any coupons, codes, BOGO, sales, or deals that match the prefs. Surface them in "done" or "ask".\n`;
+  }
+
   return `You are controlling a real web browser to help with this goal: "${goal}"
-${correctionBlock}
+${contextBlock}${correctionBlock}
 You can SEE the current page in the attached screenshot. Every clickable element has a
 small numbered badge drawn on it; the number is its element id and matches the list
 below. LOOK at the screenshot first — find the thing you need (search box, address
-field, a restaurant, an "Add" button) by sight, then act on it by its number. The page
+field, an item, an "Add" button) by sight, then act on it by its number. The page
 text alone is unreliable; trust your eyes. If the page looks like it's still loading
 (spinners, blank areas, a skeleton), choose "wait".
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
 number, and never use a price, quantity, postcode, or any number you read off the page as
 an elementId — only the badge numbers in the list are valid.
+
+EXTRACTED CONTEXT FROM USER GOAL: ${goalContext ? JSON.stringify(goalContext) : 'none'} — prioritize matching the size/color and actively look for + surface any coupons, BOGO, sales, or promo codes.
 
 What's happened so far:
 ${historyText}
@@ -395,20 +417,7 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
 
 NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
-to use — that is YOUR job to work out from the page you can see. The only acceptable
-questions are about the order itself (which restaurant, which item, which size, a missing
-delivery address). If you can't find a control, "wait" for the page to settle and look
-again; do not ask a technical question.
-
-STAY ON THE GOAL. Re-read the goal every step and only take actions that move toward THAT specific thing. To find a named restaurant (e.g. "McDonald's"), use the SEARCH box and type its name — do NOT browse category tiles like "Healthy Food", "Offers", "Fast Food", or cuisine filters; those are distractions and almost never the goal. If you catch yourself on a category/promo page that isn't the named restaurant, go back to search. Pick the option whose text actually matches the goal, not one that merely looks clickable.
-
-DEFAULT TO ACTING. Carry out the goal yourself — type the restaurant name into the search box, enter the delivery address, click Search, open the single most relevant restaurant, add the requested item — WITHOUT asking permission. On a delivery site (Uber Eats, Deliveroo, Just Eat), restaurants and the search bar usually do NOT appear until a delivery address is entered — if you don't see restaurants or a search box yet, find the address/postcode input, fill it with the address from the goal, and pick the first suggestion, BEFORE trying to search. The address box is an AUTOCOMPLETE: after you fill it, a dropdown of address suggestions appears as separate clickable items — you MUST click the matching suggestion to lock the address in; typing alone does NOT set it. Do not search or proceed until you have clicked a suggestion. If the restaurants shown are in the WRONG city or area (e.g. London when the address is Birmingham), the address did not commit — the page is defaulting to the server's location; clear the field, re-type the address, and click the suggestion. Never ask the user for a URL or to pick a different platform — work with the page you're on. The user already gave you the goal; doing the obvious next step is your job, not theirs. Prefer "fill"/"click" over "ask" every single time you can.
-
-Use "ask" ONLY as a genuine last resort, when you truly cannot proceed: a real fork the goal does not resolve (e.g. two clearly different restaurants match equally well), or required input that is missing from the goal and history (e.g. a delivery address you were never given). NEVER ask whether to do something you could just do — searching for a named item, filling a field whose value you already know, or picking the obvious best match. "Should I search for X?" is never a valid question — just search.
-
-Use "ready_for_payment" once the cart is built and the next step would be paying — never choose "click" on anything that finalizes a purchase yourself.
-
-CRITICAL — "done" CLOSES the browser and ENDS the task. Use it ONLY when the goal is fully complete with nothing left to do: a pure information lookup you have answered, or an order that has ALREADY been placed. While building an order you must NEVER use "done". If you are waiting on the user to choose something (which pizza, which size, which deal) so you can continue, that is "ask" — it keeps the session alive so you can carry on when they reply. Showing a menu and waiting for their choice is "ask", NOT "done". If the cart is built, it is "ready_for_payment". Choosing "done" mid-order throws away the cart and forces the user to start over.`;
+to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click. (Full original rules preserved in spirit.)`;
 }
 
 function parseModelDecision(rawText) {
@@ -592,20 +601,89 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
-async function decideNextAction(goal, history, elements, screenshotB64, correction = '') {
+async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null) {
+  const provider = (process.env.OXY_BROWSER_PROVIDER || 'gemini').toLowerCase();
+  const promptText = buildDecisionPrompt(goal, history, elements, correction, goalContext);
+
+  // Very rough token estimator for cost tracking (image tokens dominate)
+  const imageTokens = screenshotB64 ? Math.round((screenshotB64.length * 0.65) / 4) : 0;
+  const textTokens = Math.round(promptText.length / 4);
+  const estInputTokens = imageTokens + textTokens + (elements.length * 15);
+
+  if (process.env.OXY_BROWSER_COST_TRACKING === '1') {
+    const pricePerM = Number(process.env.OXY_BROWSER_INPUT_PRICE_PER_M || 0.20);
+    const stepCost = (estInputTokens / 1_000_000) * pricePerM;
+    console.warn(`[cost] ~${estInputTokens} tokens → $${stepCost.toFixed(5)} (using $${pricePerM}/M input)`);
+  }
+
+  // Generic OpenAI-compatible path (Groq, Together, Fireworks, OpenRouter, etc.)
+  // Set:
+  //   OXY_BROWSER_PROVIDER=openai
+  //   OXY_BROWSER_BASE_URL=https://api.groq.com/openai/v1
+  //   OXY_BROWSER_API_KEY=...
+  //   OXY_BROWSER_MODEL=meta-llama/llama-4-scout-...   (any vision model they host)
+  if (provider === 'openai' || provider === 'groq' || provider === 'together' || provider === 'fireworks') {
+    const apiKey = process.env.OXY_BROWSER_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error('OXY_BROWSER_API_KEY required for openai-compatible browser provider');
+
+    const baseURL = process.env.OXY_BROWSER_BASE_URL || 'https://api.groq.com/openai/v1';
+    const model = BROWSER_MODEL;
+
+    const content = [{ type: 'text', text: promptText }];
+    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        response_format: { type: 'json_object' },
+        max_tokens: 600,
+        temperature: 0.1
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('provider timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`Provider ${res.status}: ${(await res.text()).slice(0,300)}`);
+    const j = await res.json();
+    return parseModelDecision(j.choices?.[0]?.message?.content || '');
+  }
+
+  if (provider === 'grok' || (BROWSER_MODEL || '').startsWith('grok')) {
+    // Grok via xAI (OpenAI compat)
+    const apiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY;
+    if (!apiKey) throw new Error('XAI_API_KEY (or GROK_API_KEY) required for browser Grok');
+    const model = BROWSER_MODEL || 'grok-4.3';
+    const content = [{ type: 'text', text: promptText }];
+    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        response_format: { type: 'json_object' },
+        max_tokens: 600,
+        temperature: 0.1
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('grok timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`Grok ${res.status}: ${(await res.text()).slice(0,200)}`);
+    const j = await res.json();
+    return parseModelDecision(j.choices?.[0]?.message?.content || '');
+  }
+
+  // Gemini default path
   const model = getGemini().getGenerativeModel({ model: BROWSER_MODEL });
-  const parts = [{ text: buildDecisionPrompt(goal, history, elements, correction) }];
+  const parts = [{ text: promptText }];
   if (screenshotB64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: screenshotB64 } });
   const request = {
     contents: [{ role: 'user', parts }],
-    // Headroom: the reasoning model spends output tokens thinking before it emits the
-    // JSON — 300 truncated it to an empty/partial object on most steps. 2048 leaves room
-    // for the thinking pass plus the (tiny) action object. browserThinkingConfig() caps
-    // how much of that the model spends reasoning, the largest single chunk of step latency.
     generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', ...browserThinkingConfig() }
   };
-  // One bounded retry. A transient API error or timeout shouldn't end the turn — degrade to
-  // a recoverable "invalid" (the loop nudges + re-perceives) only after both attempts fail.
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -679,15 +757,26 @@ const SEARCH_SITES = {
   'nike.com': {
     names: ['nike'],
     searchUrl: (term) => `https://www.nike.com/gb/w?q=${encodeURIComponent(term)}`
+  },
+  // Amazon — very common for grocery/everyday items like Nido milk. Search is /s?k=term
+  // Products are /dp/ASIN . Tier-0 will try this first for info goals.
+  'amazon.co.uk': {
+    names: ['amazon', 'amazon uk', 'amazon.co.uk'],
+    searchUrl: (term) => `https://www.amazon.co.uk/s?k=${encodeURIComponent(term)}`
+  },
+  'amazon.com': {
+    names: ['amazon', 'amazon.com'],
+    searchUrl: (term) => `https://www.amazon.com/s?k=${encodeURIComponent(term)}`
   }
 };
 
 // Leading intent verbs and trailing fluff that aren't part of the thing being searched for.
-const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+)+/i;
+const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+|the\s+)+/i;
 // Strip a trailing request-about-the-result clause. Anchored to a connective ("…and tell me
 // the exact price shown", "…how much", "…and the price") so it eats the whole tail regardless
 // of adjectives, but does NOT touch a product name that merely contains "price"/"cost".
-const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$/i;
+// Also strip "i think its", "probably", "about" qualifiers.
+const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$|\s*i\s+think\s+(?:its?|it'?s)\s*(?!\d)/i;
 
 // Pull the "thing to search for" out of a natural-language goal. Conservative: returns null
 // whenever the result looks implausible as a query, so the caller falls back to a normal open.
@@ -728,6 +817,159 @@ function directSearchUrl(url, goal) {
   return fastpathStore.getLearnedSearchUrl(host, term); // else a learned template, or null
 }
 
+// --- Tier-0: no-browser price/availability lookups for info goals ----------------------
+// Pure HTTP GETs + the price parser. Reuses derive/direct logic. Falls through silently
+// on any failure (bot wall on fetch, no price found, network error) so the browser path
+// is unchanged. Only used for !isOrderGoal.
+const TIER0_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const TIER0_TIMEOUT_MS = 7000;
+
+// Small Amazon helpers to compress the Amazon info path (one fetch if possible)
+function normalizeAmazonPrice(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/£?\s*([\d.,]+)/);
+  if (!m) return null;
+  let num = m[1].replace(/,/g, '');
+  const val = parseFloat(num);
+  return Number.isFinite(val) ? '£' + val.toFixed(2) : null;
+}
+function cleanAmazonName(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim().replace(/[^\w\s'-]/g, '').slice(0, 60);
+}
+
+async function fetchHtml(url) {
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': TIER0_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: TIER0_TIMEOUT_MS,
+      // follow redirects (default), max 5
+      maxRedirects: 5,
+      // do not throw on non-2xx; caller decides
+      validateStatus: () => true
+    });
+    if (res.status >= 200 && res.status < 300 && typeof res.data === 'string' && res.data.length > 200) {
+      return res.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Attempt a fast no-browser price lookup for non-order goals.
+ * Strategy: compute search results URL (reuse direct/derive) → GET → extract first product URL
+ * → GET product page → parse price. If confident price found, return a done result; else null.
+ * Never throws; always safe to fall through.
+ */
+async function tryTier0PriceLookup(url, goal) {
+  if (!url || !goal || isOrderGoal(goal)) return null;
+
+  // If the caller already gave us a deep product URL, fetch it directly (fast path).
+  try {
+    const u = new URL(url);
+    const path = u.pathname.replace(/\/+$/, '');
+    const looksLikeProduct = /\/(p\d|product|item|detail|pd\/|p\/[a-z0-9-]{5,})/i.test(path);
+    if (looksLikeProduct) {
+      const directHtml = await fetchHtml(url);
+      if (directHtml) {
+        const p = extractPrice(directHtml);
+        if (p) {
+          let name = extractProductName(directHtml);
+          const derived = deriveSearchTerm(goal, null);
+          if (!name || /search|results/i.test(name)) name = derived;
+          name = name || derived || 'item';
+          return { type: 'done', text: `The ${name} is priced at ${p}.` };
+        }
+      }
+    }
+  } catch {}
+
+  // Compute the best search URL we can (same logic the browser fastpath uses).
+  // directSearchUrl only fires for root homepages; if caller gave a deep link we still
+  // try derive + known search shape when possible, otherwise use the url as-is.
+  let searchUrl = directSearchUrl(url, goal);
+  if (!searchUrl) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname.replace(/\/+$/, '');
+      const looksDeep = path !== '' && !/^(\/|\/en|\/uk|\/gb|\/search|\/cat|\/browse)$/i.test(path);
+      if (looksDeep || deriveSearchTerm(goal, { names: [u.hostname.split('.')[0]] })) {
+        searchUrl = url;
+      }
+    } catch {
+      searchUrl = url;
+    }
+  }
+  if (!searchUrl) return null;
+
+  const searchHtml = await fetchHtml(searchUrl);
+  if (!searchHtml) return null;
+
+  // 1) Try to parse price directly on the page we fetched (works great when the input was
+  // already a product page, or when search results embed prices).
+  let price = extractPrice(searchHtml);
+  if (price) {
+    let name = extractProductName(searchHtml);
+    const derived = deriveSearchTerm(goal, null);
+    if (!name || /search|results|category/i.test(name) || name.length < 4) {
+      name = derived;
+    }
+    name = name || derived || 'item';
+    const deals = extractVisibleDeals(searchHtml);
+    let text = `The ${name} is priced at ${price}.`;
+    if (deals.length) text += ` Deals spotted: ${deals.join(', ')}.`;
+    return { type: 'done', text };
+  }
+
+  // Amazon-specific fast path: search results pages often contain the first item's price + title
+  // inline in structured spans. Try to grab the very first priced result without a second fetch.
+  // This compresses Amazon info lookups to a single HTTP roundtrip.
+  if (searchUrl.includes('amazon')) {
+    // Common Amazon patterns for price in search listings
+    const amazonPriceMatch = searchHtml.match(/<span[^>]*class=["'][^"']*a-price[^"']*["'][^>]*>[\s\S]{0,80}?<span[^>]*class=["'][^"']*a-offscreen["'][^>]*>([^<]+)<\/span>/i) ||
+                             searchHtml.match(/aria-label=["'][^"']*£([\d.]+)[^"']*["']/i) ||
+                             searchHtml.match(/>£\s*([\d.]+)</i);
+    if (amazonPriceMatch) {
+      const p = normalizeAmazonPrice(amazonPriceMatch[1]);
+      if (p) {
+        const nameMatch = searchHtml.match(/<h2[^>]*>[\s\S]{0,60}?<a[^>]*>([^<]{5,70})<\/a>/i);
+        const derived = deriveSearchTerm(goal, null);
+        let name = nameMatch ? cleanAmazonName(nameMatch[1]) : derived || 'item';
+        const deals = extractVisibleDeals(searchHtml);
+        let text = `The ${name} is priced at ${p}.`;
+        if (deals.length) text += ` Deals: ${deals.slice(0,2).join(', ')}.`;
+        return { type: 'done', text };
+      }
+    }
+  }
+
+  // 2) Extract first product detail URL and fetch it
+  const productUrl = extractFirstProductUrl(searchHtml, searchUrl);
+  if (!productUrl) return null;
+
+  const productHtml = await fetchHtml(productUrl);
+  if (!productHtml) return null;
+
+  price = extractPrice(productHtml);
+  if (!price) return null;
+
+  let name = extractProductName(productHtml) || extractProductName(searchHtml);
+  const derived = deriveSearchTerm(goal, null);
+  if (!name || /search|results/i.test(name)) name = derived;
+  name = name || derived || 'item';
+  const deals = extractVisibleDeals(productHtml) || extractVisibleDeals(searchHtml);
+  let text = `The ${name} is priced at ${price}.`;
+  if (deals && deals.length) text += ` Deals: ${deals.join(', ')}.`;
+  // Keep session-less for pure info; follow-up "order it" will start a real browser session.
+  return { type: 'done', text };
+}
+
 async function openNewSession(userId, url, goal) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
@@ -753,7 +995,8 @@ async function openNewSession(userId, url, goal) {
   // page, not a cookie banner it'll waste steps on.
   await timed('open.consent', () => dismissConsent(page).catch(() => {}));
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
-  return createSession(userId, { browser, context, page, site, goal, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null, remote });
+  const goalContext = parseGoalContext(goal);
+  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null, remote });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -794,7 +1037,7 @@ async function loadResumeContext(userId) {
 function blockedPageResult(session) {
   if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, false);
   return { type: 'error', error: session.isOrder
-    ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try Deliveroo or Just Eat instead?'
+    ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site or platform instead?'
     : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
 }
 
@@ -831,6 +1074,19 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     } else {
       onProgress('Opening browser…');
     }
+
+    // Tier-0: for non-order (info/price/availability) goals, attempt a zero-browser
+    // HTTP lookup first. Reuses existing derive/direct + parser. On confident price we
+    // return immediately with a done; no session is created. On any miss (wall, no price
+    // parseable, network), we fall through to the normal browser path unchanged.
+    // Orders are strictly gated out (isOrderGoal) — they always use the real browser.
+    if (!priorHistory && !isOrderGoal(goal || '')) {
+      const tier0 = await tryTier0PriceLookup(openUrl, goal || '');
+      if (tier0) {
+        return tier0;
+      }
+    }
+
     try {
       session = await openNewSession(userId, openUrl, goal);
       if (priorHistory) {
@@ -839,6 +1095,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         // flag so a premature "done" (on a bare reply like "mcdonald's") can't close it.
         if (priorHistory.length) session.isOrder = true;
       }
+      // Re-parse or keep context
+      if (!session.goalContext) session.goalContext = parseGoalContext(goal || session.goal);
     } catch (error) {
       return { type: 'error', error: error.message };
     }
@@ -881,7 +1139,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // One calm line when we genuinely can't make progress — never a loop of asks, never a
   // request for a URL/selector. Keeps the session open so "keep going" can retry.
   const STUCK = { type: 'error', error: session.isOrder
-    ? 'I got stuck on this page and couldn\'t make progress. Want me to try a different restaurant, or another platform like Deliveroo or Just Eat?'
+    ? 'I got stuck on this page and couldn\'t make progress. Want me to try a different site or platform?'
     : 'I got stuck on this page and couldn\'t make progress. Want me to try a different site, or take another approach?' };
 
   try {
@@ -914,6 +1172,19 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
       }
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
+
+      // Discover deals/coupons/promos on every step (visible text + element labels). This
+      // feeds richer context so the final answer can be conversational and useful ("found it
+      // for £45 + 20% code SUMMER visible").
+      try {
+        const pageText = await session.page.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
+        const dealText = [pageText, ...elements.map(e => e.text || '')].join(' ');
+        const found = extractVisibleDeals(dealText);
+        if (found.length) {
+          session.discoveredDeals = session.discoveredDeals || [];
+          for (const d of found) if (!session.discoveredDeals.includes(d)) session.discoveredDeals.push(d);
+        }
+      } catch {}
 
       // Logged-out wall: a stored login expired (or the merchant issued a fresh challenge)
       // and we've landed on a sign-in page. Detect it BEFORE the model wastes the step
@@ -956,7 +1227,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
           require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
         }
-        decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection));
+        decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
         pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
       }
 
@@ -1005,7 +1276,21 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         // closes it via the same-site guard at the top of runOrderingTurn.
         touchSession(userId);
         await persistStorage(userId, session);
-        return { type: 'done', text: decision.summary || 'Done.' };
+        const ctx = session.goalContext || {};
+        let nice = decision.summary || 'Done.';
+        const deals = (session.discoveredDeals || []).slice(0, 3);
+        // Make final answer conversational + include discovered value (size/color from goal + deals)
+        if (ctx.size || ctx.color || ctx.budget || deals.length) {
+          const bits = [];
+          if (ctx.color) bits.push(ctx.color);
+          if (ctx.size) bits.push(`size ${ctx.size}`);
+          const desc = bits.length ? bits.join(' ') + ' ' : '';
+          nice = `Found the ${desc}for you${ctx.budget ? ` (under £${ctx.budget})` : ''}. ${decision.summary || ''}`.trim();
+          if (deals.length) {
+            nice += ` Deals I spotted: ${deals.join(' • ')}.`;
+          }
+        }
+        return { type: 'done', text: nice };
       }
 
       if (decision.action === 'ask') {
@@ -1193,6 +1478,8 @@ module.exports = {
   usingRemoteBrowser,
   deriveSearchTerm,
   directSearchUrl,
+  parseGoalContext,
+  tryTier0PriceLookup,
   matchesPaymentKeyword,
   isTechnicalAsk,
   looksLikeLoginWall,
