@@ -627,6 +627,14 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // open alone can eat the mobile client's 45s watchdog before a single step runs.
   const startedAt = Date.now();
   let session = getSession(userId);
+  // A live session left open by a finished lookup (see the 'done' keep-alive below) is a
+  // continuation ("order it") ONLY if it's the same site. If a new url points at a different
+  // site, it's a fresh task — close the stale session so we open the right site, not continue
+  // on the old product page.
+  if (session && url && siteKeyFromUrl(url) !== session.site) {
+    await closeSession(userId);
+    session = null;
+  }
   if (!session) {
     // No live session. Prefer the url we were handed; otherwise re-open where we left
     // off from persisted context so an idle-evicted order resumes instead of dead-ending.
@@ -791,7 +799,13 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
         // Goal answered via a fast-path → the learned/seed template worked; reward it.
         if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, true);
-        await closeSession(userId);
+        // Keep the browser open on a finished lookup: "what's the price of X" is often followed
+        // by "order it" / "add it to my basket". Leaving the session on its current product page
+        // lets that follow-up continue right here instead of reopening from scratch. Idle
+        // eviction (SESSION_IDLE_MS) reclaims it if no follow-up comes; a different-site task
+        // closes it via the same-site guard at the top of runOrderingTurn.
+        touchSession(userId);
+        await persistStorage(userId, session);
         return { type: 'done', text: decision.summary || 'Done.' };
       }
 
