@@ -85,7 +85,7 @@ private struct LoginFormPage: View {
 
                 Text(isRegistering ? "Create your account." : "Welcome back.")
                     .font(.nmlDisplay(30, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
+                    .foregroundStyle(Color.edInk)
                     .padding(.bottom, 44)
 
                 VStack(alignment: .leading, spacing: 28) {
@@ -106,17 +106,21 @@ private struct LoginFormPage: View {
                     HStack(spacing: 8) {
                         if isLoading {
                             ProgressView()
-                                .tint(Color.nmlObsidian)
+                                .tint(Color.edCanvas)
                                 .scaleEffect(0.8)
                         }
                         Text(isRegistering ? "Create Account" : "Sign In")
                             .font(.system(size: 14, weight: .semibold))
                             .tracking(1.5)
                     }
-                    .foregroundStyle(Color.nmlObsidian)
+                    // On-ink, not pure black: contrasts with edInk in BOTH finishes (the same
+                    // fix NamelessPrimaryButton carries). nmlObsidian is always black, so an
+                    // enabled button in light mode rendered black text on a near-black fill —
+                    // invisible. edCanvas flips with the finish and stays legible.
+                    .foregroundStyle(Color.edCanvas)
                     .frame(maxWidth: .infinity)
                     .frame(height: 58)
-                    .background(Color.nmlInk)
+                    .background(Color.edInk)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.nmlScale)
