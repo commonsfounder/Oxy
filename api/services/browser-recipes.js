@@ -54,7 +54,7 @@ const RECIPES = {
       selected:  ['[aria-checked="true"]', '[aria-selected="true"]', 'option:checked'],
     },
     steps: [
-      { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: null /* set in Task 4 */ },
+      { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
       { phase: 'product', name: 'add', action: 'click', selectorAny: [
         '[data-test*="add-to-basket" i]',
         'button[aria-label*="add to basket" i]',
@@ -112,4 +112,108 @@ function selectStep(recipe, phase, ctx, health, host) {
   return null;
 }
 
-module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD };
+// --- DOM probes (real in prod; scripted by the fake page in unit tests) -------------------
+// Build the ctx the step gates read. Only `hasUnsatisfiedSize` for now: a size container is
+// present AND nothing in it is selected yet.
+async function readCtx(page, recipe) {
+  const ctx = await page.evaluate(({ probe, size }) => {
+    void probe;
+    const hasAny = (sels) => sels.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
+    const container = hasAny(size.container);
+    const selected = hasAny(size.selected);
+    return { hasUnsatisfiedSize: container && !selected };
+  }, { probe: 'ctx', size: recipe.size });
+  return ctx || { hasUnsatisfiedSize: false };
+}
+
+// Resolve a step's selectorAny to a { locatorIndex, text }, choosing the first candidate that
+// maps to a VISIBLE, ENABLED element (locatorIndex = index into querySelectorAll(CLICKABLE_SELECTOR)).
+// null if none match. `text` lets the loop apply the payment guardrail + write history without a
+// re-read. CLICKABLE_SELECTOR must match browser-task.js's constant — passed in so there's one source.
+async function resolveSelectorIndex(page, selectorAny, clickableSelector, tag) {
+  return page.evaluate(({ probe, selectorAny, clickableSelector }) => {
+    void probe;
+    const all = Array.from(document.querySelectorAll(clickableSelector));
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    for (const sel of selectorAny) {
+      let match;
+      try { match = document.querySelector(sel); } catch { continue; }
+      if (!match || !visible(match)) continue;
+      const node = match.closest(clickableSelector) || match;
+      const idx = all.indexOf(node);
+      if (idx !== -1) {
+        const text = (node.innerText || node.getAttribute('aria-label') || node.value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+        return { locatorIndex: idx, text };
+      }
+    }
+    return null;
+  }, { probe: tag, selectorAny, clickableSelector });
+}
+
+// The size step's resolve — the per-step escape hatch from the design. Size is a genuine
+// choice, so we NEVER guess: if the goal names a size, click the matching chip; if it doesn't,
+// ask. Reads chip labels from the page and maps the chosen one to a locatorIndex. Takes the
+// single args bag the executor hands every resolve fn: { page, session, recipe, ctx, clickable }.
+async function resolveSizeMove({ page, session, recipe, clickable }) {
+  const want = parseSizeFromGoal(`${session.goal || ''} ${(session.history || []).join(' ')}`);
+  if (!want) return { action: 'ask', question: 'What size would you like?', stepName: 'size' };
+  const chips = await page.evaluate(({ probe, chipSel, clickableSelector }) => {
+    void probe;
+    const all = Array.from(document.querySelectorAll(clickableSelector));
+    const out = [];
+    for (const sel of chipSel) {
+      for (const el of document.querySelectorAll(sel)) {
+        const label = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+        const idx = all.indexOf(el.closest(clickableSelector) || el);
+        if (label && idx !== -1) out.push({ label, idx });
+      }
+      if (out.length) break; // first selector that yields chips wins
+    }
+    return out;
+  }, { probe: 'sizeChips', chipSel: recipe.size.chip, clickableSelector: clickable });
+  const pick = matchSizeChip(want, chips.map((c) => c.label));
+  if (pick == null) return null; // asked-for size not offered → vision/ask fallback
+  return { action: 'click', locatorIndex: chips[pick].idx, text: chips[pick].label, stepName: 'size' };
+}
+
+// CLICKABLE_SELECTOR is owned by browser-task.js; keep one copy here that MUST equal it.
+// (Task 5 asserts they're identical so a future edit to one can't silently diverge.)
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+
+const recipeHealth = createRecipeHealth();
+
+// The executor. Returns a move for the loop to execute, or null → vision fallback.
+async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
+  const host = hostOfRecipe(recipe);
+  const phase = phaseFromUrl(recipe, page.url());
+  if (!phase) return null;
+  const ctx = await readCtx(page, recipe);
+  const step = selectStep(recipe, phase, ctx, health, host);
+  if (!step) return null;
+
+  if (step.resolve) {
+    // Escape hatch: the step supplies its own move (may be an "ask", which is a real move,
+    // not a miss). Only a null return — the step couldn't resolve — counts as a miss.
+    const move = await step.resolve({ page, session, recipe, ctx, clickable: CLICKABLE_SELECTOR });
+    if (move) { health.recordHit(host, step.name); return move; }
+  } else if (step.selectorAny) {
+    const hit = await resolveSelectorIndex(page, step.selectorAny, CLICKABLE_SELECTOR, `resolve:${step.name}`);
+    if (hit) { health.recordHit(host, step.name); return { action: step.action, locatorIndex: hit.locatorIndex, text: hit.text, stepName: step.name }; }
+  }
+  health.recordMiss(host, step.name);
+  return null;
+}
+
+// Find the host key a recipe is registered under (so callers can pass the recipe object alone).
+function hostOfRecipe(recipe) {
+  for (const [host, r] of Object.entries(RECIPES)) if (r === recipe) return host;
+  return 'unknown';
+}
+
+module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR };

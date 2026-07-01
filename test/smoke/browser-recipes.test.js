@@ -89,3 +89,52 @@ test('recipe health disables after N misses and a hit resets the streak', () => 
   health.recordHit('h', 's'); // one success re-enables
   assert.equal(health.isDisabled('h', 's'), false);
 });
+
+const { nextRecipeMove, resolveSizeMove } = require('../../api/services/browser-recipes');
+
+// A fake page: url() returns the given url; evaluate(fn, arg) runs fn against a scripted
+// "DOM answer" table keyed by a tag we pass in arg.probe, so tests stay declarative.
+function fakePage(url, answers = {}) {
+  return {
+    url: () => url,
+    evaluate: async (_fn, arg) => (arg && arg.probe in answers ? answers[arg.probe] : null),
+  };
+}
+
+test('nextRecipeMove returns null off any recipe phase (e.g. search page)', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const move = await nextRecipeMove(
+    fakePage('https://www.johnlewis.com/search?search-term=joggers'),
+    { goal: 'joggers size m', history: [] }, jl, createRecipeHealth());
+  assert.equal(move, null);
+});
+
+test('nextRecipeMove asks for a size when the goal has none and a size is needed', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const page = fakePage('https://www.johnlewis.com/x/p6543210', {
+    ctx: { hasUnsatisfiedSize: true },
+    sizeChips: [], // no chips fetched because we ask before matching
+  });
+  const move = await nextRecipeMove(page, { goal: 'add the joggers to my basket', history: [] }, jl, createRecipeHealth());
+  assert.equal(move.action, 'ask');
+  assert.match(move.question, /size/i);
+});
+
+test('nextRecipeMove returns a click for add-to-basket once size is satisfied', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const page = fakePage('https://www.johnlewis.com/x/p6543210', {
+    ctx: { hasUnsatisfiedSize: false },
+    'resolve:add': { locatorIndex: 17, text: 'Add to basket' }, // scripted resolution
+  });
+  const move = await nextRecipeMove(page, { goal: 'add the joggers to my basket', history: [] }, jl, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
+});
+
+test('nextRecipeMove records a miss and returns null when the step resolves to nothing', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const health = createRecipeHealth(1);
+  const page = fakePage('https://www.johnlewis.com/x/p6543210', { ctx: { hasUnsatisfiedSize: false }, 'resolve:add': null });
+  const move = await nextRecipeMove(page, { goal: 'add joggers', history: [] }, jl, health);
+  assert.equal(move, null);
+  assert.equal(health.isDisabled('johnlewis.com', 'add'), true);
+});
