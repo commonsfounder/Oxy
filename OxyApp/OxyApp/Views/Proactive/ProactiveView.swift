@@ -40,10 +40,8 @@ struct ProactiveView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // The page canvas: warm-white by day, true black at night.
-                Color.edCanvas.ignoresSafeArea()
-                // Weather is the backdrop — a painterly sky that fades into the canvas.
-                // No box, no icons; colour lives only here.
+                Color.appBackground.ignoresSafeArea()
+                // Light accent wash for atmosphere — accent is now allowed to live everywhere.
                 AtmosphereSky(condition: weather?.symbolName)
                     .allowsHitTesting(false)
 
@@ -58,8 +56,7 @@ struct ProactiveView: View {
                         if isLoading && events.isEmpty && weather == nil && visibleBriefings.isEmpty {
                             loadingSkeleton.padding(.top, 16)
                         } else {
-                            // Composable, but rendered as flat editorial sections (the board
-                            // editor still controls which appear and in what order).
+                            // Composable cards (user controls order/visibility).
                             ForEach(Array(layout.visibleOrdered().enumerated()), id: \.element) { idx, kind in
                                 card(for: kind, index: idx)
                             }
@@ -78,7 +75,7 @@ struct ProactiveView: View {
                 }
 
                 // Paper grain over the whole screen for materiality — barely there.
-                PaperGrain().ignoresSafeArea().allowsHitTesting(false)
+                AppGrain().ignoresSafeArea().allowsHitTesting(false)
             }
             // No opaque cap: the aurora gradient runs full-bleed behind the status
             // bar (as in the reference), so content scrolling under it reads as
@@ -100,29 +97,29 @@ struct ProactiveView: View {
         }
     }
 
-    // MARK: - Hero (editorial greeting + weather spoken as a line)
+    // MARK: - Hero (clean greeting + weather spoken as a line)
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Date kicker + a discreet refresh — the only control up here.
             HStack(alignment: .firstTextBaseline) {
                 Text(dateLine)
-                    .font(.nmlBody(11, weight: .regular)).tracking(2)
+                    .font(.appBody(11, weight: .regular)).tracking(2)
                     .textCase(.uppercase)
-                    .foregroundStyle(Color.edMuted)
+                    .foregroundStyle(Color.appMuted)
                 Spacer()
                 Button(action: { Task { await checkNow() } }) {
-                    if isChecking { ProgressView().scaleEffect(0.6).tint(Color.edMuted) }
-                    else { Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .light)).foregroundStyle(Color.edMuted) }
+                    if isChecking { ProgressView().scaleEffect(0.6).tint(Color.appMuted) }
+                    else { Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .light)).foregroundStyle(Color.appMuted) }
                 }
-                .buttonStyle(.nmlScale).disabled(isChecking).accessibilityLabel("Refresh")
+                .buttonStyle(.appScale).disabled(isChecking).accessibilityLabel("Refresh")
             }
             .padding(.top, 8)
 
-            // Big Didot greeting, set well down the hero so the sky breathes above it.
+            // Greeting.
             Text(greeting)
-                .font(.nmlDisplay(40))
-                .foregroundStyle(Color.edInk)
+                .font(.appTitle(36, weight: .semibold))
+                .foregroundStyle(Color.appInk)
                 .lineLimit(3)
                 .minimumScaleFactor(0.6)
                 .fixedSize(horizontal: false, vertical: true)
@@ -131,15 +128,15 @@ struct ProactiveView: View {
 
             if let weather {
                 Text(weatherLine(weather))
-                    .font(.custom("Didot", size: 17)).italic()
-                    .foregroundStyle(Color.edInk.opacity(0.72))
+                    .font(.appBody(17))
+                    .foregroundStyle(Color.appAccent)
                     .padding(.top, 16)
             }
         }
         .padding(.bottom, 10)
     }
 
-    /// Weather spoken as an editorial line, e.g. "Clear — thirty-two degrees."
+    /// Weather spoken as an clean line, e.g. "Clear — thirty-two degrees."
     private func weatherLine(_ w: OxyWeatherService.OxyWeatherSnapshot) -> String {
         let t = Int(w.temperatureC.rounded())
         let spelled = Self.spellOutFormatter.string(from: NSNumber(value: t)) ?? "\(t)"
@@ -183,8 +180,8 @@ struct ProactiveView: View {
 
     // MARK: - Cards
 
-    /// Flat editorial section — a Didot title + content on the bare canvas, no fill or
-    /// border. Sections are separated by an `EditorialRule` drawn in `card(for:)`.
+    /// Flat clean section — a Didot title + content on the bare canvas, no fill or
+    /// border. Sections are separated by an `AppRule` drawn in `card(for:)`.
     @ViewBuilder private func boardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -196,8 +193,8 @@ struct ProactiveView: View {
             cardLabel("Your day")
             if events.isEmpty {
                 Text("Nothing scheduled — the day is yours.")
-                    .font(.nmlBody(15, weight: .light))
-                    .foregroundStyle(Color.edMuted)
+                    .font(.appBody(15, weight: .light))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
@@ -208,17 +205,17 @@ struct ProactiveView: View {
                         } label: {
                             HStack(alignment: .top, spacing: 16) {
                                 Text(event.isAllDay ? "all-day" : timeString(event.start))
-                                    .font(.nmlBody(13)).foregroundStyle(Color.edMuted)
+                                    .font(.appBody(13)).foregroundStyle(Color.appMuted)
                                     .frame(width: 52, alignment: .leading)
                                 Text(eventLine(event))
-                                    .font(.nmlBody(16, weight: .light))
+                                    .font(.appBody(16, weight: .light))
                                     .foregroundStyle(Color.edInk)
                                     .lineLimit(2)
                                 Spacer(minLength: 0)
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.nmlScale(0.99))
+                        .buttonStyle(.appScale(0.99))
                     }
                 }
             }
@@ -239,9 +236,9 @@ struct ProactiveView: View {
 
     @ViewBuilder private func card(for kind: TodayCardKind, index: Int) -> some View {
         VStack(spacing: 0) {
-            // A centred-dot editorial rule between sections — the only separator.
+            // A centred-dot clean rule between sections — the only separator.
             if index > 0 {
-                EditorialRule()
+                AppRule()
             }
             Group {
                 switch kind {
@@ -255,7 +252,7 @@ struct ProactiveView: View {
         }
         .opacity(contentAppeared ? 1 : 0)
         .offset(y: contentAppeared ? 0 : 14)
-        .animation(.nmlSpring.delay(0.04 + Double(index) * 0.05), value: contentAppeared)
+        .animation(.appSpring.delay(0.04 + Double(index) * 0.05), value: contentAppeared)
     }
 
     /// Incoming items off the freshest briefing's metadata (same source as inbox).
@@ -268,11 +265,11 @@ struct ProactiveView: View {
     @ViewBuilder private var eveningPlate: some View {
         if let line = eveningLine {
             VStack(spacing: 0) {
-                EditorialRule()
+                AppRule()
                 EditorialPlate {
                     Text("THIS EVENING")
-                        .font(.nmlBody(11)).tracking(1.8)
-                        .foregroundStyle(Color.edMuted)
+                        .font(.appBody(11)).tracking(1.8)
+                        .foregroundStyle(Color.appMuted)
                     Text(line)
                         .font(.custom("Didot", size: 21)).italic()
                         .foregroundStyle(Color.edInk)
@@ -295,16 +292,16 @@ struct ProactiveView: View {
     /// A quiet, text-only way into the board editor — no boxed "add a card" affordance.
     private var editBoardLink: some View {
         VStack(spacing: 0) {
-            EditorialRule()
+            AppRule()
             Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
                 Text("Edit board")
-                    .font(.nmlBody(13, weight: .light))
-                    .foregroundStyle(Color.edMuted)
+                    .font(.appBody(13, weight: .light))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 20)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.nmlScale(0.99))
+            .buttonStyle(.appScale(0.99))
         }
     }
 
@@ -336,18 +333,18 @@ struct ProactiveView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(email.cleanFrom)
-                                    .font(.nmlBody(14, weight: .regular))
+                                    .font(.appBody(14, weight: .regular))
                                     .foregroundStyle(Color.edInk)
                                     .lineLimit(1)
                                 Text(email.cleanSubject)
-                                    .font(.nmlBody(14, weight: .light))
-                                    .foregroundStyle(Color.edMuted)
+                                    .font(.appBody(14, weight: .light))
+                                    .foregroundStyle(Color.appMuted)
                                     .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.nmlScale(0.99))
+                        .buttonStyle(.appScale(0.99))
                     }
                 }
             }
@@ -378,8 +375,8 @@ struct ProactiveView: View {
             cardLabel("Reminders")
             if reminders.isEmpty {
                 Text("Nothing to carry today.")
-                    .font(.nmlBody(15, weight: .light))
-                    .foregroundStyle(Color.edMuted)
+                    .font(.appBody(15, weight: .light))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
@@ -389,22 +386,22 @@ struct ProactiveView: View {
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
                                 Circle()
-                                    .strokeBorder(Color.edMuted, lineWidth: 1)
+                                    .strokeBorder(Color.appMuted, lineWidth: 1)
                                     .frame(width: 15, height: 15)
                                     .offset(y: 2)
                                 Text(reminder.title)
-                                    .font(.nmlBody(16, weight: .light))
+                                    .font(.appBody(16, weight: .light))
                                     .foregroundStyle(Color.edInk)
                                 Spacer(minLength: 8)
                                 if let due = reminder.due {
                                     Text(reminder.overdue ? "overdue" : timeString(due))
-                                        .font(.nmlBody(12))
-                                        .foregroundStyle(reminder.overdue ? Color.nmlAttention : Color.edMuted)
+                                        .font(.appBody(12))
+                                        .foregroundStyle(reminder.overdue ? Color.appAttention : Color.appMuted)
                                 }
                             }
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.nmlScale(0.99))
+                        .buttonStyle(.appScale(0.99))
                     }
                 }
             }
@@ -428,8 +425,8 @@ struct ProactiveView: View {
                     }
                 } label: {
                     Text("Connect Health to weave your rest and movement into the day.")
-                        .font(.nmlBody(15, weight: .light))
-                        .foregroundStyle(Color.edMuted)
+                        .font(.appBody(15, weight: .light))
+                        .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
@@ -469,7 +466,7 @@ struct ProactiveView: View {
     }
 
     private func cardLabel(_ text: String) -> some View {
-        EditorialSectionTitle(text).padding(.bottom, 14)
+        AppSectionTitle(text).padding(.bottom, 14)
     }
 
     private func timeString(_ date: Date) -> String {
@@ -500,7 +497,7 @@ struct ProactiveView: View {
         restingHR = await restingHRResult
         isLoading = false
         contentAppeared = false
-        withAnimation(.nmlSpring.delay(0.04)) { contentAppeared = true }
+        withAnimation(.appSpring.delay(0.04)) { contentAppeared = true }
         await maybeAutoProactive()
     }
 
@@ -558,7 +555,7 @@ struct ProactiveView: View {
     private func complete(_ reminder: TodayReminder) {
         // A soft, rewarding check-off, then the row springs away.
         HapticManager.shared.impact(.soft)
-        withAnimation(.nmlSpring) {
+        withAnimation(.appSpring) {
             reminders.removeAll { $0.id == reminder.id }
         }
         Task { await native.completeReminder(id: reminder.id) }
@@ -583,32 +580,32 @@ struct TodayBoardEditor: View {
             List {
                 ForEach(layout.order) { kind in
                     HStack {
-                        Text(kind.title).font(.nmlBody(15)).foregroundStyle(Color.nmlInk)
+                        Text(kind.title).font(.appBody(15)).foregroundStyle(Color.appInk)
                         Spacer()
                         if isConfigurable(kind) {
                             Button { configuringKind = kind } label: {
-                                Image(systemName: "gearshape").foregroundStyle(Color.nmlTitanium)
+                                Image(systemName: "gearshape").foregroundStyle(Color.appMuted)
                             }
                             .buttonStyle(.plain)
                             .padding(.trailing, 4)
                         }
-                        NamelessToggle(isOn: Binding(
+                        AppToggle(isOn: Binding(
                             get: { !layout.isHidden(kind) },
                             set: { _ in layout.toggle(kind) }
                         ))
                     }
-                    .listRowBackground(Color.nmlSurface)
+                    .listRowBackground(Color.appSurface)
                 }
                 .onMove { layout.move(from: $0, to: $1) }
             }
             .environment(\.editMode, .constant(.active))
             .scrollContentBackground(.hidden)
-            .background(Color.nmlObsidian)
+            .background(Color.appObsidian)
             .navigationTitle("Edit Today")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.foregroundStyle(Color.nmlInk)
+                    Button("Done") { dismiss() }.foregroundStyle(Color.appInk)
                 }
             }
             .sheet(item: $configuringKind) { kind in
@@ -641,23 +638,23 @@ private struct TodayCardOptionsEditor: View {
             List {
                 ForEach(options, id: \.id) { option in
                     HStack {
-                        Text(option.title).font(.nmlBody(15)).foregroundStyle(Color.nmlInk)
+                        Text(option.title).font(.appBody(15)).foregroundStyle(Color.appInk)
                         Spacer()
-                        NamelessToggle(isOn: Binding(
+                        AppToggle(isOn: Binding(
                             get: { layout.isOptionEnabled(option.id, for: kind) },
                             set: { layout.setOption(option.id, for: kind, enabled: $0) }
                         ))
                     }
-                    .listRowBackground(Color.nmlSurface)
+                    .listRowBackground(Color.appSurface)
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.nmlObsidian)
+            .background(Color.appObsidian)
             .navigationTitle("\(kind.title) sources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.foregroundStyle(Color.nmlInk)
+                    Button("Done") { dismiss() }.foregroundStyle(Color.appInk)
                 }
             }
         }
@@ -730,10 +727,10 @@ private struct EmptyProactiveState: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Nothing needs you right now.")
-                .font(.nmlDisplay(21, weight: .regular))
+                .font(.appTitle(21, weight: .regular))
                 .foregroundStyle(palette.ink)
             Text("This stays quiet until there's something actually useful.")
-                .font(.nmlBody(13, weight: .light))
+                .font(.appBody(13, weight: .light))
                 .foregroundStyle(palette.muted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)

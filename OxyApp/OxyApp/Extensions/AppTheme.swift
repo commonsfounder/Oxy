@@ -1,139 +1,176 @@
 import SwiftUI
 import UIKit
 
-/// "Silent Luxury" design tokens for the Nameless companion experience —
-/// deep obsidian, titanium hairlines, soft white editorial type. Intentionally
-/// fixed rather than light/dark-adaptive: this aesthetic doesn't bend to system
-/// appearance, the same way a well-made object looks the same in any room.
-// MARK: - Fixed pure-black palette
-//
-// One aesthetic, no finishes, no accents. Pure black canvas, titanium/silver
-// hairlines, soft-white editorial type. Every view reads the `nml*` tokens
-// below; there's nothing to switch.
+/// APP DESIGN SYSTEM (new direction July 2026)
+/// Warm, clear, capable assistant.
+/// Burned the old cold look. New: warm, clear, capable app UI. app* tokens.
+/// Clarity + trust first. Accent color for life and AI voice. Readable, scannable, slightly warm.
+/// Use app* tokens. Old app* are deprecated and will be removed.
+///
+/// Default vibe: dark companion mode with a fresh teal accent for energy and CTAs.
+/// Strong semantics for safety on actions/money.
 
 extension Color {
-    /// Resolves to `dark` under a dark colour scheme and `light` otherwise. Most of
-    /// the app is pinned dark (OxyApp sets `.preferredColorScheme(.dark)`), so these
-    /// stay on their dark values everywhere except the Today/Chat subtrees, which
-    /// override `colorScheme` to flip the whole language to the light finish.
-    static func nmlAdaptive(dark: Color, light: Color) -> Color {
-        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
+    /// Main canvas. Rich dark for companion feel.
+    static let appBackground = Color(red: 0.06, green: 0.06, blue: 0.07)
+
+    /// Primary surface for cards, sheets, inputs.
+    static let appSurface = Color(red: 0.12, green: 0.12, blue: 0.13)
+
+    /// Slightly lifted surface.
+    static let appSurface2 = Color(red: 0.16, green: 0.16, blue: 0.17)
+
+    /// Hairline / divider. Subtle, not the star.
+    static let appHairline = Color.white.opacity(0.08)
+
+    /// Primary text.
+    static let appInk = Color(red: 0.95, green: 0.95, blue: 0.94)
+
+    /// Secondary / captions.
+    static let appMuted = Color(red: 0.55, green: 0.55, blue: 0.54)
+
+    /// Accent — fresh teal/cyan. Used for AI presence, primary actions, highlights.
+    /// This is the personality color now. Changeable via settings but default is energetic.
+    static let appAccent = Color(red: 0.0, green: 0.71, blue: 0.63) // #00B5A1
+
+    /// On accent (text/icons on the accent color).
+    static let appOnAccent = Color.black
+
+    // MARK: - Semantic (for trust and safety)
+    static let appSuccess = Color(red: 0.30, green: 0.75, blue: 0.50)
+    static let appWarning = Color(red: 0.95, green: 0.70, blue: 0.25)
+    static let appDanger  = Color(red: 0.90, green: 0.35, blue: 0.30)
+    static let appLive    = Color(red: 0.20, green: 0.85, blue: 0.55)
+
+    // Legacy scrim etc for quick ports
+    static let appScrim = Color.black.opacity(0.5)
+    static let appFillSubtle = Color.white.opacity(0.06)
+}
+
+// MARK: - Radius (concentric friendly)
+enum AppRadius {
+    static let sm: CGFloat = 6
+    static let md: CGFloat = 10
+    static let lg: CGFloat = 16
+    static let xl: CGFloat = 22
+    static let bubble: CGFloat = 18
+}
+
+// MARK: - Animation tokens (keep discipline)
+extension Animation {
+    static let appFast     = Animation.easeInOut(duration: 0.15)
+    static let appStandard = Animation.easeInOut(duration: 0.22)
+    static let appRelax    = Animation.easeInOut(duration: 0.4)
+    static let appSpring   = Animation.spring(response: 0.32, dampingFraction: 0.82)
+}
+
+// MARK: - Typography
+extension Font {
+    /// Clear, friendly body. Use for most things.
+    static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight, design: .default)
     }
 
-    /// Pure black background — the single canvas colour across the app. Stays black
-    /// in both finishes (it doubles as the contrast colour on titanium fills); the
-    /// light Today/Chat surfaces use the aurora gradient as their canvas, not this.
-    static let nmlObsidian = Color.black
-    /// Slightly raised surface for cards and rows — dark obsidian / clean white.
-    static let nmlSurface = nmlAdaptive(dark: Color(red: 14 / 255, green: 14 / 255, blue: 16 / 255),
-                                        light: Color.white.opacity(0.82))
-    /// One step lighter still — for elements nested inside a surface (input fields, pills).
-    static let nmlSurface2 = nmlAdaptive(dark: Color(red: 21 / 255, green: 21 / 255, blue: 23 / 255),
-                                         light: Color.white.opacity(0.9))
-    /// Hairline rule — titanium-on-black / ink-on-light, always drawn at 0.5pt.
-    static let nmlHairline = nmlAdaptive(dark: Color(red: 198 / 255, green: 200 / 255, blue: 204 / 255).opacity(0.16),
-                                         light: Color.black.opacity(0.10))
-    /// Flat solid card border (#222222) for raw monospace telemetry cards.
-    static let nmlCardBorder = Color(red: 34 / 255, green: 34 / 255, blue: 34 / 255)
-    /// Soft titanium for icons, dots, and quiet emphasis. Fixed: it's also the fill
-    /// behind black glyphs (send button), so it can't flip to a dark value.
-    static let nmlTitanium = Color(red: 199 / 255, green: 202 / 255, blue: 206 / 255)
-    /// Primary editorial type — soft white on dark, near-black ink on light.
-    static let nmlInk = nmlAdaptive(dark: Color(red: 240 / 255, green: 239 / 255, blue: 235 / 255),
-                                    light: Color(red: 0.13, green: 0.13, blue: 0.15))
-    /// Muted secondary text for captions, eyebrows, secondary detail.
-    static let nmlMuted = nmlAdaptive(dark: Color(red: 142 / 255, green: 142 / 255, blue: 147 / 255),
-                                      light: Color(red: 0.42, green: 0.42, blue: 0.46))
-    /// Faint halo behind a live-status dot.
-    static let nmlGlow = Color(red: 214 / 255, green: 217 / 255, blue: 220 / 255)
-
-    // MARK: - Named surface fills
-    //
-    // White overlays on obsidian. Use these instead of inline Color.white.opacity(N)
-    // so every surface lift has a consistent, auditable name.
-    //
-    //   ghost  — barely-there tint: inactive tabs, glass base
-    //   subtle — slightly raised: button backgrounds, segmented control track
-    //   bubble — user chat bubble fill
-    //   scrim  — modal/sheet backdrop over the full screen
-
-    static let nmlFillGhost  = Color.white.opacity(0.04)
-    static let nmlFillSubtle = Color.white.opacity(0.08)
-    /// User chat-bubble fill — a white lift on dark, an ink lift on light (a white
-    /// tint would disappear against the light aurora canvas).
-    static let nmlFillBubble = nmlAdaptive(dark: Color.white.opacity(0.13), light: Color.black.opacity(0.06))
-    static let nmlFillScrim  = Color.black.opacity(0.45)
-
-    // MARK: - Semantic status colours
-    //
-    // The one place hue is allowed to carry meaning in this otherwise monochrome
-    // language: status indicators. A user should be able to read device/connector
-    // state from colour alone. Reserved strictly for the `NamelessStatusDot` token
-    // table below — not for decoration.
-    //
-    //   nmlLive       green   — active / live / streaming
-    //   nmlGlow       silver  — enabled-and-idle (available, not currently live)
-    //   nmlMuted      gray    — disabled / off
-    //   nmlDanger     coral   — error / disconnected-with-a-problem / destructive
-    //   nmlAttention  amber   — degraded / attention-needed (e.g. overdue)
-
-    /// Green for a live/streaming link.
-    static let nmlLive = Color(red: 0.30, green: 0.80, blue: 0.46)
-    /// Amber for attention-needed / degraded states (overdue, needs-reconnect).
-    static let nmlAttention = Color(red: 232 / 255, green: 176 / 255, blue: 84 / 255)
+    /// Stronger display for headers / important moments. Not ultra light poetry.
+    static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .rounded)
+    }
 }
 
-// MARK: - Radius scale
-//
-// Four named steps cover every shape in the product. Prefer these over raw literals.
-//
-//   sm     — 5pt  : status dots, small pill badges
-//   card   — 8pt  : cards, rows, action chips, attachment strips
-//   bubble — 20pt : chat bubble outer corners
-//   input  — 22pt : text input container (near-capsule)
-
-enum NMLRadius {
-    static let sm:     CGFloat = 5
-    static let card:   CGFloat = 8
-    static let bubble: CGFloat = 20
-    static let input:  CGFloat = 22
+// MARK: - Helpers (scale on press, glass where it still fits)
+extension View {
+    func appScale(_ amount: CGFloat = 0.96) -> some View {
+        buttonStyle(AppScaleButtonStyle(amount: amount))
+    }
 }
 
-// MARK: - Animation tokens
-//
-// Three speed steps + one standard spring. Use these instead of inline duration literals.
-//
-//   nmlFast     — 0.15 s : micro-interactions, icon transitions
-//   nmlStandard — 0.22 s : most UI state changes (modals, tab switching)
-//   nmlRelax    — 0.40 s : content reveals, loading transitions
-//   nmlSpring   — response 0.34 / damping 0.86 : nav slides, drawer open/close
+struct AppScaleButtonStyle: ButtonStyle {
+    var amount: CGFloat = 0.96
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? amount : 1)
+            .animation(.appFast, value: configuration.isPressed)
+    }
+}
+
+// MARK: - Deprecated nml / Nameless bridge (temporary during burn)
+// Old code using nml* or Nameless* will resolve via these.
+extension Color {
+    static let nmlObsidian = appBackground
+    static let nmlSurface = appSurface
+    static let nmlSurface2 = appSurface2
+    static let nmlHairline = appHairline
+    static let nmlInk = appInk
+    static let nmlMuted = appMuted
+    static let nmlTitanium = appMuted
+    static let nmlFillSubtle = appFillSubtle
+    static let nmlFillScrim = appScrim
+    static let nmlLive = appLive
+    static let nmlAttention = appWarning
+    static let nmlDanger = appDanger
+    static let nmlGlow = appAccent.opacity(0.3)
+    static let nmlFillBubble = appSurface
+    static let nmlCardBorder = appHairline
+    static func nmlAdaptive(dark: Color, light: Color) -> Color { dark }
+}
 
 extension Animation {
-    static let nmlFast     = Animation.easeInOut(duration: 0.15)
-    static let nmlStandard = Animation.easeInOut(duration: 0.22)
-    static let nmlRelax    = Animation.easeInOut(duration: 0.4)
-    static let nmlSpring   = Animation.spring(response: 0.34, dampingFraction: 0.86)
+    static let nmlFast = appFast
+    static let nmlStandard = appStandard
+    static let nmlRelax = appRelax
+    static let nmlSpring = appSpring
+}
+
+enum NMLRadius {
+    static let sm = AppRadius.sm
+    static let card = AppRadius.md
+    static let bubble = AppRadius.bubble
+    static let input = AppRadius.xl
+}
+
+extension Font {
+    static func nmlBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { .appBody(size, weight: weight) }
+    static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .light) -> Font { .appTitle(size, weight: weight) }
+    static func nmlMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font { .system(size: size, weight: weight, design: .monospaced) }
+}
+
+extension View {
+    func nmlScale(_ amount: CGFloat = 0.96) -> some View { appScale(amount) }
+    func nmlGlass<C: Shape>(_ shape: C, interactive: Bool = false, tint: Color? = nil) -> some View {
+        background(shape.fill(Color.white.opacity(0.04)))
+            .overlay(shape.stroke(Color.white.opacity(0.06), lineWidth: 0.5))
+    }
+}
+
+func nmlGlassContainer<Content: View>(spacing: CGFloat = 0, @ViewBuilder content: () -> Content) -> some View {
+    content()
+}
+
+extension View {
+    func nmlGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        self.nmlGlass(shape, tint: tint, interactive: interactive)
+    }
 }
 
 // MARK: - Typography rule (serif vs sans)
 //
 // Decide which face a new label takes by its SEMANTIC ROLE, not by taste:
 //
-//   • nmlDisplay (Fraunces, serif) — warm / identity / emotional moments ONLY:
+//   • appDisplay (Fraunces, serif) — warm / identity / emotional moments ONLY:
 //     greetings ("Good afternoon", "Welcome back."), empty-state prompts, and
 //     Memory content category headers ("People", "Places"). The voice of the app.
 //
-//   • nmlBody (Inter, sans) — ALL functional/navigational/control UI: screen and
+//   • appBody (Inter, sans) — ALL functional/navigational/control UI: screen and
 //     nav titles, settings rows, buttons, field labels, status text, captions.
 //
-//   • nmlMono — technical readouts only (battery, latency, ids, timestamps).
+//   • appMono — technical readouts only (battery, latency, ids, timestamps).
 //
 // If a label is something the user operates (a control, a title, a status), it's
 // sans. If it's the product speaking to the user, it's serif. No other use of serif.
 /// Maps a SwiftUI `Font.Weight` to its `UIFont.Weight` twin. `Font.Weight` isn't a
 /// switchable enum, so a small lookup is the cleanest bridge for the metrics-scaled
 /// monospace font below.
-private func nmlUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
+private func appUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
     let map: [Font.Weight: UIFont.Weight] = [
         .ultraLight: .ultraLight, .thin: .thin, .light: .light, .regular: .regular,
         .medium: .medium, .semibold: .semibold, .bold: .bold, .heavy: .heavy, .black: .black
@@ -148,24 +185,24 @@ extension Font {
     // scales from there.
 
     /// Editorial display face (Didot) — iOS's built-in high-contrast Modern serif, the
-    /// app-wide headline/identity voice per the Silent Luxury spec. Didot ships only
+    /// app-wide headline/identity voice per the modern spec. Didot ships only
     /// Regular + Bold faces, so bold-ish weights map to Didot-Bold and everything else
     /// to Didot; `relativeTo:` keeps it scaling with Dynamic Type.
-    static func nmlDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    static func appDisplay(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let bolds: Set<Font.Weight> = [.semibold, .bold, .heavy, .black]
         return .custom(bolds.contains(weight) ? "Didot-Bold" : "Didot", size: size, relativeTo: .title)
     }
 
     /// Body / UI face (Inter) — a clean, even grotesque for running text and labels.
-    static func nmlBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .custom("Inter", size: size, relativeTo: .body).weight(weight)
     }
 
     /// Clean monospace for technical readouts — battery, latency, connection state.
     /// Scaled with Dynamic Type via UIFontMetrics (a fixed-size `.system` mono otherwise
     /// stays pinned no matter the user's text-size setting).
-    static func nmlMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        let base = UIFont.monospacedSystemFont(ofSize: size, weight: nmlUIFontWeight(weight))
+    static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        let base = UIFont.monospacedSystemFont(ofSize: size, weight: appUIFontWeight(weight))
         return Font(UIFontMetrics(forTextStyle: .body).scaledFont(for: base))
     }
 }
@@ -173,17 +210,17 @@ extension Font {
 extension View {
     /// Editorial eyebrow: small Inter, tracked-out, in muted titanium.
     /// Use above a title to let the layout breathe instead of stacking bold labels.
-    func nmlEyebrow() -> some View {
-        font(.nmlBody(11, weight: .semibold))
+    func appEyebrow() -> some View {
+        font(.appBody(11, weight: .semibold))
             .tracking(2.6)
-            .foregroundStyle(Color.nmlMuted)
+            .foregroundStyle(Color.appMuted)
     }
 
     /// A 0.5pt titanium hairline border — the only "accent" this aesthetic allows.
-    func nmlHairline(radius: CGFloat) -> some View {
+    func appHairline(radius: CGFloat) -> some View {
         overlay(
             RoundedRectangle(cornerRadius: radius)
-                .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                .strokeBorder(Color.appHairline, lineWidth: 0.5)
         )
     }
 }
@@ -191,7 +228,7 @@ extension View {
 /// A small status dot whose colour carries meaning (see the token table in the
 /// semantic-status section above). A soft halo only appears for the `.live` state,
 /// so "live" reads differently from a merely "enabled" row at a glance.
-struct NamelessStatusDot: View {
+struct AppStatusDot: View {
     enum Kind {
         case live      // green — active / streaming
         case enabled   // silver — enabled, idle
@@ -201,11 +238,11 @@ struct NamelessStatusDot: View {
 
         var color: Color {
             switch self {
-            case .live:     return .nmlLive
-            case .enabled:  return .nmlGlow
-            case .off:      return .nmlMuted.opacity(0.4)
-            case .error:    return .nmlDanger
-            case .degraded: return .nmlAttention
+            case .live:     return .appLive
+            case .enabled:  return .appGlow
+            case .off:      return .appMuted.opacity(0.4)
+            case .error:    return .appDanger
+            case .degraded: return .appAttention
             }
         }
         var halo: Bool { self == .live }
@@ -241,7 +278,7 @@ struct NamelessStatusDot: View {
     }
 }
 
-// MARK: - Unified "Nameless" list primitives
+// MARK: - Unified "App" list primitives
 //
 // Stock `List`/`Form` rows, grouped insets and the green system `Toggle` are
 // banned across Settings, Connectors and Memory. These primitives replace them:
@@ -251,17 +288,17 @@ struct NamelessStatusDot: View {
 extension Color {
     /// Luminous coral for destructive actions and overdue states — warm rather than
     /// neon, but bright enough to clear contrast against the pure-black canvas.
-    static let nmlDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
+    static let appDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
 }
 
 /// An ultra-thin, low-opacity horizontal divider — the only separator the
 /// language allows between rows.
-struct NamelessDivider: View {
+struct AppDivider: View {
     var inset: CGFloat = 0
     var body: some View {
         Rectangle()
             // The spec separator: 0.5px ≈ #222222, tinted subtly by the active finish.
-            .fill(Color.nmlHairline)
+            .fill(Color.appHairline)
             .frame(height: 0.5)
             .padding(.leading, inset)
     }
@@ -269,20 +306,20 @@ struct NamelessDivider: View {
 
 /// Title Case, wide-tracked sans-serif section header in muted detail colour.
 /// Elegant spacing instead of a loud uppercase monospace grid.
-struct NamelessSectionHeader: View {
+struct AppSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
             .font(.system(size: 12, weight: .regular))
             .tracking(2.4)
-            .foregroundStyle(Color.nmlMuted)
+            .foregroundStyle(Color.appMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 /// Minimalist custom toggle: a 30×16 capsule that slides between muted gray
 /// (off) and soft silver (on). Replaces the stock green `Toggle`.
-struct NamelessToggle: View {
+struct AppToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
@@ -290,11 +327,11 @@ struct NamelessToggle: View {
             withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.nmlInk : Color.white.opacity(0.12))
+                .fill(isOn ? Color.appInk : Color.white.opacity(0.12))
                 .frame(width: 30, height: 16)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.nmlObsidian : Color.nmlMuted)
+                        .fill(isOn ? Color.appObsidian : Color.appMuted)
                         .frame(width: 12, height: 12)
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
@@ -312,7 +349,7 @@ struct NamelessToggle: View {
 
 /// A single-line text field with no box — just a thin bottom rule that brightens
 /// softly while editing. Used for every text input in this language.
-struct NamelessLineField: View {
+struct AppLineField: View {
     let placeholder: String
     @Binding var text: String
     var axis: Axis = .horizontal
@@ -330,107 +367,43 @@ struct NamelessLineField: View {
                 }
             }
             .font(.system(size: 15, weight: .light))
-            .foregroundStyle(Color.nmlInk)
-            .tint(Color.nmlTitanium)
+            .foregroundStyle(Color.appInk)
+            .tint(Color.appTitanium)
             .focused($isFocused)
 
             Rectangle()
-                .fill(isFocused ? Color.nmlInk.opacity(0.55) : Color.white.opacity(0.08))
+                .fill(isFocused ? Color.appInk.opacity(0.55) : Color.white.opacity(0.08))
                 .frame(height: isFocused ? 1 : 0.5)
                 .animation(.easeInOut(duration: 0.2), value: isFocused)
         }
     }
 }
 
-// MARK: - Scale-on-press button style
-//
-// 0.96 is the calibrated value: tactile without feeling exaggerated.
-// Apply to every tappable element that isn't a full-width navigation row.
+// Clean shims and new helpers only. Old glass/primary button code burned.
+// Use oxy* + oxyScale. Legacy app* map above.
 
-struct NMLScaleButtonStyle: ButtonStyle {
-    var scale: CGFloat = 0.96
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? scale : 1.0)
-            .animation(.nmlFast, value: configuration.isPressed)
-    }
+extension ButtonStyle where Self == OxyScaleButtonStyle {
+    static var oxyScale: OxyScaleButtonStyle { .init() }
+    static func oxyScale(_ amount: CGFloat) -> OxyScaleButtonStyle { .init(amount: amount) }
 }
 
-extension ButtonStyle where Self == NMLScaleButtonStyle {
-    static var nmlScale: NMLScaleButtonStyle { .init() }
-    static func nmlScale(_ scale: CGFloat) -> NMLScaleButtonStyle { .init(scale: scale) }
+// Temporary edCanvas shim for remaining old views during migration.
+extension Color {
+    static let edCanvas = appBackground
+    static let edInk = appInk
+    static let edMuted = appMuted
 }
 
-/// The one loud gesture this language permits: a thick, full-width pill in stark
-/// solid white with black text. Labels are bracketed and tracked-out.
-struct NamelessPrimaryButton: View {
-    let title: String
-    var action: () -> Void
-
+// Simple atmosphere placeholder (weather hero can be re-thought later — not the only color anymore).
+struct AtmosphereSky: View {
+    let condition: String?
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .tracking(1.5)
-                // On-ink: contrasts with nmlInk in BOTH modes (white text on a dark fill in
-                // light mode, black text on a light fill in dark mode). nmlObsidian was always
-                // black and went invisible once light mode became real.
-                .foregroundStyle(Color.edCanvas)
-                .frame(maxWidth: .infinity)
-                .frame(height: 58)
-                .background(Color.nmlInk)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.nmlScale)
+        Color.clear // burn the full-bleed painterly sky as primary color source for now
+            .overlay(
+                LinearGradient(colors: [Color.appAccent.opacity(0.08), .clear], startPoint: .top, endPoint: .bottom)
+            )
     }
 }
-
-// MARK: - Liquid Glass (iOS 26+)
-//
-// Apple's Liquid Glass material gives icon-sized chrome — header buttons, the
-// composer's floating action button, floating overlays — a refractive,
-// light-bending surface. It's reserved for that "chrome": flat list rows
-// (Settings, Connectors, Memory, More) keep the existing raw-typography
-// treatment untouched. On iOS 17–25, where `glassEffect` doesn't exist, a
-// frosted `.ultraThinMaterial` approximation keeps the same silhouette and
-// tint so the layout doesn't shift between OS versions.
-
-extension View {
-    /// Wraps an icon/control in Liquid Glass on iOS 26+, or a frosted-material
-    /// approximation on earlier versions. `tint` carries through the control's
-    /// existing accent colour (e.g. titanium-fill buttons); pass `nil` for a
-    /// neutral glass chip. `interactive` adds the press/highlight response
-    /// Liquid Glass gives tappable controls.
-    @ViewBuilder
-    func nmlGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(Self.nmlGlassStyle(tint: tint, interactive: interactive), in: shape)
-        } else {
-            self.background { NamelessGlassFill(shape: shape, tint: tint) }
-        }
-    }
-
-    @available(iOS 26.0, *)
-    fileprivate static func nmlGlassStyle(tint: Color?, interactive: Bool) -> Glass {
-        var glass = Glass.regular
-        if let tint { glass = glass.tint(tint) }
-        if interactive { glass = glass.interactive() }
-        return glass
-    }
-}
-
-/// A hand-built glass fill for iOS 17–25, where Apple's `glassEffect` doesn't
-/// exist. A flat `.ultraThinMaterial` reads as frosted plastic; real glass needs
-/// the cues the eye looks for — a frosted base, a top-down sheen where light
-/// gathers, a bright specular highlight on the upper rim, and a refractive edge
-/// that fades toward the bottom. Layering those makes a chip read as glass on a
-/// pure-black UI instead of a dim disc.
-private struct NamelessGlassFill<S: InsettableShape>: View {
-    let shape: S
-    let tint: Color?
-
-    var body: some View {
-        ZStack {
             // Frosted base + a faint wash (or the control's tint) so it's visible on black.
             shape.fill(.ultraThinMaterial)
             shape.fill((tint ?? Color.white).opacity(tint == nil ? 0.06 : 0.22))
@@ -470,7 +443,7 @@ private struct NamelessGlassFill<S: InsettableShape>: View {
 /// Groups adjacent Liquid Glass controls so iOS 26 can render them as a single
 /// fluid surface that can morph between states. No-op passthrough on iOS 17–25.
 @ViewBuilder
-func nmlGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) -> some View {
+func appGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder content: () -> Content) -> some View {
     if #available(iOS 26.0, *) {
         GlassEffectContainer(spacing: spacing, content: content)
     } else {
@@ -478,14 +451,14 @@ func nmlGlassContainer<Content: View>(spacing: CGFloat = 12, @ViewBuilder conten
     }
 }
 
-// MARK: - NMLCard
+// MARK: - AppCard
 //
 // The single shared card surface. Every raised container in the product (Today cards,
 // More menu, action rows, attachment strips) should use this instead of defining its own
 // background + border + radius triple. The content is left-aligned by default; pass a
 // different alignment via the view modifier if needed.
 
-struct NMLCard<Content: View>: View {
+struct AppCard<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder let content: Content
 
@@ -493,11 +466,11 @@ struct NMLCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            .background(Color.nmlSurface)
+            .background(Color.appSurface)
             .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
-                    .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
             )
     }
 }
@@ -510,7 +483,7 @@ struct NMLCard<Content: View>: View {
 
 struct BrandWordmark: View {
     var height: CGFloat = 14
-    var color: Color = .nmlMuted
+    var color: Color = .appMuted
 
     var body: some View {
         Image("wordmark")
@@ -571,24 +544,24 @@ extension View {
 // A harder, purer greyscale for the settings-family screens (Settings, Connectors,
 // Pendant, Memory) per the Milgrain spec: a flat #0A0A0A canvas, dark #1A1A1A
 // hairlines, pure-white headings, and a #888/#555/#333 grey ramp. Kept separate from
-// the softer app-wide `nml*` tokens (off-black canvas, warm off-white ink, translucent
+// the softer app-wide `app*` tokens (off-black canvas, warm off-white ink, translucent
 // titanium hairlines) so Chat / Today / Onboarding are left untouched.
 
 extension Color {
     // Adaptive: resolves light/dark from the environment colorScheme, which the app root
     // drives from the user's AppAppearance setting (.system follows iOS). Dark values are
     // the Milgrain spec; light values are the inverted equivalents.
-    static let mgBg = nmlAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
+    static let mgBg = appAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
                                   light: Color(red: 250 / 255, green: 250 / 255, blue: 249 / 255)) // near-white
-    static let mgDivider = nmlAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
+    static let mgDivider = appAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
                                        light: Color.black.opacity(0.10))
-    static let mgHeading = nmlAdaptive(dark: Color.white,                                     // #FFFFFF
+    static let mgHeading = appAdaptive(dark: Color.white,                                     // #FFFFFF
                                        light: Color(red: 0.11, green: 0.11, blue: 0.12))      // near-black
-    static let mgSecondary = nmlAdaptive(dark: Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255), // #888
+    static let mgSecondary = appAdaptive(dark: Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255), // #888
                                          light: Color(red: 0.42, green: 0.42, blue: 0.46))
-    static let mgCaption = nmlAdaptive(dark: Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255), // #555
+    static let mgCaption = appAdaptive(dark: Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255), // #555
                                        light: Color(red: 0.56, green: 0.56, blue: 0.58))
-    static let mgOff = nmlAdaptive(dark: Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255), // #333 toggle off
+    static let mgOff = appAdaptive(dark: Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255), // #333 toggle off
                                    light: Color(white: 0.82))
     /// Fixed both finishes — system red reads on black and white alike.
     static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
@@ -612,12 +585,12 @@ struct MilgrainDivider: View {
 }
 
 /// Editorial section header — a Didot title in editorial ink, Title-case, left-aligned,
-/// no background. The settings-family counterpart to `EditorialSectionTitle`.
+/// no background. The settings-family counterpart to `AppSectionTitle`.
 struct MilgrainSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.nmlDisplay(20))
+            .font(.appDisplay(20))
             .foregroundStyle(Color.edInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -652,7 +625,7 @@ struct MilgrainToggle: View {
 
 /// Flat multi-option picker — plain text options side by side, separated by 0.5pt
 /// vertical hairlines, the selected one in heading colour and the rest in secondary.
-/// No capsule track, no fill, no pill (per the Silent Luxury spec: zero pill shapes).
+/// No capsule track, no fill, no pill (per the modern spec: zero pill shapes).
 /// `options` holds the stored values; pass `labels` when the display text differs.
 struct MilgrainSegmentedControl: View {
     let options: [String]
@@ -747,9 +720,9 @@ struct TodayPalette {
     )
 }
 
-/// A glass card for the Today tab — same silhouette as `NMLCard` but with a
+/// A glass card for the Today tab — same silhouette as `AppCard` but with a
 /// refractive Liquid Glass surface instead of an opaque fill, so it picks up the
-/// aurora gradient behind it. Group these in `nmlGlassContainer` to get the fluid
+/// aurora gradient behind it. Group these in `appGlassContainer` to get the fluid
 /// morph between cards on iOS 26.
 struct TodayCard<Content: View>: View {
     var padding: CGFloat = 16
@@ -862,10 +835,10 @@ private struct HidesTabBarOnScroll: ViewModifier {
         if #available(iOS 18.0, *) {
             content.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { oldY, newY in
                 // Ignore rubber-banding above the top and sub-pixel jitter.
-                guard newY > 0 else { withAnimation(.nmlStandard) { visibility.hidden = false }; return }
+                guard newY > 0 else { withAnimation(.appStandard) { visibility.hidden = false }; return }
                 let delta = newY - oldY
                 guard abs(delta) > 6 else { return }
-                withAnimation(.nmlStandard) { visibility.hidden = delta > 0 && newY > 40 }
+                withAnimation(.appStandard) { visibility.hidden = delta > 0 && newY > 40 }
             }
         } else {
             content // ponytail: pre-iOS-18 just keeps the bar pinned; not worth a manual offset reader.
@@ -880,7 +853,7 @@ extension View {
 }
 
 /// The quiet counterpart: border-only, muted titanium text, no fill.
-struct NamelessOutlineButton: View {
+struct AppOutlineButton: View {
     let title: String
     var action: () -> Void
 
@@ -889,12 +862,12 @@ struct NamelessOutlineButton: View {
             Text(title)
                 .font(.system(size: 14, weight: .medium))
                 .tracking(1.5)
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(Color.appMuted)
                 .frame(maxWidth: .infinity)
                 .frame(height: 58)
                 .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
         }
-        .buttonStyle(.nmlScale)
+        .buttonStyle(.appScale)
     }
 }
 
@@ -907,19 +880,19 @@ struct NamelessOutlineButton: View {
 
 extension Color {
     /// Warm-white by day, true black at night — the page canvas the whole app sits on.
-    static let edCanvas = nmlAdaptive(dark: .black,
+    static let edCanvas = appAdaptive(dark: .black,
                                       light: Color(red: 255 / 255, green: 253 / 255, blue: 249 / 255))
     /// Primary editorial ink — soft off-white on black, warm near-black on white.
-    static let edInk = nmlAdaptive(dark: Color(red: 236 / 255, green: 234 / 255, blue: 228 / 255),
+    static let edInk = appAdaptive(dark: Color(red: 236 / 255, green: 234 / 255, blue: 228 / 255),
                                    light: Color(red: 42 / 255, green: 36 / 255, blue: 29 / 255))
     /// Muted secondary — captions, times, metadata. Warm taupe on white, cool grey on black.
-    static let edMuted = nmlAdaptive(dark: Color(red: 124 / 255, green: 122 / 255, blue: 128 / 255),
+    static let edMuted = appAdaptive(dark: Color(red: 124 / 255, green: 122 / 255, blue: 128 / 255),
                                      light: Color(red: 168 / 255, green: 154 / 255, blue: 134 / 255))
     /// Tonal plate fill for featured blocks — deep charcoal on black, warm taupe on white.
-    static let edPlate = nmlAdaptive(dark: Color(red: 16 / 255, green: 15 / 255, blue: 13 / 255),
+    static let edPlate = appAdaptive(dark: Color(red: 16 / 255, green: 15 / 255, blue: 13 / 255),
                                      light: Color(red: 239 / 255, green: 230 / 255, blue: 216 / 255))
     /// Hairline rule for editorial dividers.
-    static let edRule = nmlAdaptive(dark: Color.white.opacity(0.10),
+    static let edRule = appAdaptive(dark: Color.white.opacity(0.10),
                                     light: Color(red: 230 / 255, green: 221 / 255, blue: 207 / 255))
 }
 
@@ -939,7 +912,7 @@ struct EditorialSeededRNG: RandomNumberGenerator {
 
 /// Faint paper-grain overlay for materiality — dark specks multiplied onto a light
 /// canvas, light specks screened onto a dark one. Static (seeded), never animated.
-struct PaperGrain: View {
+struct AppGrain: View {
     @Environment(\.colorScheme) private var scheme
     var intensity: Double = 0.05
 
@@ -1038,20 +1011,20 @@ struct AtmosphereSky: View {
 }
 
 /// A Didot section title — the editorial counterpart to a small-caps header.
-struct EditorialSectionTitle: View {
+struct AppSectionTitle: View {
     let text: String
     var size: CGFloat = 22
     init(_ text: String, size: CGFloat = 22) { self.text = text; self.size = size }
     var body: some View {
         Text(text)
-            .font(.nmlDisplay(size))
+            .font(.appDisplay(size))
             .foregroundStyle(Color.edInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 /// Hairline rule with a small centred dot — the only divider ornament the language uses.
-struct EditorialRule: View {
+struct AppRule: View {
     var body: some View {
         HStack(spacing: 10) {
             Rectangle().fill(Color.edRule).frame(height: 0.5)
@@ -1074,7 +1047,7 @@ struct EditorialPlate<Content: View>: View {
             .background {
                 ZStack {
                     Color.edPlate
-                    PaperGrain(intensity: 0.06)
+                    AppGrain(intensity: 0.06)
                 }
             }
             .clipShape(shape)

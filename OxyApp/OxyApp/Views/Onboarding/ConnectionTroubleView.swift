@@ -21,19 +21,19 @@ struct ConnectionTroubleView: View {
                 Spacer(minLength: 0)
 
                 Text("NO DEVICE FOUND")
-                    .font(.nmlBody(11, weight: .semibold))
+                    .font(.appBody(11, weight: .semibold))
                     .tracking(2.4)
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
 
                 Text("We couldn't reach your pendant.")
-                    .font(.nmlDisplay(30, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.appDisplay(30, weight: .regular))
+                    .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 18)
 
                 VStack(spacing: 0) {
                     ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
-                        if index != 0 { NamelessDivider() }
+                        if index != 0 { AppDivider() }
                         checkRow(check)
                     }
                 }
@@ -42,8 +42,8 @@ struct ConnectionTroubleView: View {
                 Spacer(minLength: 0)
 
                 VStack(spacing: 12) {
-                    NamelessPrimaryButton(title: "TRY AGAIN", action: onRetry)
-                    NamelessOutlineButton(title: "SKIP FOR NOW", action: onSkip)
+                    AppPrimaryButton(title: "TRY AGAIN", action: onRetry)
+                    AppOutlineButton(title: "SKIP FOR NOW", action: onSkip)
                 }
             }
             .padding(.horizontal, 28)
@@ -55,11 +55,11 @@ struct ConnectionTroubleView: View {
     private func checkRow(_ text: String) -> some View {
         HStack(spacing: 14) {
             Text("—")
-                .font(.nmlMono(13))
-                .foregroundStyle(Color.nmlMuted)
+                .font(.appMono(13))
+                .foregroundStyle(Color.appMuted)
             Text(text)
                 .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(Color.appInk)
             Spacer(minLength: 0)
         }
         .padding(.vertical, 18)

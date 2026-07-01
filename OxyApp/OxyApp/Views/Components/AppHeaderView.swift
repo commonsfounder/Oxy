@@ -17,18 +17,18 @@ struct AppHeaderView: View {
     private let circle: CGFloat = 38
 
     var body: some View {
-        nmlGlassContainer(spacing: 16) {
+        appGlassContainer(spacing: 16) {
             HStack {
                 // Left: history / menu, in a soft circular button (matches the
                 // app's other circular nav controls), finished with Liquid Glass.
                 Button(action: onLeading) {
                     Image(systemName: "line.3.horizontal")
                         .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(Color.nmlInk.opacity(0.85))
+                        .foregroundColor(Color.appInk.opacity(0.85))
                         .frame(width: circle, height: circle)
-                        .nmlGlass(Circle(), interactive: true)
+                        .appGlass(Circle(), interactive: true)
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .accessibilityLabel("History")
 
                 Spacer()
@@ -44,9 +44,9 @@ struct AppHeaderView: View {
                             GhostIcon(active: isIncognito)
                                 .frame(width: 18, height: 18)
                                 .frame(width: circle, height: circle)
-                                .nmlGlass(Circle(), tint: isIncognito ? Color.nmlInk : nil, interactive: true)
+                                .appGlass(Circle(), tint: isIncognito ? Color.appInk : nil, interactive: true)
                         }
-                        .buttonStyle(.nmlScale)
+                        .buttonStyle(.appScale)
                         .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
                     }
 
@@ -56,11 +56,11 @@ struct AppHeaderView: View {
                         Button(action: onNewChat) {
                             Image(systemName: "square.and.pencil")
                                 .font(.system(size: 16, weight: .medium))
-                                .foregroundColor(Color.nmlInk.opacity(0.85))
+                                .foregroundColor(Color.appInk.opacity(0.85))
                                 .frame(width: circle, height: circle)
-                                .nmlGlass(Circle(), interactive: true)
+                                .appGlass(Circle(), interactive: true)
                         }
-                        .buttonStyle(.nmlScale)
+                        .buttonStyle(.appScale)
                         .accessibilityLabel("New conversation")
                     }
                 }
@@ -82,7 +82,7 @@ private struct GhostIcon: View {
         // Active chip is ink-tinted, so the glyph takes the inverse of ink to stay
         // legible in both finishes; inactive is a neutral muted grey.
         GhostShape()
-            .fill(active ? Color.nmlAdaptive(dark: Color(red: 0.08, green: 0.08, blue: 0.10), light: .white) : Color.nmlMuted,
+            .fill(active ? Color.appAdaptive(dark: Color(red: 0.08, green: 0.08, blue: 0.10), light: .white) : Color.appMuted,
                   style: FillStyle(eoFill: true))
     }
 }
@@ -119,5 +119,5 @@ private struct GhostShape: Shape {
         AppHeaderView(isIncognito: .constant(false), isEmptyChat: false)
         Spacer()
     }
-    .background(Color.nmlObsidian)
+    .background(Color.appObsidian)
 }

@@ -23,12 +23,12 @@ struct ScreenHeaderView: View {
                         .frame(width: circle, height: circle)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .accessibilityLabel("Back")
             }
 
             Text(title)
-                .font(.nmlBody(17, weight: .semibold))
+                .font(.appBody(17, weight: .semibold))
                 .foregroundStyle(Color.mgHeading)
 
             Spacer()

@@ -84,7 +84,7 @@ private struct LoginFormPage: View {
                 Spacer().frame(height: 96)
 
                 Text(isRegistering ? "Create your account." : "Welcome back.")
-                    .font(.nmlDisplay(30, weight: .light))
+                    .font(.appDisplay(30, weight: .light))
                     .foregroundStyle(Color.edInk)
                     .padding(.bottom, 44)
 
@@ -95,8 +95,8 @@ private struct LoginFormPage: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.nmlBody(12, weight: .medium))
-                        .foregroundStyle(Color.nmlDanger)
+                        .font(.appBody(12, weight: .medium))
+                        .foregroundStyle(Color.appDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -114,7 +114,7 @@ private struct LoginFormPage: View {
                             .tracking(1.5)
                     }
                     // On-ink, not pure black: contrasts with edInk in BOTH finishes (the same
-                    // fix NamelessPrimaryButton carries). nmlObsidian is always black, so an
+                    // primary button accent. appBackground.
                     // enabled button in light mode rendered black text on a near-black fill —
                     // invisible. edCanvas flips with the finish and stays legible.
                     .foregroundStyle(Color.edCanvas)
@@ -123,21 +123,21 @@ private struct LoginFormPage: View {
                     .background(Color.edInk)
                     .clipShape(Capsule())
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .disabled(isLoading || userId.isEmpty || password.isEmpty)
                 .opacity(userId.isEmpty || password.isEmpty ? 0.4 : 1)
-                .animation(.nmlFast, value: userId.isEmpty || password.isEmpty)
+                .animation(.appFast, value: userId.isEmpty || password.isEmpty)
                 .padding(.top, 36)
 
                 Button {
-                    withAnimation(.nmlFast) { isRegistering.toggle() }
+                    withAnimation(.appFast) { isRegistering.toggle() }
                 } label: {
                     Text(isRegistering ? "Already have an account? Sign in" : "New here? Create account")
                         .font(.system(size: 13, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .padding(.top, 20)
 
                 Spacer().frame(height: 60)
@@ -159,14 +159,14 @@ private struct LoginFormPage: View {
                 }
             }
             .font(.system(size: 16, weight: .light))
-            .foregroundStyle(Color.nmlInk)
-            .tint(Color.nmlTitanium)
+            .foregroundStyle(Color.appInk)
+            .tint(Color.appTitanium)
             .focused($focusedField, equals: field)
 
             Rectangle()
-                .fill(focusedField == field ? Color.nmlInk.opacity(0.55) : Color.nmlFillSubtle)
+                .fill(focusedField == field ? Color.appInk.opacity(0.55) : Color.appFillSubtle)
                 .frame(height: focusedField == field ? 1 : 0.5)
-                .animation(.nmlFast, value: focusedField)
+                .animation(.appFast, value: focusedField)
         }
     }
 }

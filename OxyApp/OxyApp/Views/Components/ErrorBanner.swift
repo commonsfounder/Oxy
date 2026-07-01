@@ -9,7 +9,7 @@ struct ErrorBanner: View {
         HStack(spacing: 12) {
             Text(message)
                 .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(Color.nmlDanger)
+                .foregroundStyle(Color.appDanger)
                 .lineLimit(2)
 
             Spacer(minLength: 8)
@@ -17,40 +17,40 @@ struct ErrorBanner: View {
             if let onRetry {
                 Button(action: onRetry) {
                     Text("Retry")
-                        .font(.nmlBody(12, weight: .semibold))
+                        .font(.appBody(12, weight: .semibold))
                         .tracking(0.3)
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(Color.appTitanium)
                         // Pad the label to a ~40pt tap target without distorting the row.
                         .padding(.vertical, 11)
                         .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
             }
 
             if let onDismiss {
                 Button(action: onDismiss) {
                     Text("Dismiss")
-                        .font(.nmlBody(12, weight: .semibold))
+                        .font(.appBody(12, weight: .semibold))
                         .tracking(0.3)
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                         .padding(.vertical, 11)
                         .padding(.horizontal, 4)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color.nmlObsidian)
+        .background(Color.appObsidian)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.nmlFillSubtle).frame(height: 0.5)
+            Rectangle().fill(Color.appFillSubtle).frame(height: 0.5)
         }
     }
 }
 
 #Preview {
     ErrorBanner(message: "Network connection lost", onRetry: {}, onDismiss: {})
-        .background(Color.nmlObsidian)
+        .background(Color.appObsidian)
 }

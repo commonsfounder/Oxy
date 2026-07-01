@@ -23,7 +23,7 @@ struct PendantStatusView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.edCanvas.ignoresSafeArea()
+                Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Pendant", onBack: { dismiss() })
@@ -115,7 +115,7 @@ struct PendantStatusView: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
         .padding(.vertical, 14)
         .accessibilityHint("Cycles options")
     }
@@ -142,7 +142,7 @@ private struct PendantPairingSection: View {
                     Spacer()
                     // Static sans label — no status dot, no pulse (Milgrain spec).
                     Text(statusDescription)
-                        .font(.nmlBody(15, weight: .semibold))
+                        .font(.appBody(15, weight: .semibold))
                         .foregroundStyle(statusColor)
                         .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                 }
@@ -201,10 +201,10 @@ private struct PendantPairingSection: View {
                     Spacer()
                 }
                 .padding(.vertical, 16)
-                .animation(.nmlStandard, value: pendant.connectionState)
+                .animation(.appStandard, value: pendant.connectionState)
             }
         }
-        .animation(.nmlSpring, value: pendant.connectionState)
+        .animation(.appSpring, value: pendant.connectionState)
         .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { pendant.unpair() }
             Button("Cancel", role: .cancel) {}

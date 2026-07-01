@@ -60,7 +60,7 @@ struct ConnectorsView: View {
                                 }
                                 .opacity(cardsVisible ? 1 : 0)
                                 .offset(y: cardsVisible ? 0 : 18)
-                                .animation(.nmlSpring.delay(0.0), value: cardsVisible)
+                                .animation(.appSpring.delay(0.0), value: cardsVisible)
                             }
 
                             // Connected apps
@@ -85,7 +85,7 @@ struct ConnectorsView: View {
                             }
                             .opacity(cardsVisible ? 1 : 0)
                             .offset(y: cardsVisible ? 0 : 18)
-                            .animation(.nmlSpring.delay(0.08), value: cardsVisible)
+                            .animation(.appSpring.delay(0.08), value: cardsVisible)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 12)
@@ -482,7 +482,7 @@ private struct NativeCapabilityRow: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(statusColor)
             }
-            .buttonStyle(.nmlScale)
+            .buttonStyle(.appScale)
         }
         .padding(.vertical, 18)
     }
@@ -542,7 +542,7 @@ private struct IntegrationRow: View {
                         .foregroundStyle(isConnected ? Color.mgCaption : Color.mgSecondary)
                 }
             }
-            .buttonStyle(.nmlScale)
+            .buttonStyle(.appScale)
             .disabled(isBusy)
         }
         .padding(.vertical, 18)

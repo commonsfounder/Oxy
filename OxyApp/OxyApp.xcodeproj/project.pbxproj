@@ -38,7 +38,7 @@
 		A10000010000000000000026 /* PendantAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000028 /* PendantAudioBridge.swift */; };
 		A10000010000000000000028 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000030 /* HapticManager.swift */; };
 		A10000010000000000000029 /* ChatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000031 /* ChatHomeView.swift */; };
-		A10000010000000000000032 /* NamelessTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000032 /* NamelessTheme.swift */; };
+		A10000010000000000000032 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000032 /* AppTheme.swift */; };
 		A10000010000000000000033 /* PendantTelemetryMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000033 /* PendantTelemetryMonitor.swift */; };
 		A10000010000000000000034 /* DeviceStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000034 /* DeviceStatusCard.swift */; };
 		A10000010000000000000035 /* LegalConsentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000035 /* LegalConsentView.swift */; };
@@ -87,7 +87,7 @@
 		A20000010000000000000028 /* PendantAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantAudioBridge.swift; sourceTree = "<group>"; };
 		A20000010000000000000030 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000031 /* ChatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHomeView.swift; sourceTree = "<group>"; };
-		A20000010000000000000032 /* NamelessTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NamelessTheme.swift; sourceTree = "<group>"; };
+		A20000010000000000000032 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		A20000010000000000000033 /* PendantTelemetryMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantTelemetryMonitor.swift; sourceTree = "<group>"; };
 		A20000010000000000000034 /* DeviceStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceStatusCard.swift; sourceTree = "<group>"; };
 		A20000010000000000000035 /* LegalConsentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegalConsentView.swift; sourceTree = "<group>"; };
@@ -220,7 +220,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000010000000000000012 /* Color+Oxy.swift */,
-				A20000010000000000000032 /* NamelessTheme.swift */,
+				A20000010000000000000032 /* AppTheme.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -374,7 +374,7 @@
 				A10000010000000000000010 /* ChatViewModel.swift in Sources */,
 				A10000010000000000000011 /* MessageBubble.swift in Sources */,
 				A10000010000000000000012 /* Color+Oxy.swift in Sources */,
-				A10000010000000000000032 /* NamelessTheme.swift in Sources */,
+				A10000010000000000000032 /* AppTheme.swift in Sources */,
 				A10000010000000000000013 /* LoadingIndicator.swift in Sources */,
 				A10000010000000000000014 /* ErrorBanner.swift in Sources */,
 				A10000010000000000000015 /* MainTabView.swift in Sources */,

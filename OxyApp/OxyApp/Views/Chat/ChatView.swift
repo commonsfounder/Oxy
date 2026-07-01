@@ -63,7 +63,7 @@ struct ChatView: View {
                         .foregroundStyle(Color.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
-                        .background(Color.nmlAttention)
+                        .background(Color.appWarning)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -87,10 +87,10 @@ struct ChatView: View {
                             }
                             .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.nmlTitanium.opacity(0.1))
+                        .background(Color.appMuted.opacity(0.1))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -143,7 +143,7 @@ struct ChatView: View {
                                 }
                             }
                             .padding(.vertical, 12)
-                            .animation(.nmlSpring, value: viewModel.messages.count)
+                            .animation(.appSpring, value: viewModel.messages.count)
                         }
                         .overlay {
                             if viewModel.messages.isEmpty && !viewModel.isSending {
@@ -179,7 +179,7 @@ struct ChatView: View {
                         .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.nmlSpring) {
+                            withAnimation(.appSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -189,7 +189,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages.last?.content) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.nmlSpring) {
+                            withAnimation(.appSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -201,7 +201,7 @@ struct ChatView: View {
                             guard let targetID else { return }
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(150))
-                                withAnimation(.nmlStandard) {
+                                withAnimation(.appStandard) {
                                     proxy.scrollTo(targetID, anchor: .center)
                                 }
                                 try? await Task.sleep(for: .milliseconds(700))
@@ -400,7 +400,7 @@ struct ChatView: View {
     private var attachmentSheetOverlay: some View {
         if showAttachMenu {
             ZStack(alignment: .bottom) {
-                Color.nmlFillScrim
+                Color.appScrim
                     .ignoresSafeArea()
                     .onTapGesture { dismissAttachMenu() }
 
@@ -409,17 +409,17 @@ struct ChatView: View {
                         dismissAttachMenu()
                         showPhotoPicker = true
                     }
-                    NamelessDivider()
+                    AppDivider()
                     attachSheetRow("Files") {
                         dismissAttachMenu()
                         showFileImporter = true
                     }
                 }
                 .background(.regularMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
-                        .strokeBorder(Color.nmlHairline, lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
                 )
                 .padding(.horizontal, 14)
                 .padding(.bottom, 14)
@@ -433,17 +433,17 @@ struct ChatView: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 16, weight: .regular))
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(Color.appInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 17)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
     }
 
     private func dismissAttachMenu() {
-        withAnimation(.nmlFast) { showAttachMenu = false }
+        withAnimation(.appFast) { showAttachMenu = false }
     }
 
     /// Send a spoken transcript as a message into this conversation. De-dupes
@@ -657,96 +657,125 @@ private struct ActionReviewSheet: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
+    private var isPayment: Bool {
+        (action.actionSummary ?? "").localizedCaseInsensitiveContains("payment") ||
+        (action.actionSummary ?? "").localizedCaseInsensitiveContains("order") ||
+        (action.text ?? "").localizedCaseInsensitiveContains("charge") ||
+        (action.cardText ?? "").localizedCaseInsensitiveContains("£") ||
+        action.actionSummary == "Awaiting payment confirmation"
+    }
+
     private var title: String {
-        action.actionSummary ?? {
+        if isPayment {
+            return action.actionSummary ?? "Confirm order"
+        }
+        return action.actionSummary ?? {
             switch action.action {
             case "send_email": return "Review email"
             case "send_message": return "Review message"
             case "send_telegram": return "Review Telegram"
             case "make_call": return "Review call"
-            default: return "Review action"
+            default: return "Review"
             }
         }()
     }
 
+    private var subtitle: String {
+        isPayment ? "This will use the saved payment method on the site." : "One tap when it looks right."
+    }
+
+    private var confirmLabel: String {
+        isPayment ? "Confirm & Place Order" : "Confirm"
+    }
+
     private var detail: String {
-        action.cardText ?? action.text ?? "Ready for review."
+        action.cardText ?? action.text ?? "Ready."
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             Capsule()
-                .fill(Color.nmlHairline)
+                .fill(Color.appHairline)
                 .frame(width: 36, height: 4)
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 12) {
                 Image(systemName: iconName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.nmlTitanium)
-                    .frame(width: 34, height: 34)
-                    .nmlGlass(Circle(), tint: Color.nmlTitanium)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isPayment ? Color.appAccent : Color.appMuted)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle().fill(isPayment ? Color.appAccent.opacity(0.15) : Color.appSurface)
+                    )
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Color.nmlInk)
-                    Text("One tap when it looks right.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.nmlMuted)
+                        .font(.appTitle(20, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text(subtitle)
+                        .font(.appBody(13))
+                        .foregroundStyle(Color.appMuted)
                 }
                 Spacer()
             }
 
             Text(detail)
-                .font(.system(size: 15))
-                .foregroundStyle(Color.nmlInk)
-                .lineSpacing(5)
+                .font(.appBody(15))
+                .foregroundStyle(Color.appInk)
+                .lineSpacing(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(Color.nmlSurface.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.nmlHairline, lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: AppRadius.md)
+                        .stroke(isPayment ? Color.appAccent.opacity(0.3) : Color.appHairline, lineWidth: 1)
                 )
 
-            HStack(spacing: 10) {
+            if isPayment {
+                Text("Double-check the total and address on the site if anything looks off.")
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+            }
+
+            HStack(spacing: 12) {
                 Button(action: onCancel) {
-                    Label("Cancel", systemImage: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
+                    Text("Cancel")
+                        .font(.appBody(15, weight: .semibold))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 14)
                 }
-                .buttonStyle(.nmlScale)
-                .foregroundStyle(Color.nmlMuted)
-                .background(Color.nmlSurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(.appScale)
+                .foregroundStyle(Color.appMuted)
+                .background(Color.appSurface2)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
 
                 Button(action: onConfirm) {
-                    Label("Send", systemImage: "arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
+                    Text(confirmLabel)
+                        .font(.appBody(15, weight: .semibold))
+                        .foregroundStyle(Color.appOnAccent)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 14)
                 }
-                .buttonStyle(.nmlScale)
-                .foregroundStyle(Color.nmlObsidian)
-                .background(Color.nmlTitanium)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .buttonStyle(.appScale)
+                .foregroundStyle(Color.appOnAccent)
+                .background(isPayment ? Color.appAccent : Color.appAccent)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
             }
         }
-        .padding(18)
+        .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.nmlObsidian)
+        .background(Color.appBackground)
     }
 
     private var iconName: String {
+        if isPayment { return "creditcard.fill" }
         switch action.action {
         case "send_email": return "envelope.fill"
         case "send_message": return "message.fill"
         case "send_telegram": return "paperplane.fill"
         case "make_call": return "phone.fill"
-        default: return "checkmark.seal.fill"
+        default: return "checkmark.circle.fill"
         }
     }
 }
@@ -763,30 +792,30 @@ private struct VoiceRecordingBar: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Divider().overlay(Color.nmlHairline)
+            Divider().overlay(Color.appHairline)
 
             HStack(spacing: 12) {
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(isTranscribing ? Color.nmlTitanium : Color.nmlDanger)
+                            .fill(isTranscribing ? Color.appMuted : Color.appDanger)
                             .frame(width: 8, height: 8)
                             .scaleEffect(pulse ? 1.2 : 0.8)
                             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
                         Text(isTranscribing ? "Transcribing…" : "Listening...")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.nmlInk)
+                            .foregroundStyle(Color.appInk)
                     }
                     if let t = transcript, !t.isEmpty {
                         Text(t)
                             .font(.system(size: 13))
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(2)
                     }
                 }
@@ -797,9 +826,9 @@ private struct VoiceRecordingBar: View {
                     Button(action: onStop) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.nmlObsidian)
+                            .foregroundStyle(Color.appObsidian)
                             .frame(width: 36, height: 36)
-                            .nmlGlass(Circle(), tint: Color.nmlTitanium, interactive: true)
+                            .appGlass(Circle(), tint: Color.appMuted, interactive: true)
                     }
                 }
             }
@@ -889,7 +918,7 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
-/// Full-screen editorial welcome state. Fraunces title in the upper portion,
+/// Full-screen welcome. Quick actions.
 /// hairline-separated action rows in the lower portion. Silent luxury: generous
 /// space, no fills, nothing decorated.
 private struct WelcomeCard: View {
@@ -928,19 +957,16 @@ private struct WelcomeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // ── Editorial title ─────────────────────────────────────────────
+            // Quick start actions
             VStack(alignment: .leading, spacing: 20) {
-                BrandWordmark(height: 11)
-                    .opacity(appeared ? 0.55 : 0)
-                    .animation(.nmlRelax.delay(0.06), value: appeared)
+                // BrandWordmark removed — less precious, more direct.
 
-                Text("Where should\nwe begin?")
-                    .font(.nmlDisplay(42, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
-                    .lineSpacing(8)
+                Text("What can I do for you?")
+                    .font(.appTitle(28, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 18)
-                    .animation(.nmlSpring.delay(0.1), value: appeared)
+                    .animation(.appSpring.delay(0.1), value: appeared)
             }
             .padding(.horizontal, 24)
             .padding(.top, 52)
@@ -950,37 +976,37 @@ private struct WelcomeCard: View {
             // ── Action rows ─────────────────────────────────────────────────
             VStack(alignment: .leading, spacing: 0) {
                 Rectangle()
-                    .fill(Color.nmlHairline)
+                    .fill(Color.appHairline)
                     .frame(height: 0.5)
                     .opacity(appeared ? 1 : 0)
-                    .animation(.nmlSpring.delay(0.18), value: appeared)
+                    .animation(.appSpring.delay(0.18), value: appeared)
 
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
                     Button { onAction(label) } label: {
                         HStack(spacing: 14) {
                             Image(systemName: icon(for: label))
                                 .font(.system(size: 14, weight: .ultraLight))
-                                .foregroundStyle(Color.nmlMuted.opacity(0.5))
+                                .foregroundStyle(Color.appMuted.opacity(0.5))
                                 .frame(width: 18, alignment: .center)
                             Text(label)
-                                .font(.nmlBody(16, weight: .light))
-                                .foregroundStyle(Color.nmlMuted)
+                                .font(.appBody(16, weight: .light))
+                                .foregroundStyle(Color.appMuted)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 9, weight: .light))
-                                .foregroundStyle(Color.nmlMuted.opacity(0.3))
+                                .foregroundStyle(Color.appMuted.opacity(0.3))
                         }
                         .padding(.horizontal, 24)
                         .padding(.vertical, 20)
                         .contentShape(Rectangle())
                         .overlay(alignment: .bottom) {
-                            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+                            Rectangle().fill(Color.appHairline).frame(height: 0.5)
                         }
                     }
-                    .buttonStyle(.nmlScale(0.97))
+                    .buttonStyle(.appScale(0.97))
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 10)
-                    .animation(.nmlSpring.delay(0.22 + Double(index) * 0.07), value: appeared)
+                    .animation(.appSpring.delay(0.22 + Double(index) * 0.07), value: appeared)
                     .contextMenu {
                         ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
                             Button { replace(slot: index, with: option.label) } label: {
@@ -1038,35 +1064,35 @@ private struct ChatInputBar: View {
                     } else {
                         Image(systemName: attachmentIsImage ? "photo.fill" : "doc.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.nmlTitanium)
+                            .foregroundStyle(Color.appMuted)
                             .frame(width: 38, height: 38)
-                            .nmlGlass(RoundedRectangle(cornerRadius: 8))
+                            .appGlass(RoundedRectangle(cornerRadius: 8))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.nmlInk)
+                            .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
                             .font(.system(size: 11))
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
                     Button(action: onRemoveAttachment) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(Color.appMuted)
                             // Glyph stays 16pt; the tap target grows to the 40×40 minimum.
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.nmlScale)
+                    .buttonStyle(.appScale)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
-                .background(Color.nmlSurface)
-                .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
             }
@@ -1076,34 +1102,34 @@ private struct ChatInputBar: View {
                 Button(action: onAttach) {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                         .frame(width: 36, height: 36)
-                        .nmlGlass(Circle(), interactive: true)
+                        .appGlass(Circle(), interactive: true)
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .disabled(isSending)
 
                 // Text field in a rounded container — the chat surface
                 TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
                     .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
-                    .tint(Color.nmlTitanium)
+                    .foregroundStyle(Color.appInk)
+                    .tint(Color.appMuted)
                     .lineLimit(1...6)
                     .focused(isFocused)
                     .onSubmit { if canSend { onSend() } }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.nmlSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous))
+                    .background(Color.appSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: NMLRadius.input, style: .continuous)
+                        RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
                             .strokeBorder(
                                 isFocused.wrappedValue
-                                    ? Color.nmlTitanium.opacity(0.28)
-                                    : Color.nmlHairline,
+                                    ? Color.appAccent.opacity(0.35)
+                                    : Color.appHairline,
                                 lineWidth: isFocused.wrappedValue ? 1.0 : 0.5
                             )
-                            .animation(.nmlFast, value: isFocused.wrappedValue)
+                            .animation(.oxyFast, value: isFocused.wrappedValue)
                     )
 
                 // Send / voice
@@ -1112,26 +1138,26 @@ private struct ChatInputBar: View {
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(Color.nmlObsidian)
+                                .tint(Color.appObsidian)
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                                 .font(.system(size: 15, weight: .semibold))
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .foregroundStyle(canAct ? Color.nmlObsidian : Color.nmlMuted)
+                    .foregroundStyle(canAct ? Color.appObsidian : Color.appMuted)
                     .frame(width: 36, height: 36)
                     .contentShape(Circle())
-                    .nmlGlass(
+                    .appGlass(
                         Circle(),
-                        tint: canAct ? (isRecording && !canSend ? Color.nmlDanger : Color.nmlTitanium) : nil,
+                        tint: canAct ? (isRecording && !canSend ? Color.appDanger : Color.appMuted) : nil,
                         interactive: false
                     )
-                    .shadow(color: Color.nmlFillScrim, radius: 6, y: 2)
+                    .shadow(color: Color.appScrim, radius: 6, y: 2)
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
-                .animation(.nmlFast, value: canAct)
+                .animation(.appFast, value: canAct)
             }
             .padding(.horizontal, 14)
             .padding(.top, 10)
@@ -1159,7 +1185,7 @@ private struct StatusIndicator: View {
             OxyThinkingIndicator(label: label, compact: true)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
-                .background(Color.nmlTitanium.opacity(0.08))
+                .background(Color.appMuted.opacity(0.08))
                 .clipShape(Capsule())
             Spacer(minLength: 60)
         }
@@ -1180,7 +1206,7 @@ struct PendantOverlay: View {
             if let notice {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(Color.nmlAttention)
+                    .foregroundStyle(Color.appWarning)
                 Text(notice)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(.primary)
@@ -1197,7 +1223,7 @@ struct PendantOverlay: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                        .animation(.nmlFast, value: t)
+                        .animation(.appFast, value: t)
                 }
             } else {
                 Image(systemName: "waveform")
@@ -1207,19 +1233,19 @@ struct PendantOverlay: View {
                 if let t = transcript, !t.isEmpty {
                     Text(t)
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.nmlInk)
+                        .foregroundStyle(Color.appInk)
                         .lineLimit(1)
                 } else {
                     Text("Transcribing…")
                         .font(.system(size: 14))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                 }
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 11)
-        .nmlGlass(Capsule())
-        .animation(.nmlFast, value: state)
+        .appGlass(Capsule())
+        .animation(.appFast, value: state)
     }
 }
 
@@ -1246,12 +1272,12 @@ struct PendantWaveform: View {
 
         var body: some View {
             Capsule()
-                .fill(Color.nmlTitanium)
+                .fill(Color.appMuted)
                 .frame(width: 3, height: on ? maxH : 3)
                 .animation(
                     active
                         ? .easeInOut(duration: dur).repeatForever(autoreverses: true).delay(delay)
-                        : .nmlFast,
+                        : .appFast,
                     value: on
                 )
                 .onAppear { if active { on = true } }

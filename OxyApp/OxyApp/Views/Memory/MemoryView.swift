@@ -56,28 +56,28 @@ struct MemoryView: View {
                                     isSaving: isSaving,
                                     message: saveMessage,
                                     onSave: { Task { await saveMemory() } },
-                                    onCollapse: { withAnimation(.nmlStandard) { composerExpanded = false } }
+                                    onCollapse: { withAnimation(.appStandard) { composerExpanded = false } }
                                 )
                             } else {
                                 // Collapsed: a single quiet line. Tapping it reveals the full composer.
                                 Button {
                                     HapticManager.shared.impact(.light)
                                     saveMessage = nil
-                                    withAnimation(.nmlStandard) { composerExpanded = true }
+                                    withAnimation(.appStandard) { composerExpanded = true }
                                 } label: {
                                     HStack(spacing: 12) {
                                         Image(systemName: "plus")
                                             .font(.system(size: 13, weight: .medium))
                                             .foregroundStyle(Color.mgSecondary)
                                         Text("Remember something…")
-                                            .font(.nmlBody(15, weight: .light))
+                                            .font(.appBody(15, weight: .light))
                                             .foregroundStyle(Color.mgSecondary)
                                         Spacer(minLength: 0)
                                     }
                                     .padding(.vertical, 14)
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.nmlScale(0.99))
+                                .buttonStyle(.appScale(0.99))
                             }
                         }
                         .padding(.top, 12)
@@ -88,16 +88,16 @@ struct MemoryView: View {
                             Spacer()
                             if !items.isEmpty {
                                 Text("\(items.count)")
-                                    .font(.nmlBody(13))
+                                    .font(.appBody(13))
                                     .foregroundStyle(Color.mgSecondary)
                                     .contentTransition(.numericText())
-                                    .animation(.nmlStandard, value: items.count)
+                                    .animation(.appStandard, value: items.count)
                             }
                         }
                         .padding(.bottom, 12)
 
                         if !isLoading && !items.isEmpty {
-                            NamelessLineField(placeholder: "Search memories…", text: $search)
+                            AppLineField(placeholder: "Search memories…", text: $search)
                                 .padding(.bottom, 20)
                         }
 
@@ -124,7 +124,7 @@ struct MemoryView: View {
 
                     ForEach(Array(groupedItems.enumerated()), id: \.element.title) { index, group in
                         Text(group.title)
-                            .font(.nmlBody(18, weight: .semibold))
+                            .font(.appBody(18, weight: .semibold))
                             .foregroundStyle(Color.mgHeading)
                             .padding(.top, index == 0 ? 16 : 30)
                             .padding(.bottom, 4)
@@ -165,7 +165,7 @@ struct MemoryView: View {
                                 .foregroundStyle(Color.mgDestructive)
                                 .padding(.vertical, 18)
                         }
-                        .buttonStyle(.nmlScale(0.98))
+                        .buttonStyle(.appScale(0.98))
                         .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
@@ -174,7 +174,7 @@ struct MemoryView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .environment(\.defaultMinListRowHeight, 0)
-                .animation(.nmlSpring, value: isLoading)
+                .animation(.appSpring, value: isLoading)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -198,7 +198,7 @@ struct MemoryView: View {
         }
     }
 
-    // Group memories into a few editorial buckets so the screen reads as a curated
+    // Group memories into a few buckets so the screen reads as curated
     // index rather than one long flat list. "Notes" is the catch-all — nothing is lost.
     private var groupedItems: [(title: String, items: [MemoryItem])] {
         let query = search.trimmingCharacters(in: .whitespaces)
@@ -244,7 +244,7 @@ struct MemoryView: View {
                 saveMessage = nil
                 isSaving = false
                 // Collapse back to the quiet line so the freshly-saved memory leads again.
-                withAnimation(.nmlStandard) { composerExpanded = false }
+                withAnimation(.appStandard) { composerExpanded = false }
             }
             await loadMemory()
         } catch {
@@ -288,7 +288,7 @@ private struct MemoryRow: View {
 
     var body: some View {
         Text(item.content)
-            .font(.nmlBody(15, weight: .light))
+            .font(.appBody(15, weight: .light))
             .foregroundStyle(Color.mgHeading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -313,7 +313,7 @@ private struct MemoryDropBox: View {
                 // Sans, matching every other heading in the settings family — the lone
                 // Didot here was the one place the mg dialect borrowed the display serif.
                 Text("Add it once. It's kept for later.")
-                    .font(.nmlBody(17, weight: .semibold))
+                    .font(.appBody(17, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
                 Spacer(minLength: 8)
                 if let onCollapse {
@@ -324,12 +324,12 @@ private struct MemoryDropBox: View {
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.nmlScale)
+                    .buttonStyle(.appScale)
                     .accessibilityLabel("Collapse")
                 }
             }
 
-            NamelessLineField(
+            AppLineField(
                 placeholder: "Remember that…",
                 text: $draft,
                 axis: .vertical,
@@ -339,7 +339,7 @@ private struct MemoryDropBox: View {
             HStack {
                 if let message {
                     Text(message)
-                        .font(.nmlBody(12, weight: .medium))
+                        .font(.appBody(12, weight: .medium))
                         .foregroundStyle(message == "Saved." ? Color.mgHeading : Color.mgDestructive)
                 }
                 Spacer()
@@ -351,12 +351,12 @@ private struct MemoryDropBox: View {
                                 .tint(Color.mgSecondary)
                         }
                         Text(isSaving ? "Saving" : "Save")
-                            .font(.nmlBody(12, weight: .semibold))
+                            .font(.appBody(12, weight: .semibold))
                             .tracking(0.4)
                     }
                     .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
                 }
-                .buttonStyle(.nmlScale)
+                .buttonStyle(.appScale)
                 .disabled(!canSave)
             }
         }

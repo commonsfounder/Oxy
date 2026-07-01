@@ -25,62 +25,54 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.pending }
     }
 
-    // Minimal, near-square corners — a quiet tonal block, not a chat bubble. Inner
-    // (leading) corners tighten further when adjacent to another in the same run.
-    private var userBubbleShape: UnevenRoundedRectangle {
-        UnevenRoundedRectangle(
-            topLeadingRadius: isGroupStart ? 6 : 3,
-            bottomLeadingRadius: isGroupEnd  ? 6 : 3,
-            bottomTrailingRadius: 6,
-            topTrailingRadius: 6,
-            style: .continuous
-        )
+    // New direction bubbles: clear distinction, accent for the AI voice and user actions.
+    // Friendly, not literary. User on right with accent tint. AI on left with presence.
+    private var bubbleShape: some Shape {
+        RoundedRectangle(cornerRadius: AppRadius.bubble, style: .continuous)
     }
 
     var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
-            // Message content
+        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 6) {
+            // Message content — real bubbles now.
             if !message.content.isEmpty && uberAction == nil {
                 HStack(alignment: .bottom, spacing: 0) {
-                    if isUser { Spacer(minLength: 64) }
-
-                    // The assistant's voice gets a quiet leading rule — it anchors the reply
-                    // like a quoted passage in a magazine, without caging it in a bubble.
-                    // Fills the text height; never drawn on the user (bubbled) side.
-                    if !isUser {
-                        RoundedRectangle(cornerRadius: 1, style: .continuous)
-                            .fill(Color.nmlMuted.opacity(0.35))
-                            .frame(width: 2)
-                            .frame(maxHeight: .infinity)
-                            .padding(.trailing, 12)
-                    }
+                    if isUser { Spacer(minLength: 48) }
 
                     Group {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
-                                fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 4 : 6
+                                fontSize: isCompact ? 15 : 16,
+                                lineSpacing: isCompact ? 4 : 5
                             )
                         } else {
                             Text(message.content)
-                                .font(.nmlBody(isCompact ? 14 : 15))
-                                .foregroundStyle(Color.nmlInk)
-                                .lineSpacing(isCompact ? 4 : 6)
+                                .font(.oxyBody(isCompact ? 15 : 16))
+                                .foregroundStyle(Color.appInk)
+                                .lineSpacing(isCompact ? 4 : 5)
                         }
                     }
-                    .padding(.horizontal, isUser ? 15 : 0)
-                    .padding(.vertical, isUser ? 11 : 0)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
                     .background {
-                        if isUser {
-                            // Shaped bubble: more rounded toward the exterior of the run,
-                            // gently squared where messages sit flush against each other.
-                            userBubbleShape
-                                .fill(Color.nmlFillBubble)
+                        bubbleShape
+                            .fill(isUser ? Color.appAccent.opacity(0.18) : Color.appSurface)
+                    }
+                    .overlay {
+                        if !isUser {
+                            // Subtle left accent bar for AI "voice"
+                            HStack {
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(Color.appAccent)
+                                    .frame(width: 3)
+                                Spacer()
+                            }
+                            .padding(.vertical, 6)
+                            .padding(.leading, 4)
                         }
                     }
 
-                    if !isUser { Spacer(minLength: 64) }
+                    if !isUser { Spacer(minLength: 48) }
                 }
             }
 
@@ -129,9 +121,9 @@ struct MessageBubble: View {
             // Timestamp — group-end only, very quiet
             if isGroupEnd {
                 Text(message.timestamp, style: .time)
-                    .font(.nmlBody(10))
+                    .font(.appBody(10))
                     .monospacedDigit()
-                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
+                    .foregroundStyle(Color.appMuted.opacity(0.6))
                     .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
                     .padding(.top, 1)
             }
@@ -146,7 +138,7 @@ struct MessageBubble: View {
         ))
         // Animate the streaming→settled flip, not every token. Animating on
         // `content` re-ran a spring layout pass per streamed word — a stutter source.
-        .animation(.nmlSpring, value: message.isStreaming)
+        .animation(.appSpring, value: message.isStreaming)
     }
 }
 
@@ -161,10 +153,10 @@ private struct StreamingWordText: View {
 
     var body: some View {
         Text(attributedText)
-            .font(.nmlBody(fontSize))
-            .foregroundStyle(Color.nmlInk)
+            .font(.appBody(fontSize))
+            .foregroundStyle(Color.appInk)
             .lineSpacing(lineSpacing)
-            .animation(.nmlRelax, value: words.count)
+            .animation(.appRelax, value: words.count)
     }
 
     private var attributedText: AttributedString {
@@ -181,7 +173,7 @@ private struct StreamingWordText: View {
             case 5:       0.62
             default:      0.55
             }
-            part.foregroundColor = Color.nmlInk.opacity(opacity)
+            part.foregroundColor = Color.appInk.opacity(opacity)
             output += part
         }
         return output
@@ -199,20 +191,20 @@ private struct DirectionsLink: View {
         Button(action: open) {
             HStack(spacing: 6) {
                 Text("Open in Maps")
-                    .font(.nmlBody(13, weight: .light))
-                    .foregroundStyle(Color.nmlTitanium)
+                    .font(.appBody(13, weight: .light))
+                    .foregroundStyle(Color.appTitanium)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
             }
             .padding(.vertical, 13)
             .frame(maxWidth: .infinity)
             .overlay(alignment: .top) {
-                Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+                Rectangle().fill(Color.appHairline).frame(height: 0.5)
             }
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
         .contentShape(Rectangle())
     }
 
@@ -235,8 +227,8 @@ private struct MessageSourceChips: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 Text("Sources")
-                    .nmlEyebrow()
-                    .foregroundStyle(Color.nmlMuted)
+                    .appEyebrow()
+                    .foregroundStyle(Color.appMuted)
 
                 ForEach(sources) { source in
                     Button {
@@ -245,17 +237,17 @@ private struct MessageSourceChips: View {
                     } label: {
                         HStack(spacing: 4) {
                             Text(source.title)
-                                .font(.nmlBody(11))
+                                .font(.appBody(11))
                                 .lineLimit(1)
                             Image(systemName: "arrow.up.right")
                                 .font(.system(size: 8, weight: .semibold))
                         }
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(Color.appTitanium)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .overlay(Rectangle().strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                        .overlay(Rectangle().strokeBorder(Color.appHairline, lineWidth: 0.5))
                     }
-                    .buttonStyle(.nmlScale)
+                    .buttonStyle(.appScale)
                 }
             }
         }
@@ -304,7 +296,7 @@ struct ActionCard: View {
             Button(action: openLink) {
                 confirmationRow
             }
-            .buttonStyle(.nmlScale(0.98))
+            .buttonStyle(.appScale(0.98))
             .disabled(!hasLink)
         }
     }
@@ -318,12 +310,12 @@ struct ActionCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(headline)
-                    .font(.nmlBody(14))
-                    .foregroundStyle(action.success ? Color.nmlInk : Color.nmlDanger)
+                    .font(.appBody(14))
+                    .foregroundStyle(action.success ? Color.appInk : Color.appDanger)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.nmlBody(13, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .font(.appBody(13, weight: .light))
+                        .foregroundStyle(Color.appMuted)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -335,17 +327,17 @@ struct ActionCard: View {
             if hasLink {
                 HStack(spacing: 3) {
                     Text("Open")
-                        .font(.nmlBody(13))
+                        .font(.appBody(13))
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                 }
-                .foregroundStyle(Color.nmlTitanium)
+                .foregroundStyle(Color.appTitanium)
             }
         }
         .padding(.vertical, 15)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) {
-            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
         }
         .contentShape(Rectangle())
     }
@@ -354,7 +346,7 @@ struct ActionCard: View {
     private var statusGlyph: some View {
         Image(systemName: action.success ? "checkmark" : "exclamationmark")
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(action.success ? Color.nmlGlow : Color.nmlDanger)
+            .foregroundStyle(action.success ? Color.appGlow : Color.appDanger)
             .frame(width: 16, height: 19, alignment: .center)
     }
 
@@ -370,12 +362,12 @@ struct ActionCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(headline)
-                        .font(.nmlBody(14))
-                        .foregroundStyle(Color.nmlInk)
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appInk)
                     if let detail = detailText {
                         Text(detail)
-                            .font(.nmlBody(13, weight: .light))
-                            .foregroundStyle(Color.nmlMuted)
+                            .font(.appBody(13, weight: .light))
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -395,13 +387,13 @@ struct ActionCard: View {
     private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.nmlBody(13, weight: .medium))
-                .foregroundStyle(muted ? Color.nmlMuted : Color.nmlInk)
+                .font(.appBody(13, weight: .medium))
+                .foregroundStyle(muted ? Color.appMuted : Color.appInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
-                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
         }
-        .buttonStyle(.nmlScale)
+        .buttonStyle(.appScale)
     }
 
     private func openLink() {
@@ -486,9 +478,9 @@ struct UberHandoffCard: View {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
                         Text("RIDE · UBER")
-                            .font(.nmlMono(11))
+                            .font(.appMono(11))
                             .tracking(1.4)
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(Color.appMuted)
                         Spacer()
                         ConfirmTick(active: confirmed)
                     }
@@ -502,9 +494,9 @@ struct UberHandoffCard: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
         .onAppear {
-            withAnimation(.nmlRelax.delay(0.15)) { confirmed = true }
+            withAnimation(.appRelax.delay(0.15)) { confirmed = true }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
@@ -513,12 +505,12 @@ struct UberHandoffCard: View {
     private func handoffRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 12) {
             Text(label)
-                .font(.nmlMono(11))
-                .foregroundStyle(Color.nmlMuted)
+                .font(.appMono(11))
+                .foregroundStyle(Color.appMuted)
                 .frame(width: 38, alignment: .leading)
             Text(value)
-                .font(.nmlMono(11))
-                .foregroundStyle(Color.nmlInk)
+                .font(.appMono(11))
+                .foregroundStyle(Color.appInk)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
@@ -543,11 +535,11 @@ private struct ConfirmTick: View {
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Color.nmlMuted.opacity(0.4), lineWidth: 1)
+                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
                 .frame(width: 18, height: 18)
             CheckPath()
                 .trim(from: 0, to: active ? 1 : 0)
-                .stroke(Color.nmlInk, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .stroke(Color.appInk, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
                 .frame(width: 9, height: 7)
         }
         .frame(width: 18, height: 18)
@@ -595,37 +587,37 @@ struct TravelResultCard: View {
             HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(Color.nmlTitanium)
+                    .foregroundStyle(Color.appTitanium)
                 Text(eyebrow)
-                    .font(.nmlMono(11))
+                    .font(.appMono(11))
                     .tracking(0.8)
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                 Spacer()
                 if action.success {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.nmlTitanium)
+                        .foregroundStyle(Color.appTitanium)
                 } else {
                     Image(systemName: "exclamationmark")
                         .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                 }
             }
 
             if let text = action.text, !text.isEmpty {
                 Text(text)
-                    .font(.nmlBody(13, weight: .light))
-                    .foregroundStyle(action.success ? Color.nmlInk : Color.nmlMuted)
+                    .font(.appBody(13, weight: .light))
+                    .foregroundStyle(action.success ? Color.appInk : Color.appMuted)
                     .lineLimit(6)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.nmlSurface)
+        .background(Color.appSurface)
         // Rounded card silhouette to match every other card in the message stream
         // (UberHandoffCard/ActionCard/pendingCard) — was the lone sharp-edged Rectangle.
         .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
     }
 }
 
@@ -647,5 +639,5 @@ struct TravelResultCard: View {
             MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
         }
     }
-    .background(Color.nmlObsidian)
+    .background(Color.appObsidian)
 }

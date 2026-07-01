@@ -70,7 +70,7 @@ struct ChatHomeView: View {
 
             // Dim backdrop
             if sidebarOpen {
-                Color.nmlFillScrim
+                Color.appFillScrim
                     .ignoresSafeArea()
                     .onTapGesture { closeSidebar() }
                     .transition(.opacity)
@@ -84,7 +84,7 @@ struct ChatHomeView: View {
                 .offset(x: sidebarOpen ? dragOffset : -sidebarWidth)
                 .gesture(drawerCloseGesture)
         }
-        .animation(.nmlSpring, value: sidebarOpen)
+        .animation(.appSpring, value: sidebarOpen)
         .task { await loadSessions() }
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
@@ -96,13 +96,13 @@ struct ChatHomeView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // Header — Milgrain wordmark above the label for editorial weight
+            // Header — Milgrain wordmark above the label for weight
             VStack(alignment: .leading, spacing: 10) {
                 BrandWordmark(height: 12)
                 Text("CONVERSATIONS")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(3.5)
-                    .foregroundStyle(Color.nmlMuted.opacity(0.6))
+                    .foregroundStyle(Color.appMuted.opacity(0.6))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -121,22 +121,22 @@ struct ChatHomeView: View {
                         .font(.system(size: 14, weight: .medium))
                     Spacer()
                 }
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(Color.appInk)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
-                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
             }
-            .buttonStyle(.nmlScale(0.97))
+            .buttonStyle(.appScale(0.97))
             .padding(.horizontal, 16)
 
             // Search
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                 TextField("Search", text: $searchQuery)
                     .font(.system(size: 14))
-                    .foregroundStyle(Color.nmlInk)
+                    .foregroundStyle(Color.appInk)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 if !searchQuery.isEmpty {
@@ -145,24 +145,24 @@ struct ChatHomeView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 13))
-                            .foregroundStyle(Color.nmlMuted)
+                            .foregroundStyle(Color.appMuted)
                             // Glyph stays 13pt; the tap target grows to the 40×40 minimum.
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.nmlScale)
+                    .buttonStyle(.appScale)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 11)
-            .background(Color.nmlSurface)
-            .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.nmlHairline, lineWidth: 0.5))
+            .background(Color.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
             .padding(.horizontal, 16)
             .padding(.top, 14)
             .padding(.bottom, 8)
 
-            Rectangle().fill(Color.nmlHairline).frame(height: 0.5)
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
 
             // List
             sidebarList
@@ -191,7 +191,7 @@ struct ChatHomeView: View {
                             } label: {
                                 SidebarRow(title: session.title, trailing: session.relativeTime)
                             }
-                            .buttonStyle(.nmlScale(0.98))
+                            .buttonStyle(.appScale(0.98))
                             .listRowInsets(EdgeInsets())
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
@@ -223,7 +223,7 @@ struct ChatHomeView: View {
     private var searchList: some View {
         if isSearching {
             Spacer()
-            ProgressView().tint(Color.nmlTitanium)
+            ProgressView().tint(Color.appTitanium)
             Spacer()
         } else if searchResults.isEmpty {
             emptyState(icon: "doc.text.magnifyingglass", text: "No results")
@@ -236,8 +236,8 @@ struct ChatHomeView: View {
                         } label: {
                             SidebarSearchResultRow(result: result)
                         }
-                        .buttonStyle(.nmlScale(0.98))
-                        Divider().overlay(Color.nmlHairline).padding(.leading, 16)
+                        .buttonStyle(.appScale(0.98))
+                        Divider().overlay(Color.appHairline).padding(.leading, 16)
                     }
                 }
                 .padding(.bottom, 24)
@@ -254,10 +254,10 @@ struct ChatHomeView: View {
             Spacer()
             Image(systemName: icon)
                 .font(.system(size: 34))
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(Color.appMuted)
             Text(text)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(Color.appMuted)
             Spacer()
         }
         .frame(maxWidth: .infinity)
@@ -492,15 +492,15 @@ private struct SidebarRow: View {
     var body: some View {
         HStack(spacing: 0) {
             Text(title)
-                .font(.nmlBody(14, weight: .light))
-                .foregroundStyle(Color.nmlInk)
+                .font(.appBody(14, weight: .light))
+                .foregroundStyle(Color.appInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 12)
             Text(trailing)
-                .font(.nmlMono(11))
+                .font(.appMono(11))
                 .monospacedDigit()
-                .foregroundStyle(Color.nmlMuted.opacity(0.7))
+                .foregroundStyle(Color.appMuted.opacity(0.7))
                 .fixedSize()
         }
         .padding(.horizontal, 16)
@@ -518,14 +518,14 @@ private struct SidebarSectionHeader: View {
             Text(label.uppercased())
                 .font(.system(size: 10, weight: .regular))
                 .tracking(2.8)
-                .foregroundStyle(Color.nmlMuted.opacity(0.5))
+                .foregroundStyle(Color.appMuted.opacity(0.5))
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         // The drawer is already .regularMaterial; a second material here blurs a blur
         // and smears as it pins. An opaque surface keeps the pinned header crisp.
-        .background(Color.nmlSurface)
+        .background(Color.appSurface)
     }
 }
 
@@ -537,17 +537,17 @@ private struct SidebarSearchResultRow: View {
             HStack {
                 Text(result.role == "user" ? "You" : "Millie")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                 Spacer()
                 if let date = result.formattedDate {
                     Text(date)
                         .font(.system(size: 11))
-                        .foregroundStyle(Color.nmlMuted)
+                        .foregroundStyle(Color.appMuted)
                 }
             }
             Text(result.content)
                 .font(.system(size: 14))
-                .foregroundStyle(Color.nmlInk)
+                .foregroundStyle(Color.appInk)
                 .lineLimit(2)
         }
         .padding(.horizontal, 16)

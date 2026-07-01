@@ -12,9 +12,9 @@ struct SetupPendantView: View {
                 Spacer()
 
                 Text("CONNECTING DEVICE")
-                    .font(.nmlBody(11, weight: .semibold))
+                    .font(.appBody(11, weight: .semibold))
                     .tracking(2.4)
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
 
                 PendantGlyph()
                     .frame(width: 120, height: 168)
@@ -22,7 +22,7 @@ struct SetupPendantView: View {
 
                 Text("Connect your pendant to the charger to begin pairing.")
                     .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -45,13 +45,13 @@ private struct PendantGlyph: View {
         VStack(spacing: 0) {
             // Bail loop
             Circle()
-                .strokeBorder(Color.nmlTitanium, lineWidth: 1)
+                .strokeBorder(Color.appTitanium, lineWidth: 1)
                 .frame(width: 22, height: 22)
                 .zIndex(1)
 
             // Core disc
             Circle()
-                .strokeBorder(Color.nmlTitanium, lineWidth: 1)
+                .strokeBorder(Color.appTitanium, lineWidth: 1)
                 .background(
                     Circle().fill(Color.white.opacity(0.03))
                 )
@@ -74,7 +74,7 @@ private struct SilverArcSpinner: View {
     var body: some View {
         Circle()
             .trim(from: 0, to: 0.18)
-            .stroke(Color.nmlTitanium, style: StrokeStyle(lineWidth: 1, lineCap: .round))
+            .stroke(Color.appTitanium, style: StrokeStyle(lineWidth: 1, lineCap: .round))
             .frame(width: 28, height: 28)
             .rotationEffect(.degrees(spinning ? 360 : 0))
             .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)

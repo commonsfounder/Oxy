@@ -5,18 +5,7 @@ struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @State private var selectedTab = Tab.today
-    // The bar slides out of the way while the keyboard is up (e.g. composing in chat) and
-    // returns when the keyboard dismisses — which the interactive scroll-to-dismiss makes a
-    // natural "swipe near that area to bring it back" gesture.
     @State private var keyboardUp = false
-    @State private var tabBar = TabBarVisibility()
-    // Resolved from the app-wide appearance setting (Settings → Appearance) via the root's
-    // preferredColorScheme; .system follows iOS.
-    @Environment(\.colorScheme) private var colorScheme
-    private var lightMode: Bool { colorScheme == .light }
-
-    // Tucked away either while typing (keyboard up) or while scrolling down into content.
-    private var barTucked: Bool { keyboardUp || tabBar.hidden }
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -39,34 +28,20 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        // The aurora canvas lives here, behind the whole TabView and ignoring all safe
-        // areas, so it bleeds edge-to-edge — under the status bar and behind the floating
-        // tab bar. The pages themselves are transparent (More paints its own dark canvas).
         ZStack {
-            // One clean editorial canvas for every tab — warm-white by day, true black at
-            // night. Colour/atmosphere lives only in Today's own sky hero, layered on top.
-            Color.edCanvas.ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
 
-            // A true paged TabView for buttery 1:1 horizontal swiping. The native
-            // page style hides the system tab bar, so a slim custom bar is added via
-            // safeAreaInset (which also keeps page content clear of it).
+            // Standard tab view — reliable muscle memory. No more fussy page swipe + tucked glass.
+            // Accent color now drives selection and life in the UI.
             TabView(selection: $selectedTab) {
                 ChatHomeView().tag(Tab.chat)
                 ProactiveView().tag(Tab.today)
                 MoreView().tag(Tab.more)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .animation(.nmlStandard, value: selectedTab)
-            .environment(tabBar)
-            // When the bar is tucked (scrolling or keyboard), it leaves the safe-area
-            // inset entirely so content fills to the bottom edge — no reserved dead band.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !barTucked {
-                    bottomBar
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+            .tint(Color.appAccent)
+            .onChange(of: selectedTab) { _, _ in
+                HapticManager.shared.select()
             }
-            .animation(.nmlStandard, value: barTucked)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             keyboardUp = true
@@ -75,16 +50,8 @@ struct MainTabView: View {
             keyboardUp = false
         }
         .id(accentColor)
-        .onChange(of: selectedTab) { _, _ in
-            HapticManager.shared.select()
-            // A fresh tab always shows its bar — don't inherit the previous tab's tucked state.
-            tabBar.hidden = false
-        }
         .onAppear {
             HapticManager.shared.prepare()
-            // Cold-launch from the "Ask Oxy" Siri intent: the jump-to-chat
-            // notification fired before this view subscribed, so peek the bus
-            // (ChatView.task consumes the query itself).
             if SiriRequestBus.shared.pendingQuery != nil {
                 selectedTab = .chat
             }
@@ -95,55 +62,6 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
             withAnimation { selectedTab = .more }
         }
-    }
-
-    // MARK: - Custom bottom bar
-
-    // A floating Liquid Glass bar (Apple iOS 26 style): the whole bar is one
-    // refractive glass surface that hovers above the bottom edge, with a soft
-    // highlight capsule marking the active tab.
-    private var bottomBar: some View {
-        nmlGlassContainer(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(Tab.allCases, id: \.self) { tab in
-                    tabButton(tab)
-                }
-            }
-            .padding(6)
-            // Passive glass: an `interactive` surface here captures presses for the whole bar
-            // and starves the individual tab Buttons (the "tap 50 times" bug). The buttons own
-            // their own gesture + highlight.
-            .nmlGlass(Capsule(), interactive: false)
-        }
-        .padding(.horizontal, 24)
-        .padding(.bottom, 4)
-    }
-
-    private func tabButton(_ tab: Tab) -> some View {
-        let selected = selectedTab == tab
-        return Button {
-            withAnimation(.nmlStandard) { selectedTab = tab }
-        } label: {
-            VStack(spacing: 3) {
-                Image(systemName: selected ? "\(tab.icon).fill" : tab.icon)
-                    .font(.system(size: 18, weight: .regular))
-                    // A soft bounce the moment a tab becomes active — the icon answers the tap.
-                    .symbolEffect(.bounce, value: selected)
-                    .contentTransition(.symbolEffect(.replace))
-                Text(tab.label)
-                    .font(.system(size: 10, weight: selected ? .semibold : .medium))
-            }
-            .foregroundStyle(selected ? Color.nmlInk : Color.nmlMuted)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-            .background {
-                if selected {
-                    Capsule().fill(Color.nmlFillSubtle)
-                }
-            }
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.nmlScale(0.96))
     }
 }
 
@@ -175,14 +93,14 @@ struct MoreView: View {
                         identityHeader
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 16)
-                            .animation(.nmlSpring.delay(0.04), value: appeared)
+                            .animation(.appSpring.delay(0.04), value: appeared)
                         menuSection
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 12)
-                            .animation(.nmlSpring.delay(0.14), value: appeared)
+                            .animation(.appSpring.delay(0.14), value: appeared)
                         signOutButton
                             .opacity(appeared ? 1 : 0)
-                            .animation(.nmlSpring.delay(0.22), value: appeared)
+                            .animation(.appSpring.delay(0.22), value: appeared)
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 32)
@@ -218,7 +136,7 @@ struct MoreView: View {
         }
     }
 
-    // MARK: - Identity header (Milgrain editorial)
+    // MARK: - Identity header (Milgrain clean)
 
     private var identityHeader: some View {
         Button {
@@ -230,15 +148,15 @@ struct MoreView: View {
                     .padding(.bottom, 28)
 
                 Text(displayName)
-                    .font(.nmlDisplay(46, weight: .light))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.appDisplay(46, weight: .light))
+                    .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
 
                 if !accountEmail.isEmpty {
                     Text(accountEmail)
-                        .font(.nmlBody(12, weight: .light))
-                        .foregroundStyle(Color.nmlMuted)
+                        .font(.appBody(12, weight: .light))
+                        .foregroundStyle(Color.appMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .padding(.top, 6)
@@ -246,7 +164,7 @@ struct MoreView: View {
 
                 // Hairline rule separating identity from navigation
                 Rectangle()
-                    .fill(Color.nmlHairline)
+                    .fill(Color.appHairline)
                     .frame(height: 0.5)
                     .padding(.top, 28)
             }
@@ -292,13 +210,13 @@ struct MoreView: View {
 
     private var menuSection: some View {
         VStack(spacing: 0) {
-            editorialRow("Memory") { destination = .memory }
+            cleanRow("Memory") { destination = .memory }
             rowDivider
-            editorialRow("Apps") { destination = .connectors }
+            cleanRow("Apps") { destination = .connectors }
             rowDivider
-            editorialRow("Settings") { destination = .settings }
+            cleanRow("Settings") { destination = .settings }
             rowDivider
-            editorialRow(
+            cleanRow(
                 "Pendant",
                 trailing: pendantStatusText,
                 trailingLive: pendant.isConnected
@@ -309,11 +227,11 @@ struct MoreView: View {
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color.nmlHairline)
+            .fill(Color.appHairline)
             .frame(height: 0.5)
     }
 
-    private func editorialRow(
+    private func cleanRow(
         _ title: String,
         trailing: String? = nil,
         trailingLive: Bool = false,
@@ -325,28 +243,28 @@ struct MoreView: View {
         } label: {
             HStack(spacing: 0) {
                 Text(title)
-                    .font(.nmlBody(17, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.appBody(17, weight: .regular))
+                    .foregroundStyle(Color.appInk)
                 Spacer()
                 if let trailing {
                     HStack(spacing: 6) {
                         if trailingLive {
-                            NamelessStatusDot(isLive: true, diameter: 5)
+                            AppStatusDot(isLive: true, diameter: 5)
                         }
                         Text(trailing)
-                            .font(.nmlBody(12, weight: .regular))
-                            .foregroundStyle(trailingLive ? Color.nmlLive : Color.nmlMuted)
+                            .font(.appBody(12, weight: .regular))
+                            .foregroundStyle(trailingLive ? Color.appLive : Color.appMuted)
                     }
                     .padding(.trailing, 10)
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(Color.nmlMuted.opacity(0.5))
+                    .foregroundStyle(Color.appMuted.opacity(0.5))
             }
             .padding(.vertical, 20)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
     }
 
     // MARK: - Sign out
@@ -357,13 +275,13 @@ struct MoreView: View {
             showSignOutConfirm = true
         } label: {
             Text("Sign Out")
-                .font(.nmlBody(13, weight: .regular))
-                .foregroundStyle(Color.nmlMuted)
+                .font(.appBody(13, weight: .regular))
+                .foregroundStyle(Color.appMuted)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
         .padding(.top, 16)
     }
 

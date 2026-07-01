@@ -25,7 +25,7 @@ struct DeviceStatusCard: View {
             .padding(.vertical, 11)
 
             Rectangle()
-                .fill(Color.nmlHairline)
+                .fill(Color.appHairline)
                 .frame(height: 0.5)
         }
     }
@@ -33,12 +33,12 @@ struct DeviceStatusCard: View {
     private var liveState: some View {
         HStack(spacing: 6) {
             Circle()
-                .fill(telemetry.isStreaming ? Color.nmlLive : Color.nmlMuted.opacity(0.5))
+                .fill(telemetry.isStreaming ? Color.appLive : Color.appMuted.opacity(0.5))
                 .frame(width: 6, height: 6)
             Text(telemetry.isStreaming ? "BLE STREAMING" : "BLE IDLE")
-                .font(.nmlMono(10, weight: .medium))
+                .font(.appMono(10, weight: .medium))
                 .tracking(0.6)
-                .foregroundStyle(telemetry.isStreaming ? Color.nmlInk : Color.nmlMuted)
+                .foregroundStyle(telemetry.isStreaming ? Color.appInk : Color.appMuted)
                 .fixedSize()
         }
     }
@@ -53,19 +53,19 @@ struct DeviceStatusCard: View {
 
     private func metric(_ text: String) -> some View {
         Text(text)
-            .font(.nmlMono(10, weight: .medium))
+            .font(.appMono(10, weight: .medium))
             .tracking(0.4)
-            .foregroundStyle(Color.nmlTitanium)
+            .foregroundStyle(Color.appTitanium)
             .fixedSize()
             // Live telemetry rolls its digits instead of popping.
             .contentTransition(.numericText())
-            .animation(.nmlStandard, value: text)
+            .animation(.appStandard, value: text)
     }
 }
 
 #Preview {
     ZStack(alignment: .top) {
-        Color.nmlObsidian.ignoresSafeArea()
+        Color.appObsidian.ignoresSafeArea()
         DeviceStatusCard(telemetry: {
             let monitor = PendantTelemetryMonitor()
             monitor.start()

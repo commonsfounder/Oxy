@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Consent gate in the Nameless language: obsidian ground, editorial serif
+/// Consent gate. Clean, direct.
 /// header, custom fill-box checkboxes (no green switches), and a single stark
 /// white pill to proceed. Continuing is blocked until both boxes are filled.
 struct LegalConsentView: View {
@@ -19,18 +19,18 @@ struct LegalConsentView: View {
                 Spacer(minLength: 0)
 
                 Text("AGREEMENT")
-                    .font(.nmlBody(11, weight: .semibold))
+                    .font(.appBody(11, weight: .semibold))
                     .tracking(2.4)
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
 
                 Text("Before we begin.")
-                    .font(.nmlDisplay(36, weight: .regular))
-                    .foregroundStyle(Color.nmlInk)
+                    .font(.appDisplay(36, weight: .regular))
+                    .foregroundStyle(Color.appInk)
                     .padding(.top, 18)
 
                 Text("Yours alone. Confirm you've read how your data is handled before continuing.")
                     .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 14)
@@ -41,7 +41,7 @@ struct LegalConsentView: View {
                         lead: "I agree to the",
                         emphasis: "Terms of Service"
                     )
-                    NamelessDivider()
+                    AppDivider()
                     consentRow(
                         isOn: $agreedPrivacy,
                         lead: "I have read the",
@@ -52,10 +52,10 @@ struct LegalConsentView: View {
 
                 Spacer(minLength: 0)
 
-                NamelessPrimaryButton(title: "AGREE AND CONTINUE", action: onContinue)
+                AppPrimaryButton(title: "AGREE AND CONTINUE", action: onContinue)
                     .disabled(!canContinue)
                     .opacity(canContinue ? 1 : 0.4)
-                    .animation(.nmlFast, value: canContinue)
+                    .animation(.appFast, value: canContinue)
             }
             .padding(.horizontal, 28)
             .padding(.top, 80)
@@ -66,15 +66,15 @@ struct LegalConsentView: View {
     private func consentRow(isOn: Binding<Bool>, lead: String, emphasis: String) -> some View {
         Button {
             HapticManager.shared.impact(.rigid)
-            withAnimation(.nmlSpring) { isOn.wrappedValue.toggle() }
+            withAnimation(.appSpring) { isOn.wrappedValue.toggle() }
         } label: {
             HStack(alignment: .center, spacing: 16) {
-                NamelessCheckbox(isOn: isOn.wrappedValue)
+                AppCheckbox(isOn: isOn.wrappedValue)
                 (
                     Text(lead + " ")
-                        .foregroundColor(Color.nmlMuted)
+                        .foregroundColor(Color.appMuted)
                     + Text(emphasis)
-                        .foregroundColor(Color.nmlInk)
+                        .foregroundColor(Color.appInk)
                 )
                 .font(.system(size: 14, weight: .regular))
                 Spacer(minLength: 0)
@@ -88,12 +88,12 @@ struct LegalConsentView: View {
 
 /// A 16×16 box that simply fills with soft silver when selected — no checkmark,
 /// no animation theatrics, just presence or absence.
-private struct NamelessCheckbox: View {
+private struct AppCheckbox: View {
     let isOn: Bool
 
     var body: some View {
         Rectangle()
-            .fill(isOn ? Color.nmlInk : Color.clear)
+            .fill(isOn ? Color.appInk : Color.clear)
             .frame(width: 16, height: 16)
             .overlay(
                 Rectangle()
@@ -101,7 +101,7 @@ private struct NamelessCheckbox: View {
             )
             // A small overshoot as it fills — presence with a little life, not a hard flip.
             .scaleEffect(isOn ? 1.08 : 1.0)
-            .animation(.nmlSpring, value: isOn)
+            .animation(.appSpring, value: isOn)
     }
 }
 

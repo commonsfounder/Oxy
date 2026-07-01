@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The account home in the Nameless language — pitch black, flat rows split by
+/// The account home — clean dark surfaces, accent highlights.
 /// 0.5px rules. Identity at the top (editable assistant name + read-only account
 /// id), then the account lifecycle actions (export, sign out, delete) that used
 /// to be scattered across Settings and the Pendant screen.
@@ -25,7 +25,7 @@ struct ProfileView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.edCanvas.ignoresSafeArea()
+                Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
@@ -169,7 +169,7 @@ struct ProfileView: View {
                 .foregroundStyle(Color.mgHeading)
             Spacer(minLength: 16)
             Text(value)
-                .font(.nmlMono(12))
+                .font(.appMono(12))
                 .foregroundStyle(Color.mgSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -197,7 +197,7 @@ struct ProfileView: View {
             .foregroundStyle(destructive ? Color.mgDestructive : Color.mgHeading)
             .padding(.vertical, 16)
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
     }
 
     // MARK: - Settings persistence

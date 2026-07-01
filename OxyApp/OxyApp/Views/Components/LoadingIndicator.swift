@@ -2,7 +2,7 @@ import SwiftUI
 
 struct LoadingIndicator: View {
     var label: String = "Loading…"
-    var tint: Color = .nmlTitanium
+    var tint: Color = .appTitanium
 
     var body: some View {
         VStack(spacing: 12) {
@@ -10,10 +10,10 @@ struct LoadingIndicator: View {
                 .tint(tint)
             Text(label)
                 .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Color.nmlMuted)
+                .foregroundStyle(Color.appMuted)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.nmlObsidian)
+        .background(Color.appObsidian)
     }
 }
 
@@ -27,7 +27,7 @@ struct OxyThinkingIndicator: View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
-                    .fill(Color.nmlMuted)
+                    .fill(Color.appMuted)
                     .frame(width: 5, height: 5)
                     .scaleEffect(active ? (index == 1 ? 1.12 : 1.0) : 0.65)
                     .opacity(active ? 1 : 0.25)
@@ -42,7 +42,7 @@ struct OxyThinkingIndicator: View {
             if let label, !label.isEmpty {
                 Text(label)
                     .font(.system(size: compact ? 12 : 13, weight: .regular))
-                    .foregroundStyle(Color.nmlMuted)
+                    .foregroundStyle(Color.appMuted)
                     .lineLimit(1)
                     .padding(.leading, 4)
             }
@@ -87,5 +87,5 @@ struct OxySkeletonCard: View {
         OxyThinkingIndicator()
         OxyThinkingIndicator(label: "Thinking")
     }
-    .background(Color.nmlObsidian)
+    .background(Color.appObsidian)
 }

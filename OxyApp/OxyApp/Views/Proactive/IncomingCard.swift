@@ -1,7 +1,7 @@
 // OxyApp/OxyApp/Views/Proactive/IncomingCard.swift
 import SwiftUI
 
-/// Deliveries and reservations parsed from the briefing, as a flat editorial section —
+/// Deliveries and reservations parsed from the briefing, as a section —
 /// no card, no progress gauges. Reads as part of the day, not a tracking widget.
 struct IncomingCard: View {
     let items: [BriefingIncoming]
@@ -9,7 +9,7 @@ struct IncomingCard: View {
     var body: some View {
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                EditorialSectionTitle("Incoming").padding(.bottom, 14)
+                AppSectionTitle("Incoming").padding(.bottom, 14)
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(items.prefix(4)) { item in
                         row(item)
@@ -25,17 +25,17 @@ struct IncomingCard: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline) {
                 Text(item.cleanTitle)
-                    .font(.nmlBody(16, weight: .light))
-                    .foregroundStyle(Color.edInk)
+                    .font(.appBody(16, weight: .light))
+                    .foregroundStyle(Color.appInk)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 if let eta = item.eta, !eta.isEmpty {
-                    Text(eta).font(.nmlBody(12)).foregroundStyle(Color.edMuted)
+                    Text(eta).font(.appBody(12)).foregroundStyle(Color.appMuted)
                 }
             }
             Text("\(item.vendor) · \(item.status.lowercased())")
-                .font(.nmlBody(13, weight: .light))
-                .foregroundStyle(Color.edMuted)
+                .font(.appBody(13, weight: .light))
+                .foregroundStyle(Color.appAccent)
         }
     }
 }

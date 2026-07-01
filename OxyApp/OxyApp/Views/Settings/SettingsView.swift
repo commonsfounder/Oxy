@@ -23,12 +23,12 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.edCanvas.ignoresSafeArea()
+                Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
-                    nmlGlassContainer(spacing: 24) {
+                    appGlassContainer(spacing: 24) {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
                             VStack(alignment: .leading, spacing: 12) {
@@ -110,7 +110,7 @@ struct SettingsView: View {
                                 }
                                 .padding(.vertical, 16)
                             }
-                            .buttonStyle(.nmlScale(0.98))
+                            .buttonStyle(.appScale(0.98))
                         }
 
                         Spacer().frame(height: 32)
@@ -140,10 +140,10 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        // Flat editorial section — Didot title, no glass card. Rows sit on the canvas,
+        // Clean section. Rows sit on the canvas,
         // split by hairlines, the way the rest of the app now reads.
         VStack(alignment: .leading, spacing: 10) {
-            EditorialSectionTitle(title, size: 20)
+            AppSectionTitle(title, size: 20)
             VStack(spacing: 0) { content() }
         }
     }
@@ -204,7 +204,7 @@ struct SettingsView: View {
             .foregroundStyle(Color.mgHeading)
             .padding(.vertical, 16)
         }
-        .buttonStyle(.nmlScale(0.98))
+        .buttonStyle(.appScale(0.98))
     }
 
     private func loadSettings() {
@@ -256,7 +256,7 @@ private struct BackendURLEditorSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     MilgrainSectionHeader(title: "Custom Backend URL")
 
-                    NamelessLineField(
+                    AppLineField(
                         placeholder: "https://your-backend.run.app",
                         text: $draft
                     )
@@ -461,8 +461,8 @@ struct OxySettings: Codable {
         }
     }
     static let accentOptions = [
-        AccentOption(value: "stone", label: "Stone", color: Color.oxyDefaultStone),
-        AccentOption(value: "mint", label: "Mint", color: Color.oxyGreen),
+        AccentOption(value: "teal", label: "Teal", color: Color.appAccent),
+        AccentOption(value: "mint", label: "Mint", color: Color.appSuccess),
         AccentOption(value: "blue", label: "Blue", color: Color(red: 92/255, green: 154/255, blue: 245/255)),
         AccentOption(value: "cyan", label: "Cyan", color: Color(red: 48/255, green: 184/255, blue: 210/255)),
         AccentOption(value: "amber", label: "Amber", color: Color(red: 236/255, green: 168/255, blue: 65/255)),
