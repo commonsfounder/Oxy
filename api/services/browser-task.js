@@ -493,6 +493,28 @@ const SEARCH_SITES = {
   'selfridges.com': {
     names: ['selfridges'],
     searchUrl: (term) => `https://www.selfridges.com/GB/en/cat/?freeText=${encodeURIComponent(term)}&srch=Y`
+  },
+  // UK dept/fashion — patterns discovered with test/dev/discover-search-url.js and each
+  // E2E-verified via DIRECT navigation (not just interactive search). Next was dropped: it
+  // serves "Access Denied" when a search-results URL is opened directly, though interactive
+  // search works — so it must NOT have a direct-nav seed.
+  'marksandspencer.com': {
+    names: ['m&s', 'marks and spencer', 'marks & spencer', 'marksandspencer'],
+    searchUrl: (term) => `https://www.marksandspencer.com/search?searchTerm=${encodeURIComponent(term)}`
+  },
+  'asos.com': {
+    names: ['asos'],
+    searchUrl: (term) => `https://www.asos.com/search/?q=${encodeURIComponent(term)}`
+  },
+  // Grocery. Sainsbury's puts the term in the PATH (a seed's searchUrl can build any shape;
+  // only the auto-LEARN path is query-param-only). Waitrose uses a normal query param.
+  'sainsburys.co.uk': {
+    names: ["sainsbury's", 'sainsburys', 'sainsbury'],
+    searchUrl: (term) => `https://www.sainsburys.co.uk/gol-ui/SearchResults/${encodeURIComponent(term)}`
+  },
+  'waitrose.com': {
+    names: ['waitrose'],
+    searchUrl: (term) => `https://www.waitrose.com/ecom/shop/search?searchTerm=${encodeURIComponent(term)}`
   }
 };
 
