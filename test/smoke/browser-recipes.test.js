@@ -33,3 +33,25 @@ test('matchSizeChip returns null when no chip matches', () => {
   assert.equal(matchSizeChip('xxl', ['S', 'M', 'L']), null);
   assert.equal(matchSizeChip('m', []), null);
 });
+
+const { RECIPES, phaseFromUrl } = require('../../api/services/browser-recipes');
+
+test('John Lewis recipe is registered with the expected phases and steps', () => {
+  const jl = RECIPES['johnlewis.com'];
+  assert.ok(jl, 'johnlewis.com recipe exists');
+  assert.deepEqual(jl.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+  // durable attribute candidate comes before the visible-text candidate
+  const add = jl.steps.find((s) => s.name === 'add');
+  const dataTestIdx = add.selectorAny.findIndex((s) => /data-test/i.test(s));
+  const textIdx = add.selectorAny.findIndex((s) => /has-text/i.test(s));
+  assert.ok(dataTestIdx !== -1 && textIdx !== -1 && dataTestIdx < textIdx, 'durable selector before text');
+});
+
+test('phaseFromUrl classifies John Lewis product / basket / checkout urls', () => {
+  const jl = RECIPES['johnlewis.com'];
+  assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/adidas-joggers/p6543210'), 'product');
+  assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/basket'), 'basket');
+  assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/checkout/delivery'), 'checkout');
+  assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/search?search-term=joggers'), null);
+  assert.equal(phaseFromUrl(jl, 'not a url'), null);
+});

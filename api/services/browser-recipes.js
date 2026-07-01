@@ -38,4 +38,53 @@ function matchSizeChip(parsedSize, chipLabels) {
   return contains === -1 ? null : contains;
 }
 
-module.exports = { parseSizeFromGoal, matchSizeChip };
+// Host-keyed registry. Selectors prefer durable attributes; visible text is last.
+// NOTE: John Lewis product-page URLs end in `/pNNNNNN`; basket is `/basket`; checkout `/checkout`.
+const RECIPES = {
+  'johnlewis.com': {
+    phases: {
+      product:  (u) => /\/p\d+(?:\b|\/|$)/i.test(u.pathname),
+      basket:   (u) => /\/basket(?:\b|\/|$)/i.test(u.pathname),
+      checkout: (u) => /\/checkout(?:\b|\/|$)/i.test(u.pathname),
+    },
+    // Site-specific probes the generic size step uses (confirmed at E2E).
+    size: {
+      container: ['[data-test*="size" i]', '[class*="size" i] [role="listbox"]', 'select[name*="size" i]'],
+      chip:      ['[data-test*="size" i] button', '[role="radio"]', 'select[name*="size" i] option'],
+      selected:  ['[aria-checked="true"]', '[aria-selected="true"]', 'option:checked'],
+    },
+    steps: [
+      { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: null /* set in Task 4 */ },
+      { phase: 'product', name: 'add', action: 'click', selectorAny: [
+        '[data-test*="add-to-basket" i]',
+        'button[aria-label*="add to basket" i]',
+        'button:has-text("Add to basket")',
+        'button:has-text("Add to bag")',
+      ] },
+      { phase: 'product', name: 'go-to-basket', action: 'click', selectorAny: [
+        '[data-test*="view-basket" i]',
+        'a[href*="/basket" i]',
+        'a:has-text("View basket")',
+        'a:has-text("Basket")',
+      ] },
+      { phase: 'basket', name: 'checkout', action: 'click', selectorAny: [
+        '[data-test*="checkout" i]',
+        'a[href*="checkout" i]',
+        'button:has-text("Checkout")',
+        'a:has-text("Checkout")',
+      ] },
+    ],
+  },
+};
+
+// First phase whose predicate matches the url, or null. Never throws on a bad url.
+function phaseFromUrl(recipe, url) {
+  let u;
+  try { u = new URL(url); } catch { return null; }
+  for (const [name, pred] of Object.entries(recipe.phases)) {
+    if (pred(u)) return name;
+  }
+  return null;
+}
+
+module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl };
