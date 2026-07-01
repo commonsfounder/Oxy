@@ -165,6 +165,10 @@ struct ChatView: View {
                                 onLeading: {
                                     HapticManager.shared.impact(.light)
                                     if let onMenu { onMenu() } else { dismiss() }
+                                },
+                                onNewChat: {
+                                    HapticManager.shared.impact(.light)
+                                    viewModel.startNewChat(userId: appState.userId)
                                 }
                             )
                             .onChange(of: isIncognito) { _, on in

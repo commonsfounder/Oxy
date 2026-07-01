@@ -126,6 +126,14 @@ final class ChatViewModel {
         isViewingHistorySnapshot = false
         historySnapshotLabel = nil
         nativeManager.resetConversationContext()
+        // Abandon any in-progress browser/ordering session server-side so this fresh
+        // chat isn't hijacked by a still-running order's input latch. Best-effort.
+        Task {
+            _ = try? await APIClient.shared.request(
+                path: "/browser-session/\(userId)/close",
+                method: "POST"
+            )
+        }
     }
 
     func sendMessage(userId: String) {

@@ -4959,6 +4959,20 @@ app.delete('/history/:userId/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// Abandon any live browser/ordering session for this user. Starting a new
+// conversation calls this so a still-running order stops latching the user's
+// next message into its loop (the "can't start a new chat mid-task" trap).
+// Idempotent — a no-op when there's nothing open.
+app.post('/browser-session/:userId/close', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    await closeSession(req.params.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 app.get('/history/:userId/search', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   const q = (req.query.q || '').trim();

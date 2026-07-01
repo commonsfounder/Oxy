@@ -9,6 +9,10 @@ struct AppHeaderView: View {
     var isEmptyChat: Bool = false
     /// Invoked when the left menu icon is tapped (open history/sidebar).
     var onLeading: () -> Void = {}
+    /// Invoked by the right-side compose icon to start a fresh conversation. Only offered
+    /// once a chat is under way — so a new chat (and abandoning any running order) is one
+    /// tap from anywhere, without opening the drawer.
+    var onNewChat: (() -> Void)? = nil
 
     private let circle: CGFloat = 38
 
@@ -29,20 +33,36 @@ struct AppHeaderView: View {
 
                 Spacer()
 
-                // Right: incognito ghost. Offered on an empty chat, and kept visible whenever
-                // shadow mode is ON so the user can see they're in it and switch it back off
-                // mid-conversation — not just silently active behind an absent button.
-                if isEmptyChat || isIncognito {
-                    Button {
-                        withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
-                    } label: {
-                        GhostIcon(active: isIncognito)
-                            .frame(width: 18, height: 18)
-                            .frame(width: circle, height: circle)
-                            .nmlGlass(Circle(), tint: isIncognito ? Color.nmlInk : nil, interactive: true)
+                HStack(spacing: 10) {
+                    // Right: incognito ghost. Offered on an empty chat, and kept visible whenever
+                    // shadow mode is ON so the user can see they're in it and switch it back off
+                    // mid-conversation — not just silently active behind an absent button.
+                    if isEmptyChat || isIncognito {
+                        Button {
+                            withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
+                        } label: {
+                            GhostIcon(active: isIncognito)
+                                .frame(width: 18, height: 18)
+                                .frame(width: circle, height: circle)
+                                .nmlGlass(Circle(), tint: isIncognito ? Color.nmlInk : nil, interactive: true)
+                        }
+                        .buttonStyle(.nmlScale)
+                        .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
                     }
-                    .buttonStyle(.nmlScale)
-                    .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
+
+                    // New conversation — only once a chat is under way (an empty chat is already
+                    // new, so it'd be a no-op). One tap starts fresh from anywhere.
+                    if !isEmptyChat, let onNewChat {
+                        Button(action: onNewChat) {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundColor(Color.nmlInk.opacity(0.85))
+                                .frame(width: circle, height: circle)
+                                .nmlGlass(Circle(), interactive: true)
+                        }
+                        .buttonStyle(.nmlScale)
+                        .accessibilityLabel("New conversation")
+                    }
                 }
             }
         }
