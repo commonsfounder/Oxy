@@ -97,11 +97,6 @@ function getSearchReason(message) {
     return 'factual-question-keyword';
   }
 
-  const looksPersonal = PERSONAL_CONTEXT_PATTERNS.some(pattern => pattern.test(text));
-  if (hasQuestion && !looksLikeToolRequest && !looksPersonal && text.length >= 18) {
-    return 'question-default-search';
-  }
-
   return '';
 }
 

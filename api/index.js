@@ -337,28 +337,22 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-// Cost split: the user-facing reasoning + voice/streaming brain stays on a capable Flash
-// model; background helper calls run on the much cheaper Flash-Lite tier.
-// Pricing (per 1M tokens, approx 2026):
-// gemini-3.5-flash: $1.50 input / $9 output  (the expensive one someone switched to)
-// gemini-3-flash-preview: $0.50 / $3.00   (~3x cheaper)
-// gemini-3.1-flash-lite: $0.25 / $1.50   (~6x cheaper)
-// Use the lite for FAST_MODEL (quick extractions, simple structured tasks).
-// Use the preview (or 2.5 equivalent) for main reasoning/chat where quality matters.
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+// All paths default to gemini-3.1-flash-lite (~6x cheaper than 3.5-flash).
+// Override via env vars if a specific path needs more power:
+//   OXY_REASONING_MODEL / OXY_FAST_MODEL / OXY_STREAM_MODEL
+// 3.5-flash is banned — any model string containing "3.5" hard-crashes at startup.
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
-// Voice/streaming tracks the primary brain (not the lite helper tier) so the core
-// experience stays sharp; override with OXY_STREAM_MODEL if needed.
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
 
-// Log resolved models at startup so it's obvious what is actually being used
+// Hard ban on 3.5-flash — crash at startup rather than silently run up a bill
+const _allModels = [PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL];
+if (_allModels.some(m => m.includes('3.5'))) {
+  throw new Error(`[models] BANNED: a model config contains "3.5" (${_allModels.join(', ')}). Remove it.`);
+}
 console.log('[models] PRIMARY_CHAT_MODEL=', PRIMARY_CHAT_MODEL);
 console.log('[models] FAST_MODEL=', FAST_MODEL);
 console.log('[models] STREAMING_CHAT_MODEL=', STREAMING_CHAT_MODEL);
-if (PRIMARY_CHAT_MODEL.includes('3.5') || FAST_MODEL.includes('3.5') || STREAMING_CHAT_MODEL.includes('3.5')) {
-  console.warn('[models] WARNING: Using 3.5-flash tier which is ~3x more expensive than 3-flash-preview');
-}
-console.log('[models] To force cheap models set: OXY_REASONING_MODEL=gemini-3-flash-preview OXY_FAST_MODEL=gemini-3.1-flash-lite');
 const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 
 // Gemini 3.x Flash thinks before answering by default, which added ~4.5s to
