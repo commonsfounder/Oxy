@@ -43,7 +43,7 @@ test('John Lewis recipe is registered with the expected phases and steps', () =>
   // durable attribute candidate comes before the visible-text candidate
   const add = jl.steps.find((s) => s.name === 'add');
   const dataTestIdx = add.selectorAny.findIndex((s) => /data-test/i.test(s));
-  const textIdx = add.selectorAny.findIndex((s) => /has-text/i.test(s));
+  const textIdx = add.selectorAny.findIndex((s) => /^text=/i.test(s));
   assert.ok(dataTestIdx !== -1 && textIdx !== -1 && dataTestIdx < textIdx, 'durable selector before text');
 });
 
@@ -76,8 +76,10 @@ test('selectStep skips a step that health has disabled', () => {
   const health = createRecipeHealth(2);
   health.recordMiss('johnlewis.com', 'add');
   health.recordMiss('johnlewis.com', 'add'); // disabled at threshold 2
-  // size not needed, add disabled → fall to go-to-basket
-  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false }, health, 'johnlewis.com').name, 'go-to-basket');
+  // add disabled + empty basket: no other product step qualifies (go-to-basket needs basketCount>0) → null
+  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false, basketCount: 0 }, health, 'johnlewis.com'), null);
+  // once the item is in the basket, go-to-basket qualifies regardless of add's health
+  assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false, basketCount: 1 }, health, 'johnlewis.com').name, 'go-to-basket');
 });
 
 test('recipe health disables after N misses and a hit resets the streak', () => {

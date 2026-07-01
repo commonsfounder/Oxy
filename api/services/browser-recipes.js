@@ -47,31 +47,33 @@ const RECIPES = {
       basket:   (u) => /\/basket(?:\b|\/|$)/i.test(u.pathname),
       checkout: (u) => /\/checkout(?:\b|\/|$)/i.test(u.pathname),
     },
-    // Site-specific probes the generic size step uses (confirmed at E2E).
+    // Site-specific probes the generic size step uses. Finalized against the live John Lewis
+    // DOM (Task 6): sizes are <a data-testid="size:option:button"> (text XS/S/L) inside
+    // <li data-testid="size:option">; selection is href-based (?size=xs).
     size: {
-      container: ['[data-test*="size" i]', '[class*="size" i] [role="listbox"]', 'select[name*="size" i]'],
-      chip:      ['[data-test*="size" i] button', '[role="radio"]', 'select[name*="size" i] option'],
-      selected:  ['[aria-checked="true"]', '[aria-selected="true"]', 'option:checked'],
+      container: ['[data-testid="size:option"]'],
+      chip:      ['a[data-testid="size:option:button"]'],
+      selected:  ['[data-testid="size:option:button"][aria-current="true"]', '[data-testid="size:option"][class*="selected" i]'],
     },
     steps: [
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-      { phase: 'product', name: 'add', action: 'click', selectorAny: [
-        '[data-test*="add-to-basket" i]',
-        'button[aria-label*="add to basket" i]',
-        'button:has-text("Add to basket")',
-        'button:has-text("Add to bag")',
+      // Only add while nothing is in the basket yet, so this doesn't re-fire once the item's in.
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+        '[data-testid="basket:add"]',
+        'text=Add to basket',
       ] },
-      { phase: 'product', name: 'go-to-basket', action: 'click', selectorAny: [
-        '[data-test*="view-basket" i]',
-        'a[href*="/basket" i]',
-        'a:has-text("View basket")',
-        'a:has-text("Basket")',
+      // Once the item is in the basket, go to the basket page via the header anchor (or a
+      // "View basket" affordance from the add interstitial).
+      { phase: 'product', name: 'go-to-basket', when: (ctx) => ctx.basketCount > 0, action: 'click', selectorAny: [
+        '[data-testid="basket-anchor"]',
+        'text=View basket',
+        'text=Basket',
       ] },
       { phase: 'basket', name: 'checkout', action: 'click', selectorAny: [
-        '[data-test*="checkout" i]',
-        'a[href*="checkout" i]',
-        'button:has-text("Checkout")',
-        'a:has-text("Checkout")',
+        '[data-testid*="checkout" i]',
+        'text=Checkout',
+        'text=Secure checkout',
+        'text=Continue to checkout',
       ] },
     ],
   },
@@ -120,10 +122,17 @@ async function readCtx(page, recipe) {
     void probe;
     const hasAny = (sels) => sels.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
     const container = hasAny(size.container);
-    const selected = hasAny(size.selected);
-    return { hasUnsatisfiedSize: container && !selected };
+    // A size is "chosen" either by a DOM marker (aria-current/selected class) or — on John
+    // Lewis, where size chips are hrefs — by the ?size= query param the click navigates to.
+    const selectedDom = hasAny(size.selected);
+    const selectedUrl = /[?&]size=/i.test(location.search || '');
+    // Basket count from the header badge: distinguishes "not added yet" (add step) from
+    // "added, go to basket" (go-to-basket step) so add doesn't re-fire on the same product.
+    const amtEl = document.querySelector('[data-testid="basket-amount"]');
+    const basketCount = amtEl ? (parseInt((amtEl.innerText || '').replace(/\D+/g, ''), 10) || 0) : 0;
+    return { hasUnsatisfiedSize: container && !selectedDom && !selectedUrl, basketCount };
   }, { probe: 'ctx', size: recipe.size });
-  return ctx || { hasUnsatisfiedSize: false };
+  return ctx || { hasUnsatisfiedSize: false, basketCount: 0 };
 }
 
 // Resolve a step's selectorAny to a { locatorIndex, text }, choosing the first candidate that
@@ -142,10 +151,19 @@ async function resolveSelectorIndex(page, selectorAny, clickableSelector, tag) {
       return r.width > 0 && r.height > 0;
     };
     for (const sel of selectorAny) {
-      let match;
-      try { match = document.querySelector(sel); } catch { continue; }
-      if (!match || !visible(match)) continue;
-      const node = match.closest(clickableSelector) || match;
+      let node = null;
+      if (sel.startsWith('text=')) {
+        // Native exact-text candidate (case-insensitive, trimmed). Replaces Playwright's
+        // :has-text pseudo — which document.querySelector cannot parse — and exact-matches so
+        // "Add to basket" never picks a carousel "Add to basket , <product>" recommendation.
+        const want = sel.slice(5).trim().toLowerCase();
+        node = all.find((el) => visible(el) && (el.innerText || '').trim().toLowerCase() === want) || null;
+      } else {
+        let match;
+        try { match = document.querySelector(sel); } catch { continue; }
+        if (match && visible(match)) node = match.closest(clickableSelector) || match;
+      }
+      if (!node) continue;
       const idx = all.indexOf(node);
       if (idx !== -1) {
         const text = (node.innerText || node.getAttribute('aria-label') || node.value || '').trim().replace(/\s+/g, ' ').slice(0, 80);

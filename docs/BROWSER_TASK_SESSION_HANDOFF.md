@@ -106,6 +106,37 @@ Validated more sites with `browser-task-e2e.js` and fixed general loop weaknesse
     diagnostic runs — likely a required-option gate or force-click not firing Uber's handler, plus
     a "wait until the store page actually has products" check. Argos remains bot-walled.
 
+## UPDATE 2026-07-01 (c) — Tier 2 deterministic recipes landed (John Lewis tail)
+Spec `docs/superpowers/specs/2026-07-01-browser-task-tier2-recipes-design.md`, plan
+`docs/superpowers/plans/2026-07-01-browser-task-tier2-recipes.md`. New module
+`api/services/browser-recipes.js`: a host-keyed recipe registry + a generic executor
+`nextRecipeMove(page, session, recipe)` that serves the *mechanical* order tail from durable
+selectors, skipping the vision call on those steps. `browser-task.js` calls it once per step
+before the vision path; a `null` return falls through to today's all-vision loop. Kill-switch
+`OXY_BROWSER_RECIPES=false`. Per-`(host,step)` in-memory health self-disables a chronically
+missing step → graceful degrade to vision. The model still makes the judgment calls (which
+product, which size when the goal didn't say); the recipe never guesses a size (asks instead).
+
+**E2E (real browser, John Lewis adidas joggers PDP, size in goal):** the recipe drove
+`size → add-to-basket → go-to-basket → checkout` as **4 deterministic steps, 0 vision calls**
+(history steps 1–4 all `[recipe:…]`), in ~1s of clicking. The same tail with
+`OXY_BROWSER_RECIPES=false` took the model **7 steps to reach "Continue to checkout"** (incl. a
+hallucinated-elementId retry + 2 "wait" detours) at ~1.2–1.9s each ≈ ~10s of model latency. Both
+then hit John Lewis's **guest-vs-sign-in checkout wall** — a genuine user-data fork (email/
+address), out of recipe scope and *before* the pay guardrail, so neither reaches
+`ready_for_payment` without account/guest details. Reaching a real pay button needs those.
+
+Selectors were finalized against the live DOM (Task 6): John Lewis exposes stable `data-testid`s
+— sizes `<a data-testid="size:option:button">` (href-based `?size=`), add `[data-testid="basket:add"]`,
+header `[data-testid="basket-anchor"]`/`basket-amount`. Two design fixes came out of E2E: (1)
+Playwright `:has-text()` candidates THROW under native `document.querySelector`, so the executor
+now supports a `text=<exact>` candidate (exact, case-insensitive) instead; (2) `readCtx` detects
+a chosen size via the `?size=` URL param and reads the basket count so `add` doesn't re-fire once
+the item is in the basket. Smoke: `node --test test/smoke/*.test.js` → **221 pass**.
+Next for Tier 2: the checkout *auth/delivery* steps (guest email, saved address) are the real
+remaining latency, but they're user-data-specific — recipe-able only with stored profile data.
+Add more sites to the registry as data (the executor is generic).
+
 ## NEXT (original) — latency roadmap
 Equation: `latency ≈ browser_open + (n_steps × model_latency)`. Three levers:
 - **Tier 1 → ~8–12s (no model change):** warm browser pool (kills ~4s cold open); slim the
