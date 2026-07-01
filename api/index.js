@@ -77,6 +77,7 @@ const {
   isTravelPlanningRequest
 } = require('./services/travel-concierge');
 const { generateItinerary, modifyItinerary, itineraryToText } = require('./services/itinerary-engine');
+const { RETENTION_POLICY, runRetentionSweep: runRetentionSweepImpl } = require('./services/data-retention');
 const { rankHotels, rankActivities, rankFlights } = require('./services/travel-ranking');
 const {
   createSessionToken,
@@ -4822,6 +4823,24 @@ app.all('/proactive/sweep', async (req, res) => {
   }
 });
 
+// Bound to the live supabase client so retention-job.js and the route can call
+// it the same way runProactiveSweep is called: runRetentionSweep(logger).
+function runRetentionSweep(logger = console) {
+  return runRetentionSweepImpl(supabase, { logger });
+}
+
+app.all('/retention/sweep', async (req, res) => {
+  try {
+    if (!proactiveSweepAuthorized(req)) {
+      return res.status(401).json({ error: 'Invalid sweep secret.' });
+    }
+    const summary = await runRetentionSweep(console);
+    res.json({ ok: true, summary });
+  } catch (err) {
+    return sendServerError(res, err, 'server.error');
+  }
+});
+
 app.post('/tts-preview', async (req, res) => {
   try {
     const { voice = 'Aoede', text = 'Hi, it is lovely to meet you. This is how I sound.' } = req.body || {};
@@ -7378,10 +7397,11 @@ app.get('/privacy', (_req, res) => {
       <li>Telegram — messaging connector (when enabled)</li>
     </ul>
     <h2>Data Retention</h2>
+    <p>We delete data automatically once it is no longer needed. A daily job enforces these limits:</p>
     <ul>
-      <li>Conversations: 180 days</li>
-      <li>Memories: until you delete them</li>
-      <li>Account data: until you request deletion</li>
+      ${Object.values(RETENTION_POLICY).map((rule) => `<li>${escapeHtml(rule.label)}</li>`).join('')}
+      <li>Memories: kept until you delete them</li>
+      <li>Account &amp; connector settings: kept until you delete your account or disconnect</li>
     </ul>
     <h2>Your Rights</h2>
     <p>You have the right to access, rectification, erasure, portability, restriction, and objection. To exercise these rights, email <a href="mailto:support@oxy.app">support@oxy.app</a>.</p>
@@ -7520,6 +7540,7 @@ if (process.env.SENTRY_DSN) {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+module.exports.runRetentionSweep = runRetentionSweep;
 // Exposed so tests can exercise the real dispatch path (executeActions -> the contract
 // validator -> this switch) instead of only unit-testing pieces in isolation — that gap
 // is exactly how the contract/handler mismatch shipped to production undetected.

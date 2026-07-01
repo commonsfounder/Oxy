@@ -11,7 +11,8 @@
     "brain:evals": "node --test test/smoke/brain-evals.test.js",
     "latency": "node test/bench/latency.js",
     "release:check": "node --check api/index.js && node --check api/services/context-brain.js && node --test test/smoke/*.test.js",
-    "proactive:job": "node proactive-job.js"
+    "proactive:job": "node proactive-job.js",
+    "retention:job": "node retention-job.js"
   },
   "dependencies": {
     "@google/genai": "^2.2.0",

@@ -255,6 +255,23 @@ Cloud Run is the primary deploy target for Oxy. This repo now runs as a standard
      --oauth-service-account-email YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com
    ```
 
+8. **Run the data-retention sweep as a daily Cloud Run Job**
+
+   The app enforces the bounded retention promised on `/privacy` (conversations 180d, action history 180d, briefings 90d, stale device context/browser logins 90d, expired reset tokens) via a standalone runner at `npm run retention:job`. Apply `supabase-migration-retention.sql` once, then deploy the job and schedule it daily:
+
+   ```bash
+   gcloud run jobs create oxy-retention \
+     --source . \
+     --region europe-west2 \
+     --command npm \
+     --args run,retention:job \
+     --tasks 1 \
+     --max-retries 1
+   # schedule daily at 03:30 (same pattern as oxy-proactive above)
+   ```
+
+   It can also be triggered over HTTP at `ALL /retention/sweep`, gated by the same `PROACTIVE_SWEEP_SECRET` as the proactive sweep. Retention windows live in one place — `RETENTION_POLICY` in `api/services/data-retention.js` — which also renders the `/privacy` retention section, so the promise and the enforcement can't drift apart.
+
 Notes:
 - `mcp-server.js` is a separate process. If you still want the MCP server in Cloud Run, deploy it as a second service instead of trying to run both processes in one container.
 
