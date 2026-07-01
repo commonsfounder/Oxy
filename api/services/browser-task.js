@@ -1,6 +1,7 @@
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
+const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
 
 chromium.use(stealth);
 
@@ -72,6 +73,24 @@ function getSupabase() {
   if (!supabaseClient) supabaseClient = createSupabaseServiceClient();
   return supabaseClient;
 }
+
+// Self-learning fast-path store. loadRows/saveRow are Supabase-backed but best-effort — a DB
+// hiccup never blocks a turn. Only LEARNED hosts live here; curated SEARCH_SITES stay in code.
+const fastpathStore = createFastpathStore({
+  loadRows: async () => {
+    const { data } = await getSupabase().from('browser_fastpaths').select('host,url_template,param,fail_count');
+    return data || [];
+  },
+  saveRow: async (row) => {
+    await getSupabase().from('browser_fastpaths').upsert(
+      { ...row, last_ok_at: row.fail_count === 0 ? new Date().toISOString() : undefined, updated_at: new Date().toISOString() },
+      { onConflict: 'host' }
+    );
+  }
+});
+
+// Load the learned fast-paths into memory (call on server boot, alongside primeWarmBrowser).
+async function primeFastpaths() { await fastpathStore.load(); }
 
 // ponytail: site key keeps cookies/login isolated per domain per user. One row
 // per (user, site) — fine at personal-assistant scale, revisit if sites multiply.
@@ -893,6 +912,8 @@ function cancelPayment(userId) {
 
 module.exports = {
   primeWarmBrowser,
+  primeFastpaths,
+  _fastpathStore: fastpathStore,
   getWarmBrowser,
   deriveSearchTerm,
   directSearchUrl,

@@ -14,7 +14,11 @@ if (require.main === module) {
     }
     // Launch one spare browser now (it's a ~4s cold start) so the first browser task of
     // this instance's life grabs it instantly instead of paying that inside the request.
-    try { require('./api/services/browser-task').primeWarmBrowser(); } catch { /* non-fatal */ }
+    try {
+      const bt = require('./api/services/browser-task');
+      bt.primeWarmBrowser();
+      bt.primeFastpaths();
+    } catch { /* non-fatal */ }
   });
 }
 

@@ -68,3 +68,10 @@ test('directSearchUrl is null for unknown sites and unusable goals', () => {
   assert.equal(directSearchUrl('https://www.johnlewis.com', 'find me'), null);    // no derivable term
   assert.equal(directSearchUrl('not a url', 'find joggers'), null);
 });
+
+const bt = require('../../api/services/browser-task');
+
+test('browser-task exposes the fast-path store and boot primer', () => {
+  assert.equal(typeof bt.primeFastpaths, 'function');
+  assert.ok(bt._fastpathStore && typeof bt._fastpathStore.getLearnedSearchUrl === 'function');
+});
