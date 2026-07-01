@@ -5303,7 +5303,7 @@ function normalizeSignal(raw) {
 // JSON instruction never blanks the Today tab.
 function parseSignalsResponse(raw) {
   const text = String(raw || '').trim();
-  if (!text || /^NOTHING\b/i.test(text)) return { lead: '', signals: [] };
+  if (!text || /^NOTHING\b/i.test(text)) return { lead: '', narrative: '', wellbeing: '', signals: [] };
   const jsonText = extractJsonObject(text);
   if (jsonText) {
     try {

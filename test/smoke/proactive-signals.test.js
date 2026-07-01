@@ -37,9 +37,18 @@ test('parseSignalsResponse falls back to prose when JSON is unparseable', () => 
 });
 
 test('parseSignalsResponse treats NOTHING / empty as no content', () => {
-  assert.deepEqual(parseSignalsResponse('NOTHING'), { lead: '', signals: [] });
-  assert.deepEqual(parseSignalsResponse('   '), { lead: '', signals: [] });
-  assert.deepEqual(parseSignalsResponse('{"lead":"","signals":[]}'), { lead: '', signals: [] });
+  const empty = { lead: '', narrative: '', wellbeing: '', signals: [] };
+  assert.deepEqual(parseSignalsResponse('NOTHING'), empty);
+  assert.deepEqual(parseSignalsResponse('   '), empty);
+  assert.deepEqual(parseSignalsResponse('{"lead":"","signals":[]}'), empty);
+});
+
+test('parseSignalsResponse carries editorial narrative and wellbeing prose', () => {
+  const raw = '{"lead":"Morning.","narrative":"A rare quiet night ahead.","wellbeing":"You slept well.","signals":[]}';
+  const { lead, narrative, wellbeing } = parseSignalsResponse(raw);
+  assert.equal(lead, 'Morning.');
+  assert.equal(narrative, 'A rare quiet night ahead.');
+  assert.equal(wellbeing, 'You slept well.');
 });
 
 test('classifySignalTier: reversible & private actions are safe', () => {
