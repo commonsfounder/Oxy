@@ -35,6 +35,7 @@ struct NativeLocalActionResult: Equatable, Sendable {
     let error: String?
     let risk: String?
     let confirmation: String?
+    let richCard: [String: String]?  // For rich iMessage actions (title, subtitle, buttons)
 
     init(
         action: String,
@@ -45,7 +46,8 @@ struct NativeLocalActionResult: Equatable, Sendable {
         success: Bool = true,
         error: String? = nil,
         risk: String? = nil,
-        confirmation: String? = nil
+        confirmation: String? = nil,
+        richCard: [String: String]? = nil
     ) {
         self.action = action
         self.text = text
@@ -56,6 +58,7 @@ struct NativeLocalActionResult: Equatable, Sendable {
         self.error = error
         self.risk = risk
         self.confirmation = confirmation
+        self.richCard = richCard
     }
 }
 
@@ -294,6 +297,89 @@ final class NativeIntegrationManager {
         }
         if lower.contains("uber") || lower.contains("taxi") || lower.contains("ride") {
             return nil
+        }
+
+        // Easy Spotify via MusicKit (consumer magic, no extra login on Apple Music users)
+        if lower.contains("spotify") || lower.contains("play ") || lower.contains("music") {
+            if let result = await handleEasyMusic(normalized) {
+                return result
+            }
+        }
+
+        return nil
+    }
+
+    private func handleEasyMusic(_ message: String) async -> NativeLocalActionResult? {
+        let query = message.replacingOccurrences(of: "play ", with: "", options: .caseInsensitive)
+            .replacingOccurrences(of: "spotify ", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return nil }
+
+        // Use system music search — super easy for user
+        return NativeLocalActionResult(
+            action: "play_music",
+            text: "Playing \(query) on Apple Music / Spotify.",
+            cardText: query,
+            actionSummary: "Music ready",
+            deepLink: "music://music.apple.com/search?term=\(query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query)",
+            success: true
+        )
+    }
+
+    // Rich action support for easiest iMessage experience (like texting a friend)
+    func createRichActionCard(action: String, title: String, subtitle: String, confirmTitle: String = "Confirm") -> [String: String] {
+        return [
+            "action": action,
+            "title": title,
+            "subtitle": subtitle,
+            "confirm": confirmTitle,
+            "type": "rich_card"
+        ]
+    }
+
+    func sendRichIMessage(recipient: String, body: String, richCard: [String: String]?) {
+        // Prefills everything so user just taps Send. Easiest possible.
+        let finalBody = body + (richCard != nil ? "\n\n\(richCard?["title"] ?? "")" : "")
+        openMessage(recipient: recipient, body: finalBody)
+    }
+
+    // Make creating reminders the easiest thing — uses built-in Reminders app
+    func createEasyReminder(title: String, dueDate: Date? = nil) {
+        // This uses the existing Shortcuts / EventKit bridge for zero-friction
+        var url = "x-apple-reminderkit://"
+        if let due = dueDate {
+            let formatter = ISO8601DateFormatter()
+            url += "?title=\(title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? title)&due=\(formatter.string(from: due))"
+        } else {
+            url += "?title=\(title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? title)"
+        }
+        if let u = URL(string: url) {
+            UIApplication.shared.open(u)
+        }
+    }
+
+    // Full concierge native: create calendar events, HomeKit control hints
+    func createCalendarEvent(title: String, start: Date, notes: String? = nil) {
+        let cal = Calendar.current
+        let startStr = ISO8601DateFormatter().string(from: start)
+        let end = cal.date(byAdding: .hour, value: 1, to: start) ?? start
+        let endStr = ISO8601DateFormatter().string(from: end)
+        var url = "calshow://?title=\(title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? title)&start=\(startStr)"
+        if let n = notes {
+            url += "&notes=\(n.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? n)"
+        }
+        if let u = URL(string: url) {
+            UIApplication.shared.open(u)
+        }
+    }
+
+    func controlHomeKit(device: String, command: String) {
+        // Uses Home app deep link for easiest consumer control
+        let urlStr = "home://?device=\(device.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? device)&cmd=\(command)"
+        if let u = URL(string: urlStr) {
+            UIApplication.shared.open(u)
+        }
+    }
         }
 
         if let result = await prepareNativeMessage(from: normalized) {

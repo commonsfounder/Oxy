@@ -237,7 +237,133 @@ const ACTION_CONTRACTS = {
     successSummary: 'Presentation built',
     failureSummary: 'Presentation failed',
     confirmation: 'none'
-  }
+  },
+  // New agentic + general tools
+  web_browse: {
+    risk: 'low',
+    required: ['url'],
+    optional: ['query'],
+    inputExample: { url: 'https://...', query: 'what you need from the page' },
+    successSummary: 'Page browsed and relevant info extracted',
+    failureSummary: 'Browse failed',
+    confirmation: 'none'
+  },
+  web_search: {
+    risk: 'low',
+    required: ['query'],
+    optional: ['num_results'],
+    inputExample: { query: 'best pizza near me', num_results: 5 },
+    successSummary: 'Search results',
+    failureSummary: 'Search failed',
+    confirmation: 'none'
+  },
+  calculate: {
+    risk: 'low',
+    required: ['expression'],
+    inputExample: { expression: '2 + 2 * 3 or natural math question' },
+    successSummary: 'Calculated',
+    failureSummary: 'Calculation failed',
+    confirmation: 'none'
+  },
+  create_agent_task: {
+    risk: 'medium',
+    required: ['goal'],
+    optional: ['autonomy', 'plan'],
+    inputExample: { goal: 'the long term goal', autonomy: 'Active|High', plan: 'optional initial plan json' },
+    successSummary: 'Task created for background execution',
+    failureSummary: 'Task creation failed',
+    confirmation: 'none'
+  },
+  simulate_actions: {
+    risk: 'low',
+    required: ['goal'],
+    optional: ['actions'],
+    inputExample: { goal: 'what to simulate', actions: 'optional list of candidate actions' },
+    successSummary: 'Simulation complete',
+    failureSummary: 'Simulation failed',
+    confirmation: 'none'
+  },
+  log_health: { risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, successSummary: 'Health logged', failureSummary: 'Log failed', confirmation: 'none' },
+  control_smart_home: { risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Control failed', confirmation: 'none' },
+  save_to_notion: { risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
+  github_action: { risk: 'low', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'none' },
+  track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none' },
+  edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },
+  analyze_image: {
+    risk: 'low',
+    required: ['prompt'],
+    optional: ['image_url'],
+    inputExample: { prompt: 'describe this or extract text', image_url: 'optional' },
+    successSummary: 'Image analyzed',
+    failureSummary: 'Analysis failed',
+    confirmation: 'none'
+  },
+  mcp_tool: {
+    risk: 'medium',
+    required: ['name'],
+    optional: ['arguments'],
+    inputExample: { name: 'home_assistant_action', arguments: { entity: 'light.living', action: 'turn_on' } },
+    successSummary: 'MCP tool executed',
+    failureSummary: 'MCP tool failed',
+    confirmation: 'none'
+  },
+  // Concierge account / virtual card - like giving a real concierge a company card
+  check_concierge_balance: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Balance checked',
+    failureSummary: 'Check failed',
+    confirmation: 'none'
+  },
+  spend_from_concierge_account: {
+    risk: 'high',
+    required: ['amount', 'description'],
+    optional: ['merchant'],
+    inputExample: { amount: 25.5, description: 'book table at restaurant', merchant: 'OpenTable' },
+    successSummary: 'Spent from account',
+    failureSummary: 'Spend failed',
+    confirmation: 'review'
+  },
+  top_up_concierge_account: {
+    risk: 'medium',
+    required: ['amount'],
+    optional: ['source'],
+    inputExample: { amount: 100, source: 'user bank' },
+    successSummary: 'Account topped up',
+    failureSummary: 'Top up failed',
+    confirmation: 'review'
+  },
+  receive_to_concierge_account: {
+    risk: 'medium',
+    required: ['amount', 'description'],
+    optional: ['source'],
+    inputExample: { amount: 50, description: 'payment for freelance gig', source: 'client' },
+    successSummary: 'Received to account',
+    failureSummary: 'Receive failed',
+    confirmation: 'none'
+  },
+  // For broad money-making: use account to fund opportunities
+  fund_opportunity: {
+    risk: 'high',
+    required: ['amount', 'opportunity'],
+    inputExample: { amount: 25, opportunity: 'boost gig listing on platform' },
+    successSummary: 'Opportunity funded from concierge account',
+    failureSummary: 'Funding failed',
+    confirmation: 'review'
+  },
+  // New integrations
+  check_monzo_balance: { risk: 'low', required: [], inputExample: {}, successSummary: 'Monzo balance', failureSummary: 'Failed', confirmation: 'none' },
+  stripe_charge: { risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review' },
+  get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none' },
+  search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none' },
+  send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
+  book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none' },
+  get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none' },
+  search_eventbrite: { risk: 'low', required: ['query'], inputExample: { query: 'concert' }, successSummary: 'Events found', failureSummary: 'Failed', confirmation: 'none' },
+  search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none' },
+  search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none' },
+  get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' }
 };
 
 function getActionContract(type) {
@@ -377,6 +503,52 @@ function actionPromptBlock() {
   return `<action>\n${JSON.stringify({ actions: actionPromptList() }, null, 2)}\n</action>`;
 }
 
+function actionToFunctionDeclaration(type, contract) {
+  const properties = {};
+  const inputEx = contract.inputExample || {};
+  const required = new Set(contract.required || []);
+  const optional = new Set(contract.optional || []);
+  const allParams = new Set([...Object.keys(inputEx), ...required, ...optional]);
+
+  for (const key of allParams) {
+    const isRequired = required.has(key);
+    properties[key] = {
+      type: 'string',
+      description: `${key}${isRequired ? ' (required)' : ' (optional)'}`
+    };
+  }
+
+  // Add common freeform for complex ones
+  if (['send_email', 'send_message', 'send_telegram'].includes(type)) {
+    properties.body = properties.body || { type: 'string', description: 'The full message or email body content' };
+  }
+
+  return {
+    name: type,
+    description: `${type} — ${contract.successSummary || type}. Risk level: ${contract.risk || 'medium'}. ${contract.guidance || 'Execute only when details are clear.'}`.trim(),
+    parameters: {
+      type: 'OBJECT',
+      properties,
+      required: Array.from(required)
+    }
+  };
+}
+
+function buildFunctionDeclarations() {
+  return Object.entries(ACTION_CONTRACTS).map(([type, contract]) =>
+    actionToFunctionDeclaration(type, contract)
+  );
+}
+
+function buildToolsForGemini(includeSearch = false) {
+  const decls = buildFunctionDeclarations();
+  const tools = [{ functionDeclarations: decls }];
+  if (includeSearch) {
+    tools.push({ googleSearch: {} });
+  }
+  return tools;
+}
+
 function containsUrl(text) {
   return /\bhttps?:\/\/\S+/i.test(String(text || ''));
 }
@@ -393,5 +565,8 @@ module.exports = {
   validateActionWithContract,
   buildActionRecovery,
   applyActionContractResultMetadata,
-  actionPromptBlock
+  actionPromptBlock,
+  buildFunctionDeclarations,
+  buildToolsForGemini,
+  actionToFunctionDeclaration
 };

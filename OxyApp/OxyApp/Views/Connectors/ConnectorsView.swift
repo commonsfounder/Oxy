@@ -41,14 +41,17 @@ struct ConnectorsView: View {
                                 .offset(y: cardsVisible ? 0 : 18)
                                 .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.02), value: cardsVisible)
 
-                            // Grouped connectors
+                            // Consumer-friendly grouping: Real smarts vs Quick opens (easiest thing ever)
                             let nonGoogle = connectors.filter { $0.id != "google" && $0.implemented }
-                            let grouped = Dictionary(grouping: nonGoogle) { $0.category }
+                            let realActions = nonGoogle.filter { $0.type == "api" || $0.type == nil }
+                            let quickOpens = nonGoogle.filter { $0.type == "handoff" || $0.type == "hybrid" }
 
-                            ForEach(grouped.keys.sorted(), id: \.self) { category in
-                                if let items = grouped[category] {
-                                    connectorSection(title: category, connectors: items)
-                                }
+                            // Show "Oxy can do this for you" first (real actions), then "Quick opens" (super easy handoffs)
+                            if !realActions.isEmpty {
+                                connectorSection(title: "I can handle for you", connectors: realActions)
+                            }
+                            if !quickOpens.isEmpty {
+                                connectorSection(title: "Quick opens (I pre-fill everything)", connectors: quickOpens)
                             }
                         }
                         .padding(16)
@@ -342,6 +345,19 @@ private struct ConnectorCard: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .overlay(alignment: .bottomLeading) {
+            if let t = connector.type, t != "api" {
+                Text(t == "handoff" ? "Opens app" : "Hybrid")
+                    .font(.system(size: 9, weight: .medium))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.oxyStone.opacity(0.15))
+                    .foregroundStyle(Color.oxyStone)
+                    .clipShape(Capsule())
+                    .padding(.leading, 8)
+                    .padding(.bottom, 6)
+            }
+        }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
@@ -514,9 +530,10 @@ struct Connector: Codable, Identifiable {
     let implemented: Bool
     var connectionState: String
     var statusText: String
+    let type: String?   // 'api' | 'handoff' | 'hybrid'
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, category, enabled, implemented, connectionState, statusText
+        case id, name, icon, category, enabled, implemented, connectionState, statusText, type
     }
 
     init(from decoder: Decoder) throws {
@@ -529,6 +546,7 @@ struct Connector: Codable, Identifiable {
         implemented = try c.decodeIfPresent(Bool.self, forKey: .implemented) ?? false
         connectionState = try c.decodeIfPresent(String.self, forKey: .connectionState) ?? (enabled ? "connected" : "available")
         statusText = try c.decodeIfPresent(String.self, forKey: .statusText) ?? (enabled ? "Connected" : "Available")
+        type = try c.decodeIfPresent(String.self, forKey: .type)
     }
 
     var actionLabel: String {

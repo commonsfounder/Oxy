@@ -111,7 +111,7 @@ private struct ProactiveHeader: View {
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Oxy's read on today")
+                Text("Today's insights")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Color.oxyText)
                 Text("Only useful nudges. No noise.")
@@ -196,9 +196,14 @@ private struct BriefingCard: View {
     }
 
     private var iconName: String {
-        if briefing.kind.contains("health") { return "heart.fill" }
-        if briefing.kind.contains("location") { return "location.fill" }
-        if briefing.kind.contains("failed") { return "exclamationmark.arrow.triangle.2.circlepath" }
+        let k = briefing.kind.lowercased()
+        if k.contains("health") { return "heart.fill" }
+        if k.contains("location") { return "location.fill" }
+        if k.contains("recipe") { return "bookmark.fill" }
+        if k.contains("agent_task") || k.contains("task") { return "target" }
+        if k.contains("email") { return "envelope.fill" }
+        if k.contains("calendar") { return "calendar" }
+        if k.contains("failed") { return "exclamationmark.arrow.triangle.2.circlepath" }
         return "sparkles"
     }
 
@@ -210,13 +215,16 @@ private struct BriefingCard: View {
     }
 
     private var sourceLabel: String {
-        switch briefing.source {
-        case "healthkit": return "HealthKit"
-        case "location": return "Location"
-        case "action_log": return "Action follow-up"
-        case "schedule": return "Scheduled"
-        default: return "Proactive"
-        }
+        let s = briefing.source?.lowercased() ?? ""
+        let k = briefing.kind.lowercased()
+        if s.contains("healthkit") || k.contains("health") { return "Health" }
+        if s.contains("location") { return "Location" }
+        if s.contains("agent") || k.contains("agent") || k.contains("task") { return "Agent" }
+        if s.contains("email") { return "Email" }
+        if s.contains("calendar") { return "Calendar" }
+        if k.contains("recipe") { return "Recipe" }
+        if s.contains("schedule") { return "Scheduled" }
+        return "Insight"
     }
 
     private var timeLabel: String {
@@ -237,7 +245,7 @@ private struct EmptyProactiveState: View {
             Text("Nothing needs you right now.")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Color.oxyText)
-            Text("Oxy will only interrupt when there’s something actually useful.")
+            Text("The assistant will only interrupt when there’s something actually useful.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.oxySub)
                 .multilineTextAlignment(.center)
@@ -252,23 +260,22 @@ private struct EmptyProactiveState: View {
 
 private extension Briefing {
     var isWorthShowing: Bool {
-        if source == "action_log" { return false }
+        // Only hide real noise/errors. Allow agent tasks, recipes, email/calendar nudges, etc.
         let lowerKind = kind.lowercased()
-        if lowerKind.contains("failed") || lowerKind.contains("cancel") { return false }
+        // Still hide pure failed/cancelled noise, but let agent follow-ups through if useful
+        if lowerKind.contains("failed") && !lowerKind.contains("agent") { return false }
+        if lowerKind.contains("cancel") && !lowerKind.contains("agent") { return false }
         let lower = body.lowercased()
         let noisyFragments = [
             ".unknown",
             "maps error",
             "try a diff",
-            "that hit a snag",
-            "cancelled",
-            "canceled",
-            "was cancelled",
-            "was canceled"
+            "that hit a snag"
         ]
         if noisyFragments.contains(where: { lower.contains($0) }) {
             return false
         }
+        // Allow everything else: nudges, recipes, agent_tasks, normal briefings
         return true
     }
 }

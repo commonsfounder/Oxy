@@ -5,10 +5,17 @@ Oxy is an AI-powered personal assistant that you talk to like a friend. It conne
 ## What It Does
 
 - **Conversational AI** — Chat via text or voice. Oxy responds naturally, remembers personal context across conversations, and adapts its tone to your preferences over time.
+- **Agentic Core (NEW)** — Full ReAct-style loops, native Gemini function calling, explicit planning, sequential tool orchestration with result passing, reflection/verification, simulation/dry-run mode, and persistent agent tasks/goals for long-running work.
+- **Proactive Nudges (Poke-inspired)** — Deeper email action scanning + calendar nudges, unprompted context-aware briefings.
+- **Recipes & Automations** — Save and execute custom recipes/automations (like Poke Kitchen).
+- **Expanded Integrations** — Health logging, smart home control, Notion/GitHub, flight tracking, photo editing + general tools (browse/calculate).
+- **Rich iMessage & Native** — Enhanced rich cards, one-tap actions, better iMessage integration via Shortcuts + native.
+- **Advanced Orchestration** — Branching plans, multi-agent delegation stubs, richer memory.
 - **Voice I/O** — Record audio from your browser, get it transcribed (Gemini), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
-- **Real Actions** — Oxy doesn't just talk. When you say "text Sarah I'm running late" or "book an Uber to the station", it actually does it through connected services.
-- **Memory** — Oxy automatically extracts and stores personal facts from conversations ("Works at KPMG", "Has a dog named Biscuit") and uses them to personalise future replies.
-- **Connectors** — A pluggable connector system lets Oxy interface with external services. Each connector handles auth, token refresh, and API calls independently.
+- **Real Actions** — Oxy doesn't just talk. When you say "text Sarah I'm running late" or "book an Uber to the station", it actually does it through connected services. High-risk actions gated by review.
+- **Memory + Episodic Traces** — Oxy automatically extracts and stores personal facts + agent execution history (how goals were achieved) and uses them to personalise future replies and agent behavior.
+- **Connectors + General Tools** — Pluggable connectors + new general tools: web_browse, calculate, create_agent_task, simulate_actions.
+- **Persistent Agency** — Create long-lived tasks/goals. Background execution via agent loops and proactive.
 - **Apple Shortcuts Bridge** — An included `.shortcut` file and generator script let Oxy trigger native iOS actions (iMessage, Reminders, HomeKit) from the AI's responses.
 
 ## Architecture
@@ -150,9 +157,18 @@ Schema is in `supabase-migration.sql`.
    - `APNS_USE_SANDBOX=true` — use APNs sandbox while testing development builds
    - `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN` — Smart home
 
-4. **Run the database migration**
+4. **Run the database migrations**
 
-   Execute the SQL in `supabase-migration.sql` against your Supabase project (via the SQL editor in the Supabase dashboard).
+   Execute the SQL in `supabase-migration.sql` + `supabase-migration-agentic.sql` (and any v2 etc.) against your Supabase project (via the SQL editor in the Supabase dashboard).
+
+   The agentic migration adds agent_tasks, agent_traces, simulation_runs for persistent goals, planning, and dry-run support.
+
+**5 Next Steps after migrations (agentic upgrade):**
+1. Run `node scripts/apply-agentic-migration.js` (it will show the SQL and verify).
+2. (Re)start your server (`npm run dev` or deploy).
+3. Test persistent tasks: Use POST /agent/tasks or say a long-term goal in chat with high autonomy.
+4. Test agent loop: Send a complex multi-step request like "Plan my day: check calendar, find nearby coffee, book Uber if time allows, remind me".
+5. Check `GET /agent/tasks?userId=...` and use simulation with "simulate ..." requests. Set autonomy to High/Bold in settings for deeper loops.
 
 5. **Start the server**
    ```bash

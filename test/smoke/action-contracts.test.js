@@ -9,7 +9,7 @@ const {
   validateActionWithContract
 } = require('../../api/action-contracts');
 
-test('Core 20 actions have contracts for reliability work', () => {
+test('Core actions (incl. new agentic) have contracts for reliability work', () => {
   const expected = [
     'find_place',
     'book_uber',
@@ -28,6 +28,10 @@ test('Core 20 actions have contracts for reliability work', () => {
     'order_uber_eats',
     'order_deliveroo',
     'search_netflix_title',
+    'web_browse',
+    'calculate',
+    'create_agent_task',
+    'simulate_actions',
     'add_to_netflix_list',
     'send_telegram',
     'get_telegram_contacts',
