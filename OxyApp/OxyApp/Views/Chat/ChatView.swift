@@ -1023,8 +1023,8 @@ private struct WelcomeCard: View {
     }
 }
 
-// ScaleButtonStyle kept for local usage — delegates to NMLScaleButtonStyle at 0.96
-private typealias ScaleButtonStyle = NMLScaleButtonStyle
+// ScaleButtonStyle kept for local usage — delegates to AppScaleButtonStyle at 0.96
+private typealias ScaleButtonStyle = AppScaleButtonStyle
 
 // MARK: - Chat Input Bar
 
@@ -1129,7 +1129,7 @@ private struct ChatInputBar: View {
                                     : Color.appHairline,
                                 lineWidth: isFocused.wrappedValue ? 1.0 : 0.5
                             )
-                            .animation(.oxyFast, value: isFocused.wrappedValue)
+                            .animation(.appFast, value: isFocused.wrappedValue)
                     )
 
                 // Send / voice

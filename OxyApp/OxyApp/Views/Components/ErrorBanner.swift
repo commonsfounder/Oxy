@@ -7,8 +7,8 @@ struct ErrorBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(message)
-                .font(.system(size: 13, weight: .regular))
+            Group { Text(message) }
+                .font(Font.appBody(13))
                 .foregroundStyle(Color.appDanger)
                 .lineLimit(2)
 

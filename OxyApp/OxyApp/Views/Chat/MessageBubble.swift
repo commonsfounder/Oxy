@@ -47,7 +47,7 @@ struct MessageBubble: View {
                             )
                         } else {
                             Text(message.content)
-                                .font(.oxyBody(isCompact ? 15 : 16))
+                                .font(.appBody(isCompact ? 15 : 16))
                                 .foregroundStyle(Color.appInk)
                                 .lineSpacing(isCompact ? 4 : 5)
                         }

@@ -95,7 +95,7 @@ private struct LoginFormPage: View {
 
                 if let errorMessage {
                     Text(errorMessage)
-                        .font(.appBody(12, weight: .medium))
+                        .font(Font.appBody(12, weight: .medium))
                         .foregroundStyle(Color.appDanger)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)

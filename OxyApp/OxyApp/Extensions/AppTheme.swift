@@ -39,12 +39,15 @@ extension Color {
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = Color(red: 0.30, green: 0.75, blue: 0.50)
     static let appWarning = Color(red: 0.95, green: 0.70, blue: 0.25)
-    static let appDanger  = Color(red: 0.90, green: 0.35, blue: 0.30)
+    static let appAttention = appWarning
     static let appLive    = Color(red: 0.20, green: 0.85, blue: 0.55)
 
     // Legacy scrim etc for quick ports
     static let appScrim = Color.black.opacity(0.5)
     static let appFillSubtle = Color.white.opacity(0.06)
+    static let appFillScrim = appScrim
+    static let appObsidian = appBackground
+    static let appTitanium = appMuted
 }
 
 // MARK: - Radius (concentric friendly)
@@ -54,6 +57,7 @@ enum AppRadius {
     static let lg: CGFloat = 16
     static let xl: CGFloat = 22
     static let bubble: CGFloat = 18
+    static let card: CGFloat = md
 }
 
 // MARK: - Animation tokens (keep discipline)
@@ -62,19 +66,6 @@ extension Animation {
     static let appStandard = Animation.easeInOut(duration: 0.22)
     static let appRelax    = Animation.easeInOut(duration: 0.4)
     static let appSpring   = Animation.spring(response: 0.32, dampingFraction: 0.82)
-}
-
-// MARK: - Typography
-extension Font {
-    /// Clear, friendly body. Use for most things.
-    static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .default)
-    }
-
-    /// Stronger display for headers / important moments. Not ultra light poetry.
-    static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
-    }
 }
 
 // MARK: - Helpers (scale on press, glass where it still fits)
@@ -91,6 +82,11 @@ struct AppScaleButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? amount : 1)
             .animation(.appFast, value: configuration.isPressed)
     }
+}
+
+extension ButtonStyle where Self == AppScaleButtonStyle {
+    static var appScale: AppScaleButtonStyle { .init() }
+    static func appScale(_ amount: CGFloat) -> AppScaleButtonStyle { .init(amount: amount) }
 }
 
 // MARK: - Deprecated nml / Nameless bridge (temporary during burn)
@@ -112,6 +108,7 @@ extension Color {
     static let nmlFillBubble = appSurface
     static let nmlCardBorder = appHairline
     static func nmlAdaptive(dark: Color, light: Color) -> Color { dark }
+    static func appAdaptive(dark: Color, light: Color) -> Color { dark }
 }
 
 extension Animation {
@@ -140,6 +137,9 @@ extension View {
         background(shape.fill(Color.white.opacity(0.04)))
             .overlay(shape.stroke(Color.white.opacity(0.06), lineWidth: 0.5))
     }
+    func appGlass<C: Shape>(_ shape: C, tint: Color? = nil, interactive: Bool = false) -> some View {
+        nmlGlass(shape, interactive: interactive, tint: tint)
+    }
 }
 
 func nmlGlassContainer<Content: View>(spacing: CGFloat = 0, @ViewBuilder content: () -> Content) -> some View {
@@ -148,7 +148,8 @@ func nmlGlassContainer<Content: View>(spacing: CGFloat = 0, @ViewBuilder content
 
 extension View {
     func nmlGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
-        self.nmlGlass(shape, tint: tint, interactive: interactive)
+        background(shape.fill(Color.white.opacity(0.04)))
+            .overlay(shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
     }
 }
 
@@ -183,6 +184,10 @@ extension Font {
     // monospace readout via `UIFontMetrics`. A fixed-size font ignores the user's text-size
     // setting entirely, so the passed `size` is the point size at the Large default and
     // scales from there.
+
+    static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
+        .system(size: size, weight: weight, design: .rounded)
+    }
 
     /// Editorial display face (Didot) — iOS's built-in high-contrast Modern serif, the
     /// app-wide headline/identity voice per the modern spec. Didot ships only
@@ -368,7 +373,7 @@ struct AppLineField: View {
             }
             .font(.system(size: 15, weight: .light))
             .foregroundStyle(Color.appInk)
-            .tint(Color.appTitanium)
+            .tint(Color.appMuted)
             .focused($isFocused)
 
             Rectangle()
@@ -380,65 +385,35 @@ struct AppLineField: View {
 }
 
 // Clean shims and new helpers only. Old glass/primary button code burned.
-// Use oxy* + oxyScale. Legacy app* map above.
-
-extension ButtonStyle where Self == OxyScaleButtonStyle {
-    static var oxyScale: OxyScaleButtonStyle { .init() }
-    static func oxyScale(_ amount: CGFloat) -> OxyScaleButtonStyle { .init(amount: amount) }
-}
 
 // Temporary edCanvas shim for remaining old views during migration.
 extension Color {
     static let edCanvas = appBackground
     static let edInk = appInk
     static let edMuted = appMuted
+    static let edPlate = appSurface
+    static let edRule = appHairline
+    static let appGlow = appAccent.opacity(0.3)
 }
 
-// Simple atmosphere placeholder (weather hero can be re-thought later — not the only color anymore).
-struct AtmosphereSky: View {
-    let condition: String?
+struct AppPrimaryButton: View {
+    let title: String
+    let action: () -> Void
     var body: some View {
-        Color.clear // burn the full-bleed painterly sky as primary color source for now
-            .overlay(
-                LinearGradient(colors: [Color.appAccent.opacity(0.08), .clear], startPoint: .top, endPoint: .bottom)
-            )
-    }
-}
-            // Frosted base + a faint wash (or the control's tint) so it's visible on black.
-            shape.fill(.ultraThinMaterial)
-            shape.fill((tint ?? Color.white).opacity(tint == nil ? 0.06 : 0.22))
-
-            // Sheen: light gathers along the top and falls off downward.
-            shape.fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.24),
-                        Color.white.opacity(0.0),
-                        Color.white.opacity(0.05)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-
-            // Refractive rim: bright at the top edge, dim at the bottom.
-            shape.strokeBorder(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.6),
-                        Color.white.opacity(0.14),
-                        Color.white.opacity(0.04)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ),
-                lineWidth: 0.75
-            )
+        Button(action: action) {
+            Text(title)
+                .font(.appBody(13, weight: .semibold))
+                .tracking(1.8)
+                .foregroundStyle(Color.appBackground)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(Color.appInk)
+                .clipShape(Capsule())
         }
-        .compositingGroup()
-        .shadow(color: Color.black.opacity(0.35), radius: 4, y: 2)
+        .buttonStyle(.appScale(0.97))
     }
 }
+
 
 /// Groups adjacent Liquid Glass controls so iOS 26 can render them as a single
 /// fluid surface that can morph between states. No-op passthrough on iOS 17–25.
@@ -467,9 +442,9 @@ struct AppCard<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
             .background(Color.appSurface)
-            .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                     .strokeBorder(Color.appHairline, lineWidth: 0.5)
             )
     }
@@ -551,17 +526,17 @@ extension Color {
     // Adaptive: resolves light/dark from the environment colorScheme, which the app root
     // drives from the user's AppAppearance setting (.system follows iOS). Dark values are
     // the Milgrain spec; light values are the inverted equivalents.
-    static let mgBg = appAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
+    static let mgBg = nmlAdaptive(dark: Color(red: 10 / 255, green: 10 / 255, blue: 10 / 255), // #0A0A0A
                                   light: Color(red: 250 / 255, green: 250 / 255, blue: 249 / 255)) // near-white
-    static let mgDivider = appAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
+    static let mgDivider = nmlAdaptive(dark: Color(red: 26 / 255, green: 26 / 255, blue: 26 / 255), // #1A1A1A
                                        light: Color.black.opacity(0.10))
-    static let mgHeading = appAdaptive(dark: Color.white,                                     // #FFFFFF
+    static let mgHeading = nmlAdaptive(dark: Color.white,                                     // #FFFFFF
                                        light: Color(red: 0.11, green: 0.11, blue: 0.12))      // near-black
-    static let mgSecondary = appAdaptive(dark: Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255), // #888
+    static let mgSecondary = nmlAdaptive(dark: Color(red: 136 / 255, green: 136 / 255, blue: 136 / 255), // #888
                                          light: Color(red: 0.42, green: 0.42, blue: 0.46))
-    static let mgCaption = appAdaptive(dark: Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255), // #555
+    static let mgCaption = nmlAdaptive(dark: Color(red: 85 / 255, green: 85 / 255, blue: 85 / 255), // #555
                                        light: Color(red: 0.56, green: 0.56, blue: 0.58))
-    static let mgOff = appAdaptive(dark: Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255), // #333 toggle off
+    static let mgOff = nmlAdaptive(dark: Color(red: 51 / 255, green: 51 / 255, blue: 51 / 255), // #333 toggle off
                                    light: Color(white: 0.82))
     /// Fixed both finishes — system red reads on black and white alike.
     static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
@@ -591,7 +566,7 @@ struct MilgrainSectionHeader: View {
     var body: some View {
         Text(title)
             .font(.appDisplay(20))
-            .foregroundStyle(Color.edInk)
+            .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -729,7 +704,7 @@ struct TodayCard<Content: View>: View {
     @ViewBuilder let content: Content
     @Environment(\.colorScheme) private var scheme
 
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
@@ -871,30 +846,7 @@ struct AppOutlineButton: View {
     }
 }
 
-// MARK: - Editorial language (de-gadgeted, whole-app)
-//
-// The product reads as a beautifully made editorial object, not a device dashboard.
-// Colour lives only in the painterly weather sky; the canvas stays warm-white (light)
-// or true black (dark) and all content is monochrome, tone-adaptive. These tokens and
-// primitives are the shared vocabulary for every screen.
-
-extension Color {
-    /// Warm-white by day, true black at night — the page canvas the whole app sits on.
-    static let edCanvas = appAdaptive(dark: .black,
-                                      light: Color(red: 255 / 255, green: 253 / 255, blue: 249 / 255))
-    /// Primary editorial ink — soft off-white on black, warm near-black on white.
-    static let edInk = appAdaptive(dark: Color(red: 236 / 255, green: 234 / 255, blue: 228 / 255),
-                                   light: Color(red: 42 / 255, green: 36 / 255, blue: 29 / 255))
-    /// Muted secondary — captions, times, metadata. Warm taupe on white, cool grey on black.
-    static let edMuted = appAdaptive(dark: Color(red: 124 / 255, green: 122 / 255, blue: 128 / 255),
-                                     light: Color(red: 168 / 255, green: 154 / 255, blue: 134 / 255))
-    /// Tonal plate fill for featured blocks — deep charcoal on black, warm taupe on white.
-    static let edPlate = appAdaptive(dark: Color(red: 16 / 255, green: 15 / 255, blue: 13 / 255),
-                                     light: Color(red: 239 / 255, green: 230 / 255, blue: 216 / 255))
-    /// Hairline rule for editorial dividers.
-    static let edRule = appAdaptive(dark: Color.white.opacity(0.10),
-                                    light: Color(red: 230 / 255, green: 221 / 255, blue: 207 / 255))
-}
+// Duplicate editorial ed shims removed to avoid redeclaration. Use the ones earlier in the file.
 
 /// A tiny deterministic RNG so the paper grain is stable across redraws (no per-frame
 /// shimmer). Splitmix64 — good enough for scattering specks.
@@ -1018,7 +970,7 @@ struct AppSectionTitle: View {
     var body: some View {
         Text(text)
             .font(.appDisplay(size))
-            .foregroundStyle(Color.edInk)
+            .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -1028,7 +980,7 @@ struct AppRule: View {
     var body: some View {
         HStack(spacing: 10) {
             Rectangle().fill(Color.edRule).frame(height: 0.5)
-            Circle().fill(Color.edMuted.opacity(0.55)).frame(width: 3, height: 3)
+            Circle().fill(Color.appMuted.opacity(0.55)).frame(width: 3, height: 3)
             Rectangle().fill(Color.edRule).frame(height: 0.5)
         }
     }
