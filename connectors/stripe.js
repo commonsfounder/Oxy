@@ -1,8 +1,13 @@
 const axios = require('axios');
 const { createSupabaseServiceClient } = require('../runtime');
 const { decryptTokens } = require('../api/services/token-crypto');
+const { checkSpendLimit } = require('../api/services/money-guard');
 
 const supabase = createSupabaseServiceClient();
+
+// Actions on this connector that move money OUT and must respect the hard per-transaction cap,
+// even when reached post-approval (bypassReview). Receiving money (payment links) is exempt.
+const SPEND_ACTIONS = new Set(['stripe_charge', 'spend_from_concierge_via_stripe', 'stripe_payout_to_user']);
 
 const SUPPORTED_ACTIONS = ['stripe_charge', 'stripe_payout_to_user', 'create_stripe_payment_link', 'spend_from_concierge_via_stripe'];
 
@@ -41,6 +46,15 @@ async function stripeRequest(key, method, path, data = null) {
 }
 
 async function execute(userId, action, params) {
+  // Hard per-transaction ceiling before any real Stripe call — independent of the model and of
+  // whether the review gate was bypassed. `stripe_charge` passes the amount in cents; every other
+  // spend action here is in dollars.
+  if (SPEND_ACTIONS.has(action)) {
+    const dollars = action === 'stripe_charge' ? Number(params?.amount || 0) / 100 : Number(params?.amount || 0);
+    const verdict = checkSpendLimit({ amount: dollars });
+    if (!verdict.ok) return { success: false, error: verdict.error };
+  }
+
   const key = await getStripeKey(userId);
   if (!key) {
     return { success: true, text: `Stripe ${action} - add your STRIPE_SECRET_KEY for real payments. Falling back to concierge account simulation.`, webLink: 'https://stripe.com' };

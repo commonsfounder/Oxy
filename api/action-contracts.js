@@ -354,7 +354,12 @@ const ACTION_CONTRACTS = {
   },
   // New integrations
   check_monzo_balance: { risk: 'low', required: [], inputExample: {}, successSummary: 'Monzo balance', failureSummary: 'Failed', confirmation: 'none' },
-  stripe_charge: { risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review' },
+  stripe_charge: { risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
+  // These move (or purport to move) real money and previously had NO contract at all, so the
+  // runner treated them as direct-execute. Register them high-risk + review so they can't.
+  stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review' },
+  spend_from_concierge_via_stripe: { risk: 'high', required: ['amount'], inputExample: { amount: 25, description: 'concierge spend' }, successSummary: 'Spent via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
+  transfer_to_concierge_account: { risk: 'medium', required: ['amount'], inputExample: { amount: 10 }, successSummary: 'Transferred to concierge', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
   get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none' },
   search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none' },
   send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
@@ -367,7 +372,20 @@ const ACTION_CONTRACTS = {
 };
 
 function getActionContract(type) {
-  return ACTION_CONTRACTS[type] || null;
+  const contract = ACTION_CONTRACTS[type];
+  if (!contract) return null;
+  // Fail-safe review routing. The action-runner gates human review on `executionMode === 'review'`,
+  // but the `confirmation`/`risk` fields are what authors actually set — and it's easy to add a new
+  // spend action with `confirmation: 'review'` while forgetting `executionMode`, which silently ships
+  // it as direct-execute (the concierge/Stripe money actions did exactly this). Derive the gate here
+  // so anything marked for confirmation, or flagged high-risk, can never execute without review.
+  if (!contract.executionMode) {
+    const needsReview = contract.confirmation === 'review'
+      || contract.confirmation === 'review_required'
+      || contract.risk === 'high';
+    if (needsReview) return { ...contract, executionMode: 'review' };
+  }
+  return contract;
 }
 
 function normalizeActionInput(type, input = {}) {

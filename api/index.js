@@ -27,6 +27,7 @@ const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { createActionRunner } = require('./services/action-runner');
+const { checkSpendLimit } = require('./services/money-guard');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -2176,6 +2177,8 @@ async function executeAction(userId, action, params, context = {}) {
       const description = params?.description || 'purchase';
       const merchant = params?.merchant || 'unknown';
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
+      const spendGuard = await guardConciergeSpend(userId, amount);
+      if (!spendGuard.ok) return { success: false, error: spendGuard.error };
       const prefs = await getPreferenceMap(userId);
       let balance = Number(prefs['concierge_account.balance'] || 0);
       if (balance < amount) {
@@ -2233,6 +2236,8 @@ async function executeAction(userId, action, params, context = {}) {
       const amount = Number(params?.amount || 0);
       const opportunity = params?.opportunity || 'opportunity';
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
+      const fundGuard = await guardConciergeSpend(userId, amount);
+      if (!fundGuard.ok) return { success: false, error: fundGuard.error };
       const prefs = await getPreferenceMap(userId);
       let balance = Number(prefs['concierge_account.balance'] || 0);
       if (balance < amount) return { success: false, error: 'Insufficient balance', balance };
@@ -2246,6 +2251,8 @@ async function executeAction(userId, action, params, context = {}) {
       const amountCents = Number(params?.amount || 1000);
       const desc = params?.description || 'Concierge spend';
       const amount = amountCents / 100;
+      const chargeGuard = await guardConciergeSpend(userId, amount);
+      if (!chargeGuard.ok) return { success: false, error: chargeGuard.error };
       const prefs = await getPreferenceMap(userId);
       let balance = Number(prefs['concierge_account.balance'] || 0);
       if (balance >= amount) {
@@ -2639,6 +2646,23 @@ async function getPreferenceEntries(userId) {
 async function getPreferenceMap(userId) {
   const entries = await getPreferenceEntries(userId);
   return Object.fromEntries(entries.map(entry => [entry.key, entry.value]));
+}
+
+// Deterministic spend cap for concierge money movements — enforced regardless of what the
+// model asked for. Reads the user's rolling-day spend tally, applies the per-txn + per-day
+// limits, and (when allowed) advances the tally. Returns { ok, error }. Callers MUST honour
+// a false `ok` and abort the spend before touching balance or any real payment API.
+async function guardConciergeSpend(userId, amount, prefsMap = null) {
+  const prefs = prefsMap || await getPreferenceMap(userId);
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
+  let tally = {};
+  try { tally = JSON.parse(prefs['concierge_account.spend_day'] || '{}'); } catch { tally = {}; }
+  const spentToday = tally.date === today ? Number(tally.total) || 0 : 0;
+  const verdict = checkSpendLimit({ amount, spentToday });
+  if (!verdict.ok) return verdict;
+  await setPreferenceValue(userId, 'concierge_account.spend_day',
+    JSON.stringify({ date: today, total: spentToday + Number(amount) }));
+  return { ok: true };
 }
 
 async function setPreferenceValue(userId, key, value) {

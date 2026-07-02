@@ -6,8 +6,35 @@ const {
   actionPromptBlock,
   buildActionRecovery,
   applyActionContractResultMetadata,
-  validateActionWithContract
+  validateActionWithContract,
+  getActionContract
 } = require('../../api/action-contracts');
+
+test('every money-moving action routes through human review (executionMode: review)', () => {
+  // Regression guard for the P0: the action-runner gates review on executionMode === 'review'.
+  // These actions move (or purport to move) real money; if any resolves to direct-execute, the
+  // agent could spend without confirmation. getActionContract must fail them safe.
+  const moneyActions = [
+    'spend_from_concierge_account',
+    'top_up_concierge_account',
+    'fund_opportunity',
+    'stripe_charge',
+    'stripe_payout_to_user',
+    'spend_from_concierge_via_stripe',
+    'transfer_to_concierge_account'
+  ];
+  for (const type of moneyActions) {
+    const contract = getActionContract(type);
+    assert.ok(contract, `${type} must have a contract (no contract = direct execute)`);
+    assert.equal(contract.executionMode, 'review', `${type} must be review-gated`);
+  }
+});
+
+test('getActionContract leaves non-review actions as direct execute', () => {
+  assert.equal(getActionContract('check_concierge_balance').executionMode, undefined);
+  assert.equal(getActionContract('get_weather').executionMode, undefined);
+  assert.equal(getActionContract('nonexistent_action'), null);
+});
 
 test('Core actions (incl. new agentic) have contracts for reliability work', () => {
   const expected = [
