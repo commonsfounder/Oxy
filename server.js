@@ -1,10 +1,16 @@
 const http = require('http');
 const app = require('./api/index.js');
-const { getMissingRuntimeEnv, logMissingRuntimeEnvOnce } = require('./runtime');
+const { getMissingRuntimeEnv, logMissingRuntimeEnvOnce, validateTokenEncryptionKey } = require('./runtime');
 
 if (require.main === module) {
   const missing = getMissingRuntimeEnv();
   if (missing.length) logMissingRuntimeEnvOnce('server startup');
+  try {
+    validateTokenEncryptionKey();
+  } catch (e) {
+    console.error('[boot] Halting due to token encryption misconfiguration.');
+    process.exit(1);
+  }
   const PORT = Number(process.env.PORT) || 3000;
   const server = http.createServer(app);
   server.listen(PORT, '0.0.0.0', () => {

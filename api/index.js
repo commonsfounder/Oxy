@@ -92,6 +92,60 @@ const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { extractIncoming } = require('./services/incoming');
 
+// Subscription / entitlement helpers (server-side enforcement)
+async function getUserSubscription(userId, trace = null) {
+  if (!userId) return { status: 'free', active: false };
+  try {
+    const { data } = await (trace ? trace.run('supabase.subscription.fetch', () =>
+      supabase.from('user_subscriptions').select('*').eq('user_id', userId).maybeSingle()
+    ) : supabase.from('user_subscriptions').select('*').eq('user_id', userId).maybeSingle());
+    if (!data) {
+      // Default new users to trial (14 days)
+      return { status: 'trial', active: true, trial_ends_at: new Date(Date.now() + 14*24*3600*1000).toISOString() };
+    }
+    const now = Date.now();
+    const trialOk = data.trial_ends_at && new Date(data.trial_ends_at).getTime() > now;
+    const periodOk = data.current_period_end && new Date(data.current_period_end).getTime() > now;
+    const active = ['active', 'trial'].includes(data.status) && (trialOk || periodOk || data.status === 'active');
+    return { ...data, active };
+  } catch (e) {
+    console.warn('[subscription] fetch failed, allowing for now:', e.message);
+    return { status: 'trial', active: true };
+  }
+}
+
+function isSubscriptionActive(sub) {
+  return !!(sub && sub.active);
+}
+
+// Basic AI safety / output moderation (P1)
+function isOutputSafe(text = '') {
+  if (!text) return true;
+  const lower = String(text).toLowerCase();
+  // Simple high-confidence bad patterns (expand with model call in future)
+  if (/\b(suicide|kill yourself|bomb making|child exploitation|how to hack bank)\b/.test(lower)) return false;
+  if (lower.includes('ignore previous instructions') && lower.length < 200) return false; // obvious injection echo
+  return true;
+}
+
+// Cost / usage control (P1)
+const usageCounters = new Map(); // userId -> { date, tokens }
+const DAILY_TOKEN_CAP = Number(process.env.OXY_DAILY_TOKEN_CAP_PER_USER || 0); // 0 = no cap
+
+async function checkUsageCap(userId, estimatedTokens = 2000) {
+  if (!DAILY_TOKEN_CAP || !userId) return true;
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `${userId}:${today}`;
+  let rec = usageCounters.get(key) || { tokens: 0 };
+  if (rec.tokens + estimatedTokens > DAILY_TOKEN_CAP) {
+    return false;
+  }
+  rec.tokens += estimatedTokens;
+  usageCounters.set(key, rec);
+  // In prod, persist to DB (e.g. daily_usage table) and use atomic increment
+  return true;
+}
+
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const APP_URL = process.env.APP_URL || '';
@@ -3301,6 +3355,7 @@ const USER_DATA_TABLES = [
   'action_log',
   'memories',
   'conversations',
+  'user_subscriptions',
   'users'
 ];
 
@@ -3445,6 +3500,16 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
 
     const { error } = await supabase.from('users').insert(insertData);
     if (error) throw error;
+
+    // Seed default trial subscription (14 days)
+    try {
+      await supabase.from('user_subscriptions').upsert({
+        user_id: userId,
+        status: 'trial',
+        trial_ends_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+    } catch (e) { /* non fatal */ }
 
     log('info', 'auth.register', { userId });
 
@@ -3691,6 +3756,14 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
   };
 
+  // Subscription gate (P0 fix) - early, before expensive STT/LLM
+  const subStatus = await getUserSubscription(userId);
+  if (!isSubscriptionActive(subStatus)) {
+    sse({ type: 'error', error: 'Subscription required. Please subscribe or start a trial in the app.' });
+    sse({ type: 'done' });
+    return res.end();
+  }
+
   try {
     const tStart = Date.now();
     const hint = await buildTranscriptionHint(userId);
@@ -3728,6 +3801,12 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       baseHistory,
       userContent: { role: 'user', parts: [{ text: userText }] }
     });
+
+    if (!(await checkUsageCap(userId, 4000))) {
+      sse({ type: 'error', error: 'Daily usage limit reached. Try again tomorrow or upgrade.' });
+      sse({ type: 'done' });
+      return res.end();
+    }
 
     const stream = await modernGenAI.models.generateContentStream({
       model: STREAMING_CHAT_MODEL,
@@ -3773,6 +3852,11 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) finalSpoken = actionConfirmation;
+
+    if (!isOutputSafe(finalSpoken)) {
+      finalSpoken = "I'm sorry, I can't help with that.";
+    }
+
     audioBase64 = await generateSpeech(buildVoiceExcerpt(finalSpoken), req.body.voice).catch(err => {
       ttsError = err.message;
       console.error('[tts error]', err.message);
@@ -3860,6 +3944,12 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     if (!req.file) return res.status(400).json({ error: 'file is required.' });
     if (!message) return res.status(400).json({ error: 'message is required.' });
 
+    // Subscription gate (P0)
+    const subStatus = await getUserSubscription(userId);
+    if (!isSubscriptionActive(subStatus)) {
+      return res.status(402).json({ error: 'Subscription required. Please subscribe in the app.' });
+    }
+
     const isImage = (req.file.mimetype || '').startsWith('image/');
     const fileLabel = isImage ? 'image' : 'file';
     const fileContextHint = isImage
@@ -3884,6 +3974,10 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
         ]
       }
     });
+
+    if (!(await checkUsageCap(userId, 3000))) {
+      return res.status(429).json({ error: 'Daily usage limit reached.' });
+    }
 
     const geminiRes = await modernGenAI.models.generateContent({
       model: PRIMARY_CHAT_MODEL,
@@ -3931,6 +4025,10 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
 
     if (!spoken) {
       spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
+    }
+
+    if (!isOutputSafe(spoken)) {
+      spoken = "I'm sorry, I can't help with that.";
     }
 
     saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }).catch(() => {});
