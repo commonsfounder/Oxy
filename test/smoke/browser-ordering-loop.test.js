@@ -114,6 +114,12 @@ test('parseModelDecision parses a valid ready_for_payment decision', () => {
   assert.equal(result.total, '£9.50');
 });
 
+test('parseModelDecision parses a valid back decision', () => {
+  // "back" exists so "this product can't fulfil the goal (size out of stock) → return to
+  // results" is actionable even when the site hides its header/back affordances (Nike).
+  assert.deepEqual(parseModelDecision('{"action":"back"}'), { action: 'back' });
+});
+
 test('parseModelDecision rejects unparseable JSON', () => {
   const result = parseModelDecision('not json at all');
   assert.equal(result.action, 'invalid');

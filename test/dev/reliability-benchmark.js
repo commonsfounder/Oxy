@@ -120,7 +120,7 @@ function reasonOf(r) {
   console.log(`  LOOP pass:         ${passes}/${scorable}  (${pct(passes, scorable)})   ← excludes ${infra} infra/bot-wall case(s)`);
   console.log('');
   console.log('  buckets:');
-  for (const b of ['pass', 'botwall', 'reauth', 'stuck', 'wrong', 'incomplete', 'threw']) {
+  for (const b of ['pass', 'botwall', 'reauth', 'user_gate', 'stuck', 'wrong', 'incomplete', 'threw']) {
     const n = by(b).length;
     if (n) console.log(`    ${b.padEnd(11)} ${n}`);
   }

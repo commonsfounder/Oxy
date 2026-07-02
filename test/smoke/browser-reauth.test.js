@@ -62,6 +62,16 @@ test('looksLikeBlockWall fires on anti-automation interstitials (small page + co
   assert.equal(looksLikeBlockWall({ text: 'Pardon our interruption... Press & Hold to confirm you are a human', bodyLen: 90 }), true);
 });
 
+test('looksLikeBlockWall fires on Nike\'s add-to-cart automation rejection dialog', () => {
+  // Nike serves the PDP fine but refuses the add-to-cart API behind a dialog: "We Couldn't
+  // Complete Your Request … disable any browser extensions … and reopen Nike.com." The
+  // dialog text is probed separately (page behind it keeps bodyLen large).
+  assert.equal(looksLikeBlockWall({
+    text: 'We Couldn\'t Complete Your Request\nClose this tab, disable any browser extensions (such as coupon or promo code tools) and reopen Nike.com.\nView Bag',
+    bodyLen: 150,
+  }), true);
+});
+
 test('looksLikeBlockWall does NOT fire on a normal shopping page that merely mentions the words', () => {
   // A full 5k-char product page is not a wall even if a footer link says "captcha" or a help
   // article mentions "unusual traffic" — the length gate protects against that.

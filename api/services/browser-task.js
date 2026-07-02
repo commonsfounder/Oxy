@@ -316,7 +316,7 @@ function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
 // Left undetected, the loop clicks around the dead page for its whole step budget, returns
 // awaiting_more, and the client AUTO-CONTINUES — a bot-walled Just Eat ran 6 turns / ~13min
 // before this landed. Detecting the copy lets us bail on the first step that shows it.
-const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|hcaptcha|recaptcha challenge|cf-challenge/i;
+const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|disable any browser extensions|hcaptcha|recaptcha challenge|cf-challenge/i;
 
 // Pure so it's unit-testable. A wall page is SMALL (a challenge, not a shop) AND contains the
 // copy — gating on length keeps a normal 5k-char product page that merely mentions "captcha"
@@ -330,11 +330,23 @@ function looksLikeBlockWall({ text, bodyLen } = {}) {
 // Live probe: one short innerText read. Best-effort — a failed read degrades to "not a wall".
 async function detectBlockWall(page) {
   try {
-    const { text, bodyLen } = await page.evaluate(() => {
+    const { text, bodyLen, dialogText } = await page.evaluate(() => {
       const it = document.body?.innerText || '';
-      return { text: it.slice(0, 1500), bodyLen: it.length };
+      // A wall can also be a DIALOG over an otherwise-fine page (Nike's "disable any browser
+      // extensions" add-to-cart rejection) — the page behind keeps bodyLen over the length
+      // gate, so the biggest visible dialog gets probed with its own length.
+      let dialogText = '';
+      for (const d of document.querySelectorAll('[role="dialog"],[aria-modal="true"]')) {
+        const s = getComputedStyle(d);
+        const r = d.getBoundingClientRect();
+        if (s.visibility === 'hidden' || s.display === 'none' || !r.width || !r.height) continue;
+        const t = (d.innerText || '').trim();
+        if (t.length > dialogText.length) dialogText = t.slice(0, 1500);
+      }
+      return { text: it.slice(0, 1500), bodyLen: it.length, dialogText };
     });
-    return looksLikeBlockWall({ text, bodyLen });
+    return looksLikeBlockWall({ text, bodyLen })
+      || (dialogText ? looksLikeBlockWall({ text: dialogText, bodyLen: dialogText.length }) : false);
   } catch {
     return false;
   }
@@ -528,9 +540,11 @@ inside the dialog if you can't see it. NEVER press Close/X on a dialog for an it
 intend to order.
 
 If you pressed Add and nothing changed, a REQUIRED option (size, colour, delivery method)
-is probably unselected — select it first, then press Add again. If the requested size or
-option is OUT OF STOCK or unavailable, do NOT ask the user — go back to the results and
-pick a different product that matches the goal.
+is probably unselected — select it first, then press Add again. Elements marked
+"(unavailable)" are out of stock or disabled — clicking them does nothing. If the requested
+size or option is unavailable, do NOT ask the user — use {"action":"back"} (with a note
+saying why) to return to the results and pick a different product that matches the goal.
+NEVER re-open a product you already went back from — the history notes tell you which.
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
 number, and never use a price, quantity, postcode, or any number you read off the page as
@@ -547,6 +561,7 @@ ${elementsText}
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"back","note":"<why, e.g. UK 10 unavailable on this product>"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
 {"action":"done","summary":"<short summary answering the goal>"}
@@ -577,7 +592,7 @@ function parseModelDecision(rawText) {
       return { action: 'invalid', error: 'Could not parse model response as JSON.' };
     }
   }
-  const validActions = new Set(['click', 'fill', 'wait', 'ask', 'done', 'ready_for_payment']);
+  const validActions = new Set(['click', 'fill', 'back', 'wait', 'ask', 'done', 'ready_for_payment']);
   if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
@@ -595,7 +610,10 @@ function findElementByText(elements, text) {
 // Include ARIA-role interactives, not just native controls: address-autocomplete
 // suggestions, menu items, size/option radios etc. are often role-based divs/li that
 // the loop must be able to see and click (e.g. committing a delivery address).
-const CLICKABLE_SELECTOR = 'button, a, input, textarea, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+// `label` is here for styled radio/checkbox chips (M&S/Nike sizes: a <label> fronting a
+// visually-hidden input) — extraction only keeps labels whose control is hidden, so plain
+// form labels don't double every field.
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
 async function extractClickableElements(page) {
   // One round-trip, not ~6 per element. The old per-element loop (isVisible + innerText +
@@ -618,12 +636,34 @@ async function extractClickableElements(page) {
     // elements behind it land mis-aligned and the model re-clicks the tile behind the dialog
     // (the Uber Eats "add item" modal failure). Scope to the largest visible dialog, if any.
     const vw = window.innerWidth * window.innerHeight;
-    const dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+    let dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
       .filter(visible)
       .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
       .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
       .sort((a, b) => b.area - a.area)[0];
+    if (!dialog) {
+      // Obstruction fallback: some interstitials (Nike's Klarna "click continue to proceed"
+      // overlay) are plain fixed divs with no dialog role, so badges land on the inert page
+      // behind them and the model can never find the Continue/close control. Ask the DOM
+      // what's physically on top at the viewport centre; if its fixed ancestor blankets the
+      // viewport and holds only a handful of controls (an overlay card, not an app shell),
+      // scope perception to it.
+      let n = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+      while (n && n !== document.body && n !== document.documentElement) {
+        const cs = getComputedStyle(n);
+        if (cs.position === 'fixed') {
+          const r = n.getBoundingClientRect();
+          if (r.width >= window.innerWidth * 0.6 && r.height >= window.innerHeight * 0.6) {
+            const controls = n.querySelectorAll(selector).length;
+            if (controls >= 1 && controls <= 12) dialog = { el: n, area: r.width * r.height };
+          }
+          break; // nearest fixed ancestor decides either way
+        }
+        n = n.parentElement;
+      }
+    }
     let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
+    if (dialog && scope.length === 0) scope = allNodes; // never let scoping blind the model entirely
     // Commercial pages front-load 20-40 header/nav controls in DOM order, which used to
     // consume the whole element budget before the first product tile — the model could only
     // ever see site chrome (2026-07-02 Currys screenshots: every badge in the header, zero
@@ -638,21 +678,52 @@ async function extractClickableElements(page) {
       const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
       const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept/i;
       const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
-      const content = [], keyChrome = [], chrome = [], offscreen = [];
+      // Off-screen CONTENT outranks on-screen plain chrome: on a PDP the buy box (size
+      // chips, Add to bag) is routinely below the fold while ~20 header nav links are on
+      // screen — the nav links used to consume the budget and the model couldn't buy
+      // (M&S 2026-07-02). Key chrome (search/basket/consent) keeps its priority.
+      const content = [], keyChrome = [], chrome = [], offContent = [], offChrome = [];
       for (const el of scope) {
-        if (!inViewport(el)) { offscreen.push(el); continue; }
-        if (!inChrome(el)) { content.push(el); continue; }
+        const chromeEl = inChrome(el);
+        if (!inViewport(el)) { (chromeEl ? offChrome : offContent).push(el); continue; }
+        if (!chromeEl) { content.push(el); continue; }
         (KEY_CHROME.test(labelOf(el)) ? keyChrome : chrome).push(el);
       }
-      scope = [...content, ...keyChrome, ...chrome, ...offscreen];
+      scope = [...content, ...keyChrome, ...offContent, ...chrome, ...offChrome];
     }
     const out = [];
     for (const el of scope) {
       if (out.length >= max) break;
       if (!visible(el)) continue;
+      // "Soft hidden": the visually-hidden idiom (1×1 box + clip rect, or opacity:0) keeps
+      // visibility:visible so the plain visible() check passes — M&S/Nike size radios.
+      const softHidden = (n) => {
+        const r = n.getBoundingClientRect();
+        return !visible(n) || r.width <= 2 || r.height <= 2 || getComputedStyle(n).opacity === '0';
+      };
+      let proxyCtl = null;
+      if (el.tagName === 'LABEL') {
+        // Keep a label only when it's the visible face of a hidden control (styled
+        // radio/checkbox chips). A label for a visible control would just duplicate it.
+        const ctl = el.control || (el.htmlFor && document.getElementById(el.htmlFor)) || el.querySelector('input,select,textarea');
+        if (!ctl || !softHidden(ctl)) continue;
+        proxyCtl = ctl;
+      } else if (el.tagName === 'INPUT' && (el.type === 'radio' || el.type === 'checkbox')) {
+        // Mirror of the label rule: when the label is the visible face, drop the hidden
+        // input so each chip appears ONCE (Nike listed every size twice, and the duplicate
+        // burned the element budget before "UK 10" was reached — 2026-07-02).
+        const lab = (el.labels && el.labels[0]) || el.closest('label');
+        if (lab && visible(lab) && softHidden(el)) continue;
+      }
       const raw = (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
-      const text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+      let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
       if (!text) continue;
+      // Surface disabled state (out-of-stock size chips, inactive CTAs) so the model can
+      // reason about it instead of clicking a dead control forever (Nike: sold-out sizes
+      // are aria-disabled radios behind styled labels — 2026-07-02, 273s of "UK 10" clicks).
+      const isOff = el.disabled || el.getAttribute('aria-disabled') === 'true'
+        || (proxyCtl && (proxyCtl.disabled || proxyCtl.getAttribute('aria-disabled') === 'true'));
+      if (isOff && !/unavailable|out of stock/i.test(text)) text = `${text} (unavailable)`;
       const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
       if (locatorIndex === -1) continue;
       const r = el.getBoundingClientRect();
@@ -1422,6 +1493,12 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
+      // ponytail: debug-only — dump what the model can act on each step (pairs with the
+      // step-N.jpg screenshots below) so element-extraction bugs are diagnosable offline.
+      if (process.env.OXY_DEBUG_SCREENSHOT_DIR) {
+        require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.elements.json`,
+          JSON.stringify({ url: session.page.url(), elements: elements.map(e => ({ id: e.id, text: e.text, box: e.box && { x: Math.round(e.box.x), y: Math.round(e.box.y) } })) }, null, 1), () => {});
+      }
 
       // Discover deals/coupons/promos on every step (visible text + element labels). This
       // feeds richer context so the final answer can be conversational and useful ("found it
@@ -1503,6 +1580,19 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           consecutiveBadDecisions += 1;
           if (consecutiveBadDecisions >= 3) return STUCK;
         }
+        continue;
+      }
+
+      if (decision.action === 'back') {
+        // History navigation is a real primitive: "this product can't fulfil the goal (size
+        // out of stock) → return to the results" must work even when the site's own back
+        // affordances are hidden (Nike's auto-hiding header). Counts as a real action.
+        await session.page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+        await settle(session.page);
+        const why = decision.note ? ` (${String(decision.note).replace(/\s+/g, ' ').slice(0, 80)})` : '';
+        session.history.push(`Step ${steps}: went back to the previous page${why}`);
+        consecutiveBadDecisions = 0;
+        consecutiveWaits = 0;
         continue;
       }
 
@@ -1631,8 +1721,18 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           if (match) actionIndex = match.locatorIndex;
         }
       }
-      const locator = session.page.locator(CLICKABLE_SELECTOR).nth(actionIndex);
+      // Resolve the node in the SAME index space extraction used (document.querySelectorAll
+      // order). Playwright's locator(sel).nth(i) is a DIFFERENT space — its CSS engine
+      // pierces open shadow roots, so on shadow-DOM sites every index past the first shadow
+      // host lands N elements off and the loop clicks the wrong control (Nike: "Add to Bag"
+      // resolved to the Klarna "Check purchase power" trigger, 2026-07-02). An ElementHandle
+      // keeps Playwright's actionability checks + trusted input on the exact node we saw.
+      const locator = await session.page.evaluateHandle(
+        ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+        { selector: CLICKABLE_SELECTOR, idx: actionIndex }
+      ).then((h) => h.asElement()).catch(() => null);
       try {
+        if (!locator) throw new Error('element is no longer on the page');
         if (decision.action === 'click') {
           onProgress(`Clicking "${target.text}"…`);
           // Two real-site hazards: (1) elements in horizontal carousels/off-screen rows
@@ -1642,7 +1742,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // first, then force the click past any overlay. Safe — the payment guardrail
           // above means the loop never force-clicks a pay button.
           await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
-          await session.page.evaluate(el => el && el.scrollIntoView({ block: 'center', behavior: 'instant' }), await locator.elementHandle().catch(() => null)).catch(() => {});
+          await session.page.evaluate(el => el && el.scrollIntoView({ block: 'center', behavior: 'instant' }), locator).catch(() => {});
           try {
             await locator.click({ timeout: 10000, force: true });
           } catch (clickErr) {
@@ -1680,8 +1780,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
             // button that reveals the real field) instead of the <input> itself, so fill
             // throws "not an <input>". Recover: fill a nested input if there is one, else
             // focus the element and type via the keyboard.
-            const nested = locator.locator('input, textarea, [contenteditable]').first();
-            if (await nested.count().catch(() => 0)) {
+            const nested = await locator.$('input, textarea, [contenteditable]').catch(() => null);
+            if (nested) {
               await nested.fill(value, { timeout: 8000 });
             } else {
               await locator.click({ timeout: 5000, force: true }).catch(() => {});
@@ -1803,7 +1903,17 @@ async function confirmPayment(userId) {
     if (!target) {
       return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
     }
-    await session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex).click({ timeout: 10000 });
+    // Same-index-space resolve as the main loop: locator().nth() counts shadow-DOM nodes
+    // that querySelectorAll (extraction) doesn't, and a mis-indexed click HERE is a wrong
+    // click on a payment page — the one place that must never happen.
+    const handle = await session.page.evaluateHandle(
+      ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+      { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
+    ).then((h) => h.asElement());
+    if (!handle) {
+      return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
+    }
+    await handle.click({ timeout: 10000 });
     const text = `Done — placed the order (${session.pendingPaymentLabel}).`;
     await persistStorage(userId, session);
     await closeSession(userId);
@@ -1832,6 +1942,7 @@ module.exports = {
   isTechnicalAsk,
   looksLikeLoginWall,
   looksLikeBlockWall,
+  detectBlockWall,
   describesBlockWall,
   isOrderGoal,
   assessProgress,

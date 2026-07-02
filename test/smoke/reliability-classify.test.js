@@ -46,6 +46,29 @@ test('the runaway-watchdog ask is incomplete, not a real fork', () => {
   assert.equal(classifyOutcome('cart', { type: 'ask', question: 'This order is taking an unusually long time — want me to keep trying?' }), 'incomplete');
 });
 
+test('a checkout email/address ask on a cart case is a user-input gate, not a loop failure', () => {
+  // The loop built the basket and reached checkout; it correctly stops for data the harness
+  // deliberately withholds (email/address/postcode). That's the success boundary, not a bug.
+  for (const q of [
+    'Please provide your email address to continue with the guest checkout.',
+    'What delivery address should I use?',
+    'Please provide a postcode for collection.',
+    'I need a phone number to place the order.',
+  ]) {
+    const b = classifyOutcome('cart', { type: 'ask', question: q });
+    assert.equal(b, 'user_gate', `"${q}" → user_gate`);
+    assert.ok(INFRA_BUCKETS.has(b));
+    assert.ok(!LOOP_FAILURE_BUCKETS.has(b));
+  }
+});
+
+test('a size/option ask stays incomplete when the goal already named it (loop failure)', () => {
+  // Asking for a size the goal supplied means the loop failed to apply it — still a failure.
+  assert.equal(classifyOutcome('cart', { type: 'ask', question: 'What size would you like?' }), 'incomplete');
+  // And an email ask on an answer (price-lookup) case is overshoot, not a checkout gate.
+  assert.equal(classifyOutcome('answer', { type: 'ask', question: 'What is your email address?' }), 'incomplete');
+});
+
 test('a null/garbage outcome is threw', () => {
   assert.equal(classifyOutcome('answer', null), 'threw');
   assert.equal(classifyOutcome('answer', undefined), 'threw');

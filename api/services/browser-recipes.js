@@ -27,17 +27,30 @@ function parseSizeFromGoal(text, goalContext) {
   return null;
 }
 
+// Garment words ↔ letter chips: goals say "size medium" but most PDPs label the chip "M"
+// (M&S, John Lewis) — and some label it "Medium". Try both spellings of the ask.
+const SIZE_WORD_TO_LETTER = { 'extra small': 'xs', 'small': 's', 'medium': 'm', 'large': 'l', 'extra large': 'xl' };
+const SIZE_LETTER_TO_WORD = Object.fromEntries(Object.entries(SIZE_WORD_TO_LETTER).map(([w, l]) => [l, w]));
+
 // Given the size the user asked for and the labels of the size chips on the page, return
 // the index of the chip to click, or null. Exact (normalized) match wins; a contains match
 // (e.g. "10" inside "Size 10") is the fallback.
 function matchSizeChip(parsedSize, chipLabels) {
   const want = norm(parsedSize);
   if (!want) return null;
+  const wants = [want];
+  if (SIZE_WORD_TO_LETTER[want]) wants.push(SIZE_WORD_TO_LETTER[want]);
+  if (SIZE_LETTER_TO_WORD[want]) wants.push(SIZE_LETTER_TO_WORD[want]);
   const labels = (chipLabels || []).map(norm);
-  const exact = labels.indexOf(want);
-  if (exact !== -1) return exact;
-  const contains = labels.findIndex((l) => l.split(/\s+/).includes(want) || l === `size ${want}`);
-  return contains === -1 ? null : contains;
+  for (const w of wants) {
+    const exact = labels.indexOf(w);
+    if (exact !== -1) return exact;
+  }
+  for (const w of wants) {
+    const contains = labels.findIndex((l) => l.split(/\s+/).includes(w) || l === `size ${w}`);
+    if (contains !== -1) return contains;
+  }
+  return null;
 }
 
 // Generic fallback recipe. Tried for any host not in RECIPES. No size step (too risky to
@@ -231,7 +244,7 @@ async function resolveSizeMove({ page, session, recipe, clickable }) {
 
 // CLICKABLE_SELECTOR is owned by browser-task.js; keep one copy here that MUST equal it.
 // (Task 5 asserts they're identical so a future edit to one can't silently diverge.)
-const CLICKABLE_SELECTOR = 'button, a, input, textarea, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
 const recipeHealth = createRecipeHealth();
 

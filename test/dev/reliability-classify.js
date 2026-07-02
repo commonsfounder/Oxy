@@ -10,6 +10,12 @@
 const BOTWALL_ERROR = /blocking automated access|couldn'?t load the page properly/i;
 const STUCK_ERROR = /got stuck on this page/i;
 const WATCHDOG = /taking an unusually long time/i;
+// A checkout fork asking for user-specific data the harness deliberately withholds (email,
+// address, postcode, phone, card, name, or a sign-in). When the loop asks this on an ORDER
+// case it has already built the basket and reached checkout — the success boundary, not a
+// bug. Kept narrow so a "which size/colour?" ask (a real loop failure when the goal named
+// it) does NOT match.
+const USER_DATA_GATE = /\b(e-?mail|delivery address|shipping address|postcode|post code|zip code|phone number|mobile number|card (?:number|details)|payment details|(?:full |your )?name|sign in|log ?in|create an account)\b/i;
 
 // buckets:
 //  pass       — reached the expected success state
@@ -17,6 +23,8 @@ const WATCHDOG = /taking an unusually long time/i;
 //  reauth     — needs a stored login we don't have in the harness (NOT a loop bug)
 //  stuck      — loop ran but couldn't make progress (a real loop failure)
 //  wrong      — finished in a state that doesn't satisfy the goal (e.g. done on an order case)
+//  user_gate  — order reached checkout and asked for withheld user data (email/address/
+//               login) — the success boundary for the harness, NOT a loop bug
 //  incomplete — ran out of turns / asked a question it shouldn't need to (a soft loop failure)
 //  threw      — an unhandled exception escaped the loop
 function classifyOutcome(expect, outcome) {
@@ -45,9 +53,13 @@ function classifyOutcome(expect, outcome) {
   }
 
   if (type === 'ask') {
-    if (WATCHDOG.test(String(outcome.question || ''))) return 'incomplete';
-    // A legitimate fork the goal didn't resolve. For a `cart` case a needed choice is
-    // plausible; for an `answer` case the loop should have just answered → soft failure.
+    const q = String(outcome.question || '');
+    if (WATCHDOG.test(q)) return 'incomplete';
+    // On an order case, an ask for checkout data we intentionally don't supply means the
+    // loop reached the checkout gate — an infra ceiling like reauth, not a loop failure.
+    if (expect === 'cart' && USER_DATA_GATE.test(q)) return 'user_gate';
+    // Any other ask is a fork the loop shouldn't have needed (e.g. a size the goal named,
+    // or any ask on an info lookup) → soft loop failure.
     return 'incomplete';
   }
 
@@ -60,6 +72,6 @@ function classifyOutcome(expect, outcome) {
 // A bucket is a "loop failure" (counts against the reliability number) vs an infra ceiling
 // (excluded, tracked separately). pass is neither.
 const LOOP_FAILURE_BUCKETS = new Set(['stuck', 'wrong', 'incomplete', 'threw']);
-const INFRA_BUCKETS = new Set(['botwall', 'reauth']);
+const INFRA_BUCKETS = new Set(['botwall', 'reauth', 'user_gate']);
 
 module.exports = { classifyOutcome, LOOP_FAILURE_BUCKETS, INFRA_BUCKETS };

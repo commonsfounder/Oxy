@@ -34,6 +34,17 @@ test('matchSizeChip returns null when no chip matches', () => {
   assert.equal(matchSizeChip('m', []), null);
 });
 
+test('matchSizeChip maps garment words to letter chips and back', () => {
+  // Goals say "size medium" but most PDPs label the chip "M" (M&S, JL) — and vice versa.
+  assert.equal(matchSizeChip('medium', ['XS', 'S', 'M', 'L']), 2);
+  assert.equal(matchSizeChip('extra large', ['S', 'M', 'L', 'XL']), 3);
+  assert.equal(matchSizeChip('extra small', ['XS', 'S', 'M']), 0);
+  assert.equal(matchSizeChip('m', ['Small', 'Medium', 'Large']), 1);
+  assert.equal(matchSizeChip('l', ['Small', 'Medium', 'Large']), 2);
+  // aria-label style chips ("Size M") still match a word ask
+  assert.equal(matchSizeChip('medium', ['Size S', 'Size M', 'Size L']), 1);
+});
+
 const { RECIPES, phaseFromUrl } = require('../../api/services/browser-recipes');
 
 test('John Lewis recipe is registered with the expected phases and steps', () => {
@@ -205,4 +216,11 @@ test('recipe CLICKABLE_SELECTOR equals the one browser-task uses', () => {
   const bt = require('../../api/services/browser-task');
   assert.equal(recipes.CLICKABLE_SELECTOR, bt.CLICKABLE_SELECTOR,
     'the two clickable-selector copies must stay identical');
+});
+
+test('CLICKABLE_SELECTOR includes label (styled radio/checkbox size chips: M&S, Nike)', () => {
+  // Size chips are commonly <label> wrapping a visually-hidden radio input; without
+  // `label` in the selector the extraction can't see them and the model can't pick a size.
+  const bt = require('../../api/services/browser-task');
+  assert.ok(/(^|,\s*)label(\s*,|$)/.test(bt.CLICKABLE_SELECTOR), 'label is a clickable candidate');
 });
