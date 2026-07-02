@@ -8,6 +8,8 @@ struct Message: Identifiable, Equatable {
     let timestamp: Date
     var actions: [ActionResult]
     var isStreaming: Bool
+    /// Web sources behind a grounded answer, when the model searched for it.
+    var sources: [MessageSource]
 
     enum Role: String, Codable {
         case user
@@ -21,7 +23,8 @@ struct Message: Identifiable, Equatable {
         content: String,
         timestamp: Date = Date(),
         actions: [ActionResult] = [],
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        sources: [MessageSource] = []
     ) {
         self.id = id
         self.dbId = dbId
@@ -30,6 +33,7 @@ struct Message: Identifiable, Equatable {
         self.timestamp = timestamp
         self.actions = actions
         self.isStreaming = isStreaming
+        self.sources = sources
     }
 
     static func == (lhs: Message, rhs: Message) -> Bool {
@@ -37,7 +41,15 @@ struct Message: Identifiable, Equatable {
             && lhs.content == rhs.content
             && lhs.isStreaming == rhs.isStreaming
             && lhs.actions == rhs.actions
+            && lhs.sources == rhs.sources
     }
+}
+
+/// A web source behind a grounded answer — a publisher title and the link.
+struct MessageSource: Codable, Equatable, Identifiable {
+    let title: String
+    let uri: String
+    var id: String { uri }
 }
 
 extension Date {
@@ -117,7 +129,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         confirmation: String? = nil,
         pending: Bool = false,
         connectorId: String? = nil,
-        healthStatus: String? = nil
+        healthStatus: String? = nil,
     ) {
         self.action = action
         self.success = success
@@ -141,7 +153,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             text: result.text,
             error: result.error,
             deepLink: result.deepLink,
-            webLink: result.deepLink,
+            webLink: nil,
             cardText: result.cardText,
             actionSummary: result.actionSummary,
             risk: result.risk,
@@ -213,12 +225,14 @@ struct HistoryEntry: Codable, Identifiable {
     let content: String
     let createdAt: String?
     let actions: [ActionResult]?
+    let sources: [MessageSource]?
 
     enum CodingKeys: String, CodingKey {
         case id
         case role
         case content
         case actions
+        case sources
         case createdAt = "created_at"
     }
 
@@ -239,14 +253,148 @@ struct Briefing: Codable, Identifiable, Equatable {
     let source: String?
     let read: Bool?
     let createdAt: String?
+    let metadata: BriefingMetadata?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, title, body, source, read
+        case id, kind, title, body, source, read, metadata
         case createdAt = "created_at"
     }
 
     var isUnread: Bool {
         read == false
+    }
+
+    var emails: [BriefingEmail] {
+        metadata?.emails ?? []
+    }
+
+    var incoming: [BriefingIncoming] {
+        metadata?.incoming ?? []
+    }
+
+    var lead: String? { metadata?.lead }
+    var signals: [BriefingSignal] { metadata?.signals ?? [] }
+
+    /// Editorial day narrative for the Today hero ("This evening" voice). Server prose.
+    var narrative: String? { metadata?.narrative?.nonEmpty }
+    /// One-line wellbeing reflection grounded in the day's health data. Server prose.
+    var wellbeing: String? { metadata?.wellbeing?.nonEmpty }
+}
+
+struct BriefingMetadata: Codable, Equatable {
+    let emails: [BriefingEmail]?
+    let incoming: [BriefingIncoming]?
+    let lead: String?
+    let signals: [BriefingSignal]?
+    let narrative: String?
+    let wellbeing: String?
+}
+
+private extension String {
+    /// nil when empty/whitespace, so the UI can fall back to local copy.
+    var nonEmpty: String? {
+        let t = trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+}
+
+/// One ranked "what matters today" item. `status` is server-set:
+/// - `done`    — a safe action already auto-ran; `receipt` describes it.
+/// - `pending` — a sensitive action waiting on a tap; `label`+`prompt` drive it (sent into chat).
+/// - `info`    — informational only, no action.
+struct BriefingSignal: Codable, Equatable, Identifiable {
+    let title: String
+    let detail: String?
+    let status: String?
+    let receipt: String?
+    let label: String?
+    let prompt: String?
+    /// Present only on auto-executed actions that can be reversed (the server holds the
+    /// actual descriptor; the app just needs to know an Undo exists and send the title back).
+    let undo: BriefingSignalUndo?
+
+    var id: String { title + "|" + (status ?? "") }
+    var isDone: Bool { status == "done" }
+    var isPending: Bool { status == "pending" }
+    var canUndo: Bool { isDone && undo != nil }
+}
+
+struct BriefingSignalUndo: Codable, Equatable {
+    let type: String?
+}
+
+struct BriefingEmail: Codable, Equatable, Identifiable {
+    let from: String
+    let subject: String
+    let snippet: String?
+    let date: String?
+
+    var id: String { from + "|" + subject }
+
+    // Inbox snippets arrive as raw HTML-ish text (&#39; &amp; &lt; …). Decode for display.
+    var cleanFrom: String { from.decodingHTMLEntities() }
+    var cleanSubject: String { subject.decodingHTMLEntities() }
+    var cleanSnippet: String? { snippet?.decodingHTMLEntities() }
+
+    /// Marketing / bulk mail the dashboard shouldn't surface as something that needs you.
+    /// ponytail: keyword heuristic; move to a server-side classifier if it misfires.
+    var isLikelyPromotional: Bool {
+        let haystack = "\(from) \(subject) \(snippet ?? "")".lowercased()
+        let signals = [
+            "% off", " off ", "sale", "deal", "discount", "coupon", "promo", "offer",
+            "unsubscribe", "newsletter", "no-reply", "noreply", "do-not-reply",
+            "free costume", "free gift", "streak", "festival", "limited time",
+            "shop now", "buy now", "save up", "win ", "prize", "pool is closing",
+            "premium", "upgrade now", "flash", "clearance", "lowest price", "best price"
+        ]
+        return signals.contains { haystack.contains($0) }
+    }
+}
+
+/// A delivery, order, or reservation parsed server-side from the user's inbox.
+/// `stage` is delivery progress 0…3 (ordered→delivered); nil for reservations.
+struct BriefingIncoming: Codable, Equatable, Identifiable {
+    let kind: String        // "delivery" | "reservation"
+    let title: String
+    let vendor: String
+    let status: String
+    let eta: String?
+    let stage: Int?
+
+    var id: String { vendor + "|" + title }
+    var isDelivery: Bool { kind == "delivery" }
+    var cleanTitle: String { title.decodingHTMLEntities() }
+}
+
+extension String {
+    /// Lightweight HTML entity decode covering what inbox snippets actually contain
+    /// (numeric &#NN; / &#xNN; plus the handful of common named entities). Avoids
+    /// NSAttributedString's slow per-call HTML parse.
+    func decodingHTMLEntities() -> String {
+        guard contains("&") else { return self }
+        var result = self
+        let named = [
+            "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+            "&apos;": "'", "&nbsp;": " ", "&hellip;": "…", "&mdash;": "—", "&ndash;": "–"
+        ]
+        for (entity, char) in named {
+            result = result.replacingOccurrences(of: entity, with: char)
+        }
+        // Numeric entities: &#39; and &#x27;
+        if let regex = try? NSRegularExpression(pattern: "&#(x?)([0-9a-fA-F]+);") {
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed()
+            for m in matches {
+                guard let full = Range(m.range, in: result),
+                      let hexFlag = Range(m.range(at: 1), in: result),
+                      let codeRange = Range(m.range(at: 2), in: result) else { continue }
+                let isHex = !result[hexFlag].isEmpty
+                let code = String(result[codeRange])
+                guard let value = UInt32(code, radix: isHex ? 16 : 10),
+                      let scalar = Unicode.Scalar(value) else { continue }
+                result.replaceSubrange(full, with: String(Character(scalar)))
+            }
+        }
+        return result
     }
 }
 

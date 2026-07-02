@@ -15,12 +15,16 @@ struct ChatService {
         settings: OxySettings? = nil,
         location: [String: Double]? = nil,
         nativeHints: [String: Any]? = nil,
-        tts: Bool = false
+        incognito: Bool = false
     ) -> AsyncStream<SSEEvent> {
         var body: [String: Any] = [
             "userId": userId,
             "message": message
         ]
+
+        if incognito {
+            body["incognito"] = true
+        }
 
         if let chatStartedAt {
             body["chatStartedAt"] = chatStartedAt
@@ -29,9 +33,6 @@ struct ChatService {
         if let settings {
             body["settings"] = [
                 "name": settings.name,
-                "voice": settings.voice,
-                "voiceOn": settings.voiceOn,
-                "voiceEngine": settings.voiceEngine,
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
@@ -48,10 +49,7 @@ struct ChatService {
             body["nativeHints"] = nativeHints
         }
 
-        var queryItems = [URLQueryItem(name: "stream", value: "true")]
-        if tts || (settings?.voiceOn == true) {
-            queryItems.append(URLQueryItem(name: "tts", value: "true"))
-        }
+        let queryItems = [URLQueryItem(name: "stream", value: "true")]
 
         return api.sseStream(
             path: "/chat",
@@ -107,6 +105,28 @@ struct ChatService {
         )
     }
 
+    /// Polish a raw voice transcript through Gemini — removes filler words,
+    /// fixes grammar, preserves intent.  Falls back to the original text on error.
+    func polishTranscript(userId: String, transcript: String) async -> String {
+        do {
+            let body: [String: Any] = [
+                "userId": userId,
+                "transcript": transcript
+            ]
+            let data = try await api.request(
+                path: "/polish-transcript",
+                method: "POST",
+                body: body
+            )
+            struct PolishResponse: Decodable { let polished: String }
+            let decoded = try JSONDecoder().decode(PolishResponse.self, from: data)
+            return decoded.polished.isEmpty ? transcript : decoded.polished
+        } catch {
+            print("[ChatService] Polish failed, using raw transcript: \(error.localizedDescription)")
+            return transcript
+        }
+    }
+
     func sendImageMessage(
         userId: String,
         message: String,
@@ -126,9 +146,6 @@ struct ChatService {
         if let settings {
             let payload: [String: Any] = [
                 "name": settings.name,
-                "voice": settings.voice,
-                "voiceOn": settings.voiceOn,
-                "voiceEngine": settings.voiceEngine,
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
@@ -141,19 +158,13 @@ struct ChatService {
             }
         }
 
-        var queryItems: [URLQueryItem] = []
-        if settings?.voiceOn == true {
-            queryItems.append(URLQueryItem(name: "tts", value: "true"))
-        }
-
         let data = try await api.multipartRequest(
             path: "/chat-with-image",
             fields: fields,
             fileField: "image",
             fileName: fileName,
             mimeType: mimeType,
-            fileData: imageData,
-            queryItems: queryItems
+            fileData: imageData
         )
         return try JSONDecoder().decode(ImageChatResponse.self, from: data)
     }
@@ -197,9 +208,6 @@ struct BackendVersion: Decodable {
 struct ImageChatResponse: Codable {
     let text: String
     let actions: [ActionResult]?
-    let audio: String?
-    let audioMimeType: String?
-    let ttsError: String?
 }
 
 private extension Encodable {

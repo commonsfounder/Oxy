@@ -35,7 +35,8 @@ function unwrapAction(entry) {
     type: entry.action || entry.type || '',
     input: entry.input || {},
     result: entry,
-    status: entry.success === false ? 'failed' : 'executed',
+    // Prefer the explicit DB status column; fall back to the inline success flag.
+    status: entry.status || (entry.success === false ? 'failed' : 'executed'),
     created_at: entry.created_at
   };
 }
@@ -60,7 +61,7 @@ function contextFromAction(action, source = 'action_result') {
   const type = action?.type || '';
   const input = action?.input || {};
   const label = actionLabel(action);
-  if (!type || action?.status === 'failed') return null;
+  if (!type || action?.status === 'failed' || action?.status === 'pending') return null;
 
   if (type === 'find_place' || type === 'book_uber') {
     return {
@@ -219,183 +220,6 @@ function extractActionContexts(recentActions = []) {
     .filter(Boolean);
 }
 
-function findMemoryValue(memory, topicPatterns) {
-  const lines = String(memory || '').split(/\n+/).map(line => line.trim()).filter(Boolean);
-  for (const line of lines) {
-    if (!topicPatterns.some(pattern => pattern.test(line))) continue;
-    const match = line.match(/\b(?:is|:|-)\s+(.+)$/i);
-    return normalizeText(match?.[1] || line.replace(/^.*?\b(?:usual|preferred|default)?\s*(station|place|address)\b/i, '').trim());
-  }
-  return '';
-}
-
-function extractContact(message) {
-  const text = normalizeText(message);
-  const match = text.match(/\bto\s+([A-Za-z][A-Za-z .'-]{1,60})(?:[?.!]|$)/);
-  return match ? match[1].trim() : '';
-}
-
-function firstRouteLeg(ctx, modePattern) {
-  const itinerary = Array.isArray(ctx?.itinerary) ? ctx.itinerary : [];
-  return itinerary.find(leg => modePattern.test([leg?.type, leg?.service, leg?.line].filter(Boolean).join(' '))) ||
-    ctx?.routeContext?.firstTransitLeg ||
-    itinerary[0] ||
-    ctx?.routeContext?.mainRailLeg ||
-    null;
-}
-
-function routeLegSentence(leg, fallbackText = '') {
-  if (!leg) return normalizeText(fallbackText).slice(0, 280);
-  const service = leg.service || leg.line || (leg.type === 'rail' ? 'the train' : 'the bus');
-  const dep = leg.departure ? ` at ${leg.departure}` : '';
-  const from = leg.from ? ` from ${leg.from}` : '';
-  const to = leg.to ? ` to ${leg.to}` : '';
-  const arr = leg.arrival ? `, arriving ${leg.arrival}` : '';
-  const platform = leg.platform ? ` Platform ${leg.platform}.` : '';
-  return `${service}${dep}${from}${to}${arr}.${platform}`.trim();
-}
-
-function contextualActionForMessage(message, contexts = [], memory = '', settings = {}) {
-  const text = normalizeText(message);
-  const lower = text.toLowerCase();
-
-  if (/\bdo you remember\b/i.test(text) && /\busual station\b/i.test(text)) {
-    const station = findMemoryValue(memory, [/\busual station\b/i, /\bpreferred station\b/i, /\bdefault station\b/i]);
-    if (station) {
-      return {
-        reason: 'memory_usual_station',
-        spokenOnly: true,
-        spoken: `Your usual station is ${station}.`,
-        resolvedContext: { kind: 'memory', label: station, source: 'memory', confidence: 'high' }
-      };
-    }
-    return {
-      reason: 'memory_usual_station_missing',
-      spokenOnly: true,
-      spoken: "I don't have your usual station saved yet.",
-      resolvedContext: { kind: 'memory', label: 'usual station', source: 'memory', confidence: 'low' }
-    };
-  }
-
-  if (/\b(is|was)\s+(that|this|it)\s+(right|correct|true)\b/i.test(text) || /\b(are you sure|source\??|check that)\b/i.test(text)) {
-    return null;
-  }
-
-  const latestPlace = contexts.find(ctx => ctx.kind === 'place' && ctx.confidence !== 'low');
-  const latestRoute = contexts.find(ctx => ctx.kind === 'route' && ctx.confidence !== 'low');
-  const latestMedia = contexts.find(ctx => ctx.kind === 'media' && ctx.confidence !== 'low');
-  const latestContent = contexts.find(ctx => ctx.kind === 'content' && ctx.label);
-
-  if (latestRoute && /\b(next|that'?s|that is|is that|so that).*\b(bus|train|route)\b/i.test(text)) {
-    const wantsTrain = /\btrain\b/i.test(text);
-    const leg = firstRouteLeg(latestRoute, wantsTrain ? /rail|train/i : /bus|transit/i);
-    const fallback = latestRoute.result?.text || latestRoute.label;
-    return {
-      reason: wantsTrain ? 'contextual_confirm_next_train' : 'contextual_confirm_next_bus',
-      spokenOnly: true,
-      spoken: leg
-        ? `That is the first ${wantsTrain ? 'train' : 'transit leg'} I found for that route: ${routeLegSentence(leg)}`
-        : `That is the route information I found: ${normalizeText(fallback).slice(0, 320)}`,
-      resolvedContext: latestRoute
-    };
-  }
-
-  if (latestRoute && /^(why not|why can't you|why couldn'?t you|how come)\??$/i.test(text)) {
-    let reason = latestRoute.result?.error ||
-      latestRoute.result?.text ||
-      latestRoute.routeContext?.reason ||
-      'I did not have enough reliable route data to answer that fully.';
-    if (/couldn'?t get a reliable|no (transit |train |rail )?route summary|route unavailable|route_summary_unavailable/i.test(reason)) {
-      reason = 'The route source did not return a usable itinerary for that journey, so I did not have reliable departure times, changes, or platform details to quote.';
-    }
-    return {
-      reason: 'contextual_route_failure_explanation',
-      spokenOnly: true,
-      spoken: normalizeText(reason).slice(0, 360),
-      resolvedContext: latestRoute
-    };
-  }
-
-  if (/\b(book|get|order|call)\s+(me\s+)?(an?\s+)?(uber|taxi|ride)\b/i.test(text) && /\b(it|that|this|there|one)\b/i.test(text)) {
-    if (!latestPlace?.label) return null;
-    return {
-      reason: 'contextual_uber_to_place',
-      spoken: "I'll open that in Uber.",
-      actions: [{ type: 'book_uber', input: { destination: latestPlace.input?.destination || latestPlace.label } }],
-      resolvedContext: { ...latestPlace, suggestedAction: 'book_uber' }
-    };
-  }
-
-  if (/\b(open|navigate|directions|get there|take me)\b/i.test(text) && /\b(it|that|this|there|one|nearest)\b/i.test(text)) {
-    const target = latestPlace || latestRoute;
-    if (!target?.label) return null;
-    const input = {
-      ...(target.input || {}),
-      destination: target.input?.destination || target.label,
-      mode: target.input?.mode || settings?.preferredTransportMode || 'driving'
-    };
-    return {
-      reason: 'contextual_open_target',
-      spoken: "I'll open directions.",
-      actions: [{ type: 'get_directions', input }],
-      resolvedContext: { ...target, suggestedAction: 'get_directions' }
-    };
-  }
-
-  if (/\bplay\s+(it|that|this|that one|this one|the song|the track|the one)\b/i.test(lower)) {
-    if (!latestMedia?.label) return null;
-    return {
-      reason: 'contextual_play_media',
-      spoken: `Playing ${latestMedia.label}.`,
-      actions: [{ type: 'play_music', input: { query: latestMedia.label } }],
-      resolvedContext: { ...latestMedia, suggestedAction: 'play_music' }
-    };
-  }
-
-  if (/\bsend\s+(it|that|this)\s+to\b/i.test(lower)) {
-    const contact = extractContact(text);
-    if (!contact || !latestContent?.label) return null;
-    return {
-      reason: 'contextual_send_content',
-      spoken: `I'll send that to ${contact}.`,
-      actions: [{ type: 'send_message', input: { contact, message: latestContent.label } }],
-      resolvedContext: { ...latestContent, suggestedAction: 'send_message' }
-    };
-  }
-
-  if (/\bwhat about\s+tomorrow\b/i.test(lower) && latestRoute?.input) {
-    const input = { ...latestRoute.input };
-    if (latestRoute.suggestedAction === 'get_directions') {
-      input.departure_time = input.departure_time || 'tomorrow';
-      return {
-        reason: 'contextual_route_tomorrow',
-        spoken: "I'll check that for tomorrow.",
-        actions: [{ type: 'get_directions', input }],
-        resolvedContext: { ...latestRoute, suggestedAction: 'get_directions' }
-      };
-    }
-    input.departure_time = input.departure_time || 'tomorrow';
-    input.preference = input.preference || 'balanced';
-    return {
-      reason: 'contextual_trip_tomorrow',
-      spoken: "I'll plan that for tomorrow.",
-      actions: [{ type: 'plan_trip', input }],
-      resolvedContext: { ...latestRoute, suggestedAction: 'plan_trip' }
-    };
-  }
-
-  if (/^(do it|do that|same|same again|again|that one|this one|the other one|last one)$/i.test(text)) {
-    return {
-      reason: 'ambiguous_contextual_reference',
-      spokenOnly: true,
-      spoken: 'What should I do with that?',
-      resolvedContext: { kind: 'unknown', label: text, source: 'assistant_answer', confidence: 'low' }
-    };
-  }
-
-  return null;
-}
-
 function buildResolvedContext(history = [], recentActions = []) {
   const contexts = [
     ...extractAssistantContexts(history),
@@ -409,23 +233,10 @@ function buildResolvedContext(history = [], recentActions = []) {
   };
 }
 
-function resolveContextualTurn({ message, history = [], recentActions = [], memory = '', settings = {} } = {}) {
-  if (!isContextualReference(message)) return null;
-  const contexts = [
-    ...extractAssistantContexts(history),
-    ...extractActionContexts(recentActions)
-  ];
-  const turn = contextualActionForMessage(message, contexts, memory, settings);
-  if (turn) return turn;
-  const resolvedContext = buildResolvedContext(history, recentActions);
-  return resolvedContext.confidence === 'low' ? null : { resolvedContext };
-}
-
 module.exports = {
   buildResolvedContext,
   extractAssistantContexts,
   extractActionContexts,
   extractSongFromText,
-  isContextualReference,
-  resolveContextualTurn
+  isContextualReference
 };

@@ -74,18 +74,11 @@ extension Color {
         guard let data = UserDefaults.standard.data(forKey: "oxy_settings") else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
-    private static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
-        Color(UIColor { traits in
-            isLightMode(traits) ? light : dark
-        })
-    }
-    private static func isLightMode(_ traits: UITraitCollection) -> Bool {
-        let theme = UserDefaults.standard.string(forKey: "oxy_appTheme")
-            ?? (oxySettingsObject?["appTheme"] as? String)
-            ?? "dark"
-        if theme == "light" { return true }
-        if theme == "system" { return traits.userInterfaceStyle == .light }
-        return false
+    // App is dark-only — no light/system appearance. The `light:` arm is kept so
+    // callers don't have to change, but it's never used.
+    static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
+        _ = light
+        return Color(dark)
     }
     /// Green — #4CAF82
     static let oxyGreen = Color(red: 76/255, green: 175/255, blue: 130/255)

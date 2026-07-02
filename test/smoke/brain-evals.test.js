@@ -46,6 +46,20 @@ const evalCases = [
     deterministicAction: null
   },
   {
+    name: 'shopping request with budget must search, not route to a job board',
+    message: 'find me a macbook under 700',
+    expectSearch: true,
+    searchReason: 'shopping-product',
+    deterministicAction: null
+  },
+  {
+    name: 'best-X-under-budget recommendation must search',
+    message: 'whats the best laptop under 500',
+    expectSearch: true,
+    searchReason: 'shopping-product',
+    deterministicAction: null
+  },
+  {
     name: 'specific known music playback does not need search',
     message: 'play California Gurls by Katy Perry',
     expectSearch: false,

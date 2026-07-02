@@ -6,6 +6,10 @@ import Observation
 final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate {
     static let shared = LocationManager()
 
+    /// Posted when the device moves meaningfully (significant-change monitoring), so the
+    /// proactive layer can refresh the server's idea of where the user is.
+    static let didChangeLocation = Notification.Name("OxyDidChangeLocation")
+
     var lastLocation: CLLocation?
     var authorizationStatus: CLAuthorizationStatus = .notDetermined
     var isAuthorized: Bool {
@@ -13,6 +17,8 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
     }
 
     private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+    private var monitoringSignificantChanges = false
     private var pendingLocationContinuations: [CheckedContinuation<[String: Double]?, Never>] = []
 
     override init() {
@@ -70,11 +76,37 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
         ]
     }
 
+    /// Wakes the app on meaningful moves (~500m) so the server's location stays current even
+    /// between foreground sessions. Always-authorization only; no-op otherwise.
+    func startMonitoringSignificantChanges() {
+        guard authorizationStatus == .authorizedAlways, !monitoringSignificantChanges,
+              CLLocationManager.significantLocationChangeMonitoringAvailable() else { return }
+        monitoringSignificantChanges = true
+        manager.startMonitoringSignificantLocationChanges()
+    }
+
+    /// Reverse-geocodes the last fix into a human place label (street/area/city/POI name) so the
+    /// brain reasons about "near Aldi", not raw coordinates. nil if unavailable.
+    func placeLabel() async -> [String: String]? {
+        guard let loc = lastLocation else { return nil }
+        let placemarks: [CLPlacemark] = await withCheckedContinuation { continuation in
+            geocoder.reverseGeocodeLocation(loc) { marks, _ in continuation.resume(returning: marks ?? []) }
+        }
+        guard let placemark = placemarks.first else { return nil }
+        var place: [String: String] = [:]
+        if let name = placemark.name { place["name"] = name }
+        if let street = placemark.thoroughfare { place["street"] = street }
+        if let area = placemark.subLocality { place["area"] = area }
+        if let city = placemark.locality { place["city"] = city }
+        return place.isEmpty ? nil : place
+    }
+
     // MARK: - CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         lastLocation = locations.last
         resolvePendingLocationContinuations(with: locationDict)
+        NotificationCenter.default.post(name: Self.didChangeLocation, object: nil)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -85,6 +117,7 @@ final class LocationManager: NSObject, @preconcurrency CLLocationManagerDelegate
         authorizationStatus = manager.authorizationStatus
         if isAuthorized {
             manager.requestLocation()
+            startMonitoringSignificantChanges()
         } else {
             resolvePendingLocationContinuations(with: nil)
         }

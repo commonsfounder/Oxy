@@ -4,14 +4,21 @@ const KEY_ENV = 'OXY_TOKEN_ENCRYPTION_KEY';
 const ALGORITHM = 'aes-256-gcm';
 let warned = false;
 
-function encryptionKey() {
+function encryptionKey({ strict = false } = {}) {
   const raw = process.env[KEY_ENV];
+  const isProd = process.env.NODE_ENV === 'production' || process.env.OXY_REQUIRE_TOKEN_KEY === 'true';
   if (!raw) {
+    if (strict || isProd) {
+      throw new Error(`FATAL: ${KEY_ENV} is required (32-byte hex) in production. Connector tokens cannot be handled in plaintext.`);
+    }
     warnOnce(`${KEY_ENV} is not set; connector tokens will remain plaintext until configured.`);
     return null;
   }
   const key = Buffer.from(raw, 'hex');
   if (key.length !== 32) {
+    if (strict || isProd) {
+      throw new Error(`FATAL: ${KEY_ENV} must be a 32-byte hex string.`);
+    }
     warnOnce(`${KEY_ENV} must be a 32-byte hex string; connector tokens will remain plaintext.`);
     return null;
   }
@@ -37,7 +44,7 @@ function isEncryptedTokenEnvelope(value) {
 }
 
 function encryptTokens(tokensObj = {}) {
-  const key = encryptionKey();
+  const key = encryptionKey({ strict: true });
   if (!key || isEncryptedTokenEnvelope(tokensObj)) return tokensObj;
 
   const iv = crypto.randomBytes(12);
@@ -57,7 +64,7 @@ function encryptTokens(tokensObj = {}) {
 
 function decryptTokens(value = {}) {
   if (!isEncryptedTokenEnvelope(value)) return value || {};
-  const key = encryptionKey();
+  const key = encryptionKey({ strict: true });
   if (!key) throw new Error('Connector tokens are encrypted but OXY_TOKEN_ENCRYPTION_KEY is unavailable.');
 
   const decipher = crypto.createDecipheriv(ALGORITHM, key, Buffer.from(value.iv, 'base64'));

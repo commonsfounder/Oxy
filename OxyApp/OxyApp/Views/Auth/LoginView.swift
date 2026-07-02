@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LoginView: View {
     @Environment(AppState.self) private var appState
-    @State private var page = 0
     @State private var userId = ""
     @State private var password = ""
     @State private var isRegistering = false
@@ -13,62 +12,17 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.oxyBg.ignoresSafeArea()
+            Color.edCanvas.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                TabView(selection: $page) {
-                    OnboardingSlide(
-                        icon: "mic.fill",
-                        subIcon: "waveform",
-                        title: "Ask Oxy",
-                        body: "Messages, bookings, reminders\n— just say it."
-                    )
-                    .tag(0)
-
-                    OnboardingSlide(
-                        icon: "arrow.triangle.branch",
-                        subIcon: nil,
-                        title: "Connected",
-                        body: "Gmail, Telegram, Uber and more\n— one request, done."
-                    )
-                    .tag(1)
-
-                    OnboardingSlide(
-                        icon: "brain.head.profile",
-                        subIcon: nil,
-                        title: "Remembers you",
-                        body: "Gets better\nthe more you use it."
-                    )
-                    .tag(2)
-
-                    LoginFormPage(
-                        userId: $userId,
-                        password: $password,
-                        isRegistering: $isRegistering,
-                        isLoading: $isLoading,
-                        errorMessage: $errorMessage,
-                        onSubmit: submit
-                    )
-                    .tag(3)
-                }
-                .tabViewStyle(.page(indexDisplayMode: page < 3 ? .always : .never))
-                .animation(.easeInOut, value: page)
-
-                if page < 3 {
-                    Button(action: { withAnimation { page = min(page + 1, 3) } }) {
-                        Text(page == 2 ? "Get Started" : "Next")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(Color.oxyStone)
-                            .foregroundStyle(Color.oxyOnAccent)
-                            .clipShape(RoundedRectangle(cornerRadius: 16))
-                    }
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 48)
-                    .transition(.opacity)
-                }
-            }
+            // Straight to the sign-in form — no intro carousel, no mic slide.
+            LoginFormPage(
+                userId: $userId,
+                password: $password,
+                isRegistering: $isRegistering,
+                isLoading: $isLoading,
+                errorMessage: $errorMessage,
+                onSubmit: submit
+            )
         }
     }
 
@@ -88,16 +42,20 @@ struct LoginView: View {
 
                 if let token = response.token, let returnedUserId = response.userId {
                     await MainActor.run {
+                        // A warm success note as the door opens.
+                        HapticManager.shared.success()
                         appState.login(userId: returnedUserId, token: token)
                     }
                 } else {
                     await MainActor.run {
+                        HapticManager.shared.warning()
                         withAnimation { errorMessage = response.error ?? "Authentication failed" }
                         isLoading = false
                     }
                 }
             } catch {
                 await MainActor.run {
+                    HapticManager.shared.warning()
                     withAnimation { errorMessage = error.localizedDescription }
                     isLoading = false
                 }
@@ -106,54 +64,6 @@ struct LoginView: View {
     }
 }
 
-// MARK: - Onboarding Slide
-
-private struct OnboardingSlide: View {
-    let icon: String
-    let subIcon: String?
-    let title: String
-    let body: String
-
-    var body: some View {
-        VStack(spacing: 36) {
-            Spacer()
-
-            ZStack {
-                Circle()
-                    .fill(Color.oxyStone.opacity(0.1))
-                    .frame(width: 148, height: 148)
-
-                VStack(spacing: 10) {
-                    Image(systemName: icon)
-                        .font(.system(size: 54, weight: .semibold))
-                        .foregroundStyle(Color.oxyStone)
-
-                    if let subIcon {
-                        Image(systemName: subIcon)
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(Color.oxyStone.opacity(0.55))
-                    }
-                }
-            }
-
-            VStack(spacing: 14) {
-                Text(title)
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.oxyText)
-
-                Text(body)
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color.oxySub)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-            }
-
-            Spacer()
-            Spacer()
-        }
-        .padding(.horizontal, 36)
-    }
-}
 
 // MARK: - Login Form Page
 
@@ -165,119 +75,99 @@ private struct LoginFormPage: View {
     @Binding var errorMessage: String?
     let onSubmit: () -> Void
 
+    @FocusState private var focusedField: Field?
+    private enum Field { case userId, password }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                Spacer().frame(height: 72)
+            VStack(alignment: .leading, spacing: 0) {
+                Spacer().frame(height: 96)
 
-                Text("Oxy")
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.oxyText)
-                    .padding(.bottom, 48)
+                Text(isRegistering ? "Create your account." : "Welcome back.")
+                    .font(.appDisplay(30, weight: .light))
+                    .foregroundStyle(Color.edInk)
+                    .padding(.bottom, 44)
 
-                VStack(spacing: 16) {
-                    VStack(spacing: 12) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxySub)
-                                .frame(width: 20)
-
-                            TextField("User ID", text: $userId)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxyText)
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: 52)
-                        .background(Color.oxySurface2)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.oxyLine2, lineWidth: 1)
-                        )
-
-                        HStack(spacing: 12) {
-                            Image(systemName: "lock.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxySub)
-                                .frame(width: 20)
-
-                            SecureField("Password", text: $password)
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxyText)
-                        }
-                        .padding(.horizontal, 16)
-                        .frame(height: 52)
-                        .background(Color.oxySurface2)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(Color.oxyLine2, lineWidth: 1)
-                        )
-                    }
-
-                    if let errorMessage {
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Color.oxyRed)
-                            Text(errorMessage)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color.oxyRed)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    Button(action: onSubmit) {
-                        HStack(spacing: 8) {
-                            if isLoading {
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(0.85)
-                            } else {
-                                Text(isRegistering ? "Create Account" : "Sign In")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 14, weight: .semibold))
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(
-                            LinearGradient(
-                                colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .foregroundStyle(Color.oxyOnAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .shadow(color: Color.oxyStone.opacity(0.3), radius: 8, y: 4)
-                    }
-                    .disabled(isLoading || userId.isEmpty || password.isEmpty)
-                    .opacity(userId.isEmpty || password.isEmpty ? 0.6 : 1)
-                    .animation(.easeInOut(duration: 0.2), value: userId.isEmpty || password.isEmpty)
-
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isRegistering.toggle()
-                        }
-                    }) {
-                        Text(isRegistering ? "Already have an account? **Sign in**" : "New to Oxy? **Create account**")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.oxySub)
-                    }
+                VStack(alignment: .leading, spacing: 28) {
+                    lineField(placeholder: "User ID", text: $userId, secure: false, field: .userId)
+                    lineField(placeholder: "Password", text: $password, secure: true, field: .password)
                 }
-                .padding(.horizontal, 28)
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(Font.appBody(12, weight: .medium))
+                        .foregroundStyle(Color.appDanger)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 20)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                Button(action: onSubmit) {
+                    HStack(spacing: 8) {
+                        if isLoading {
+                            ProgressView()
+                                .tint(Color.edCanvas)
+                                .scaleEffect(0.8)
+                        }
+                        Text(isRegistering ? "Create Account" : "Sign In")
+                            .font(.system(size: 14, weight: .semibold))
+                            .tracking(1.5)
+                    }
+                    // On-ink, not pure black: contrasts with edInk in BOTH finishes (the same
+                    // primary button accent. appBackground.
+                    // enabled button in light mode rendered black text on a near-black fill —
+                    // invisible. edCanvas flips with the finish and stays legible.
+                    .foregroundStyle(Color.edCanvas)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .background(Color.edInk)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.appScale)
+                .disabled(isLoading || userId.isEmpty || password.isEmpty)
+                .opacity(userId.isEmpty || password.isEmpty ? 0.4 : 1)
+                .animation(.appFast, value: userId.isEmpty || password.isEmpty)
+                .padding(.top, 36)
+
+                Button {
+                    withAnimation(.appFast) { isRegistering.toggle() }
+                } label: {
+                    Text(isRegistering ? "Already have an account? Sign in" : "New here? Create account")
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(Color.appMuted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.appScale)
+                .padding(.top, 20)
 
                 Spacer().frame(height: 60)
             }
+            .padding(.horizontal, 28)
         }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func lineField(placeholder: String, text: Binding<String>, secure: Bool, field: Field) -> some View {
+        VStack(spacing: 9) {
+            Group {
+                if secure {
+                    SecureField(placeholder, text: text)
+                } else {
+                    TextField(placeholder, text: text)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+            }
+            .font(.system(size: 16, weight: .light))
+            .foregroundStyle(Color.appInk)
+            .tint(Color.appTitanium)
+            .focused($focusedField, equals: field)
+
+            Rectangle()
+                .fill(focusedField == field ? Color.appInk.opacity(0.55) : Color.appFillSubtle)
+                .frame(height: focusedField == field ? 1 : 0.5)
+                .animation(.appFast, value: focusedField)
+        }
     }
 }
 

@@ -5,7 +5,10 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
 
-const SUPPORTED_ACTIONS = ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'];
+const SUPPORTED_ACTIONS = [
+  'send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events',
+  'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc'
+];
 
 async function getTokens(userId) {
   try {
@@ -73,30 +76,40 @@ async function getAccessToken(userId) {
     throw new Error('Google not authorized. Reconnect Google from Settings.');
   }
 
-  try {
-    const resp = await axios.post('https://oauth2.googleapis.com/token', {
-      grant_type: 'refresh_token',
-      refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
-      client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
-      client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
-    }, { timeout: 10000 });
+  const attemptRefresh = () => axios.post('https://oauth2.googleapis.com/token', {
+    grant_type: 'refresh_token',
+    refresh_token: tokens.refresh_token.replace(/^﻿/, '').trim(),
+    client_id: tokens.client_id || process.env.GMAIL_CLIENT_ID,
+    client_secret: tokens.client_secret || process.env.GMAIL_CLIENT_SECRET
+  }, { timeout: 10000 });
 
-    const updated = {
-      ...tokens,
-      access_token: resp.data.access_token,
-      expires_at: Date.now() + resp.data.expires_in * 1000
-    };
-    await saveTokens(userId, updated);
-    return updated.access_token;
+  let resp;
+  try {
+    resp = await attemptRefresh();
   } catch (err) {
     const desc = err.response?.data?.error_description || err.message;
     if (typeof desc === 'string' && (desc.includes('expired') || desc.includes('revoked'))) {
-      // Refresh token is dead — clear it so the connector shows as disconnected
-      try { await markGoogleDisconnected(userId, tokens); } catch {}
+      try { await markGoogleDisconnected(userId, tokens); } catch (cleanupErr) {
+        console.warn('[google] disconnect cleanup failed:', cleanupErr.message);
+      }
       throw new Error('Failed to refresh Google token: Token has been expired or revoked. Reconnect Google from Settings.');
     }
-    throw new Error(`Failed to refresh Google token: ${desc}`);
+    // One retry after a short delay for transient network errors
+    await new Promise(r => setTimeout(r, 1000));
+    try {
+      resp = await attemptRefresh();
+    } catch (retryErr) {
+      throw new Error(`Failed to refresh Google token: ${retryErr.response?.data?.error_description || retryErr.message}`);
+    }
   }
+
+  const updated = {
+    ...tokens,
+    access_token: resp.data.access_token,
+    expires_at: Date.now() + resp.data.expires_in * 1000
+  };
+  await saveTokens(userId, updated);
+  return updated.access_token;
 }
 
 function buildMime(to, subject, body, options = {}) {
@@ -315,6 +328,31 @@ function summarizeCalendarEvents(events = [], emptyText = 'No upcoming events fo
   return `Upcoming events:\n${lines.join('\n')}`;
 }
 
+function extractDocText(document = {}) {
+  const content = document.body?.content || [];
+  const lines = [];
+  for (const el of content) {
+    const elements = el.paragraph?.elements;
+    if (!elements) continue;
+    const text = elements.map(e => e.textRun?.content || '').join('');
+    if (text.trim()) lines.push(text.replace(/\n$/, ''));
+  }
+  return lines.join('\n').trim();
+}
+
+async function findDocByTitle(headers, title) {
+  const resp = await axios.get('https://www.googleapis.com/drive/v3/files', {
+    headers,
+    params: {
+      q: `mimeType='application/vnd.google-apps.document' and trashed=false and name contains '${String(title).replace(/'/g, "\\'")}'`,
+      pageSize: 1,
+      fields: 'files(id,name)'
+    },
+    timeout: 15000
+  });
+  return resp.data.files?.[0] || null;
+}
+
 async function execute(userId, action, params) {
   let token;
   try {
@@ -331,9 +369,25 @@ async function execute(userId, action, params) {
         const body = params.body || params.message || params.content;
         const subject = params.subject || inferEmailSubject(body);
         const threadId = params.thread_id || params.threadId;
-        const inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
-        const references = params.references || inReplyTo;
+        let inReplyTo = params.in_reply_to || params.inReplyTo || params.message_id || params.messageId;
+        let references = params.references || inReplyTo;
         if (!to || !body) return { success: false, error: 'send_email requires a recipient and message body' };
+        // Guard against sending to a bare name instead of an address.
+        if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(String(to))) {
+          return { success: false, error: `I need ${to}'s email address — I only have a name, not an address.` };
+        }
+        // For a reply, derive RFC threading headers from the thread's actual last
+        // message — the model can't see the real Message-ID, so don't trust it.
+        if (threadId) {
+          try {
+            const threadMsgs = await fetchThreadMessages(headers, threadId);
+            const last = threadMsgs[threadMsgs.length - 1];
+            if (last?.messageId) {
+              inReplyTo = last.messageId;
+              references = [last.references, last.messageId].filter(Boolean).join(' ').trim();
+            }
+          } catch { /* fall back to whatever the model supplied */ }
+        }
         if (isGenericPlaceholderEmail(subject, body)) {
           return {
             success: false,
@@ -379,15 +433,28 @@ async function execute(userId, action, params) {
 
       case 'create_calendar_event': {
         const { title, start_date, end_date, description = '', timezone = 'Europe/London' } = params;
-        if (!title || !start_date || !end_date) return { success: false, error: 'create_calendar_event requires title, start_date, end_date' };
+        if (!title || !start_date) return { success: false, error: 'create_calendar_event requires title and start_date' };
         // Strip timezone offsets (Z, +01:00 etc) so Google uses the timeZone field for local interpretation
-        const toLocal = dt => dt.replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+        const toLocal = dt => String(dt).replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+        const startLocal = toLocal(start_date);
+        // Default a missing end to one hour after the start (local-clock math, no TZ shift).
+        let endLocal = end_date ? toLocal(end_date) : null;
+        if (!endLocal) {
+          const d = new Date(startLocal);
+          if (!Number.isNaN(d.getTime())) {
+            d.setHours(d.getHours() + 1);
+            const pad = n => String(n).padStart(2, '0');
+            endLocal = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+          } else {
+            endLocal = startLocal;
+          }
+        }
         const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
           {
             summary: title,
             description,
-            start: { dateTime: toLocal(start_date), timeZone: timezone },
-            end:   { dateTime: toLocal(end_date),   timeZone: timezone }
+            start: { dateTime: startLocal, timeZone: timezone },
+            end:   { dateTime: endLocal,   timeZone: timezone }
           },
           { headers, timeout: 15000 });
         return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
@@ -404,6 +471,92 @@ async function execute(userId, action, params) {
           id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
         }));
         return { success: true, events, text: summarizeCalendarEvents(events) };
+      }
+
+      case 'create_google_doc': {
+        const title = String(params?.title || '').trim() || 'Untitled document';
+        const content = params?.content;
+        const doc = await axios.post('https://docs.googleapis.com/v1/documents', { title }, { headers, timeout: 15000 });
+        const documentId = doc.data.documentId;
+        if (content) {
+          await axios.post(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+            { requests: [{ insertText: { location: { index: 1 }, text: String(content) } }] },
+            { headers, timeout: 15000 });
+        }
+        return {
+          success: true,
+          text: `Created Google Doc "${title}"`,
+          documentId,
+          webLink: `https://docs.google.com/document/d/${documentId}/edit`
+        };
+      }
+
+      case 'search_google_docs': {
+        const query = String(params?.query || '').trim();
+        const maxResults = params?.max_results || 5;
+        const qParts = ["mimeType='application/vnd.google-apps.document'", 'trashed=false'];
+        if (query) qParts.push(`fullText contains '${query.replace(/'/g, "\\'")}'`);
+        const resp = await axios.get('https://www.googleapis.com/drive/v3/files', {
+          headers,
+          params: { q: qParts.join(' and '), pageSize: maxResults, fields: 'files(id,name,webViewLink,modifiedTime)', orderBy: 'modifiedTime desc' },
+          timeout: 15000
+        });
+        const docs = (resp.data.files || []).map(f => ({ id: f.id, title: f.name, url: f.webViewLink, modifiedAt: f.modifiedTime }));
+        return {
+          success: true,
+          docs,
+          text: docs.length
+            ? `Found ${docs.length} Google Doc${docs.length === 1 ? '' : 's'}${query ? ` for "${query}"` : ''}:\n${docs.map((d, i) => `${i + 1}. ${d.title}`).join('\n')}`
+            : `No Google Docs found${query ? ` for "${query}"` : ''}`
+        };
+      }
+
+      case 'append_google_doc': {
+        const content = String(params?.content || '').trim();
+        if (!content) return { success: false, error: 'append_google_doc requires content' };
+        let documentId = params?.document_id;
+        let title = params?.title;
+        if (!documentId) {
+          const docTitle = String(params?.title || params?.document_title || '').trim();
+          if (!docTitle) return { success: false, error: 'append_google_doc requires a title or document_id' };
+          const file = await findDocByTitle(headers, docTitle);
+          if (!file) return { success: false, error: `No Google Doc found matching "${docTitle}"` };
+          documentId = file.id;
+          title = file.name;
+        }
+        const doc = await axios.get(`https://docs.googleapis.com/v1/documents/${documentId}`, { headers, timeout: 15000 });
+        const lastElement = doc.data.body?.content?.slice(-1)[0];
+        const insertIndex = Math.max(1, (lastElement?.endIndex || 1) - 1);
+        await axios.post(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`,
+          { requests: [{ insertText: { location: { index: insertIndex }, text: `\n${content}` } }] },
+          { headers, timeout: 15000 });
+        return {
+          success: true,
+          text: `Added to Google Doc "${title || documentId}"`,
+          documentId,
+          webLink: `https://docs.google.com/document/d/${documentId}/edit`
+        };
+      }
+
+      case 'get_google_doc': {
+        let documentId = params?.document_id;
+        let title = params?.title;
+        if (!documentId) {
+          const docTitle = String(params?.title || '').trim();
+          if (!docTitle) return { success: false, error: 'get_google_doc requires a title or document_id' };
+          const file = await findDocByTitle(headers, docTitle);
+          if (!file) return { success: false, error: `No Google Doc found matching "${docTitle}"` };
+          documentId = file.id;
+          title = file.name;
+        }
+        const doc = await axios.get(`https://docs.googleapis.com/v1/documents/${documentId}`, { headers, timeout: 15000 });
+        const text = extractDocText(doc.data);
+        return {
+          success: true,
+          text: text ? `${title ? `"${title}":\n` : ''}${text}` : 'Document is empty',
+          documentId,
+          title: doc.data.title
+        };
       }
 
       default:

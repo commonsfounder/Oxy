@@ -20,3 +20,6 @@ OxyApp/*.xcworkspace/xcuserdata/
 *.ipa
 *.dSYM.zip
 *.dSYM
+
+# Latency benchmark output (captured baselines are throwaway)
+test/bench/baseline-*.json

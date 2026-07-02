@@ -1,3 +1,4 @@
+-- Required for gen_random_uuid() on older Postgres / Supabase projects.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- User accounts
@@ -112,6 +113,24 @@ CREATE TABLE IF NOT EXISTS briefings (
 
 CREATE INDEX IF NOT EXISTS idx_briefings_user ON briefings(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_briefings_unread ON briefings(user_id, read, created_at DESC);
+
+-- User-defined reminders and recurring scheduled tasks
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  instruction TEXT,
+  recurrence TEXT NOT NULL DEFAULT 'once',
+  time_of_day TEXT,
+  day_of_week SMALLINT,
+  next_run_at TIMESTAMPTZ NOT NULL,
+  last_run_at TIMESTAMPTZ,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_user ON scheduled_tasks(user_id, active);
+CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due ON scheduled_tasks(active, next_run_at);
 
 -- Backfill columns for older deployments
 ALTER TABLE action_log ADD COLUMN IF NOT EXISTS error TEXT;

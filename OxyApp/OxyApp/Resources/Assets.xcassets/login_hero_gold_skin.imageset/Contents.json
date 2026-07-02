@@ -1,0 +1,12 @@
+{
+  "images" : [
+    {
+      "filename" : "login_hero_gold_skin.jpg",
+      "idiom" : "universal"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}

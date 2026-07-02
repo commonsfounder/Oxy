@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import AVFoundation
 import UIKit
 
 private final class NativeActionTimeoutBox: @unchecked Sendable {
@@ -27,13 +26,25 @@ final class ChatViewModel {
     var isViewingHistorySnapshot = false
     var historySnapshotLabel: String?
     var networkError: String?
+    /// When true, this turn is not persisted server-side (shadow / incognito chat).
+    var incognito = false
 
-    @ObservationIgnored private let audioPlayback = AudioPlaybackManager()
+    /// Called on the main actor when a silent pendant execution finishes.
+    var onSilentExecComplete: (() -> Void)?
+
     @ObservationIgnored private var currentSendTask: Task<Void, Never>?
     @ObservationIgnored private var sendWatchdogTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatStartedAt: String?
     @ObservationIgnored private var pendingLocalAction: ActionResult?
     @ObservationIgnored private var lastFailedText: String?
+
+    // Sent instead of typed text to silently keep an in-progress browser/ordering task
+    // moving — never shown as a chat bubble, must match BROWSER_TASK_CONTINUE in api/index.js.
+    private static let browserTaskContinueSentinel = "__oxy_continue_browser_task__"
+    // Pure client-side safety net. Sits just above the server's runaway backstop (40, in
+    // browser-task.js) so the server's graceful "keep trying?" check-in is what surfaces;
+    // this only trips if the server somehow keeps saying "still working" past that.
+    private static let maxBrowserAutoContinues = 45
 
     private let chatService = ChatService()
     private let locationManager = LocationManager.shared
@@ -48,8 +59,7 @@ final class ChatViewModel {
     }
 
     private static let autoOpenActions: Set<String> = [
-        "book_uber", "order_deliveroo", "order_uber_eats",
-        "search_netflix_title", "add_to_netflix_list",
+        "book_uber",
         "make_call", "add_to_music_playlist", "open_app"
     ]
 
@@ -62,6 +72,9 @@ final class ChatViewModel {
     ]
 
     func prepareChat(userId: String) async {
+        #if DEBUG
+        Self.runSessionRuleCheck()
+        #endif
         activeChatStartedAt = chatStartedAt(for: userId)
         await loadHistory(userId: userId)
     }
@@ -76,7 +89,9 @@ final class ChatViewModel {
                 isViewingHistorySnapshot = false
                 historySnapshotLabel = nil
             }
-        } catch {}
+        } catch {
+            print("[ChatVM] History load failed: \(error.localizedDescription)")
+        }
     }
 
     func loadHistoryAround(userId: String, createdAt: String, messageId: String? = nil) async {
@@ -92,7 +107,9 @@ final class ChatViewModel {
                 historySnapshotLabel = label
                 scrollTargetMessageID = targetID
             }
-        } catch {}
+        } catch {
+            print("[ChatVM] History-around load failed: \(error.localizedDescription)")
+        }
     }
 
     func returnToCurrentChat(userId: String) async {
@@ -105,9 +122,18 @@ final class ChatViewModel {
         let startedAt = Date().oxyISO8601String
         activeChatStartedAt = startedAt
         UserDefaults.standard.set(startedAt, forKey: chatStartedAtKey(userId))
+        UserDefaults.standard.set(startedAt, forKey: lastActivityKey(userId))
         isViewingHistorySnapshot = false
         historySnapshotLabel = nil
         nativeManager.resetConversationContext()
+        // Abandon any in-progress browser/ordering session server-side so this fresh
+        // chat isn't hijacked by a still-running order's input latch. Best-effort.
+        Task {
+            _ = try? await APIClient.shared.request(
+                path: "/browser-session/\(userId)/close",
+                method: "POST"
+            )
+        }
     }
 
     func sendMessage(userId: String) {
@@ -119,6 +145,7 @@ final class ChatViewModel {
         if activeChatStartedAt == nil {
             activeChatStartedAt = chatStartedAt(for: userId)
         }
+        markChatActivity(for: userId)
         let pendingDecision = localActionDecision(for: text)
 
         inputText = ""
@@ -221,9 +248,12 @@ final class ChatViewModel {
                 chatStartedAt: activeChatStartedAt,
                 settings: settings,
                 location: location,
-                nativeHints: nativeHints
+                nativeHints: nativeHints,
+                incognito: incognito
             )
+            await MainActor.run { HapticManager.shared.impact(.light) }
             var fullText = ""
+            var needsBrowserContinue = false
 
             for await event in stream {
                 if Task.isCancelled { break }
@@ -241,6 +271,17 @@ final class ChatViewModel {
                     case .actions(let results):
                         guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
                         openDeepLinks(results)
+                        if results.contains(where: { $0.success }) {
+                            HapticManager.shared.success()
+                        } else if results.contains(where: { !$0.success }) {
+                            HapticManager.shared.warning()
+                        }
+                        // "Browser task paused" just means the ordering loop is still
+                        // working and hit its per-turn time budget — not a real question.
+                        // Keep it moving ourselves instead of making the user say "keep going".
+                        if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                            needsBrowserContinue = true
+                        }
                         Task {
                             await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
                         }
@@ -255,11 +296,8 @@ final class ChatViewModel {
                         guard updateAssistantMessage(id: assistantID, { $0.content = error }) else { return }
                         statusLabel = nil
 
-                    case .audio(let base64Audio, _):
-                        playAudio(base64Audio)
-
-                    case .ttsError(let error):
-                        statusLabel = "Voice unavailable: \(error)"
+                    case .sources(let sources):
+                        guard updateAssistantMessage(id: assistantID, { $0.sources = sources }) else { return }
 
                     case .done:
                         _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
@@ -268,10 +306,12 @@ final class ChatViewModel {
                         lastFailedText = nil
                         isSending = false
                         currentSendTask = nil
+                        HapticManager.shared.impact(.soft)
 
                     case .error(let error):
                         lastFailedText = text
                         networkError = friendlyNetworkError(error)
+                        HapticManager.shared.error()
                         if fullText.isEmpty {
                             _ = updateAssistantMessage(id: assistantID, { $0.content = "Something went wrong: \(error)" })
                         }
@@ -281,6 +321,10 @@ final class ChatViewModel {
                         currentSendTask = nil
                     }
                 }
+            }
+
+            if needsBrowserContinue, !Task.isCancelled {
+                await continueBrowserTask(userId: userId, assistantID: assistantID)
             }
 
             await MainActor.run {
@@ -296,6 +340,178 @@ final class ChatViewModel {
         guard !isSending else { return }
         inputText = command
         sendMessage(userId: userId)
+    }
+
+    /// Execute a voice command silently — runs through local actions + API
+    /// but does NOT add user/assistant message bubbles to the chat.
+    func executeSilently(_ command: String, userId: String) {
+        let rawText = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawText.isEmpty, !isSending else { return }
+        print("[ChatVM] Silent exec (raw): \(rawText)")
+
+        if activeChatStartedAt == nil {
+            activeChatStartedAt = chatStartedAt(for: userId)
+        }
+
+        isSending = true
+        let settings = currentSettings
+
+        Task {
+            defer {
+                Task { @MainActor in
+                    self.isSending = false
+                    self.onSilentExecComplete?()
+                }
+            }
+
+            // Polish the raw transcript — removes filler words, fixes grammar
+            let text = await chatService.polishTranscript(userId: userId, transcript: rawText)
+            if text != rawText {
+                print("[ChatVM] Polished: \(text)")
+            }
+
+            // Try local actions first (music, reminders, etc.)
+            if let localResult = await executeLocalRequestWithTimeout(text) {
+                let actionResult = ActionResult(native: localResult)
+                print("[ChatVM] Silent local result: \(localResult.text)")
+                await MainActor.run {
+                    let hasLink = actionResult.deepLink != nil || actionResult.webLink != nil
+                    if actionResult.success && hasLink && !shouldHoldForLocalConfirmation(actionResult, settings: settings) {
+                        openActionLink(actionResult)
+                    }
+                }
+                await chatService.logNativeLocalAction(
+                    userId: userId,
+                    message: text,
+                    result: actionResult,
+                    chatStartedAt: activeChatStartedAt
+                )
+                return
+            }
+
+            // Fall back to API
+            let nativeHints = await nativeManager.localContextHints(for: text)
+            let location = locationManager.locationDict
+
+            let stream = chatService.sendMessage(
+                userId: userId,
+                message: text,
+                chatStartedAt: activeChatStartedAt,
+                settings: settings,
+                location: location,
+                nativeHints: nativeHints,
+                incognito: incognito
+            )
+
+            for await event in stream {
+                if Task.isCancelled { break }
+                await MainActor.run {
+                    switch event {
+                    case .actions(let results):
+                        // In silent pendant mode, open any successful action with a link —
+                        // the user spoke the command so no whitelist gating needed.
+                        for result in results where result.success {
+                            let hasLink = result.deepLink != nil || result.webLink != nil
+                            if hasLink && !self.shouldHoldForLocalConfirmation(result, settings: settings) {
+                                self.openActionLink(result)
+                            }
+                        }
+                        // Resolve music play actions natively for gapless playback
+                        for result in results where result.action == "play_music" && result.success {
+                            let query = (result.cardText ?? result.text ?? "")
+                                .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+                                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+                            if !query.isEmpty {
+                                Task {
+                                    _ = await self.executeNativeMusicWithTimeout(query: query)
+                                }
+                            }
+                        }
+                    case .done, .error:
+                        break
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    /// Silently keeps an "awaiting_more" browser/ordering task moving — no new chat
+    /// bubble, no typing required. Updates the same assistant message in place and
+    /// loops itself as long as the loop keeps reporting "still working", stopping the
+    /// moment it needs a real answer, payment confirmation, or hits done/error.
+    private func continueBrowserTask(userId: String, assistantID: UUID, attempt: Int = 1) async {
+        // Runaway backstop. Don't freeze silently on the spinner — the server keeps the
+        // session resumable, so tell the user it's still going and how to nudge it.
+        guard attempt <= Self.maxBrowserAutoContinues else {
+            await MainActor.run {
+                _ = updateAssistantMessage(id: assistantID, {
+                    $0.content = "This order's taking a lot of steps — I've paused so it doesn't run away. Say \"keep going\" and I'll pick up where I left off."
+                    $0.isStreaming = false
+                })
+                isSending = false
+                statusLabel = nil
+            }
+            return
+        }
+
+        await MainActor.run {
+            isSending = true
+            statusLabel = "Still working on your order…"
+            // Each turn gets its own 45s budget, same as a fresh send — the chain as a
+            // whole can run for minutes, but any single round trip is still watchdogged.
+            startSendWatchdog(assistantID: assistantID)
+        }
+
+        let stream = chatService.sendMessage(
+            userId: userId,
+            message: Self.browserTaskContinueSentinel,
+            chatStartedAt: activeChatStartedAt,
+            settings: currentSettings,
+            location: locationManager.locationDict,
+            incognito: incognito
+        )
+
+        var turnText = ""
+        var needsMore = false
+
+        for await event in stream {
+            if Task.isCancelled { break }
+            await MainActor.run {
+                switch event {
+                case .text(let chunk):
+                    turnText += chunk
+                case .replace(let replacement):
+                    turnText = replacement
+                case .actions(let results):
+                    if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                        // Pure "still working" signal — keep continuing, but don't paint a
+                        // "Paused" card on the live bubble. Only terminal turns get a card.
+                        needsMore = true
+                    } else {
+                        _ = updateAssistantMessage(id: assistantID, { $0.actions = results })
+                        openDeepLinks(results)
+                    }
+                case .status(let status, let label):
+                    setStatus(status, label)
+                case .error(let error):
+                    networkError = friendlyNetworkError(error)
+                default:
+                    break
+                }
+            }
+        }
+
+        if !turnText.isEmpty {
+            await MainActor.run {
+                _ = updateAssistantMessage(id: assistantID, { $0.content = turnText })
+            }
+        }
+
+        if needsMore {
+            await continueBrowserTask(userId: userId, assistantID: assistantID, attempt: attempt + 1)
+        }
     }
 
     func retryLastFailedMessage(userId: String) {
@@ -340,6 +556,7 @@ final class ChatViewModel {
                     sendWatchdogTask = nil
                 }
             }
+            await MainActor.run { HapticManager.shared.impact(.light) }
             do {
                 let response = try await chatService.sendImageMessage(
                     userId: userId,
@@ -358,17 +575,12 @@ final class ChatViewModel {
                         $0.isStreaming = false
                     }
                     openDeepLinks(actions)
-                    if let audio = response.audio {
-                        playAudio(audio)
-                    } else if let ttsError = response.ttsError {
-                        statusLabel = "Voice unavailable: \(ttsError)"
-                    } else {
-                        statusLabel = nil
-                    }
+                    statusLabel = nil
                     networkError = nil
                     lastFailedText = nil
                     isSending = false
                     currentSendTask = nil
+                    HapticManager.shared.impact(.soft)
                 }
             } catch {
                 await MainActor.run {
@@ -381,6 +593,7 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    HapticManager.shared.error()
                 }
             }
         }
@@ -414,25 +627,62 @@ final class ChatViewModel {
                 role: role,
                 content: entry.content,
                 timestamp: Date.oxyParse(entry.createdAt) ?? Date(),
-                actions: entry.actions ?? []
+                actions: entry.actions ?? [],
+                sources: entry.sources ?? []
             )
         }
     }
 
+    // Resume the current session only if it's still "live" by the same rule the
+    // server uses to group sessions (`buildConversationSessions`): less than 45
+    // minutes since the last activity AND the same calendar day. Otherwise start
+    // a fresh session. This keeps the client's notion of the active chat aligned
+    // with the sidebar's session list — reopening the app the next day (or after
+    // a long idle) no longer feeds yesterday's messages into the current context.
+    // Must match the server's buildConversationSessions grouping.
+    static let sessionReuseWindow: TimeInterval = 45 * 60
+    static func canReuseSession(lastActivity: Date, now: Date) -> Bool {
+        now.timeIntervalSince(lastActivity) < sessionReuseWindow
+            && Calendar.current.isDate(lastActivity, inSameDayAs: now)
+    }
+
+    #if DEBUG
+    static func runSessionRuleCheck() {
+        let now = Calendar.current.startOfDay(for: Date()).addingTimeInterval(12 * 60 * 60) // midday
+        assert(canReuseSession(lastActivity: now.addingTimeInterval(-10 * 60), now: now), "recent same-day should reuse")
+        assert(!canReuseSession(lastActivity: now.addingTimeInterval(-46 * 60), now: now), "past window should start new")
+        assert(!canReuseSession(lastActivity: now.addingTimeInterval(-13 * 60 * 60), now: now), "different day should start new")
+    }
+    #endif
+
     private func chatStartedAt(for userId: String) -> String {
         let key = chatStartedAtKey(userId)
+        let now = Date()
         if let saved = UserDefaults.standard.string(forKey: key),
-           let savedDate = Date.oxyParse(saved),
-           Date().timeIntervalSince(savedDate) < TimeInterval(12 * 60 * 60) {
+           Date.oxyParse(saved) != nil,
+           let lastActivity = UserDefaults.standard.string(forKey: lastActivityKey(userId)).flatMap(Date.oxyParse),
+           Self.canReuseSession(lastActivity: lastActivity, now: now) {
             return saved
         }
-        let startedAt = Date().oxyISO8601String
+        let startedAt = now.oxyISO8601String
         UserDefaults.standard.set(startedAt, forKey: key)
+        UserDefaults.standard.set(startedAt, forKey: lastActivityKey(userId))
         return startedAt
+    }
+
+    /// Stamp the active session's last-activity time. Called whenever the user
+    /// sends a message so the 45-minute reuse window in `chatStartedAt(for:)`
+    /// tracks real activity rather than when the session first opened.
+    private func markChatActivity(for userId: String) {
+        UserDefaults.standard.set(Date().oxyISO8601String, forKey: lastActivityKey(userId))
     }
 
     private func chatStartedAtKey(_ userId: String) -> String {
         "oxy_current_chat_started_at_\(userId)"
+    }
+
+    private func lastActivityKey(_ userId: String) -> String {
+        "oxy_current_chat_last_activity_\(userId)"
     }
 
     private func closestMessageID(in messages: [Message], to createdAt: String, messageId: String? = nil) -> UUID? {
@@ -506,7 +756,7 @@ final class ChatViewModel {
                 message.isStreaming = false
             }
             statusLabel = nil
-            networkError = "Oxy got stuck waiting for the network. Try again."
+            networkError = "Got stuck waiting on the network. Try again."
             lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
         }
@@ -717,12 +967,33 @@ final class ChatViewModel {
 
     // MARK: - Deep Links
 
-    private func openDeepLinks(_ results: [ActionResult]) {
+    func openDeepLinks(_ results: [ActionResult]) {
         let settings = currentSettings
         if settings.reviewBeforeOpeningApps { return }
         for result in results {
             guard shouldAutoOpen(result, settings: settings) else { continue }
             openActionLink(result)
+        }
+    }
+
+    /// Pendant/silent-exec variant: opens any successful action that has a link,
+    /// bypassing the normal UI-confirmation whitelist. Also triggers native music
+    /// resolution for play_music results.
+    func openPendantActions(_ results: [ActionResult]) {
+        let settings = currentSettings
+        for result in results where result.success {
+            let hasLink = result.deepLink != nil || result.webLink != nil
+            if hasLink && !shouldHoldForLocalConfirmation(result, settings: settings) {
+                openActionLink(result)
+            }
+        }
+        for result in results where result.action == "play_music" && result.success {
+            let query = (result.cardText ?? result.text ?? "")
+                .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !query.isEmpty {
+                Task { _ = await self.executeNativeMusicWithTimeout(query: query) }
+            }
         }
     }
 
@@ -740,65 +1011,4 @@ final class ChatViewModel {
         }
     }
 
-    // MARK: - Audio Playback
-
-    private func playAudio(_ base64Audio: String) {
-        audioPlayback.play(base64Audio) { [weak self] message in
-            Task { @MainActor in
-                self?.statusLabel = message
-            }
-        }
-    }
-}
-
-private final class AudioPlaybackManager: NSObject, AVAudioPlayerDelegate {
-    private var audioPlayer: AVAudioPlayer?
-    private var pendingAudio: [Data] = []
-    private var onError: ((String) -> Void)?
-    private var sessionConfigured = false
-
-    func play(_ base64Audio: String, onError: @escaping (String) -> Void) {
-        guard let data = Data(base64Encoded: base64Audio) else { return }
-        self.onError = onError
-        pendingAudio.append(data)
-        playNextAudioIfNeeded()
-    }
-
-    // Configure the audio session once. Reconfiguring on every chunk added latency
-    // and audible gaps between streamed sentence clips.
-    private func ensureSessionActive() {
-        guard !sessionConfigured else { return }
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true)
-            sessionConfigured = true
-        } catch {
-            // Non-fatal: playback may still work with the default session.
-        }
-    }
-
-    private func playNextAudioIfNeeded() {
-        guard audioPlayer?.isPlaying != true, !pendingAudio.isEmpty else { return }
-        let data = pendingAudio.removeFirst()
-
-        ensureSessionActive()
-        do {
-            let player = try AVAudioPlayer(data: data)
-            player.delegate = self
-            player.prepareToPlay()
-            audioPlayer = player
-            player.play()
-        } catch {
-            onError?("Voice playback failed")
-            playNextAudioIfNeeded()
-        }
-    }
-
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        if audioPlayer === player {
-            audioPlayer = nil
-        }
-        playNextAudioIfNeeded()
-    }
 }

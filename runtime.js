@@ -39,9 +39,24 @@ function createGeminiServiceClient() {
   return new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'missing-gemini-api-key');
 }
 
+function validateTokenEncryptionKey() {
+  const isProd = process.env.NODE_ENV === 'production' || process.env.OXY_REQUIRE_TOKEN_KEY === 'true';
+  if (!isProd) return;
+  try {
+    // Import inside to avoid circular if any
+    const { encryptionKey: _ } = require('./api/services/token-crypto'); // will trigger check inside
+    // Force strict check
+    require('./api/services/token-crypto').encryptTokens({}); // dummy to validate
+  } catch (e) {
+    console.error('[boot] Token encryption validation failed:', e.message);
+    throw e;
+  }
+}
+
 module.exports = {
   createGeminiServiceClient,
   createSupabaseServiceClient,
   getMissingRuntimeEnv,
-  logMissingRuntimeEnvOnce
+  logMissingRuntimeEnvOnce,
+  validateTokenEncryptionKey
 };

@@ -6,41 +6,51 @@ struct ErrorBanner: View {
     var onDismiss: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyRed)
-
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(Color.oxyText)
+        HStack(spacing: 12) {
+            Group { Text(message) }
+                .font(Font.appBody(13))
+                .foregroundStyle(Color.appDanger)
                 .lineLimit(2)
 
-            Spacer()
+            Spacer(minLength: 8)
 
             if let onRetry {
-                Button("Retry", action: onRetry)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.oxyStone)
+                Button(action: onRetry) {
+                    Text("Retry")
+                        .font(.appBody(12, weight: .semibold))
+                        .tracking(0.3)
+                        .foregroundStyle(Color.appTitanium)
+                        // Pad the label to a ~40pt tap target without distorting the row.
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.appScale)
             }
 
             if let onDismiss {
                 Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Color.oxySub)
+                    Text("Dismiss")
+                        .font(.appBody(12, weight: .semibold))
+                        .tracking(0.3)
+                        .foregroundStyle(Color.appMuted)
+                        .padding(.vertical, 11)
+                        .padding(.horizontal, 4)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.appScale)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.oxySurface3)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
         .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color.appObsidian)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.appFillSubtle).frame(height: 0.5)
+        }
     }
 }
 
 #Preview {
-    ErrorBanner(message: "Network connection lost", onDismiss: {})
-        .background(Color.oxyBg)
+    ErrorBanner(message: "Network connection lost", onRetry: {}, onDismiss: {})
+        .background(Color.appObsidian)
 }

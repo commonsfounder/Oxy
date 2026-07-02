@@ -34,6 +34,7 @@ async function getStoredTokens(userId) {
       .select('tokens')
       .eq('user_id', userId)
       .eq('connector_id', 'telegram')
+      .eq('enabled', true)
       .limit(1);
     if (!error && data?.length > 0) return decryptTokens(data[0].tokens || {});
   } catch (err) {
@@ -43,12 +44,13 @@ async function getStoredTokens(userId) {
 }
 
 async function saveStoredTokens(userId, tokens) {
-  await supabase
+  const { error } = await supabase
     .from('connectors')
     .upsert(
       { user_id: userId, connector_id: 'telegram', enabled: true, tokens: encryptTokens(tokens), updated_at: new Date().toISOString() },
       { onConflict: 'user_id,connector_id' }
     );
+  if (error) throw error;
 }
 
 async function buildClient(sessionString) {

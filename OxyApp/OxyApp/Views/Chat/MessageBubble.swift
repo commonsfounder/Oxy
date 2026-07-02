@@ -3,18 +3,15 @@ import SwiftUI
 struct MessageBubble: View {
     let message: Message
     var showsTypingIndicator: Bool = true
+    /// True when this message is the first in a run from the same sender.
+    var isGroupStart: Bool = true
+    /// True when this message is the last in a run from the same sender.
+    var isGroupEnd: Bool = true
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
-    private var bubbleStyle: String {
-        guard let data = UserDefaults.standard.data(forKey: "oxy_settings"),
-              let settings = try? JSONDecoder().decode(OxySettings.self, from: data) else {
-            return "comfort"
-        }
-        return settings.bubbleStyle
-    }
-    private var isCompact: Bool { bubbleStyle == "compact" }
+    private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
     private var visibleActions: [ActionResult] {
         message.actions.filter { action in
             !action.pending &&
@@ -22,50 +19,60 @@ struct MessageBubble: View {
         }
     }
 
-    var body: some View {
-        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 4) {
-            // Message content
-            if !message.content.isEmpty {
-                HStack {
-                    if isUser { Spacer(minLength: 60) }
+    /// A ride booking gets a dedicated native handoff card; suppress the
+    /// assistant's "Opening Uber…" chat text so the card stands alone.
+    private var uberAction: ActionResult? {
+        message.actions.first { $0.action == "book_uber" && !$0.pending }
+    }
 
-                    VStack(alignment: .leading, spacing: 0) {
+    // New direction bubbles: clear distinction, accent for the AI voice and user actions.
+    // Friendly, not literary. User on right with accent tint. AI on left with presence.
+    private var bubbleShape: some Shape {
+        RoundedRectangle(cornerRadius: AppRadius.bubble, style: .continuous)
+    }
+
+    var body: some View {
+        VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 6) {
+            // Message content — real bubbles now.
+            if !message.content.isEmpty && uberAction == nil {
+                HStack(alignment: .bottom, spacing: 0) {
+                    if isUser { Spacer(minLength: 48) }
+
+                    Group {
                         if message.isStreaming && !isUser {
                             StreamingWordText(
                                 text: message.content,
-                                fontSize: isCompact ? 14 : 15,
-                                lineSpacing: isCompact ? 2 : 4
+                                fontSize: isCompact ? 15 : 16,
+                                lineSpacing: isCompact ? 4 : 5
                             )
                         } else {
                             Text(message.content)
-                                .font(.system(size: isCompact ? 14 : 15))
-                                .foregroundStyle(isUser ? .white : Color.oxyText)
-                                .lineSpacing(isCompact ? 2 : 4)
+                                .font(.appBody(isCompact ? 15 : 16))
+                                .foregroundStyle(Color.appInk)
+                                .lineSpacing(isCompact ? 4 : 5)
                         }
                     }
-                    .padding(.horizontal, isCompact ? 13 : 16)
-                    .padding(.vertical, isCompact ? 8 : 11)
-                    .background(
-                        isUser
-                            ? AnyShapeStyle(
-                                LinearGradient(
-                                    colors: [Color.oxyStone, Color.oxyStone.opacity(0.85)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            : AnyShapeStyle(Color.oxySurface2)
-                    )
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: isUser ? 20 : 6,
-                            bottomLeadingRadius: isCompact ? 16 : 20,
-                            bottomTrailingRadius: isUser ? 6 : (isCompact ? 16 : 20),
-                            topTrailingRadius: isCompact ? 16 : 20
-                        )
-                    )
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background {
+                        bubbleShape
+                            .fill(isUser ? Color.appAccent.opacity(0.18) : Color.appSurface)
+                    }
+                    .overlay {
+                        if !isUser {
+                            // Subtle left accent bar for AI "voice"
+                            HStack {
+                                RoundedRectangle(cornerRadius: 1)
+                                    .fill(Color.appAccent)
+                                    .frame(width: 3)
+                                Spacer()
+                            }
+                            .padding(.vertical, 6)
+                            .padding(.leading, 4)
+                        }
+                    }
 
-                    if !isUser { Spacer(minLength: 60) }
+                    if !isUser { Spacer(minLength: 48) }
                 }
             }
 
@@ -73,18 +80,8 @@ struct MessageBubble: View {
             if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
                     OxyThinkingIndicator()
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 9)
-                        .background(Color.oxySurface2.opacity(0.72))
-                        .clipShape(
-                            UnevenRoundedRectangle(
-                                topLeadingRadius: 6,
-                                bottomLeadingRadius: 18,
-                                bottomTrailingRadius: 18,
-                                topTrailingRadius: 18
-                            )
-                        )
-                    Spacer(minLength: 60)
+                        .padding(.vertical, 4)
+                    Spacer(minLength: 64)
                 }
             }
 
@@ -92,32 +89,56 @@ struct MessageBubble: View {
             if !visibleActions.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(visibleActions) { action in
-                        ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
+                        if action.action == "book_uber" {
+                            UberHandoffCard(action: action) { onOpenAction?(action) }
+                        } else if ["search_flights", "get_flight_prices"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .flights)
+                        } else if ["search_hotels", "check_hotel_availability"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .hotels)
+                        } else if ["search_activities", "get_activity_details"].contains(action.action) {
+                            TravelResultCard(action: action, kind: .activities)
+                        } else if action.action == "save_trip" {
+                            TravelResultCard(action: action, kind: .trip)
+                        } else if ["get_directions", "plan_trip"].contains(action.action) && action.success {
+                            if action.deepLink != nil || action.webLink != nil {
+                                DirectionsLink(action: action)
+                            }
+                        } else {
+                            ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
+                        }
                     }
                 }
+                .padding(.top, 3)
             }
 
-            // Timestamp
-            HStack(spacing: 4) {
-                if isUser {
-                    Spacer()
-                    if !message.isStreaming {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(Color.oxyDim)
-                    }
-                }
-                Text(message.timestamp, style: .time)
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.oxyDim)
-                if !isUser { Spacer() }
+            // Sources
+            if !isUser, !message.sources.isEmpty {
+                MessageSourceChips(sources: message.sources)
+                    .padding(.top, 8)
+                    .padding(.trailing, 64)
             }
-            .padding(.horizontal, 4)
+
+            // Timestamp — group-end only, very quiet
+            if isGroupEnd {
+                Text(message.timestamp, style: .time)
+                    .font(.appBody(10))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.appMuted.opacity(0.6))
+                    .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                    .padding(.top, 1)
+            }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, isCompact ? 2 : 4)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: message.content)
+        .padding(.vertical, isCompact ? 1 : 2)
+        .transition(.asymmetric(
+            insertion: .opacity
+                .combined(with: .move(edge: .bottom))
+                .combined(with: .scale(scale: 0.97, anchor: isUser ? .bottomTrailing : .bottomLeading)),
+            removal: .opacity
+        ))
+        // Animate the streaming→settled flip, not every token. Animating on
+        // `content` re-ran a spring layout pass per streamed word — a stutter source.
+        .animation(.appSpring, value: message.isStreaming)
     }
 }
 
@@ -132,10 +153,10 @@ private struct StreamingWordText: View {
 
     var body: some View {
         Text(attributedText)
-            .font(.system(size: fontSize))
-            .foregroundStyle(Color.oxyText)
+            .font(.appBody(fontSize))
+            .foregroundStyle(Color.appInk)
             .lineSpacing(lineSpacing)
-            .animation(.easeOut(duration: 0.28), value: words.count)
+            .animation(.appRelax, value: words.count)
     }
 
     private var attributedText: AttributedString {
@@ -143,10 +164,93 @@ private struct StreamingWordText: View {
         for (index, word) in words.enumerated() {
             var part = AttributedString(index == words.count - 1 ? word : "\(word) ")
             let distanceFromEnd = words.count - index
-            part.foregroundColor = Color.oxyText.opacity(distanceFromEnd <= 4 ? 1 : 0.78)
+            // Five-step fade: trailing words glow up to 1.0, farthest recede to 0.55.
+            let opacity: Double = switch distanceFromEnd {
+            case 1:       1.00
+            case 2:       0.95
+            case 3:       0.85
+            case 4:       0.72
+            case 5:       0.62
+            default:      0.55
+            }
+            part.foregroundColor = Color.appInk.opacity(opacity)
             output += part
         }
         return output
+    }
+}
+
+// MARK: - Directions Link
+
+/// A flat, minimal tap target that opens a route in Maps. Replaces the full
+/// ActionCard for directions/transit results — the text is already the answer.
+private struct DirectionsLink: View {
+    let action: ActionResult
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 6) {
+                Text("Open in Maps")
+                    .font(.appBody(13, weight: .light))
+                    .foregroundStyle(Color.appTitanium)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
+            }
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.appHairline).frame(height: 0.5)
+            }
+        }
+        .buttonStyle(.appScale(0.98))
+        .contentShape(Rectangle())
+    }
+
+    private func open() {
+        let urlString = action.deepLink ?? action.webLink
+        guard let urlString, let url = URL(string: urlString) else { return }
+        UIApplication.shared.open(url)
+    }
+}
+
+// MARK: - Source Chips
+
+/// A restrained row of web sources beneath a grounded answer: a quiet eyebrow and
+/// tappable publisher chips. The trust signal that the answer was looked up, not
+/// guessed. Sharp-edged and muted to stay in the luxury language.
+private struct MessageSourceChips: View {
+    let sources: [MessageSource]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Text("Sources")
+                    .appEyebrow()
+                    .foregroundStyle(Color.appMuted)
+
+                ForEach(sources) { source in
+                    Button {
+                        guard let url = URL(string: source.uri) else { return }
+                        UIApplication.shared.open(url)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(source.title)
+                                .font(.appBody(11))
+                                .lineLimit(1)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 8, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.appTitanium)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .overlay(Rectangle().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                    }
+                    .buttonStyle(.appScale)
+                }
+            }
+        }
     }
 }
 
@@ -186,95 +290,110 @@ struct ActionCard: View {
     }
 
     var body: some View {
-        Group {
-            if action.pending {
-                cardContent
-            } else {
-                Button(action: openLink) {
-                    cardContent
+        if action.pending {
+            pendingCard
+        } else {
+            Button(action: openLink) {
+                confirmationRow
+            }
+            .buttonStyle(.appScale(0.98))
+            .disabled(!hasLink)
+        }
+    }
+
+    /// A completed action, rendered as a quiet receipt line — a status mark, a
+    /// confident Title Case confirmation, optional detail, and an Open affordance
+    /// when there's somewhere to go. Flat (a single hairline), never a boxed card.
+    private var confirmationRow: some View {
+        HStack(alignment: .top, spacing: 12) {
+            statusGlyph
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(headline)
+                    .font(.appBody(14))
+                    .foregroundStyle(action.success ? Color.appInk : Color.appDanger)
+                if let detail = detailText {
+                    Text(detail)
+                        .font(.appBody(13, weight: .light))
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
-                .disabled(!hasLink)
+            }
+
+            Spacer(minLength: 8)
+
+            if hasLink {
+                HStack(spacing: 3) {
+                    Text("Open")
+                        .font(.appBody(13))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(Color.appTitanium)
+            }
+        }
+        .padding(.vertical, 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private var statusGlyph: some View {
+        Image(systemName: action.success ? "checkmark" : "exclamationmark")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(action.success ? Color.appGlow : Color.appDanger)
+            .frame(width: 16, height: 19, alignment: .center)
+    }
+
+    /// Title Case confirmation copy, e.g. "Email Sent", "Place Found".
+    private var headline: String {
+        actionSummary.capitalized
+    }
+
+    /// A high-risk action awaiting the user's confirmation keeps a bordered
+    /// surface — it's a decision to make, not a receipt, so it should hold the eye.
+    private var pendingCard: some View {
+        TodayCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(headline)
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appInk)
+                    if let detail = detailText {
+                        Text(detail)
+                            .font(.appBody(13, weight: .light))
+                            .foregroundStyle(Color.appMuted)
+                            .lineLimit(4)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if let onCommand {
+                    HStack(spacing: 0) {
+                        pendingButton("Confirm") { onCommand("confirm") }
+                        pendingButton("Cancel", muted: true) { onCommand("cancel") }
+                    }
+                }
             }
         }
     }
 
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: action.pending ? 10 : 0) {
-                HStack(spacing: 9) {
-                Image(systemName: action.success ? "checkmark" : "exclamationmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(action.success ? Color.oxyGreen : Color.oxyRed)
-                    .frame(width: 22, height: 22)
-                    .background((action.success ? Color.oxyGreen : Color.oxyRed).opacity(0.12))
-                    .clipShape(Circle())
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(actionSummary)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-
-                    if let text = detailText {
-                        Text(text)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.oxySub)
-                            .lineLimit(action.action == "plan_trip" ? 2 : 1)
-                            .multilineTextAlignment(.leading)
-                    }
-                }
-
-                Spacer()
-
-                if hasLink {
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Color.oxyStone)
-                } else {
-                    Image(systemName: iconForAction(action.action))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.oxyDim)
-                }
-            }
-
-            if action.pending, let onCommand {
-                HStack(spacing: 8) {
-                    Button {
-                        onCommand("confirm")
-                    } label: {
-                        Label("Confirm", systemImage: "checkmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.oxyOnAccent)
-                    .padding(.vertical, 8)
-                    .background(Color.oxyStone)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-
-                    Button {
-                        onCommand("cancel")
-                    } label: {
-                        Label("Cancel", systemImage: "xmark")
-                            .font(.system(size: 12, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.oxySub)
-                    .padding(.vertical, 8)
-                    .background(Color.oxySurface3)
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                }
-            }
+    private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.appBody(13, weight: .medium))
+                .foregroundStyle(muted ? Color.appMuted : Color.appInk)
+                .frame(maxWidth: .infinity)
+                .frame(height: 42)
+                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(Color.oxySurface2.opacity(0.58))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(action.success ? Color.oxyLine.opacity(0.8) : Color.oxyRed.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 3)
+        .buttonStyle(.appScale)
     }
 
     private func openLink() {
@@ -304,10 +423,7 @@ struct ActionCard: View {
         case "find_place": return action.success ? "Place found" : "Place search failed"
         case "get_directions": return action.success ? "Directions ready" : "Directions failed"
         case "plan_trip": return action.success ? "Trip planned" : "Trip failed"
-        case "search_trains": return action.success ? "Trainline ready" : "Train search failed"
         case "station_board": return action.success ? "Station board ready" : "Station board failed"
-        case "order_uber_eats": return action.success ? "Uber Eats opened" : "Uber Eats failed"
-        case "order_deliveroo": return action.success ? "Deliveroo opened" : "Deliveroo failed"
         case "open_app": return action.success ? "App opened" : "App unavailable"
         case "play_music": return action.success ? "Music opened" : "Music failed"
         case "add_to_music_playlist": return action.success ? "Music added" : "Music add failed"
@@ -318,24 +434,190 @@ struct ActionCard: View {
         }
     }
 
-    private func iconForAction(_ type: String) -> String {
-        switch type {
-        case "send_email", "get_emails", "search_emails": return "envelope.fill"
-        case "create_calendar_event", "get_calendar_events": return "calendar"
-        case "book_uber": return "car.fill"
-        case "find_place", "get_directions": return "map.fill"
-        case "plan_trip": return "tram.fill"
-        case "send_telegram", "get_telegram_contacts": return "paperplane.fill"
-        case "search_trains", "station_board": return "tram.fill"
-        case "order_uber_eats", "order_deliveroo": return "fork.knife"
-        case "search_netflix_title", "add_to_netflix_list": return "play.tv.fill"
-        case "create_reminder": return "bell.fill"
-        case "send_message": return "message.fill"
-        case "open_app": return "app.fill"
-        case "play_music", "add_to_music_playlist": return "music.note"
-        case "check_health": return "heart.fill"
-        default: return "bolt.fill"
+}
+
+// MARK: - Uber Handoff Card
+
+/// A native ride-booking transition card. Pure black with a 0.5px gray border,
+/// minimalist left-aligned monospace readout (destination / ETA / estimate), and
+/// a silent confirm indicator that animates on appear before the tap hands off
+/// to the Uber deep link.
+struct UberHandoffCard: View {
+    let action: ActionResult
+    var onOpen: () -> Void
+
+    @State private var confirmed = false
+
+    // Destination comes from the assistant text ("Opening Uber to X…"); the
+    // metrics live in cardText ("X · 9 min · £8.40").
+    private var destinationSource: String {
+        action.text ?? action.actionSummary ?? action.cardText ?? ""
+    }
+    private var metricSource: String {
+        "\(action.cardText ?? "") \(action.text ?? "")"
+    }
+
+    private var destination: String {
+        var tail = destinationSource
+        if let range = tail.range(of: " to ", options: .caseInsensitive) {
+            tail = String(tail[range.upperBound...])
         }
+        // Trim at the first sentence end or the " · " metrics separator.
+        if let dot = tail.firstIndex(of: ".") { tail = String(tail[..<dot]) }
+        if let sep = tail.range(of: " · ") { tail = String(tail[..<sep.lowerBound]) }
+        tail = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return tail.isEmpty ? "—" : tail
+    }
+
+    private var eta: String { firstMatch(#"(\d+)\s*min"#, in: metricSource) ?? "—" }
+    private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#, in: metricSource) ?? "—" }
+
+    var body: some View {
+        Button(action: onOpen) {
+            TodayCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    HStack {
+                        Text("RIDE · UBER")
+                            .font(.appMono(11))
+                            .tracking(1.4)
+                            .foregroundStyle(Color.appMuted)
+                        Spacer()
+                        ConfirmTick(active: confirmed)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        handoffRow("DEST", destination)
+                        handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
+                        handoffRow("EST", estimate)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.98))
+        .onAppear {
+            withAnimation(.appRelax.delay(0.15)) { confirmed = true }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
+    }
+
+    private func handoffRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.appMono(11))
+                .foregroundStyle(Color.appMuted)
+                .frame(width: 38, alignment: .leading)
+            Text(value)
+                .font(.appMono(11))
+                .foregroundStyle(Color.appInk)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func firstMatch(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range) else { return nil }
+        // Prefer the first capture group if present, else the whole match.
+        let target = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
+            ? match.range(at: 1) : match.range
+        guard let r = Range(target, in: text) else { return nil }
+        return String(text[r])
+    }
+}
+
+/// A 1px silver ring that draws a check on appear — a quiet "confirmed" beat.
+private struct ConfirmTick: View {
+    let active: Bool
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
+                .frame(width: 18, height: 18)
+            CheckPath()
+                .trim(from: 0, to: active ? 1 : 0)
+                .stroke(Color.appInk, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+                .frame(width: 9, height: 7)
+        }
+        .frame(width: 18, height: 18)
+    }
+}
+
+private struct CheckPath: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        return path
+    }
+}
+
+// MARK: - Travel Result Card
+
+struct TravelResultCard: View {
+    enum Kind { case flights, hotels, activities, trip }
+
+    let action: ActionResult
+    let kind: Kind
+
+    private var eyebrow: String {
+        switch kind {
+        case .flights:    return "FLIGHTS"
+        case .hotels:     return "HOTELS"
+        case .activities: return "ACTIVITIES"
+        case .trip:       return "TRIP SAVED"
+        }
+    }
+
+    private var icon: String {
+        switch kind {
+        case .flights:    return "airplane"
+        case .hotels:     return "bed.double"
+        case .activities: return "ticket"
+        case .trip:       return "suitcase"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(Color.appTitanium)
+                Text(eyebrow)
+                    .font(.appMono(11))
+                    .tracking(0.8)
+                    .foregroundStyle(Color.appMuted)
+                Spacer()
+                if action.success {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.appTitanium)
+                } else {
+                    Image(systemName: "exclamationmark")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+
+            if let text = action.text, !text.isEmpty {
+                Text(text)
+                    .font(.appBody(13, weight: .light))
+                    .foregroundStyle(action.success ? Color.appInk : Color.appMuted)
+                    .lineLimit(6)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface)
+        // Rounded card silhouette to match every other card in the message stream
+        // (UberHandoffCard/ActionCard/pendingCard) — was the lone sharp-edged Rectangle.
+        .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
     }
 }
 
@@ -357,5 +639,5 @@ struct ActionCard: View {
             MessageBubble(message: Message(role: .assistant, content: "", isStreaming: true))
         }
     }
-    .background(Color.oxyBg)
+    .background(Color.appObsidian)
 }

@@ -74,6 +74,20 @@ test('leave-time directions use preferred transport when no mode is explicit', (
   });
 });
 
+test('a meeting time is an arrival deadline, never a departure time', () => {
+  const routed = inferDeterministicAction('how do i get to selfridges, i have a meeting at 9');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.actions[0].input.arrival_time, '9');
+  assert.equal(routed.actions[0].input.departure_time, undefined);
+});
+
+test('an explicit leaving time is a departure time', () => {
+  const routed = inferDeterministicAction('how do i get to selfridges if i leave at 6');
+  assert.equal(routed.actions[0].type, 'get_directions');
+  assert.equal(routed.actions[0].input.departure_time, '6');
+  assert.equal(routed.actions[0].input.arrival_time, undefined);
+});
+
 test('future train journey requests defer to grounded answer instead of route connector', () => {
   assert.equal(inferDeterministicAction('what train can i take tomorrow around 9am heading to apsley'), null);
 });
@@ -132,5 +146,23 @@ test('contextual closest-place follow-up does not search a fake new place', () =
 test('contextual travel follow-ups defer to conversation context', () => {
   assert.equal(inferDeterministicAction('can i get there by 7:30'), null);
   assert.equal(inferDeterministicAction('can i take a direct train with no changes'), null);
+  assert.equal(inferDeterministicAction("yes directions please i'm taking the bus"), null);
   assert.equal(inferDeterministicAction('what train is it'), null);
+});
+
+test('buying a product FROM a named retailer is NOT a place lookup', () => {
+  // The reported bug: "john lewis" is a LOCAL_PLACE_TERM, so a shopping request matched
+  // find_place. A purchase from a retailer must defer to the LLM/browser-task path (null).
+  assert.equal(inferDeterministicAction('get me some seersucker white pyjamas on john lewis'), null);
+  assert.equal(inferDeterministicAction('buy me a kettle from currys'), null);
+  assert.equal(inferDeterministicAction('order me a pizza from dominos'), null);
+  assert.equal(inferDeterministicAction('add a cordless drill to my basket on screwfix'), null);
+  assert.equal(inferDeterministicAction('find me nike air max trainers on nike'), null);
+});
+
+test('locating a nearby branch still routes to find_place', () => {
+  // The guard must be precise: navigating TO a shop is still a place request.
+  assert.equal(inferDeterministicAction('nearest john lewis').actions[0].type, 'find_place');
+  assert.equal(inferDeterministicAction('is there a john lewis near me').actions[0].type, 'find_place');
+  assert.equal(inferDeterministicAction('closest currys to me').actions[0].type, 'find_place');
 });

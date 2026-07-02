@@ -1,0 +1,1850 @@
+const { chromium } = require('playwright-extra');
+const stealth = require('puppeteer-extra-plugin-stealth')();
+const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
+const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
+const { nextRecipeMove, RECIPES, GENERIC, recipeHealth } = require('./browser-recipes');
+const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
+const { parseGoalContext } = require('./browser-goal-context');
+const axios = require('axios');
+// Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
+const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
+
+chromium.use(stealth);
+
+// Driving a real browser from a screenshot is a vision+reasoning task, not a cheap
+// helper call — the flash-lite tier hallucinated out-of-range element ids on cluttered
+// commercial pages (john lewis etc.) and the loop had no way to recover. Default this
+// loop to the primary reasoning model; OXY_BROWSER_MODEL overrides if you want to A/B.
+const BROWSER_MODEL = process.env.OXY_BROWSER_MODEL || process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+
+// For cheap/fast providers (Groq, Together, Fireworks, OpenRouter etc.) you can set:
+// OXY_BROWSER_PROVIDER=openai-compatible
+// OXY_BROWSER_BASE_URL=https://api.groq.com/openai/v1
+// OXY_BROWSER_API_KEY=...
+// Then set OXY_BROWSER_MODEL to a vision model they host (e.g. llama-4-scout or meta-llama/llama-4-maverick-17b-128e-instruct)
+// Each turn must finish well within the mobile client's ~45s request watchdog, or the
+// app reports "stuck waiting on the network" while the server is still working. Keep
+// turns short; if the order isn't done, return awaiting_more and the next message
+// (routed back in by the deterministic-resume path) continues it.
+//
+// This budget covers the WHOLE turn, including opening a brand-new browser session
+// (launch + page load + hydration) on the first call — not just the step loop — or a
+// slow first open alone could already exceed the 45s watchdog before a single step runs.
+const MAX_STEPS = 20;
+// Whole-turn budget, must stay under the mobile client's ~45s request watchdog. Raised
+// from 18s now that steps are cheap (see settle() below) — the old 18s + a 2.5s-per-step
+// networkidle wait left room for only ~1 real action per turn.
+const MAX_DURATION_MS = 30 * 1000;
+
+// --- Latency knobs (see docs/superpowers/specs/2026-07-01-browser-task-latency-design.md) ---
+// ~70% of each step is the Gemini vision call, so the screenshot we send dominates cost.
+// A smaller viewport + JPEG (not PNG) shrinks the upload and the pixels the model must read,
+// cutting per-step latency. All env-tunable so a regression is a config flip, not a redeploy.
+const envInt = (name, fallback) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+};
+const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 1280), height: envInt('OXY_BROWSER_VIEWPORT_H', 800) };
+const SCREENSHOT_QUALITY = envInt('OXY_BROWSER_SCREENSHOT_QUALITY', 30);
+
+// Per-phase timing for latency work: set OXY_BROWSER_TIMING=1 to log how long each phase
+// (goto, settle, extract, screenshot, model decide, action) takes to stderr. No-op otherwise.
+const TIMING = process.env.OXY_BROWSER_TIMING === '1';
+async function timed(label, fn) {
+  if (!TIMING) return fn();
+  const t = Date.now();
+  try { return await fn(); }
+  finally { console.warn(`[timing] ${label}: ${Date.now() - t}ms`); }
+}
+// Fewer numbered badges = a cleaner image and a shorter element list (fewer input tokens).
+const MAX_ELEMENTS = envInt('OXY_BROWSER_MAX_ELEMENTS', 60);
+// The loop model is a *thinking* model; thinking is what recovers from hallucinated element
+// ids, but it's also the bulk of model latency. Cap it low (not off) and tune via E2E.
+// OXY_BROWSER_THINKING_BUDGET=-1 drops the field entirely if a model version rejects it.
+const BROWSER_THINKING_BUDGET = envInt('OXY_BROWSER_THINKING_BUDGET', 64);
+// Fixed hydration beats. goto already waits for domcontentloaded (~2s), so by the time these
+// run the DOM is parsed — the beat is just insurance against a not-yet-painted SPA shell.
+// Trimmed from 1500/400/600 (which were a third of a fast turn spent waiting); the model's
+// "wait" action is the safety net if a page genuinely isn't ready. Tunable per-env if a slow
+// site needs more.
+const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 150);
+const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 100);
+const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 120);
+function browserThinkingConfig() {
+  return BROWSER_THINKING_BUDGET >= 0 ? { thinkingConfig: { thinkingBudget: BROWSER_THINKING_BUDGET } } : {};
+}
+
+let geminiClient = null;
+function getGemini() {
+  if (!geminiClient) geminiClient = createGeminiServiceClient();
+  return geminiClient;
+}
+
+let supabaseClient = null;
+function getSupabase() {
+  if (!supabaseClient) supabaseClient = createSupabaseServiceClient();
+  return supabaseClient;
+}
+
+// Self-learning fast-path store. loadRows/saveRow are Supabase-backed but best-effort — a DB
+// hiccup never blocks a turn. Only LEARNED hosts live here; curated SEARCH_SITES stay in code.
+const fastpathStore = createFastpathStore({
+  loadRows: async () => {
+    const { data } = await getSupabase().from('browser_fastpaths').select('host,url_template,param,fail_count');
+    return data || [];
+  },
+  saveRow: async (row) => {
+    await getSupabase().from('browser_fastpaths').upsert(
+      { ...row, last_ok_at: row.fail_count === 0 ? new Date().toISOString() : undefined, updated_at: new Date().toISOString() },
+      { onConflict: 'host' }
+    );
+  }
+});
+
+// Load the learned fast-paths into memory (call on server boot, alongside primeWarmBrowser).
+async function primeFastpaths() { await fastpathStore.load(); }
+
+// ponytail: site key keeps cookies/login isolated per domain per user. One row
+// per (user, site) — fine at personal-assistant scale, revisit if sites multiply.
+async function loadStorageState(userId, site) {
+  const { data } = await getSupabase()
+    .from('browser_sessions')
+    .select('storage_state')
+    .eq('user_id', userId)
+    .eq('site', site)
+    .maybeSingle();
+  return data?.storage_state || undefined;
+}
+
+function siteKeyFromUrl(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return 'unknown'; }
+}
+
+// --- Local vs managed (remote) browser --------------------------------------------------
+// Local stealth Chromium is FREE but runs on this box's IP — a datacenter IP on Cloud Run,
+// which anti-bot walls (Cloudflare/PerimeterX/"Access Denied") block on ~a third of sites
+// (Next, H&M, Argos, Nike, Just Eat in the reliability benchmark). A managed scraping browser
+// (Bright Data, Browserbase, …) routes through residential IPs + real fingerprints and clears
+// those walls — but it's METERED ($/GB or $/browser-hour), so we do NOT want every task on it.
+//
+// Cost control: route ONLY the hosts that actually need residential through the managed
+// browser; keep the ~two-thirds that work on datacenter IP on the free local pool. Which
+// hosts are "remote" is a pure, testable decision (shouldUseRemoteForHost) driven by env.
+function usingRemoteBrowser() {
+  return Boolean(process.env.BROWSER_REMOTE_ENDPOINT);
+}
+
+// Empirically bot-walled on a datacenter IP (from test/dev/reliability-benchmark.js — these
+// are the sites that returned Access-Denied/Cloudflare, NOT my a-priori guesses: Tesco and
+// Zara actually pass on datacenter IP, so they're deliberately absent). Bare hosts, no www.
+// Override wholesale with BROWSER_REMOTE_HOSTS; force everything remote with BROWSER_REMOTE_ALWAYS=true.
+const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'asos.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk'];
+
+// Pure so it's unit-testable. Decide whether a given host should use the managed browser:
+//  - no endpoint configured                 → never (free local, today's behaviour)
+//  - BROWSER_REMOTE_ALWAYS=true              → always
+//  - BROWSER_REMOTE_HOSTS set                → only those hosts (comma list)
+//  - else                                    → the empirical bot-wall default set
+// Matches the host itself or any subdomain of it (h === entry || h endsWith '.'+entry).
+function shouldUseRemoteForHost(host, env = process.env) {
+  if (!env.BROWSER_REMOTE_ENDPOINT) return false;
+  if (String(env.BROWSER_REMOTE_ALWAYS).toLowerCase() === 'true') return true;
+  const list = env.BROWSER_REMOTE_HOSTS
+    ? env.BROWSER_REMOTE_HOSTS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
+    : DEFAULT_REMOTE_HOSTS;
+  const h = String(host || '').replace(/^www\./, '').toLowerCase();
+  return list.some((entry) => h === entry || h.endsWith('.' + entry));
+}
+
+// Always launches a LOCAL stealth Chromium (the warm pool + the non-remote path). Never
+// touches the managed endpoint — remote is a separate, per-host connect (connectRemoteBrowser).
+async function launchLocalBrowser() {
+  // ponytail: headless:true in prod; BROWSER_HEADLESS=false lets a local debug run pop
+  // a real window so you can watch the loop click around, instead of trusting logs.
+  return chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
+}
+
+// Connect to the managed scraping browser over CDP. Bounded — a wrong/down endpoint must
+// fail fast so acquireBrowser can fall back to local instead of hanging the whole turn.
+const REMOTE_CONNECT_TIMEOUT_MS = envInt('OXY_BROWSER_REMOTE_CONNECT_TIMEOUT_MS', 15000);
+async function connectRemoteBrowser() {
+  const endpoint = process.env.BROWSER_REMOTE_ENDPOINT;
+  return withTimeout(chromium.connectOverCDP(endpoint), REMOTE_CONNECT_TIMEOUT_MS, 'remote browser connect');
+}
+
+// Get a browser for a specific host: the managed one when the host needs residential (and an
+// endpoint is configured), otherwise the free local warm pool. A remote connect failure
+// degrades to local — a bot-walled host will then fail as it does today, which is strictly
+// better than hanging on a dead endpoint. Returns { browser, remote } so the caller knows
+// whether to expect a metered session (and skips the warm-pool return path for it).
+async function acquireBrowser(host) {
+  if (shouldUseRemoteForHost(host)) {
+    try {
+      return { browser: await connectRemoteBrowser(), remote: true };
+    } catch (err) {
+      console.warn(`[browser-task] managed browser connect failed for ${host}, falling back to local:`, err.message);
+    }
+  }
+  return { browser: await getWarmBrowser(), remote: false };
+}
+
+// Warm browser pool: launching Chromium cold is ~4s — paid on the FIRST step of a turn,
+// inside the mobile client's 45s watchdog. Keep one spare browser already launched so a
+// turn grabs it instantly, then relaunch a replacement in the background for next time.
+// One spare is enough at personal-assistant concurrency (one user, mostly one task at a
+// time); if a second turn lands while the spare is in use it just launches cold as before.
+// Keep the local warm pool alive even when a managed endpoint is configured — selective
+// routing still sends the ~two-thirds of (non-walled) hosts through local, so they still
+// benefit from the warm spare. Only BROWSER_REMOTE_ALWAYS (everything remote) disables it.
+const WARM_POOL_ENABLED = process.env.OXY_BROWSER_WARM_POOL !== 'false' &&
+  String(process.env.BROWSER_REMOTE_ALWAYS).toLowerCase() !== 'true';
+let warmSpare = null;      // a launched, idle Browser waiting to be claimed
+let warmingPromise = null; // in-flight launch, so we never start two at once
+
+function primeWarmBrowser() {
+  if (!WARM_POOL_ENABLED || warmSpare || warmingPromise) return;
+  warmingPromise = launchLocalBrowser()
+    .then((b) => { warmSpare = b; })
+    .catch((err) => { console.warn('[browser-task] warm launch failed:', err.message); })
+    .finally(() => { warmingPromise = null; });
+}
+
+// Hand out a ready browser. Prefer the spare (instant) after a liveness check, and kick
+// off priming the next one so the following turn is fast too. Falls back to a synchronous
+// cold launch when no healthy spare is ready (warming, disabled, or remote endpoint).
+async function getWarmBrowser() {
+  if (WARM_POOL_ENABLED && warmSpare) {
+    const spare = warmSpare;
+    warmSpare = null;
+    if (spare.isConnected()) {
+      primeWarmBrowser(); // replace the one we just took
+      return spare;
+    }
+    // Spare died while idle (crash, OS reaped it) — drop it and fall through to a fresh launch.
+    spare.close().catch(() => {});
+  }
+  const browser = await launchLocalBrowser();
+  primeWarmBrowser(); // nothing was warm; warm one for next time
+  return browser;
+}
+
+// Live session store with idle eviction
+const SESSION_IDLE_MS = 20 * 60 * 1000;
+const liveSessions = new Map();
+
+function createSession(userId, session) {
+  const record = { ...session, lastActivityAt: Date.now() };
+  liveSessions.set(userId, record);
+  return record;
+}
+
+function getSession(userId) {
+  const session = liveSessions.get(userId);
+  if (!session) return null;
+  if (Date.now() - session.lastActivityAt > SESSION_IDLE_MS) {
+    liveSessions.delete(userId);
+    session.browser.close().catch(() => {});
+    return null;
+  }
+  return session;
+}
+
+function touchSession(userId) {
+  const session = liveSessions.get(userId);
+  if (session) session.lastActivityAt = Date.now();
+}
+
+async function closeSession(userId) {
+  const session = liveSessions.get(userId);
+  if (!session) return;
+  liveSessions.delete(userId);
+  await session.browser.close().catch(() => {});
+}
+
+// Deterministic backstop: any element whose text matches this is treated as a
+// payment/finalize control and is NEVER auto-clicked — the loop pauses for explicit
+// user confirmation instead. Tuned to over-match: a false positive merely over-pauses,
+// a false negative is an unconfirmed charge. \bpay\b / \bbuy\b cover "pay now",
+// "pay £9.50 now", "slide to pay", "confirm and pay", "buy now", etc.
+const PAYMENT_KEYWORD_PATTERN = /\bpay\b|\bbuy\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)|checkout\s*(and|&)?\s*pay|proceed\s+to\s+payment|slide\s+to\s+pay/i;
+
+function matchesPaymentKeyword(text) {
+  return PAYMENT_KEYWORD_PATTERN.test(String(text || ''));
+}
+
+// A question we must NEVER surface to the user: a real assistant doesn't ask for a
+// URL, an element id, a CSS selector, or "which platform" — those are the loop's job
+// to figure out. If the model tries, we suppress it and retry instead.
+const TECHNICAL_ASK_PATTERN = /\b(url|link|element\s*id|element's\s*id|selector|css|xpath|dom|html|\bid\s+of\b|which\s+(site|platform)|delivery\s+platform|search\s+bar)\b/i;
+
+function isTechnicalAsk(question) {
+  return TECHNICAL_ASK_PATTERN.test(String(question || ''));
+}
+
+// Re-auth detection. A stored login (storageState) eventually expires — the merchant
+// invalidates the cookie (days/weeks, or on a new IP / 2FA challenge). When that happens
+// the agent lands on a sign-in wall and, blind to it, burns its whole step budget trying
+// to "order" behind the login before returning a vague "I got stuck". Detecting the wall
+// lets us stop immediately and ask the user to reconnect — a clean handoff, not a flail.
+const LOGIN_URL_PATTERN = /\/(login|log-?in|signin|sign-?in|auth|authenticate|account\/(login|signin))(\b|\/|\?|$)/i;
+// Copy that, TOGETHER with a password field, marks a page as a login wall (not a header
+// "Sign in" link on an otherwise-normal shopping page). Kept tight to avoid false pauses.
+const LOGIN_COPY_PATTERN = /\b(sign in to|log in to|enter your password|incorrect password|forgot your password|keep me signed in|sign in to your account)\b/i;
+// Stronger basket/checkout soft-gate (e.g. M&S "Sign in or create an account for faster checkout").
+// These often appear without a visible password field until clicked — catch them for order goals.
+const LOGIN_BASKET_PATTERN = /\b(sign in|log in|sign-in|log-in|create an account|register).*(?:basket|cart|checkout|to (?:continue|view|see|access)|for faster checkout)\b/i;
+const PASSWORD_FIELD_SELECTOR = 'input[type="password"]';
+
+// Pure so it's unit-testable without a live page. A wall is either (a) the URL is a login
+// route, or (b) there's a real password field AND login copy on the page. A password field
+// alone (inline "create account" upsell) or login copy alone (a "Sign in" nav link) is not
+// enough — both together, or a login URL, are.
+// Also (c) a strong "sign in to see basket/checkout" soft gate (no pw field yet) — helps M&S etc.
+function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
+  const u = String(url || '');
+  if (LOGIN_URL_PATTERN.test(u)) return true;
+  const bt = String(bodyText || '');
+  if (hasPasswordField && LOGIN_COPY_PATTERN.test(bt)) return true;
+  if (LOGIN_BASKET_PATTERN.test(bt)) return true;
+  return false;
+}
+
+// Anti-automation interstitials: a datacenter IP (Cloud Run) trips these on many sites.
+// The page LOADS with real bytes — so the empty-shell size guard misses it — but every real
+// control is replaced by an "Access Denied" / Cloudflare / "verify you're human" challenge.
+// Left undetected, the loop clicks around the dead page for its whole step budget, returns
+// awaiting_more, and the client AUTO-CONTINUES — a bot-walled Just Eat ran 6 turns / ~13min
+// before this landed. Detecting the copy lets us bail on the first step that shows it.
+const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|hcaptcha|recaptcha challenge|cf-challenge/i;
+
+// Pure so it's unit-testable. A wall page is SMALL (a challenge, not a shop) AND contains the
+// copy — gating on length keeps a normal 5k-char product page that merely mentions "captcha"
+// in a footer link from tripping it. bodyLen is the FULL innerText length; text is a prefix.
+function looksLikeBlockWall({ text, bodyLen } = {}) {
+  if (!text) return false;
+  if (Number.isFinite(bodyLen) && bodyLen > 1500) return false; // a real page, not a wall
+  return BLOCK_WALL_PATTERN.test(String(text));
+}
+
+// Live probe: one short innerText read. Best-effort — a failed read degrades to "not a wall".
+async function detectBlockWall(page) {
+  try {
+    const { text, bodyLen } = await page.evaluate(() => {
+      const it = document.body?.innerText || '';
+      return { text: it.slice(0, 1500), bodyLen: it.length };
+    });
+    return looksLikeBlockWall({ text, bodyLen });
+  } catch {
+    return false;
+  }
+}
+
+// Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
+// failure degrades to "not a wall" so a flaky read never blocks a legitimate order.
+async function detectLoginWall(page, goal) {
+  try {
+    const url = page.url();
+    // Fast path: a login URL needs no DOM read at all.
+    if (LOGIN_URL_PATTERN.test(url)) return true;
+    const hasPasswordField = await page.locator(PASSWORD_FIELD_SELECTOR).first().count().then(c => c > 0).catch(() => false);
+    const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => '');
+    // Check basket soft-gate even if no pw field visible yet (M&S etc show "sign in to continue to basket/checkout")
+    if (!hasPasswordField && !LOGIN_BASKET_PATTERN.test(bodyText)) {
+      return false;
+    }
+    return looksLikeLoginWall({ url, bodyText, hasPasswordField, goal });
+  } catch {
+    return false;
+  }
+}
+
+// Goals that mean "place an order" — for these, "done" is ALWAYS premature inside the
+// loop: a real order only completes through ready_for_payment → confirmPayment, so an
+// early "done" (e.g. right after setting the address) must not close the browser.
+const ORDER_GOAL_PATTERN = /\b(order|deliver(?:y|ed)?|buy|cart|basket|checkout|food|eats|pizza|meal|grocer|takeaway|takeout)\b/i;
+
+function isOrderGoal(goal) {
+  return ORDER_GOAL_PATTERN.test(String(goal || ''));
+}
+
+// A model "ask" whose text is really "I've hit a bot/security wall" — Cloudflare and similar
+// challenges often render in an IFRAME, so detectBlockWall's top-document innerText probe
+// can't see them, but the model DOES (it's in the screenshot) and tries to ask the user how
+// to proceed. Convert that to a clean bail instead of surfacing a confusing technical ask.
+const SECURITY_WALL_ASK_PATTERN = /security (?:verification|check)|cloudflare|\bcaptcha\b|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|access denied|blocking automated|robot check|press (?:&|and) hold/i;
+
+function describesBlockWall(question) {
+  return SECURITY_WALL_ASK_PATTERN.test(String(question || ''));
+}
+
+// Unified no-progress detector inputs. Returns { sig, stateKey, itemCount }:
+//  - sig: exact fingerprint (URL + cart count + dialogs + DOM sample) — equality across steps
+//    means the page is literally frozen (wait-loops, dead clicks).
+//  - stateKey: coarse page identity (host+path + cart + open-dialog count + titles, NO query/
+//    sample churn) — fed into a per-session seen-set so we can tell "a page we've already
+//    visited" (cycling/wandering) from "a new page" (forward progress). Normal shopping flows
+//    produce a NEW stateKey nearly every step; spins revisit old ones.
+// Both persisted on session so they survive auto-continue turns (like lastActionSig).
+// Dialog count/title are included so an item modal (Deliveroo/Uber Eats) counts as a state
+// change even when the URL and main <h1> don't move.
+async function computeProgressSignature(page) {
+  const fallback = (u) => ({ sig: u, stateKey: u, itemCount: 0 });
+  try {
+    const url = page.url() || '';
+    const info = await page.evaluate(() => {
+      // Cart/basket item count — try common badges/counts first (cheap, no full DOM walk).
+      // Broadened to catch JL [data-testid="basket-amount"], M&S etc.
+      let itemCount = 0;
+      const countCands = document.querySelectorAll(
+        '[class*="cart-count" i],[class*="basket-count" i],[data-testid*="cart" i],[data-testid*="basket" i],[aria-label*="cart" i],[aria-label*="basket" i],.bag-count,#bag-count,[class*="items-count" i],a[href*="/basket"],a[href*="/cart"],[class*="bag" i]'
+      );
+      for (const el of countCands) {
+        const txt = (el.textContent || el.getAttribute('aria-label') || '').replace(/[^0-9]/g, '');
+        if (txt) itemCount = Math.max(itemCount, parseInt(txt, 10) || 0);
+      }
+      if (!itemCount && /\/(cart|basket|bag|checkout)/i.test(location.pathname)) {
+        // rough fallback on cart page: count obvious item containers
+        const rough = document.querySelectorAll('[class*="item" i],[data-testid*="product"],li.product,[role="listitem"]').length;
+        if (rough > 0) itemCount = Math.min(99, rough);
+      }
+      // Page key focused on host + cartCount + main title (coarse so internal nav/category hops and rec churn
+      // don't reset "no progress" counter when itemCount stays 0). Real add-to-basket will bump count and flip sig.
+      const host = location.hostname.replace(/^www\./, '');
+      const mainTitle = (document.querySelector('main h1, main h2, h1, [data-testid*="title"], [data-testid*="product-name"], .product-title') || {}).innerText || '';
+      // Sample stable controls near content (add, sizes, titles)
+      const stableNodes = document.querySelectorAll('main h1, main h2, h1, h2, main [data-testid*="add"], [data-testid*="basket"], button[aria-label*="size" i], [role="button"]');
+      const sample = Array.from(stableNodes)
+        .slice(0, 6)
+        .map((el) => (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 22))
+        .filter(Boolean)
+        .join('|')
+        .slice(0, 100);
+      // Open dialogs flip the state: an item-options modal is real progress even when the
+      // URL/main title stay put, and closing it back to a seen page is a revisit.
+      const dialogEls = document.querySelectorAll('[role="dialog"],[aria-modal="true"]');
+      const dialogs = dialogEls.length;
+      const dialogTitle = dialogs
+        ? (((document.querySelector('[role="dialog"] h1, [role="dialog"] h2, [aria-modal="true"] h1, [aria-modal="true"] h2') || {}).innerText || '').trim().slice(0, 40))
+        : '';
+      // Product presence: loading results or PDP changes the "contentful" state even if title/path similar.
+      // Helps break category/search repeat loops when actual items appear.
+      const hasProducts = document.querySelectorAll('[class*="product" i], [data-testid*="product"], .item, li[class*="item"], [class*="tile" i]').length > 2 ? 1 : 0;
+      return { itemCount, path: location.pathname, dialogs, dialogTitle, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40) + '|p' + hasProducts, sample, hasProducts };
+    }).catch(() => null);
+    if (!info) return fallback(url);
+    return {
+      sig: `${url}|c${info.itemCount}|d${info.dialogs}|k${info.pageKey}|${info.dialogTitle}|${info.sample}`,
+      stateKey: `${info.path}|d${info.dialogs}|${info.pageKey}|${info.dialogTitle}|p${info.hasProducts || 0}`,
+      itemCount: info.itemCount,
+    };
+  } catch {
+    return fallback(page && typeof page.url === 'function' ? page.url() : 'err');
+  }
+}
+
+// Pure verdict over the persisted no-progress counters — exported for unit tests
+// (test/smoke/browser-progress-detector.test.js pins these thresholds).
+//  - stepsSinceProgress: consecutive steps with an IDENTICAL exact sig → frozen page /
+//    wait-loop. Nudge at 4, stuck at 7.
+//  - stepsSinceNewState: steps since we last saw a stateKey NOT already visited this
+//    session → catches cycles ([click→wait×5→click back], modal open/close churn, category
+//    ping-pong) WITHOUT punishing long-but-forward flows where each step is a new page.
+//    Nudge at 5, stuck at 9.
+//  - stepsSinceCartProgress: order-only slow backstop for "browsing forever, never adding".
+//    A normal flow legitimately needs 7-12 empty-cart steps (search→results→PDP→size→add) —
+//    this was the premature-STUCK bug: bailing at 7 killed M&S/Currys/Wickes/Nike/Deliveroo
+//    mid-normal-browse. Now it only nudges ("commit to an item") at 8 and only hard-bails at
+//    16, and is disabled once the basket has EVER been non-empty (cart badges often vanish
+//    on checkout pages, which would otherwise re-arm it against a healthy flow).
+function assessProgress(counters, { isOrder = false, cartEverNonzero = false } = {}) {
+  // No recipe exemption: recipe steps that genuinely advance reset the counters at the
+  // execution site, so a recipe site only accumulates stall when its recipe is spinning
+  // (same step re-firing) or its vision steps are — both real spins that must bail.
+  const { stepsSinceProgress = 0, stepsSinceNewState = 0, stepsSinceCartProgress = 0 } = counters || {};
+  if (stepsSinceProgress >= 7 || stepsSinceNewState >= 9) return { verdict: 'stuck', correction: '' };
+  const cartStallActive = isOrder && !cartEverNonzero;
+  if (cartStallActive && stepsSinceCartProgress >= 16) return { verdict: 'stuck', correction: '' };
+  if (stepsSinceProgress >= 4 || stepsSinceNewState >= 5) {
+    const n = Math.max(stepsSinceProgress, stepsSinceNewState);
+    // Only point at the basket/checkout once something is IN the basket — nudging an
+    // empty-cart flow toward "Basket" just sends the model to an empty-basket dead end
+    // (Wickes did exactly that).
+    const move = cartEverNonzero
+      ? 'go to the basket and proceed to checkout'
+      : 'open the best matching product, select the required size/option, and press the Add to basket/bag button';
+    return {
+      verdict: 'nudge',
+      correction: `No real progress for ${n} steps — the page is not changing, or you keep returning to pages you have already visited. Do something DIFFERENT now: ${move}.`,
+    };
+  }
+  if (cartStallActive && stepsSinceCartProgress >= 8) {
+    return {
+      verdict: 'nudge',
+      correction: `You have taken ${stepsSinceCartProgress} steps and the basket is still EMPTY. Stop browsing and comparing. Pick the best matching product visible right now, open it, select any required size/option, and press its Add to basket/bag button.`,
+    };
+  }
+  return { verdict: 'ok', correction: '' };
+}
+
+function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
+  const historyText = history.length
+    ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
+    : '(nothing yet)';
+  const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
+  const lastId = elements.length ? elements.length - 1 : 0;
+  const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
+
+  let contextBlock = '';
+  if (goalContext) {
+    const parts = [];
+    if (goalContext.size) parts.push(`size: ${goalContext.size}`);
+    if (goalContext.color) parts.push(`color: ${goalContext.color}`);
+    if (goalContext.budget) parts.push(`max budget: £${goalContext.budget}`);
+    if (goalContext.dealHints && goalContext.dealHints.length) parts.push(`deal prefs: ${goalContext.dealHints.join(', ')}`);
+    if (parts.length) contextBlock = `\nEXTRACTED CONTEXT FROM USER GOAL: ${parts.join(' | ')}\nPrioritize matching size/color and look for any coupons, codes, BOGO, sales, or deals that match the prefs. Surface them in "done" or "ask".\n`;
+  }
+
+  return `You are controlling a real web browser to help with this goal: "${goal}"
+${contextBlock}${correctionBlock}
+You can SEE the current page in the attached screenshot. Every clickable element has a
+small numbered badge drawn on it; the number is its element id and matches the list
+below. LOOK at the screenshot first — find the thing you need (search box, address
+field, an item, an "Add" button) by sight, then act on it by its number. The page
+text alone is unreliable; trust your eyes. If the page looks like it's still loading
+(spinners, blank areas, a skeleton), choose "wait".
+
+For shopping/ordering goals (anything with "order", "basket", "cart", "buy", "checkout", "add to"):
+COMMIT IMMEDIATELY to the first reasonable match. Click the first plausible product tile, select size if shown, click the primary "Add to basket" / "Add to bag" / "Add to cart" button.
+NEVER repeat search, "Men", categories, "view more", or similar links.
+NEVER click the same or very similar control twice in a row unless the page visibly changed toward the cart.
+If the last two steps were similar navigation without adding an item, your next action MUST be to pick and add a specific product.
+After add, go straight to basket then checkout. "ready_for_payment" is the win condition.
+A decent item in the basket now is infinitely better than perfect research that never adds.
+
+If an item dialog/modal is open (size, options, quantity), FINISH it: choose the required
+options, then press its Add/confirm button — usually at the bottom of the dialog; scroll
+inside the dialog if you can't see it. NEVER press Close/X on a dialog for an item you
+intend to order.
+
+If you pressed Add and nothing changed, a REQUIRED option (size, colour, delivery method)
+is probably unselected — select it first, then press Add again. If the requested size or
+option is OUT OF STOCK or unavailable, do NOT ask the user — go back to the results and
+pick a different product that matches the goal.
+
+CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
+number, and never use a price, quantity, postcode, or any number you read off the page as
+an elementId — only the badge numbers in the list are valid.
+
+EXTRACTED CONTEXT FROM USER GOAL: ${goalContext ? JSON.stringify(goalContext) : 'none'} — prioritize matching the size/color and actively look for + surface any coupons, BOGO, sales, or promo codes.
+
+What's happened so far:
+${historyText}
+
+Numbered clickable elements on the current page:
+${elementsText}
+
+Reply with ONLY one JSON object, one of these shapes:
+{"action":"click","elementId":<number>}
+{"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"wait"}
+{"action":"ask","question":"<short question for the user>"}
+{"action":"done","summary":"<short summary answering the goal>"}
+{"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
+
+NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
+to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click. (Full original rules preserved in spirit.)`;
+}
+
+function parseModelDecision(rawText) {
+  let text = String(rawText || '').trim();
+  // Reasoning models don't always honour the JSON mime type — they wrap the object in
+  // ```json fences or prepend prose ("Here is the JSON requested:\n{...}"). Strip fences,
+  // then fall back to extracting the first balanced {...} block, before giving up.
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) {
+      return { action: 'invalid', error: 'Could not parse model response as JSON.' };
+    }
+    try {
+      parsed = JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return { action: 'invalid', error: 'Could not parse model response as JSON.' };
+    }
+  }
+  const validActions = new Set(['click', 'fill', 'wait', 'ask', 'done', 'ready_for_payment']);
+  if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
+    return { action: 'invalid', error: 'Model returned an unrecognized action.' };
+  }
+  return parsed;
+}
+
+function findElementByText(elements, text) {
+  const needle = String(text || '').trim().toLowerCase();
+  if (!needle) return null;
+  return elements.find(el => el.text.trim().toLowerCase() === needle)
+    || elements.find(el => el.text.trim().toLowerCase().includes(needle))
+    || null;
+}
+
+// Include ARIA-role interactives, not just native controls: address-autocomplete
+// suggestions, menu items, size/option radios etc. are often role-based divs/li that
+// the loop must be able to see and click (e.g. committing a delivery address).
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+
+async function extractClickableElements(page) {
+  // One round-trip, not ~6 per element. The old per-element loop (isVisible + innerText +
+  // 3 getAttribute + boundingBox, each a separate CDP call) cost ~0.8s on a 40-element page;
+  // doing it all inside a single page.evaluate brings that to tens of ms. `locatorIndex` is
+  // the index into querySelectorAll(CLICKABLE_SELECTOR), which matches Playwright's
+  // locator(...).nth(i) order, so the downstream click/fill via .nth(locatorIndex) is unchanged.
+  return page.evaluate(({ selector, max }) => {
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0; // zero-size also catches display:none ancestors
+    };
+    // Full-document order is what Playwright's locator(selector).nth(i) indexes, so the
+    // click/fill site can re-find an element by `locatorIndex`. Keep this list as the source
+    // of truth for indices even when we scope perception to a modal below.
+    const allNodes = Array.from(document.querySelectorAll(selector));
+    // If a modal/dialog covers the page, only its controls matter — badges drawn on the
+    // elements behind it land mis-aligned and the model re-clicks the tile behind the dialog
+    // (the Uber Eats "add item" modal failure). Scope to the largest visible dialog, if any.
+    const vw = window.innerWidth * window.innerHeight;
+    const dialog = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+      .filter(visible)
+      .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
+      .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
+      .sort((a, b) => b.area - a.area)[0];
+    let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
+    // Commercial pages front-load 20-40 header/nav controls in DOM order, which used to
+    // consume the whole element budget before the first product tile — the model could only
+    // ever see site chrome (2026-07-02 Currys screenshots: every badge in the header, zero
+    // on products or the consent dialog, so it clicked "Search" forever). Re-order the
+    // candidates: in-viewport CONTENT first, then chrome controls that matter to the goal
+    // (search, basket, consent), then the rest of the chrome, then off-viewport elements.
+    if (!dialog) {
+      const inViewport = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+      };
+      const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
+      const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept/i;
+      const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
+      const content = [], keyChrome = [], chrome = [], offscreen = [];
+      for (const el of scope) {
+        if (!inViewport(el)) { offscreen.push(el); continue; }
+        if (!inChrome(el)) { content.push(el); continue; }
+        (KEY_CHROME.test(labelOf(el)) ? keyChrome : chrome).push(el);
+      }
+      scope = [...content, ...keyChrome, ...chrome, ...offscreen];
+    }
+    const out = [];
+    for (const el of scope) {
+      if (out.length >= max) break;
+      if (!visible(el)) continue;
+      const raw = (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+      const text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (!text) continue;
+      const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
+      if (locatorIndex === -1) continue;
+      const r = el.getBoundingClientRect();
+      // box is viewport-relative so it lines up with the screenshot; off-viewport elements
+      // keep their (off-screen) coords and simply get no visible badge, as before.
+      out.push({ id: out.length, text, locatorIndex, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
+    }
+    return out;
+  }, { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS }).catch(() => []);
+}
+
+// Set-of-marks perception: draw a numbered badge on each element, screenshot the
+// viewport, remove the overlay. The model SEES the page with ids it can point at —
+// which is what lets it find a search box even when the DOM text/aria is empty.
+async function captureMarkedScreenshot(page, elements) {
+  const marks = elements.filter(el => el.box).map(el => ({ id: el.id, ...el.box }));
+  await page.evaluate((marks) => {
+    const layer = document.createElement('div');
+    layer.id = '__oxy_marks__';
+    layer.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none;';
+    for (const m of marks) {
+      const box = document.createElement('div');
+      box.style.cssText = `position:fixed;left:${m.x}px;top:${m.y}px;width:${m.width}px;height:${m.height}px;border:2px solid #ff0066;box-sizing:border-box;`;
+      const label = document.createElement('div');
+      label.textContent = String(m.id);
+      label.style.cssText = `position:fixed;left:${m.x}px;top:${Math.max(0, m.y - 15)}px;background:#ff0066;color:#fff;font:bold 11px/15px monospace;padding:0 3px;`;
+      layer.appendChild(box);
+      layer.appendChild(label);
+    }
+    document.body.appendChild(layer);
+  }, marks).catch(() => {});
+  try {
+    // JPEG (not PNG) at a moderate quality is a fraction of the bytes for a screenshot the
+    // model reads once and discards — the badges and layout stay legible at q55, and the
+    // smaller upload + fewer pixels cut the dominant per-step vision-call latency.
+    const shot = await page.screenshot({ type: 'jpeg', quality: SCREENSHOT_QUALITY });
+    return shot.toString('base64');
+  } finally {
+    await page.evaluate(() => document.getElementById('__oxy_marks__')?.remove()).catch(() => {});
+  }
+}
+
+// Let the page catch up before we perceive it — without the old 'networkidle' trap.
+// Analytics/websocket-heavy SPAs (john lewis, uber eats, …) NEVER reach networkidle, so
+// waitForLoadState('networkidle') always ran its FULL timeout achieving nothing — 2.5s
+// of dead waiting on every step, ~69% of each step's wall time. Instead: ensure the DOM
+// is parsed (fast, usually already done) then take one short fixed hydration beat. Pages
+// that are still visibly loading are handled by the model's "wait" action, not by us
+// blocking the whole loop. Never throws — best-effort.
+async function settle(page, pauseMs = 600) {
+  await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(Math.max(0, pauseMs)).catch(() => {});
+}
+
+// Cookie/consent walls are the first thing a commercial site shows, and they cover the
+// real page — so the model's first screenshot is all banner junk and it picks garbage.
+// Best-effort dismiss: click the first visible accept/agree control we recognise. Tries
+// the common consent frameworks (OneTrust, Cookiebot) by id, then a text match. Never
+// throws and never waits long — if there's no banner, it's a couple of cheap no-ops.
+const CONSENT_SELECTORS = [
+  '#onetrust-accept-btn-handler',
+  '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+  'button[aria-label*="accept" i]',
+  'button[id*="accept" i]'
+];
+// Exact accept-button labels, most-specific first. Exact (anchored) matches so we never
+// click "Manage cookies" or "Reject all" by accident.
+const CONSENT_NAMES = [
+  /^allow all cookies$/i, /^accept all cookies$/i, /^allow all$/i, /^accept all$/i,
+  /^accept cookies$/i, /^i accept$/i, /^accept$/i, /^agree$/i, /^got it$/i, /^continue$/i
+];
+async function dismissConsent(page) {
+  // Fast path: the common consent frameworks expose a stable id.
+  for (const sel of CONSENT_SELECTORS) {
+    const el = page.locator(sel).first();
+    if (await el.isVisible({ timeout: 120 }).catch(() => false)) {
+      await el.click({ timeout: 1500, force: true }).catch(() => {});
+      return true;
+    }
+  }
+  // Role+name search the WHOLE accessibility tree, not a position-capped slice — the old
+  // "first 40 buttons" scan missed john lewis's "Allow all" because the header has dozens
+  // of links/buttons ahead of it in DOM order. Check the main frame and any iframes
+  // (some managers render the banner inside one).
+  for (const root of page.frames()) { // page.frames() includes the main frame
+    for (const name of CONSENT_NAMES) {
+      const btn = root.getByRole('button', { name }).first();
+      if (await btn.isVisible({ timeout: 120 }).catch(() => false)) {
+        await btn.click({ timeout: 1500, force: true }).catch(() => {});
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Hard cap on a single model call. A transient Gemini "fetch failed" was hanging the SDK's
+// internal retry/backoff for 60–130s, blowing the whole-turn watchdog on one blip. Bound it
+// and let decideNextAction's own retry handle recovery.
+const MODEL_CALL_TIMEOUT_MS = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+function withTimeout(promise, ms, label) {
+  let t;
+  const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
+}
+
+async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null) {
+  const provider = (process.env.OXY_BROWSER_PROVIDER || 'gemini').toLowerCase();
+  const promptText = buildDecisionPrompt(goal, history, elements, correction, goalContext);
+
+  // Very rough token estimator for cost tracking (image tokens dominate)
+  const imageTokens = screenshotB64 ? Math.round((screenshotB64.length * 0.65) / 4) : 0;
+  const textTokens = Math.round(promptText.length / 4);
+  const estInputTokens = imageTokens + textTokens + (elements.length * 15);
+
+  if (process.env.OXY_BROWSER_COST_TRACKING === '1') {
+    const pricePerM = Number(process.env.OXY_BROWSER_INPUT_PRICE_PER_M || 0.20);
+    const stepCost = (estInputTokens / 1_000_000) * pricePerM;
+    console.warn(`[cost] ~${estInputTokens} tokens → $${stepCost.toFixed(5)} (using $${pricePerM}/M input)`);
+  }
+
+  // Generic OpenAI-compatible path (Groq, Together, Fireworks, OpenRouter, etc.)
+  // Set:
+  //   OXY_BROWSER_PROVIDER=openai
+  //   OXY_BROWSER_BASE_URL=https://api.groq.com/openai/v1
+  //   OXY_BROWSER_API_KEY=...
+  //   OXY_BROWSER_MODEL=meta-llama/llama-4-scout-...   (any vision model they host)
+  if (provider === 'openai' || provider === 'groq' || provider === 'together' || provider === 'fireworks') {
+    const apiKey = process.env.OXY_BROWSER_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error('OXY_BROWSER_API_KEY required for openai-compatible browser provider');
+
+    const baseURL = process.env.OXY_BROWSER_BASE_URL || 'https://api.groq.com/openai/v1';
+    const model = BROWSER_MODEL;
+
+    const content = [{ type: 'text', text: promptText }];
+    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        response_format: { type: 'json_object' },
+        max_tokens: 600,
+        temperature: 0.1
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('provider timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`Provider ${res.status}: ${(await res.text()).slice(0,300)}`);
+    const j = await res.json();
+    return parseModelDecision(j.choices?.[0]?.message?.content || '');
+  }
+
+  if (provider === 'grok' || (BROWSER_MODEL || '').startsWith('grok')) {
+    // Grok via xAI (OpenAI compat)
+    const apiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY;
+    if (!apiKey) throw new Error('XAI_API_KEY (or GROK_API_KEY) required for browser Grok');
+    const model = BROWSER_MODEL || 'grok-4.3';
+    const content = [{ type: 'text', text: promptText }];
+    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        response_format: { type: 'json_object' },
+        max_tokens: 600,
+        temperature: 0.1
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('grok timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`Grok ${res.status}: ${(await res.text()).slice(0,200)}`);
+    const j = await res.json();
+    return parseModelDecision(j.choices?.[0]?.message?.content || '');
+  }
+
+  // Gemini default path
+  const model = getGemini().getGenerativeModel({ model: BROWSER_MODEL });
+  const parts = [{ text: promptText }];
+  if (screenshotB64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: screenshotB64 } });
+  const request = {
+    contents: [{ role: 'user', parts }],
+    generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', ...browserThinkingConfig() }
+  };
+  let lastErr;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await withTimeout(model.generateContent(request), MODEL_CALL_TIMEOUT_MS, 'model call');
+      return parseModelDecision(response.response.text());
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  return { action: 'invalid', error: `model call failed: ${String(lastErr && lastErr.message || lastErr).split('\n')[0].slice(0, 120)}` };
+}
+
+// --- Direct-search fast-paths -------------------------------------------------------------
+// Typing a query into a site's search box costs ~2-3 model steps (find the box, fill it,
+// submit). For sites with a stable search-results URL we can jump straight there, deleting
+// those steps — pure win on the dominant steps×model term. Best-effort: if we can't derive a
+// confident query we open the original url, i.e. exactly today's behaviour.
+const SEARCH_SITES = {
+  'johnlewis.com': {
+    names: ['john lewis', 'johnlewis'],
+    searchUrl: (term) => `https://www.johnlewis.com/search?search-term=${encodeURIComponent(term)}`
+  },
+  'selfridges.com': {
+    names: ['selfridges'],
+    searchUrl: (term) => `https://www.selfridges.com/GB/en/cat/?freeText=${encodeURIComponent(term)}&srch=Y`
+  },
+  // UK dept/fashion — patterns discovered with test/dev/discover-search-url.js and each
+  // E2E-verified via DIRECT navigation (not just interactive search). Next was dropped: it
+  // serves "Access Denied" when a search-results URL is opened directly, though interactive
+  // search works — so it must NOT have a direct-nav seed.
+  'marksandspencer.com': {
+    names: ['m&s', 'marks and spencer', 'marks & spencer', 'marksandspencer'],
+    searchUrl: (term) => `https://www.marksandspencer.com/search?searchTerm=${encodeURIComponent(term)}`
+  },
+  // asos.com removed: direct-nav to /search/?q= returns 0 interactive elements on a
+  // datacenter IP (SPA blank-page / bot-wall shape). Let vision drive the search natively.
+  // Grocery. Sainsbury's puts the term in the PATH (a seed's searchUrl can build any shape;
+  // only the auto-LEARN path is query-param-only). Waitrose uses a normal query param.
+  'sainsburys.co.uk': {
+    names: ["sainsbury's", 'sainsburys', 'sainsbury'],
+    searchUrl: (term) => `https://www.sainsburys.co.uk/gol-ui/SearchResults/${encodeURIComponent(term)}`
+  },
+  'waitrose.com': {
+    names: ['waitrose'],
+    searchUrl: (term) => `https://www.waitrose.com/ecom/shop/search?searchTerm=${encodeURIComponent(term)}`
+  },
+  // Electronics / DIY / sportswear. Each direct-nav-probed 2026-07-01 (search URL opened cold,
+  // returns a real results page with the query term present — not an Access-Denied/Cloudflare
+  // shell). NOTE: verified from a residential IP; a datacenter IP (Cloud Run) may still get
+  // walled on some — that's the BROWSER_REMOTE_ENDPOINT (managed browser) lever, not a bad seed.
+  // Deliberately NOT seeded (bot-wall direct nav): Boots (empty JS shell), Decathlon, Zara,
+  // Tesco, H&M, Superdrug, Very — plus Next/Argos from earlier. They still work via normal open.
+  'currys.co.uk': {
+    names: ['currys', 'currys pc world'],
+    searchUrl: (term) => `https://www.currys.co.uk/search?q=${encodeURIComponent(term)}`
+  },
+  'screwfix.com': {
+    names: ['screwfix'],
+    searchUrl: (term) => `https://www.screwfix.com/search?search=${encodeURIComponent(term)}`
+  },
+  'wickes.co.uk': {
+    names: ['wickes'],
+    searchUrl: (term) => `https://www.wickes.co.uk/search?text=${encodeURIComponent(term)}`
+  },
+  'toolstation.com': {
+    names: ['toolstation'],
+    searchUrl: (term) => `https://www.toolstation.com/search?q=${encodeURIComponent(term)}`
+  },
+  'nike.com': {
+    names: ['nike'],
+    searchUrl: (term) => `https://www.nike.com/gb/w?q=${encodeURIComponent(term)}`
+  },
+  // Amazon — very common for grocery/everyday items like Nido milk. Search is /s?k=term
+  // Products are /dp/ASIN . Tier-0 will try this first for info goals.
+  'amazon.co.uk': {
+    names: ['amazon', 'amazon uk', 'amazon.co.uk'],
+    searchUrl: (term) => `https://www.amazon.co.uk/s?k=${encodeURIComponent(term)}`
+  },
+  'amazon.com': {
+    names: ['amazon', 'amazon.com'],
+    searchUrl: (term) => `https://www.amazon.com/s?k=${encodeURIComponent(term)}`
+  }
+};
+
+// Leading intent verbs and trailing fluff that aren't part of the thing being searched for.
+const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|add\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+|the\s+)+/i;
+// Strip a trailing request-about-the-result clause. Anchored to a connective ("…and tell me
+// the exact price shown", "…how much", "…and the price") so it eats the whole tail regardless
+// of adjectives, but does NOT touch a product name that merely contains "price"/"cost".
+// Also strip "i think its", "probably", "about" qualifiers.
+const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$|\s*i\s+think\s+(?:its?|it'?s)\s*(?!\d)/i;
+// Ordering-instruction tails: the "…add to basket and go to checkout" half of an order goal
+// describes what to DO with the product, not what to search for. Passing it through produced
+// garbage queries ("add a wireless mouse to basket and go to checkout") that opened every
+// seeded site on a no-results page (2026-07-02 benchmark). Applied iteratively with
+// TRAIL_NOISE. Order matters within the alternation: whole-clause forms first.
+const ORDER_TAIL_NOISE = new RegExp([
+  String.raw`\s*,?\s*(?:and\s+)?add\s+(?:it|them|one|this)?\s*to\s+(?:my\s+)?(?:basket|bag|cart|trolley)\b.*$`,
+  String.raw`\s+to\s+(?:my\s+)?(?:basket|bag|cart|trolley)\b.*$`, // after a lead "add …" was stripped
+  String.raw`\s*,?\s*(?:and\s+)?(?:go|proceed|head|continue)\s+to\s+(?:the\s+)?checkout\b.*$`,
+  String.raw`\s*,?\s*and\s+checkout\b.*$`,
+  String.raw`\s+for\s+(?:collection|delivery|pickup|click\s+and\s+collect)\b.*$`,
+  String.raw`\s+near\s+(?![a-z]*\bme\b)[\w'’]+(?:\s+[\w'’]+)*\s*$`, // "near EC1A 1BB London" ("near me" is TRAIL_NOISE's)
+  String.raw`\s+in\s+size\s+[\w. ]+$`, // size is chosen on the product page, not searched for
+].join('|'), 'i');
+
+// Pull the "thing to search for" out of a natural-language goal. Conservative: returns null
+// whenever the result looks implausible as a query, so the caller falls back to a normal open.
+function deriveSearchTerm(goal, site) {
+  let t = String(goal || '').trim();
+  if (!t) return null;
+  // Drop a mention of the site itself ("… on John Lewis", "from johnlewis") — that's WHERE
+  // to look, not WHAT to look for.
+  for (const name of (site?.names || [])) {
+    t = t.replace(new RegExp(`\\s*(?:on|at|from|in|using)\\s+${name}\\b`, 'ig'), '');
+    t = t.replace(new RegExp(`\\b${name}\\b`, 'ig'), '');
+  }
+  t = t.replace(LEAD_NOISE, '');
+  // Trailing fluff can stack ("joggers to basket and go to checkout please") — strip until stable.
+  let prev;
+  do { prev = t; t = t.replace(TRAIL_NOISE, '').replace(ORDER_TAIL_NOISE, ''); } while (t !== prev);
+  t = t.trim().replace(/\s+/g, ' ');
+  if (t.length < 2 || t.length > 80) return null; // too short to be a query / probably not one
+  return t;
+}
+
+// If url is a known search-site root AND we can derive a query, return the results-page url
+// to open instead; otherwise null (open url unchanged).
+function directSearchUrl(url, goal) {
+  if (!url || !goal) return null;
+  if (process.env.OXY_BROWSER_FASTPATH === 'false') return null; // kill-switch / A-B isolation
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  // Only short-circuit a homepage/root — including locale roots like /gb, /uk, /en_gb
+  // (nike.com/gb never got its seed before this). If the url is a real deep link (a search,
+  // product, or category page) the caller meant to land there — don't override it.
+  const path = parsed.pathname.replace(/\/+$/, '');
+  if (path !== '' && !/^\/[a-z]{2}(?:[_-][a-z]{2})?$/i.test(path)) return null;
+  const host = parsed.hostname.replace(/^www\./, '');
+  const site = SEARCH_SITES[host];
+  // For a curated site, use its names to strip; otherwise strip using the host's brand word.
+  const term = deriveSearchTerm(goal, site || { names: [host.split('.')[0]] });
+  if (!term) return null;
+  if (site) return site.searchUrl(term);          // curated seed wins
+  return fastpathStore.getLearnedSearchUrl(host, term); // else a learned template, or null
+}
+
+// --- Tier-0: no-browser price/availability lookups for info goals ----------------------
+// Pure HTTP GETs + the price parser. Reuses derive/direct logic. Falls through silently
+// on any failure (bot wall on fetch, no price found, network error) so the browser path
+// is unchanged. Only used for !isOrderGoal.
+const TIER0_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const TIER0_TIMEOUT_MS = 7000;
+
+// Small Amazon helpers to compress the Amazon info path (one fetch if possible)
+function normalizeAmazonPrice(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/£?\s*([\d.,]+)/);
+  if (!m) return null;
+  let num = m[1].replace(/,/g, '');
+  const val = parseFloat(num);
+  return Number.isFinite(val) ? '£' + val.toFixed(2) : null;
+}
+function cleanAmazonName(s) {
+  return String(s || '').replace(/\s+/g, ' ').trim().replace(/[^\w\s'-]/g, '').slice(0, 60);
+}
+
+async function fetchHtml(url) {
+  try {
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': TIER0_UA,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Cache-Control': 'no-cache'
+      },
+      timeout: TIER0_TIMEOUT_MS,
+      // follow redirects (default), max 5
+      maxRedirects: 5,
+      // do not throw on non-2xx; caller decides
+      validateStatus: () => true
+    });
+    if (res.status >= 200 && res.status < 300 && typeof res.data === 'string' && res.data.length > 200) {
+      return res.data;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Attempt a fast no-browser price lookup for non-order goals.
+ * Strategy: compute search results URL (reuse direct/derive) → GET → extract first product URL
+ * → GET product page → parse price. If confident price found, return a done result; else null.
+ * Never throws; always safe to fall through.
+ */
+async function tryTier0PriceLookup(url, goal) {
+  if (!url || !goal || isOrderGoal(goal)) return null;
+
+  // If the caller already gave us a deep product URL, fetch it directly (fast path).
+  try {
+    const u = new URL(url);
+    const path = u.pathname.replace(/\/+$/, '');
+    const looksLikeProduct = /\/(p\d|product|item|detail|pd\/|p\/[a-z0-9-]{5,})/i.test(path);
+    if (looksLikeProduct) {
+      const directHtml = await fetchHtml(url);
+      if (directHtml) {
+        const p = extractPrice(directHtml);
+        if (p) {
+          let name = extractProductName(directHtml);
+          const derived = deriveSearchTerm(goal, null);
+          if (!name || /search|results/i.test(name)) name = derived;
+          name = name || derived || 'item';
+          return { type: 'done', text: `The ${name} is priced at ${p}.` };
+        }
+      }
+    }
+  } catch {}
+
+  // Compute the best search URL we can (same logic the browser fastpath uses).
+  // directSearchUrl only fires for root homepages; if caller gave a deep link we still
+  // try derive + known search shape when possible, otherwise use the url as-is.
+  let searchUrl = directSearchUrl(url, goal);
+  if (!searchUrl) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname.replace(/\/+$/, '');
+      const looksDeep = path !== '' && !/^(\/|\/en|\/uk|\/gb|\/search|\/cat|\/browse)$/i.test(path);
+      if (looksDeep || deriveSearchTerm(goal, { names: [u.hostname.split('.')[0]] })) {
+        searchUrl = url;
+      }
+    } catch {
+      searchUrl = url;
+    }
+  }
+  if (!searchUrl) return null;
+
+  const searchHtml = await fetchHtml(searchUrl);
+  if (!searchHtml) return null;
+
+  // 1) Try to parse price directly on the page we fetched (works great when the input was
+  // already a product page, or when search results embed prices).
+  let price = extractPrice(searchHtml);
+  if (price) {
+    let name = extractProductName(searchHtml);
+    const derived = deriveSearchTerm(goal, null);
+    if (!name || /search|results|category/i.test(name) || name.length < 4) {
+      name = derived;
+    }
+    name = name || derived || 'item';
+    const deals = extractVisibleDeals(searchHtml);
+    let text = `The ${name} is priced at ${price}.`;
+    if (deals.length) text += ` Deals spotted: ${deals.join(', ')}.`;
+    return { type: 'done', text };
+  }
+
+  // Amazon-specific fast path: search results pages often contain the first item's price + title
+  // inline in structured spans. Try to grab the very first priced result without a second fetch.
+  // This compresses Amazon info lookups to a single HTTP roundtrip.
+  if (searchUrl.includes('amazon')) {
+    // Common Amazon patterns for price in search listings
+    const amazonPriceMatch = searchHtml.match(/<span[^>]*class=["'][^"']*a-price[^"']*["'][^>]*>[\s\S]{0,80}?<span[^>]*class=["'][^"']*a-offscreen["'][^>]*>([^<]+)<\/span>/i) ||
+                             searchHtml.match(/aria-label=["'][^"']*£([\d.]+)[^"']*["']/i) ||
+                             searchHtml.match(/>£\s*([\d.]+)</i);
+    if (amazonPriceMatch) {
+      const p = normalizeAmazonPrice(amazonPriceMatch[1]);
+      if (p) {
+        const nameMatch = searchHtml.match(/<h2[^>]*>[\s\S]{0,60}?<a[^>]*>([^<]{5,70})<\/a>/i);
+        const derived = deriveSearchTerm(goal, null);
+        let name = nameMatch ? cleanAmazonName(nameMatch[1]) : derived || 'item';
+        const deals = extractVisibleDeals(searchHtml);
+        let text = `The ${name} is priced at ${p}.`;
+        if (deals.length) text += ` Deals: ${deals.slice(0,2).join(', ')}.`;
+        return { type: 'done', text };
+      }
+    }
+  }
+
+  // 2) Extract first product detail URL and fetch it
+  const productUrl = extractFirstProductUrl(searchHtml, searchUrl);
+  if (!productUrl) return null;
+
+  const productHtml = await fetchHtml(productUrl);
+  if (!productHtml) return null;
+
+  price = extractPrice(productHtml);
+  if (!price) return null;
+
+  let name = extractProductName(productHtml) || extractProductName(searchHtml);
+  const derived = deriveSearchTerm(goal, null);
+  if (!name || /search|results/i.test(name)) name = derived;
+  name = name || derived || 'item';
+  const deals = extractVisibleDeals(productHtml) || extractVisibleDeals(searchHtml);
+  let text = `The ${name} is priced at ${price}.`;
+  if (deals && deals.length) text += ` Deals: ${deals.join(', ')}.`;
+  // Keep session-less for pure info; follow-up "order it" will start a real browser session.
+  return { type: 'done', text };
+}
+
+async function openNewSession(userId, url, goal) {
+  const site = siteKeyFromUrl(url);
+  const storageState = await loadStorageState(userId, site);
+  // Route bot-walled hosts through the managed (residential) browser, everything else
+  // through the free local warm pool. `remote` is carried on the session so close paths and
+  // logs know it was a metered session.
+  const { browser, remote } = await acquireBrowser(site);
+  // A smaller viewport means a smaller screenshot — fewer bytes and fewer pixels for the
+  // model to read each step (the dominant per-step cost). 1024×768 still shows enough of a
+  // commercial page to find a search box / first result.
+  const context = await browser.newContext({ viewport: VIEWPORT, ...(storageState ? { storageState } : {}) });
+  const page = await context.newPage();
+  // Jump straight to a search-results page on sites we know how to query (skips the
+  // find-box → fill → submit steps); falls back to the given url when we can't.
+  const directUrl = directSearchUrl(url, goal);
+  const openUrl = directUrl || url;
+  await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
+  // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
+  // and the model thinks there's no search bar. A longer beat here (first paint is the
+  // slowest) but still bounded — not the old open-ended networkidle wait.
+  await timed('open.settle1', () => settle(page, OPEN_HYDRATE_MS));
+  // Clear the consent wall up front so the model's very first screenshot is the real
+  // page, not a cookie banner it'll waste steps on.
+  await timed('open.consent', () => dismissConsent(page).catch(() => {}));
+  await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
+  const goalContext = parseGoalContext(goal);
+  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null, remote });
+}
+
+// Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
+// history) so an idle-evicted or accidentally-closed session can be re-opened where it
+// left off instead of dead-ending. Failing to persist must never abort an in-progress order.
+async function persistStorage(userId, session) {
+  try {
+    await getSupabase().from('browser_sessions').upsert({
+      user_id: userId,
+      site: session.site,
+      storage_state: await session.context.storageState(),
+      last_url: session.page.url(),
+      goal: session.goal,
+      history: session.history,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,site' });
+  } catch {
+    // swallow — persistence is non-critical to the current turn
+  }
+}
+
+// Most-recent persisted session for the user, so a resume with no live session and no
+// url can re-open the browser at the last page (cookies + cart survive via storageState).
+async function loadResumeContext(userId) {
+  const { data } = await getSupabase()
+    .from('browser_sessions')
+    .select('last_url, goal, history, site')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.last_url ? data : null;
+}
+
+// One place for the "site is blocking us" bail: mark a used fast-path as failed (so a stale
+// learned template self-heals) and return the calm, order-aware copy the classifier reads as
+// a bot-wall ceiling rather than a loop bug.
+function blockedPageResult(session) {
+  if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, false);
+  return { type: 'error', error: session.isOrder
+    ? 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site or platform instead?'
+    : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
+}
+
+async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
+  // Started here, not after the session is open — a slow first-time browser launch +
+  // page load must count against the same budget that bounds the step loop, or the
+  // open alone can eat the mobile client's 45s watchdog before a single step runs.
+  const startedAt = Date.now();
+  let session = getSession(userId);
+  // A live session left open by a finished lookup (see the 'done' keep-alive below) is a
+  // continuation ("order it") ONLY if it's the same site. If a new url points at a different
+  // site, it's a fresh task — close the stale session so we open the right site, not continue
+  // on the old product page.
+  if (session && url && siteKeyFromUrl(url) !== session.site) {
+    await closeSession(userId);
+    session = null;
+  }
+  if (!session) {
+    // No live session. Prefer the url we were handed; otherwise re-open where we left
+    // off from persisted context so an idle-evicted order resumes instead of dead-ending.
+    let openUrl = url;
+    let priorHistory = null;
+    if (!openUrl) {
+      const resume = await loadResumeContext(userId);
+      if (!resume) {
+        return { type: 'error', error: 'I don\'t have an order in progress to pick back up. Tell me what you\'d like and where to deliver it, and I\'ll start fresh.' };
+      }
+      openUrl = resume.last_url;
+      priorHistory = Array.isArray(resume.history) ? resume.history : [];
+      // An empty incoming goal is a silent continuation — recover the real goal from
+      // what was persisted rather than re-opening with nothing to work toward.
+      goal = goal || resume.goal || '';
+      onProgress('Picking up where we left off…');
+    } else {
+      onProgress('Opening browser…');
+    }
+
+    // Tier-0: for non-order (info/price/availability) goals, attempt a zero-browser
+    // HTTP lookup first. Reuses existing derive/direct + parser. On confident price we
+    // return immediately with a done; no session is created. On any miss (wall, no price
+    // parseable, network), we fall through to the normal browser path unchanged.
+    // Orders are strictly gated out (isOrderGoal) — they always use the real browser.
+    if (!priorHistory && !isOrderGoal(goal || '')) {
+      const tier0 = await tryTier0PriceLookup(openUrl, goal || '');
+      if (tier0) {
+        return tier0;
+      }
+    }
+
+    try {
+      session = await openNewSession(userId, openUrl, goal);
+      if (priorHistory) {
+        session.history = priorHistory;
+        // A resumed session that already has steps is an order in progress — latch the
+        // flag so a premature "done" (on a bare reply like "mcdonald's") can't close it.
+        if (priorHistory.length) session.isOrder = true;
+      }
+      // Re-parse or keep context
+      if (!session.goalContext) session.goalContext = parseGoalContext(goal || session.goal);
+    } catch (error) {
+      return { type: 'error', error: error.message };
+    }
+  } else {
+    touchSession(userId);
+    // Empty goal = silent continuation (auto-continue loop) — keep grinding on the
+    // existing instruction instead of clobbering it. Non-empty = a real new reply/goal.
+    if (goal) {
+      session.goal = goal;
+      session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
+      session.autoContinueCount = 0; // a real instruction resets the runaway guard
+    } else {
+      session.autoContinueCount = (session.autoContinueCount || 0) + 1;
+    }
+  }
+
+  // Backstop against auto-continuing forever. Set high enough to carry a long-but-healthy
+  // order all the way to the pay button (it stops there for confirmation anyway) — this
+  // only trips on a genuinely runaway loop, where a human check-in is the right call.
+  // Only an order is about food/delivery; a "find me a pair", "check the listing" etc.
+  // is a plain browse — its copy must not talk about orders, restaurants or Deliveroo.
+  const taskNoun = session.isOrder ? 'order' : 'task';
+  if ((session.autoContinueCount || 0) > 40) {
+    return { type: 'ask', question: `This ${taskNoun} is taking an unusually long time — want me to keep trying, or stop here?` };
+  }
+
+  let steps = 0;
+  let consecutiveBadDecisions = session.consecutiveBadDecisions || 0;
+  let consecutiveWaits = session.consecutiveWaits || 0;
+  // A click on a VALID element "succeeds" even when it achieves nothing, so the bad-decision
+  // guard never trips on a model that re-clicks the same tile forever (seen on the Uber Eats
+  // item modal). Track the last action's signature and nudge, then trip, on repeats.
+  // Persisted on the session so the guard survives across turns — without this, the model
+  // resets to zero each auto-continue and can spin on the same element indefinitely.
+  let lastActionSig = session.lastActionSig || '';
+  let repeatActionCount = session.repeatActionCount || 0;
+  // Progress sigs persisted on session (cross-turn) — the core guard against click-wait cycles
+  // that reset per-action counters. See computeProgressSignature.
+  let lastProgressSig = session.lastProgressSig || '';
+  let stepsSinceProgress = session.stepsSinceProgress || 0;
+  // Steps since the page reached a state we had NOT already visited this session — the
+  // wandering/cycling detector. Backed by session.seenStateKeys (see assessProgress).
+  let stepsSinceNewState = session.stepsSinceNewState || 0;
+  // Order-only slow backstop: steps with the basket still empty. Only meaningful alongside
+  // the new-state counter — normal browsing keeps this climbing for 7-12 steps legitimately.
+  let stepsSinceCartProgress = session.stepsSinceCartProgress || 0;
+  // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
+  // price read off the screen), we feed a pointed correction into the NEXT decision so it
+  // can fix itself — instead of silently re-asking the identical prompt against the same
+  // screenshot, which just reproduces the same bad id until the stuck-guard trips.
+  let pendingCorrection = '';
+  // One calm line when we genuinely can't make progress — never a loop of asks, never a
+  // request for a URL/selector. Keeps the session open so "keep going" can retry.
+  const STUCK = { type: 'error', error: session.isOrder
+    ? 'I got stuck on this page and couldn\'t make progress. Want me to try a different site or platform?'
+    : 'I got stuck on this page and couldn\'t make progress. Want me to try a different site, or take another approach?' };
+
+  try {
+    while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
+      steps += 1;
+      session.consecutiveWaits = consecutiveWaits;
+      session.consecutiveBadDecisions = consecutiveBadDecisions;
+      session.lastProgressSig = lastProgressSig;
+      session.stepsSinceProgress = stepsSinceProgress;
+      session.stepsSinceNewState = stepsSinceNewState;
+      session.stepsSinceCartProgress = stepsSinceCartProgress;
+      onProgress('Looking at the page…');
+      await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
+      // Learn a fast-path: if the last thing we typed now shows up as a query param in the
+      // URL, we've discovered this site's search-results template. Don't override a code seed.
+      if (session.lastFilledValue) {
+        const learned = learnTemplateFromUrl(session.page.url(), session.lastFilledValue);
+        if (learned && !SEARCH_SITES[learned.host]) {
+          fastpathStore.learn(learned.host, learned.param, learned.template);
+          session.lastFilledValue = null; // captured — stop probing for it
+        }
+        // else keep it: a search box is often filled one step and submitted the next, so the
+        // results URL may not exist yet. A later fill overwrites it; it never overrides a seed.
+      }
+      // Consent walls are often injected LATE — after the initial open-time dismiss has
+      // already run — and they overlay the real page, so the model wastes every step
+      // choosing banner junk. Keep trying until one is caught, then stop (cheap no-op
+      // once gone). This is what was silently breaking john lewis: search worked, but
+      // the results stayed hidden behind a modal that appeared a beat after page load.
+      if (!session.consentHandled) {
+        if (await dismissConsent(session.page).catch(() => false)) {
+          session.consentHandled = true;
+          await settle(session.page, OPEN_POST_CONSENT_MS);
+        } else if (steps >= 4) {
+          session.consentHandled = true; // no banner showed up in the first few steps; stop checking
+        }
+      }
+
+      // --- Unified progress detector (PRIORITY 1) ---------------------------------------
+      // Three signals, combined in assessProgress (thresholds pinned by unit tests):
+      //  1. exact sig unchanged        → frozen page (wait-loops, dead clicks)
+      //  2. no NEW stateKey seen       → cycling/revisiting (the real spin patterns), while
+      //     forward flows reset it every step because each page is new
+      //  3. basket empty for very long → order-only backstop so a never-committing browse
+      //     still bails fast (~turn 2) instead of burning the full turn budget
+      // The old detector bailed on signal 3 alone at 7 steps, which is INSIDE the range a
+      // normal search→PDP→size→add flow needs — it killed M&S/Currys/Wickes/Nike/Deliveroo
+      // mid-browse in one turn. Persisted via session so all of it survives auto-continue.
+      const prog = await timed('step.progress-sig', () => computeProgressSignature(session.page)).catch(() => null);
+      const currentSig = prog ? prog.sig : (session.page.url() || '');
+      if (currentSig && currentSig === lastProgressSig) {
+        stepsSinceProgress += 1;
+      } else if (currentSig) {
+        lastProgressSig = currentSig;
+        stepsSinceProgress = 0;
+      }
+      session.lastProgressSig = lastProgressSig;
+      session.stepsSinceProgress = stepsSinceProgress;
+
+      // Seen-set of coarse page states: a state we've already visited (or never leaving the
+      // current one) counts toward "no new state"; a genuinely new page resets the counter.
+      const stateKey = prog ? prog.stateKey : currentSig;
+      session.seenStateKeys = session.seenStateKeys || [];
+      if (stateKey && !session.seenStateKeys.includes(stateKey)) {
+        session.seenStateKeys.push(stateKey);
+        if (session.seenStateKeys.length > 80) session.seenStateKeys.shift();
+        stepsSinceNewState = 0;
+      } else {
+        stepsSinceNewState += 1;
+      }
+      session.stepsSinceNewState = stepsSinceNewState;
+
+      const currCount = prog ? prog.itemCount : 0;
+      if (currCount > 0) {
+        stepsSinceCartProgress = 0;
+        session.cartEverNonzero = true; // basket badge seen non-empty → backstop off for good
+      } else {
+        stepsSinceCartProgress += 1;
+      }
+      session.stepsSinceCartProgress = stepsSinceCartProgress;
+
+      const assessed = assessProgress(
+        { stepsSinceProgress, stepsSinceNewState, stepsSinceCartProgress },
+        { isOrder: session.isOrder, cartEverNonzero: session.cartEverNonzero }
+      );
+      if (assessed.verdict === 'stuck') {
+        // Reset counters before bailing so a user "keep going" gets fresh room to retry
+        // instead of instantly re-tripping on the persisted values.
+        session.stepsSinceProgress = 0;
+        session.stepsSinceNewState = 0;
+        session.stepsSinceCartProgress = 0;
+        return STUCK;
+      }
+      if (assessed.verdict === 'nudge') {
+        pendingCorrection = assessed.correction;
+      }
+
+      const elements = await timed('step.extract', () => extractClickableElements(session.page));
+
+      // Discover deals/coupons/promos on every step (visible text + element labels). This
+      // feeds richer context so the final answer can be conversational and useful ("found it
+      // for £45 + 20% code SUMMER visible").
+      try {
+        const pageText = await session.page.evaluate(() => (document.body && document.body.innerText || '')).catch(() => '');
+        const dealText = [pageText, ...elements.map(e => e.text || '')].join(' ');
+        const found = extractVisibleDeals(dealText);
+        if (found.length) {
+          session.discoveredDeals = session.discoveredDeals || [];
+          for (const d of found) if (!session.discoveredDeals.includes(d)) session.discoveredDeals.push(d);
+        }
+      } catch {}
+
+      // Login wall: fire whenever the URL changes — catches both expired sessions and
+      // first-time sign-in gates that appear mid-flow (e.g. after clicking checkout).
+      // Cheap: URL pattern check is a string test; DOM read only when URL matches or has
+      // a password field. Session stays open so "keep going" resumes the same order.
+      const currentUrl = session.page.url();
+      if (currentUrl !== session.lastLoginCheckUrl) {
+        session.lastLoginCheckUrl = currentUrl;
+        if (await detectLoginWall(session.page, session.goal)) {
+          const siteName = session.site ? session.site.replace(/\.(com|co\.uk|co|net|org)$/i, '') : 'the site';
+          return { type: 'reauth', site: session.site, question: `I need to sign in to ${siteName} to continue your order — once you've signed in, say "keep going" and I'll carry on from where I left off.` };
+        }
+      }
+
+      // Bail on a blocked page — two shapes, both meaning "the site won't serve us a real
+      // page". (a) An empty/stripped shell on the FIRST step (near-zero text). (b) An
+      // anti-automation interstitial on ANY step: many sites serve a full page, then swap in
+      // an "Access Denied"/Cloudflare challenge AFTER a search (Next & Argos did exactly
+      // this), which the size guard misses because the wall page isn't empty. Detecting the
+      // copy stops the loop auto-continuing for turns against a dead page.
+      const emptyShell = steps === 1 && elements.length < 3 &&
+        (await session.page.evaluate(() => document.body?.innerText?.length || 0).catch(() => 0)) < 200;
+      if (emptyShell || await detectBlockWall(session.page)) {
+        return blockedPageResult(session);
+      }
+
+      // Tier-2 deterministic recipe: on stable steps (size → add → basket → checkout) a
+      // hand-written selector move replaces the vision call. Cheap; falls through to the
+      // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
+      let decision, recipeStepName = null;
+      const recipe = RECIPES_ENABLED ? (RECIPES[session.site] ?? GENERIC) : null;
+      const recipeMove = recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
+      if (recipeMove) {
+        decision = recipeMove;
+        recipeStepName = recipeMove.stepName;
+      } else {
+        const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
+        // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
+        // at each step, to eyeball that badges land on real controls. No-op when unset.
+        if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
+          require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
+        }
+        decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
+        pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
+      }
+
+      if (decision.action === 'invalid') {
+        consecutiveBadDecisions += 1;
+        session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
+        if (consecutiveBadDecisions >= 3) return STUCK;
+        continue;
+      }
+
+      if (decision.action === 'wait') {
+        session.history.push(`Step ${steps}: waited for the page to settle`);
+        await session.page.waitForTimeout(1500);
+        consecutiveBadDecisions = 0;
+        consecutiveWaits += 1;
+        // "wait" is benign once, but a model that waits forever (e.g. it reads a lazy-load
+        // skeleton as "still loading") never makes progress and never trips the stuck
+        // guard. After a few, nudge it to act; if it STILL only waits, treat it as stuck.
+        if (consecutiveWaits >= 3) {
+          pendingCorrection = 'You have chosen "wait" several times in a row. The page has finished loading. Do NOT wait again — look at the screenshot and take a concrete action (click or fill) that moves toward the goal now.';
+        }
+        if (consecutiveWaits >= 6) {
+          consecutiveBadDecisions += 1;
+          if (consecutiveBadDecisions >= 3) return STUCK;
+        }
+        continue;
+      }
+
+      if (decision.action === 'done') {
+        // For an order, "done" inside the loop is always premature — a real order only
+        // completes via ready_for_payment → confirmPayment. Don't throw away the cart.
+        if (session.isOrder) {
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: ignored a premature "done" (order isn't placed yet)`);
+          if (consecutiveBadDecisions >= 3) {
+            return { type: 'awaiting_more', summary: 'Paused — tell me the next step (which item, size, or deal) and I\'ll carry on.' };
+          }
+          continue;
+        }
+        // Goal answered via a fast-path → the learned/seed template worked; reward it.
+        if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, true);
+        // Keep the browser open on a finished lookup: "what's the price of X" is often followed
+        // by "order it" / "add it to my basket". Leaving the session on its current product page
+        // lets that follow-up continue right here instead of reopening from scratch. Idle
+        // eviction (SESSION_IDLE_MS) reclaims it if no follow-up comes; a different-site task
+        // closes it via the same-site guard at the top of runOrderingTurn.
+        touchSession(userId);
+        await persistStorage(userId, session);
+        const ctx = session.goalContext || {};
+        let nice = decision.summary || 'Done.';
+        const deals = (session.discoveredDeals || []).slice(0, 3);
+        // Make final answer conversational + include discovered value (size/color from goal + deals)
+        if (ctx.size || ctx.color || ctx.budget || deals.length) {
+          const bits = [];
+          if (ctx.color) bits.push(ctx.color);
+          if (ctx.size) bits.push(`size ${ctx.size}`);
+          const desc = bits.length ? bits.join(' ') + ' ' : '';
+          nice = `Found the ${desc}for you${ctx.budget ? ` (under £${ctx.budget})` : ''}. ${decision.summary || ''}`.trim();
+          if (deals.length) {
+            nice += ` Deals I spotted: ${deals.join(' • ')}.`;
+          }
+        }
+        return { type: 'done', text: nice };
+      }
+
+      if (decision.action === 'ask') {
+        // The model hit a bot/security wall (often a Cloudflare iframe detectBlockWall can't
+        // read) and is asking the user what to do. Don't surface a confusing technical ask —
+        // bail cleanly, same as a detected wall, so the user gets "try another site", not
+        // "there's a Cloudflare screen".
+        if (describesBlockWall(decision.question)) {
+          return blockedPageResult(session);
+        }
+        // Never surface a technical question. Treat it as a stuck step and retry instead.
+        if (isTechnicalAsk(decision.question)) {
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: suppressed a technical question ("${String(decision.question).slice(0, 60)}")`);
+          if (consecutiveBadDecisions >= 3) return STUCK;
+          await session.page.waitForTimeout(1200);
+          continue;
+        }
+        return { type: 'ask', question: decision.question };
+      }
+
+      if (decision.action === 'ready_for_payment') {
+        // Find the real pay button (the cart-summary text never matches a clickable
+        // element) so confirmPayment can re-find and click it. If no pay control is
+        // visible yet, don't hand off a dead-end — ask the user how to proceed.
+        const payEl = elements.find(el => matchesPaymentKeyword(el.text));
+        if (!payEl) {
+          return { type: 'ask', question: 'The order looks ready, but I can\'t see a payment button on screen yet — want me to keep going, or check the cart yourself?' };
+        }
+        session.pendingPaymentLabel = payEl.text;
+        return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
+      }
+
+      // click or fill — the id MUST be one we actually showed the model. A miss here is
+      // almost always a hallucinated id (the model used a price/quantity it read off the
+      // page). Don't just retry the identical prompt — raise a correction so the next
+      // decision is told the id was invalid and which ids are real, then it can recover.
+      // A recipe move already carries a full-DOM locatorIndex + the element's text, so it
+      // bypasses the elementId→element lookup the vision path uses. A vision move still maps
+      // its badge elementId (0..lastId) to the extracted element; a miss there is a hallucination.
+      let target;
+      if (recipeStepName) {
+        target = { id: -1, text: decision.text || '', locatorIndex: decision.locatorIndex };
+      } else {
+        const lastId = elements.length ? elements.length - 1 : 0;
+        const idIsValid = Number.isInteger(decision.elementId) && decision.elementId >= 0 && decision.elementId <= lastId;
+        target = idIsValid ? elements.find(el => el.id === decision.elementId) : null;
+        if (!target) {
+          consecutiveBadDecisions += 1;
+          pendingCorrection = `Your last reply used elementId ${decision.elementId}, which is NOT on this page. Valid element ids are 0 to ${lastId}. Look at the numbered badges in the screenshot and choose one of those — do not use any other number.`;
+          session.history.push(`Step ${steps}: model chose elementId ${decision.elementId}, which is not on the page (valid 0-${lastId}); asked it to pick a real one`);
+          if (consecutiveBadDecisions >= 3) return STUCK;
+          continue;
+        }
+      }
+
+      if (matchesPaymentKeyword(target.text)) {
+        session.pendingPaymentLabel = target.text;
+        return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
+      }
+
+      // The DOM often re-renders between perception and action (hydration, results refresh,
+      // a dismissed banner shifting indices), leaving locatorIndex pointing at a DIFFERENT —
+      // frequently hidden — node: Wickes' "Add for Delivery" failed "Element is not visible"
+      // three times in a row this way while a visible twin sat elsewhere in the DOM. If the
+      // indexed node's label no longer matches what the model chose, re-find the element by
+      // its visible text (fresh extraction only lists visible nodes, so a hidden mobile/
+      // desktop duplicate resolves to the visible one).
+      let actionIndex = target.locatorIndex;
+      if (target.text) {
+        const drifted = await session.page.evaluate(({ selector, idx, want }) => {
+          const el = document.querySelectorAll(selector)[idx];
+          if (!el) return true;
+          // Text alone can't detect drift between DUPLICATES: Wickes renders one hidden
+          // "Add for Delivery" twin per product tile, so the shifted index still text-matches
+          // while pointing at a zero-size node ("Element is not visible" ×3, 2026-07-02).
+          // A control the model just SAW must have a real box — treat a sizeless/hidden one
+          // as drift so we re-resolve to the visible twin.
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          if (!r.width || !r.height || s.visibility === 'hidden' || s.display === 'none') return true;
+          const label = ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+          return label !== want;
+        }, { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex, want: target.text }).catch(() => false);
+        if (drifted) {
+          const fresh = await extractClickableElements(session.page);
+          const match = findElementByText(fresh, target.text);
+          if (match) actionIndex = match.locatorIndex;
+        }
+      }
+      const locator = session.page.locator(CLICKABLE_SELECTOR).nth(actionIndex);
+      try {
+        if (decision.action === 'click') {
+          onProgress(`Clicking "${target.text}"…`);
+          // Two real-site hazards: (1) elements in horizontal carousels/off-screen rows
+          // aren't in the viewport, and force-click alone errors "outside of the viewport"
+          // because force skips the patient scroll-and-retry; (2) decorative/consent <div>s
+          // overlay the target and "intercept pointer events". So: scroll it into view
+          // first, then force the click past any overlay. Safe — the payment guardrail
+          // above means the loop never force-clicks a pay button.
+          await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+          await session.page.evaluate(el => el && el.scrollIntoView({ block: 'center', behavior: 'instant' }), await locator.elementHandle().catch(() => null)).catch(() => {});
+          try {
+            await locator.click({ timeout: 10000, force: true });
+          } catch (clickErr) {
+            // Hidden-twin recovery: sites render the same control several times (desktop/
+            // mobile/sticky variants — Wickes has one "Add for Delivery" per layout) and the
+            // indexed node can be the clipped twin that has a size but no clickable point,
+            // failing "Element is not visible" even with force. Let Playwright's own
+            // visibility semantics arbitrate: scan same-text candidates and click the one it
+            // deems visible. Only for this error shape — anything else propagates as before.
+            if (!/not visible|outside of the viewport/i.test(String(clickErr.message)) || !target.text) throw clickErr;
+            const exact = new RegExp(`^\\s*${target.text.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+            const cands = session.page.locator(CLICKABLE_SELECTOR).filter({ hasText: exact });
+            const n = Math.min(await cands.count().catch(() => 0), 12);
+            let clicked = false;
+            for (let i = 0; i < n; i++) {
+              const cand = cands.nth(i);
+              if (await cand.isVisible().catch(() => false)) {
+                await cand.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+                await cand.click({ timeout: 5000, force: true });
+                clicked = true;
+                break;
+              }
+            }
+            if (!clicked) throw clickErr;
+          }
+          session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}clicked "${target.text}"`);
+        } else if (decision.action === 'fill') {
+          onProgress(`Typing into "${target.text}"…`);
+          const value = String(decision.value || '');
+          await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+          try {
+            await locator.fill(value, { timeout: 8000 });
+          } catch (fillErr) {
+            // The model often points at a search WRAPPER (a div[role="combobox"] or a
+            // button that reveals the real field) instead of the <input> itself, so fill
+            // throws "not an <input>". Recover: fill a nested input if there is one, else
+            // focus the element and type via the keyboard.
+            const nested = locator.locator('input, textarea, [contenteditable]').first();
+            if (await nested.count().catch(() => 0)) {
+              await nested.fill(value, { timeout: 8000 });
+            } else {
+              await locator.click({ timeout: 5000, force: true }).catch(() => {});
+              await session.page.keyboard.type(value, { delay: 10 });
+            }
+          }
+          session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}filled "${target.text}" with "${value}"`);
+          // Remember what we typed into a SEARCH box so the next iterations can detect a
+          // search-results navigation and learn this site's fast-path template. Gated to
+          // search fields so we never mis-learn a filter/quantity/address as a search URL.
+          if (/search/i.test(target.text)) {
+            session.lastFilledValue = value;
+            // Most sites only run the search on Enter — the model regularly fills the box and
+            // then clicks a "Search" icon that merely toggles the overlay, spinning forever
+            // (M&S/Nike/Wickes in the 2026-07-02 benchmark). Submit for it: the field is still
+            // focused from the fill, and Enter is universal on search inputs.
+            await session.page.keyboard.press('Enter').catch(() => {});
+            session.history[session.history.length - 1] += ' and pressed Enter to search';
+          }
+        }
+        consecutiveBadDecisions = 0;
+        consecutiveWaits = 0; // a real action broke the wait streak
+        // Detect a no-progress spin: the same action on the same element, repeatedly. Some
+        // repeats are legitimate (a "+" quantity button), so we don't block — we nudge after
+        // a few, then count toward "stuck" if it keeps going. value is included so re-typing
+        // the same field counts but a different value doesn't.
+        const sig = `${decision.action}:${target.locatorIndex}:${decision.action === 'fill' ? String(decision.value || '') : ''}`;
+        if (sig === lastActionSig) {
+          repeatActionCount += 1;
+          if (repeatActionCount >= 2) {
+            pendingCorrection = `You have just done the SAME action ("${decision.action}" on "${target.text}") ${repeatActionCount + 1} times and the page isn't advancing. It is not working — do something DIFFERENT: pick another element, scroll to reveal a control (like an "Add"/"Save"/"Continue" button often at the bottom of a dialog), or choose a required option first.`;
+          }
+          if (repeatActionCount >= 4) {
+            consecutiveBadDecisions += 1;
+            if (consecutiveBadDecisions >= 3) return STUCK;
+          }
+        } else {
+          lastActionSig = sig;
+          repeatActionCount = 0;
+        }
+
+        // Extra: if we are repeating the exact same action AND cart is still 0 on an order goal,
+        // treat as strong no-progress signal (prevents the "click search 5 times" pattern).
+        if (session.isOrder && !session.cartEverNonzero && repeatActionCount >= 2) {
+          stepsSinceNewState = Math.max(stepsSinceNewState, repeatActionCount + 2);
+          stepsSinceCartProgress = Math.max(stepsSinceCartProgress, repeatActionCount + 3);
+        }
+        session.lastActionSig = lastActionSig;
+        session.repeatActionCount = repeatActionCount;
+        if (recipeStepName) {
+          const sameStep = session.lastRecipeStep === recipeStepName;
+          session.lastRecipeStep = recipeStepName;
+          if (sameStep) {
+            // The SAME recipe step firing again means the last firing didn't advance the
+            // page — a silent loop the health tracker can't see (it only counts selector
+            // misses; Wickes' GENERIC cart step clicked "Checkout" 20× this way). Count
+            // ineffective repeats as misses so the step self-disables and vision takes
+            // over, and leave the progress counters running so a stuck recipe ultimately
+            // bails like any other spin.
+            session.recipeStepRepeats = (session.recipeStepRepeats || 0) + 1;
+            if (session.recipeStepRepeats >= 2) recipeHealth.recordMiss(session.site, recipeStepName);
+          } else {
+            session.recipeStepRepeats = 0;
+            // Recipe advanced to a different step — trusted mechanical progress; reset the
+            // detector so multi-click recipe sequences (e.g. JL size then add on the same
+            // PDP) don't accumulate.
+            stepsSinceProgress = 0;
+            stepsSinceNewState = 0;
+            stepsSinceCartProgress = 0;
+            lastProgressSig = lastProgressSig + '|r';
+            session.lastProgressSig = lastProgressSig;
+            session.stepsSinceProgress = stepsSinceProgress;
+            session.stepsSinceNewState = stepsSinceNewState;
+            session.stepsSinceCartProgress = stepsSinceCartProgress;
+          }
+        }
+        touchSession(userId);
+        await persistStorage(userId, session);
+      } catch (actionErr) {
+        // One failed action must NOT kill the whole turn (the outer catch used to end it).
+        // Record it, nudge the model toward a different element, and re-perceive. Only a
+        // sustained run of failures trips the stuck guard.
+        const reason = String(actionErr.message || 'action failed').split('\n')[0].slice(0, 120);
+        consecutiveBadDecisions += 1;
+        pendingCorrection = `Your previous ${decision.action} on "${target.text}" failed (${reason}). Pick a different element or try another way to reach the goal.`;
+        session.history.push(`Step ${steps}: ${decision.action} on "${target.text}" failed (${reason})`);
+        if (consecutiveBadDecisions >= 3) return STUCK;
+        continue;
+      }
+    }
+  } catch (error) {
+    // Playwright errors carry a multi-line call log — log it server-side, but show the
+    // user a short, calm line (the session stays open so they can continue).
+    console.warn('[browser-task] step failed:', error.message);
+    const reason = String(error.message || 'something went wrong').split('\n')[0].slice(0, 160);
+    session.history.push(`Step ${steps}: action failed (${reason})`);
+    return { type: 'error', error: `Hit a snag on the page (${reason}). Say "keep going" and I'll pick up where I left off.` };
+  }
+
+  // No "want me to keep going?" — the client auto-continues, so asking a question we
+  // immediately answer ourselves just litters the transcript.
+  const n = session.history.length;
+  return { type: 'awaiting_more', summary: session.isOrder
+    ? `Working on your order — ${n} step${n === 1 ? '' : 's'} in…`
+    : `Working on it — ${n} step${n === 1 ? '' : 's'} in…` };
+}
+
+async function confirmPayment(userId) {
+  const session = getSession(userId);
+  if (!session || !session.pendingPaymentLabel) {
+    return { type: 'error', error: 'No order is waiting for payment confirmation — it may have expired.' };
+  }
+  try {
+    const elements = await extractClickableElements(session.page);
+    // Exact match only — never substring-fallback at the payment step, where a
+    // stored "Pay" could otherwise match "Apple Pay"/"PayPal" and click the wrong control.
+    const wanted = session.pendingPaymentLabel.trim().toLowerCase();
+    const target = elements.find(el => el.text.trim().toLowerCase() === wanted);
+    if (!target) {
+      return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
+    }
+    await session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex).click({ timeout: 10000 });
+    const text = `Done — placed the order (${session.pendingPaymentLabel}).`;
+    await persistStorage(userId, session);
+    await closeSession(userId);
+    return { type: 'done', text };
+  } catch (error) {
+    return { type: 'error', error: error.message };
+  }
+}
+
+function cancelPayment(userId) {
+  touchSession(userId);
+}
+
+module.exports = {
+  primeWarmBrowser,
+  primeFastpaths,
+  _fastpathStore: fastpathStore,
+  getWarmBrowser,
+  shouldUseRemoteForHost,
+  usingRemoteBrowser,
+  deriveSearchTerm,
+  directSearchUrl,
+  parseGoalContext,
+  tryTier0PriceLookup,
+  matchesPaymentKeyword,
+  isTechnicalAsk,
+  looksLikeLoginWall,
+  looksLikeBlockWall,
+  describesBlockWall,
+  isOrderGoal,
+  assessProgress,
+  buildDecisionPrompt,
+  parseModelDecision,
+  findElementByText,
+  createSession,
+  getSession,
+  touchSession,
+  closeSession,
+  extractClickableElements,
+  CLICKABLE_SELECTOR,
+  runOrderingTurn,
+  confirmPayment,
+  cancelPayment
+};

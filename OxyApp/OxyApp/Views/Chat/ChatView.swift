@@ -6,12 +6,18 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct ChatView: View {
+    var initialSession: ChatSessionSummary? = nil
+    var autoSendTranscript: String? = nil
+    /// Start a brand-new empty chat instead of resuming the current one.
+    var startFresh: Bool = false
+    /// When set, the top-left toolbar shows a sidebar/menu button instead of a back chevron.
+    var onMenu: (() -> Void)? = nil
+
     @Environment(AppState.self) private var appState
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ChatViewModel()
     @State private var voiceInput = VoiceInputManager()
     @FocusState private var isInputFocused: Bool
-    @State private var showSearch = false
-    @State private var isIncognito = false
     @State private var pendingReviewAction: ActionResult?
     @State private var messageDraft: MessageDraft?
     @State private var messageComposerAlert: String?
@@ -20,23 +26,35 @@ struct ChatView: View {
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showAttachMenu = false
+    @State private var isIncognito = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var pendingImageData: Data?
     @State private var pendingImageName: String?
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
+    // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
+    @Environment(\.colorScheme) private var colorScheme
+    private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
+
+    /// True the instant the last message is a finished assistant reply — the trigger for the
+    /// soft "reply landed" tick. Reads only `.last`, so it stays O(1) per render.
+    private var assistantReplySettled: Bool {
+        guard let last = viewModel.messages.last else { return false }
+        return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
+        ZStack {
+            // Canvas is the app-level aurora (see MainTabView) so it bleeds full-screen.
+            Color.clear
 
-                VStack(spacing: 0) {
-                    // Offline banner
-                    if isOffline {
-                        HStack(spacing: 8) {
+            VStack(spacing: 0) {
+                // Offline banner
+                if isOffline {
+                    HStack(spacing: 8) {
                             Image(systemName: "wifi.slash")
                                 .font(.system(size: 12, weight: .semibold))
                             Text("No internet connection")
@@ -45,22 +63,8 @@ struct ChatView: View {
                         .foregroundStyle(Color.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 7)
-                        .background(Color(red: 0.85, green: 0.62, blue: 0.22))
+                        .background(Color.appWarning)
                         .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
-
-                    // Incognito banner
-                    if isIncognito {
-                        HStack(spacing: 8) {
-                            Image(systemName: "eye.slash.fill")
-                                .font(.system(size: 12))
-                            Text("Vanish mode — messages won't be saved")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundStyle(Color.oxyStone)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(Color.oxyStone.opacity(0.1))
                     }
 
                     if viewModel.isViewingHistorySnapshot {
@@ -83,10 +87,10 @@ struct ChatView: View {
                             }
                             .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(Color.oxyStone)
+                        .foregroundStyle(Color.appMuted)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.oxyStone.opacity(0.1))
+                        .background(Color.appMuted.opacity(0.1))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
@@ -107,20 +111,18 @@ struct ChatView: View {
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {
-                            LazyVStack(spacing: 2) {
-                                if viewModel.messages.isEmpty && !viewModel.isSending {
-                                    WelcomeCard(onQuickAction: { action in
-                                        viewModel.inputText = action
-                                        viewModel.sendMessage(userId: appState.userId)
-                                    })
-                                    .padding(.top, 40)
-                                    .padding(.bottom, 20)
-                                }
-
-                                ForEach(viewModel.messages) { message in
+                            LazyVStack(spacing: 0) {
+                                ForEach(Array(viewModel.messages.enumerated()), id: \.element.id) { idx, message in
+                                    let msgs = viewModel.messages
+                                    let prevRole = idx > 0 ? msgs[idx - 1].role : nil
+                                    let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
+                                    let isGroupStart = prevRole != message.role
+                                    let isGroupEnd = nextRole != message.role
                                     MessageBubble(
                                         message: message,
                                         showsTypingIndicator: viewModel.statusLabel == nil,
+                                        isGroupStart: isGroupStart,
+                                        isGroupEnd: isGroupEnd,
                                         onActionCommand: { command in
                                             viewModel.sendCommand(command, userId: appState.userId)
                                         },
@@ -128,8 +130,9 @@ struct ChatView: View {
                                             handleActionOpen(action)
                                         }
                                     )
-                                        .id(message.id)
-                                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                    .id(message.id)
+                                    .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                                 }
 
                                 if let status = viewModel.statusLabel {
@@ -140,12 +143,43 @@ struct ChatView: View {
                                 }
                             }
                             .padding(.vertical, 12)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: viewModel.messages.count)
+                            .animation(.appSpring, value: viewModel.messages.count)
+                        }
+                        .overlay {
+                            if viewModel.messages.isEmpty && !viewModel.isSending {
+                                WelcomeCard { prompt in
+                                    viewModel.inputText = prompt
+                                    sendCurrentDraft()
+                                }
+                                .transition(.opacity)
+                            }
                         }
                         .scrollDismissesKeyboard(.interactively)
+                        // The header uses glass controls, but the region itself must be
+                        // opaque. Otherwise history text ghosts under the menu button while
+                        // scrolling, which makes the first visible message unreadable.
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            AppHeaderView(
+                                isIncognito: $isIncognito,
+                                isEmptyChat: viewModel.messages.isEmpty,
+                                onLeading: {
+                                    HapticManager.shared.impact(.light)
+                                    if let onMenu { onMenu() } else { dismiss() }
+                                },
+                                onNewChat: {
+                                    HapticManager.shared.impact(.light)
+                                    viewModel.startNewChat(userId: appState.userId)
+                                }
+                            )
+                            .onChange(of: isIncognito) { _, on in
+                                viewModel.incognito = on
+                            }
+                            // No frosted band — the header's glass buttons float on the canvas.
+                        }
+                        .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(.appSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -155,7 +189,7 @@ struct ChatView: View {
                         }
                         .onChange(of: viewModel.messages.last?.content) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            withAnimation(.appSpring) {
                                 if let lastId = viewModel.messages.last?.id {
                                     proxy.scrollTo(lastId, anchor: .bottom)
                                 } else {
@@ -167,32 +201,32 @@ struct ChatView: View {
                             guard let targetID else { return }
                             Task { @MainActor in
                                 try? await Task.sleep(for: .milliseconds(150))
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(.appStandard) {
                                     proxy.scrollTo(targetID, anchor: .center)
                                 }
                                 try? await Task.sleep(for: .milliseconds(700))
                                 viewModel.scrollTargetMessageID = nil
                             }
                         }
-                        .onChange(of: viewModel.messages) {
+                        // Both helpers only inspect `.actions` on the last few messages.
+                        // Keying on the action count (instead of the whole messages array)
+                        // avoids an O(conversation) Equatable compare on every streamed token.
+                        .onChange(of: viewModel.messages.suffix(3).reduce(0) { $0 + $1.actions.count }) {
                             presentPendingReviewIfNeeded()
                             presentMessageComposerIfNeeded()
                         }
                     }
 
                     // Voice recording overlay
-                    if voiceInput.isRecording {
+                    if voiceInput.isRecording || voiceInput.isTranscribing {
                         VoiceRecordingBar(
-                            transcript: voiceInput.transcript,
+                            transcript: voiceInput.isTranscribing ? nil : voiceInput.transcript,
+                            isTranscribing: voiceInput.isTranscribing,
                             onStop: {
-                                voiceInput.stopRecording()
-                                if !voiceInput.transcript.isEmpty {
-                                    viewModel.inputText = voiceInput.transcript
-                                    viewModel.sendMessage(userId: appState.userId)
-                                }
+                                if !voiceInput.isTranscribing { voiceInput.stopRecording() }
                             },
                             onCancel: {
-                                voiceInput.stopRecording()
+                                voiceInput.cancel()
                             }
                         )
                     }
@@ -202,27 +236,28 @@ struct ChatView: View {
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending || isOffline,
                         isRecording: voiceInput.isRecording,
-                        isPreparingVoice: voiceInput.isPreparing,
+                        isPreparingVoice: voiceInput.isTranscribing,
                         attachmentLabel: pendingImageName,
                         attachmentData: pendingImageData,
                         attachmentIsImage: pendingIsImage,
                         isFocused: $isInputFocused,
+                        incognito: isIncognito,
                         onSend: {
                             sendCurrentDraft()
                         },
                         onVoice: {
+                            guard !voiceInput.isTranscribing else { return }
+                            HapticManager.shared.impact(.medium)
                             if voiceInput.isRecording {
                                 voiceInput.stopRecording()
-                                if !voiceInput.transcript.isEmpty {
-                                    viewModel.inputText = voiceInput.transcript
-                                    viewModel.sendMessage(userId: appState.userId)
-                                }
                             } else {
-                                voiceInput.startRecording()
+                                voiceInput.startRecording(userId: appState.userId)
                             }
                         },
                         onAttach: {
-                            showAttachMenu = true
+                            HapticManager.shared.impact(.light)
+                            isInputFocused = false
+                            withAnimation(.easeOut(duration: 0.2)) { showAttachMenu = true }
                         },
                         onRemoveAttachment: {
                             pendingImageData = nil
@@ -232,98 +267,13 @@ struct ChatView: View {
                         }
                     )
                 }
+
+                attachmentSheetOverlay
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { showSearch = true }) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 17))
-                            .foregroundStyle(Color.oxySub)
-                    }
-                }
-
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 10) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.oxyStone.opacity(0.3), Color.oxyStone.opacity(0.15)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 34, height: 34)
-
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(Color.oxyStone)
-                        }
-
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Oxy")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Color.oxyText)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.oxyGreen)
-                                    .frame(width: 6, height: 6)
-                                Text("Online")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(Color.oxySub)
-                            }
-                        }
-                    }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                viewModel.startNewChat(userId: appState.userId)
-                            }
-                        }) {
-                            Label("New Chat", systemImage: "square.and.pencil")
-                        }
-                        Divider()
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isIncognito.toggle()
-                            }
-                        }) {
-                            Label(
-                                isIncognito ? "Turn Off Vanish Mode" : "Vanish Mode",
-                                systemImage: isIncognito ? "eye.fill" : "eye.slash.fill"
-                            )
-                        }
-                        Button(action: {
-                            viewModel.requestLocationAccess()
-                        }) {
-                            Label("Share Location", systemImage: "location.fill")
-                        }
-                        Divider()
-                        Button(role: .destructive, action: { appState.logout() }) {
-                            Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Color.oxySub)
-                    }
-                }
-            }
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $showSearch) {
-                ChatSearchView(userId: appState.userId) { result in
-                    guard let createdAt = result.createdAt else { return }
-                    showSearch = false
-                    Task {
-                        await viewModel.loadHistoryAround(userId: appState.userId, createdAt: createdAt, messageId: result.messageId)
-                    }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
+            // A soft tick when Millie's reply settles; a warning buzz when a request fails.
+            // Lives in its own modifier so this (large) body still type-checks in time.
+            .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,
@@ -340,6 +290,8 @@ struct ChatView: View {
                 )
                 .presentationDetents([.height(340), .medium])
                 .presentationDragIndicator(.visible)
+                // Modal sheet stays dark in both finishes (its surface is fixed obsidian).
+                .preferredColorScheme(.dark)
             }
             .sheet(item: $messageDraft) { draft in
                 MessageComposeSheet(draft: draft) { result in
@@ -354,11 +306,6 @@ struct ChatView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(messageComposerAlert ?? "")
-            }
-            .confirmationDialog("Add attachment", isPresented: $showAttachMenu, titleVisibility: .visible) {
-                Button("Photo Library") { showPhotoPicker = true }
-                Button("Files") { showFileImporter = true }
-                Button("Cancel", role: .cancel) {}
             }
             .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
             .fileImporter(
@@ -393,9 +340,45 @@ struct ChatView: View {
                     handledReviewActionIDs.insert(oldValue.id)
                 }
             }
-        }
+            .onChange(of: voiceInput.isTranscribing) { _, nowTranscribing in
+                guard !nowTranscribing else { return }
+                let text = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                voiceInput.transcript = ""
+                guard !text.isEmpty else { return }
+                viewModel.inputText = text
+                viewModel.sendMessage(userId: appState.userId)
+            }
+            // Spoken input from the pendant or the "Ask Oxy" Siri intent — routed
+            // into this existing chat instead of opening a second screen.
+            .onReceive(NotificationCenter.default.publisher(for: .oxyVoiceMessage)) { note in
+                guard let text = note.userInfo?["text"] as? String else { return }
+                SiriRequestBus.shared.pendingQuery = nil
+                injectVoiceMessage(text)
+            }
+            // Draft handoff (e.g. from a Today card) — fill the composer, don't send.
+            .onReceive(NotificationCenter.default.publisher(for: .oxyDraftMessage)) { note in
+                guard let text = note.userInfo?["text"] as? String else { return }
+                viewModel.inputText = text
+            }
         .task {
-            await viewModel.prepareChat(userId: appState.userId)
+            if let session = initialSession {
+                await viewModel.loadHistoryAround(
+                    userId: appState.userId,
+                    createdAt: session.lastAt ?? session.startedAt ?? ""
+                )
+            } else if startFresh {
+                viewModel.startNewChat(userId: appState.userId)
+            } else {
+                await viewModel.prepareChat(userId: appState.userId)
+            }
+            if let transcript = autoSendTranscript, !transcript.isEmpty {
+                injectVoiceMessage(transcript)
+            }
+            // Cold-launch from the Siri intent: the notification may have fired
+            // before this view subscribed, so drain any pending query here.
+            if let pending = SiriRequestBus.shared.take() {
+                injectVoiceMessage(pending)
+            }
         }
         .onAppear {
             viewModel.requestLocationAccess()
@@ -408,16 +391,73 @@ struct ChatView: View {
             }
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
-        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { notification in
-            guard let lastAt = notification.userInfo?["lastAt"] as? String, !lastAt.isEmpty else { return }
-            let messageId = notification.userInfo?["messageId"] as? String
-            Task {
-                await viewModel.loadHistoryAround(userId: appState.userId, createdAt: lastAt, messageId: messageId)
-            }
         }
     }
 
+    // MARK: - Attachment sheet (custom, flat obsidian)
+
+    @ViewBuilder
+    private var attachmentSheetOverlay: some View {
+        if showAttachMenu {
+            ZStack(alignment: .bottom) {
+                Color.appScrim
+                    .ignoresSafeArea()
+                    .onTapGesture { dismissAttachMenu() }
+
+                VStack(spacing: 0) {
+                    attachSheetRow("Photo Library") {
+                        dismissAttachMenu()
+                        showPhotoPicker = true
+                    }
+                    AppDivider()
+                    attachSheetRow("Files") {
+                        dismissAttachMenu()
+                        showFileImporter = true
+                    }
+                }
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                )
+                .padding(.horizontal, 14)
+                .padding(.bottom, 14)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+            .zIndex(20)
+        }
+    }
+
+    private func attachSheetRow(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 16, weight: .regular))
+                .foregroundStyle(Color.appInk)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 17)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.98))
+    }
+
+    private func dismissAttachMenu() {
+        withAnimation(.appFast) { showAttachMenu = false }
+    }
+
+    /// Send a spoken transcript as a message into this conversation. De-dupes
+    /// against an in-flight send so an overlapping pendant + Siri trigger can't
+    /// fire the same text twice.
+    private func injectVoiceMessage(_ rawText: String) {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        viewModel.inputText = text
+        viewModel.sendMessage(userId: appState.userId)
+    }
+
     private func sendCurrentDraft() {
+        HapticManager.shared.impact(.light)
         if let pendingImageData {
             let defaultName = pendingImageMimeType == "image/png" ? "photo.png" : "photo.jpg"
             viewModel.sendImageMessage(
@@ -492,6 +532,7 @@ struct ChatView: View {
     }
 
     private func handleActionOpen(_ action: ActionResult) {
+        HapticManager.shared.impact(.light)
         if action.action == "send_message", let draft = MessageDraft(action: action) {
             presentMessageDraft(draft)
             return
@@ -518,6 +559,23 @@ struct ChatView: View {
         @unknown default:
             viewModel.statusLabel = nil
         }
+    }
+}
+
+/// The chat's two reward haptics, isolated from the main body so its type-checking
+/// cost doesn't compound the (already large) `ChatView` body expression.
+private struct ChatHaptics: ViewModifier {
+    let replySettled: Bool
+    let failed: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .sensoryFeedback(trigger: replySettled) { _, settled in
+                settled ? .impact(flexibility: .soft, intensity: 0.7) : nil
+            }
+            .sensoryFeedback(trigger: failed) { _, didFail in
+                didFail ? .warning : nil
+            }
     }
 }
 
@@ -599,97 +657,125 @@ private struct ActionReviewSheet: View {
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
+    private var isPayment: Bool {
+        (action.actionSummary ?? "").localizedCaseInsensitiveContains("payment") ||
+        (action.actionSummary ?? "").localizedCaseInsensitiveContains("order") ||
+        (action.text ?? "").localizedCaseInsensitiveContains("charge") ||
+        (action.cardText ?? "").localizedCaseInsensitiveContains("£") ||
+        action.actionSummary == "Awaiting payment confirmation"
+    }
+
     private var title: String {
-        action.actionSummary ?? {
+        if isPayment {
+            return action.actionSummary ?? "Confirm order"
+        }
+        return action.actionSummary ?? {
             switch action.action {
             case "send_email": return "Review email"
             case "send_message": return "Review message"
             case "send_telegram": return "Review Telegram"
             case "make_call": return "Review call"
-            default: return "Review action"
+            default: return "Review"
             }
         }()
     }
 
+    private var subtitle: String {
+        isPayment ? "This will use the saved payment method on the site." : "One tap when it looks right."
+    }
+
+    private var confirmLabel: String {
+        isPayment ? "Confirm & Place Order" : "Confirm"
+    }
+
     private var detail: String {
-        action.cardText ?? action.text ?? "Ready for review."
+        action.cardText ?? action.text ?? "Ready."
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             Capsule()
-                .fill(Color.oxyLine2)
+                .fill(Color.appHairline)
                 .frame(width: 36, height: 4)
                 .frame(maxWidth: .infinity)
 
             HStack(spacing: 12) {
                 Image(systemName: iconName)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.oxyStone)
-                    .frame(width: 34, height: 34)
-                    .background(Color.oxyStone.opacity(0.12))
-                    .clipShape(Circle())
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(isPayment ? Color.appAccent : Color.appMuted)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle().fill(isPayment ? Color.appAccent.opacity(0.15) : Color.appSurface)
+                    )
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-                    Text("One tap when it looks right.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.appTitle(20, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                    Text(subtitle)
+                        .font(.appBody(13))
+                        .foregroundStyle(Color.appMuted)
                 }
                 Spacer()
             }
 
             Text(detail)
-                .font(.system(size: 15))
-                .foregroundStyle(Color.oxyText)
-                .lineSpacing(5)
+                .font(.appBody(15))
+                .foregroundStyle(Color.appInk)
+                .lineSpacing(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
-                .background(Color.oxySurface2.opacity(0.72))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.oxyLine, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: AppRadius.md)
+                        .stroke(isPayment ? Color.appAccent.opacity(0.3) : Color.appHairline, lineWidth: 1)
                 )
 
-            HStack(spacing: 10) {
+            if isPayment {
+                Text("Double-check the total and address on the site if anything looks off.")
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+            }
+
+            HStack(spacing: 12) {
                 Button(action: onCancel) {
-                    Label("Cancel", systemImage: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
+                    Text("Cancel")
+                        .font(.appBody(15, weight: .semibold))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 14)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.oxySub)
-                .background(Color.oxySurface3)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.appScale)
+                .foregroundStyle(Color.appMuted)
+                .background(Color.appSurface2)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
 
                 Button(action: onConfirm) {
-                    Label("Send", systemImage: "arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
+                    Text(confirmLabel)
+                        .font(.appBody(15, weight: .semibold))
+                        .foregroundStyle(Color.appOnAccent)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 14)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(Color.oxyOnAccent)
-                .background(Color.oxyStone)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(.appScale)
+                .foregroundStyle(Color.appOnAccent)
+                .background(isPayment ? Color.appAccent : Color.appAccent)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
             }
         }
-        .padding(18)
+        .padding(20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.oxySurface1)
+        .background(Color.appBackground)
     }
 
     private var iconName: String {
+        if isPayment { return "creditcard.fill" }
         switch action.action {
         case "send_email": return "envelope.fill"
         case "send_message": return "message.fill"
         case "send_telegram": return "paperplane.fill"
         case "make_call": return "phone.fill"
-        default: return "checkmark.seal.fill"
+        default: return "checkmark.circle.fill"
         }
     }
 }
@@ -697,7 +783,8 @@ private struct ActionReviewSheet: View {
 // MARK: - Voice Recording Bar
 
 private struct VoiceRecordingBar: View {
-    let transcript: String
+    let transcript: String?
+    let isTranscribing: Bool
     let onStop: () -> Void
     let onCancel: () -> Void
 
@@ -705,249 +792,51 @@ private struct VoiceRecordingBar: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Divider().overlay(Color.oxyLine2)
+            Divider().overlay(Color.appHairline)
 
             HStack(spacing: 12) {
                 Button(action: onCancel) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundStyle(Color.oxyDim)
+                        .foregroundStyle(Color.appMuted)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(Color.oxyRed)
+                            .fill(isTranscribing ? Color.appMuted : Color.appDanger)
                             .frame(width: 8, height: 8)
                             .scaleEffect(pulse ? 1.2 : 0.8)
                             .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
-                        Text("Listening...")
+                        Text(isTranscribing ? "Transcribing…" : "Listening...")
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                            .foregroundStyle(Color.appInk)
                     }
-                    if !transcript.isEmpty {
-                        Text(transcript)
+                    if let t = transcript, !t.isEmpty {
+                        Text(t)
                             .font(.system(size: 13))
-                            .foregroundStyle(Color.oxySub)
+                            .foregroundStyle(Color.appMuted)
                             .lineLimit(2)
                     }
                 }
 
                 Spacer()
 
-                Button(action: onStop) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Color.oxyOnAccent)
-                        .frame(width: 36, height: 36)
-                        .background(Color.oxyStone)
-                        .clipShape(Circle())
+                if !isTranscribing {
+                    Button(action: onStop) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.appObsidian)
+                            .frame(width: 36, height: 36)
+                            .appGlass(Circle(), tint: Color.appMuted, interactive: true)
+                    }
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(Color.oxySurface1)
+        .background(.ultraThinMaterial)
         .onAppear { pulse = true }
-    }
-}
-
-// MARK: - Chat Search View
-
-struct ChatSearchView: View {
-    let userId: String
-    let onSelect: (SearchResult) -> Void
-    @Environment(\.dismiss) private var dismiss
-    @State private var query = ""
-    @State private var results: [SearchResult] = []
-    @State private var sessions: [ChatSessionSummary] = []
-    @State private var isSearching = false
-    @State private var isLoadingSessions = true
-    @State private var searchTask: Task<Void, Never>?
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                Color.oxyBg.ignoresSafeArea()
-
-                if query.isEmpty {
-                    if isLoadingSessions {
-                        ProgressView()
-                            .tint(Color.oxyStone)
-                    } else if sessions.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 36))
-                                .foregroundStyle(Color.oxyDim)
-                            Text("Search conversations")
-                                .font(.system(size: 15))
-                                .foregroundStyle(Color.oxySub)
-                            Text("Find messages from your chat history")
-                                .font(.system(size: 13))
-                                .foregroundStyle(Color.oxyDim)
-                        }
-                    } else {
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 0) {
-                                Text("Recent chats")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.oxyDim)
-                                    .textCase(.uppercase)
-                                    .tracking(0.4)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-
-                                ForEach(sessions) { session in
-                                    Button {
-                                        onSelect(SearchResult(
-                                            role: "user",
-                                            content: session.title,
-                                            createdAt: session.lastAt
-                                        ))
-                                        dismiss()
-                                    } label: {
-                                        ChatSessionRow(session: session)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-
-                                    if session.id != sessions.last?.id {
-                                        Divider()
-                                            .overlay(Color.oxyLine)
-                                            .padding(.horizontal, 16)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 8)
-                        }
-                    }
-                } else if results.isEmpty && !isSearching && !query.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .font(.system(size: 36))
-                            .foregroundStyle(Color.oxyDim)
-                        Text("No results found")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Color.oxySub)
-                    }
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(results) { result in
-                                Button {
-                                    onSelect(result)
-                                    dismiss()
-                                } label: {
-                                    SearchResultRow(result: result)
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 12)
-
-                                if result.id != results.last?.id {
-                                    Divider()
-                                        .overlay(Color.oxyLine)
-                                        .padding(.horizontal, 16)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                }
-
-                if isSearching {
-                    ProgressView()
-                        .tint(Color.oxyStone)
-                }
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(Color.oxyStone)
-                }
-            }
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search messages...")
-            .task {
-                await loadSessions()
-            }
-            .onChange(of: query) { _, newValue in
-                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                searchTask?.cancel()
-                guard !trimmed.isEmpty else {
-                    results = []
-                    isSearching = false
-                    return
-                }
-                searchTask = Task {
-                    try? await Task.sleep(for: .milliseconds(300))
-                    if Task.isCancelled { return }
-                    await search(trimmed)
-                }
-            }
-            .onDisappear { searchTask?.cancel() }
-        }
-    }
-
-    private func search(_ q: String) async {
-        isSearching = true
-        defer { if !Task.isCancelled { isSearching = false } }
-        do {
-            let data = try await APIClient.shared.request(
-                path: "/history/\(userId)/search",
-                queryItems: [URLQueryItem(name: "q", value: q)]
-            )
-            // Drop stale results: a newer keystroke cancelled this task while in flight.
-            if Task.isCancelled { return }
-            let response = try JSONDecoder().decode(SearchResponse.self, from: data)
-            results = response.results
-        } catch {
-            if !Task.isCancelled { results = [] }
-        }
-    }
-
-    private func loadSessions() async {
-        isLoadingSessions = true
-        do {
-            let data = try await APIClient.shared.request(path: "/history/\(userId)/sessions")
-            let response = try JSONDecoder().decode(ChatSessionsResponse.self, from: data)
-            sessions = response.sessions
-        } catch {
-            sessions = []
-        }
-        isLoadingSessions = false
-    }
-}
-
-private struct SearchResultRow: View {
-    let result: SearchResult
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(result.role == "user" ? "YOU" : "OXY")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.oxySub)
-                    .tracking(0.5)
-
-                Spacer()
-
-                if let date = result.formattedDate {
-                    Text(date)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.oxyDim)
-                }
-            }
-
-            Text(result.content)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(3)
-        }
     }
 }
 
@@ -985,28 +874,9 @@ struct SearchResponse: Codable {
     let results: [SearchResult]
 }
 
-private struct ChatSessionRow: View {
-    let session: ChatSessionSummary
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Text(session.title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color.oxyText)
-                .lineLimit(1)
-
-            Spacer(minLength: 12)
-
-            if let date = session.formattedDate {
-                Text(date)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxyDim)
-            }
-        }
-    }
-}
-
-struct ChatSessionSummary: Codable, Identifiable {
+struct ChatSessionSummary: Codable, Identifiable, Hashable {
+    static func == (lhs: ChatSessionSummary, rhs: ChatSessionSummary) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
     let id: String
     let title: String
     let preview: String
@@ -1028,6 +898,18 @@ struct ChatSessionSummary: Codable, Identifiable {
         fmt.dateFormat = "d MMM · HH:mm"
         return fmt.string(from: date)
     }
+
+    var relativeTime: String {
+        guard let date = Date.oxyParse(lastAt ?? startedAt) else { return "" }
+        let diff = Date().timeIntervalSince(date)
+        if diff < 60 { return "just now" }
+        if diff < 3600 { return "\(Int(diff / 60))m ago" }
+        if diff < 86400 { return "\(Int(diff / 3600))h ago" }
+        if diff < 7 * 86400 { return "\(Int(diff / 86400))d ago" }
+        let fmt = DateFormatter()
+        fmt.dateFormat = "d MMM"
+        return fmt.string(from: date)
+    }
 }
 
 struct ChatSessionsResponse: Codable {
@@ -1036,81 +918,113 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
+/// Full-screen welcome. Quick actions.
+/// hairline-separated action rows in the lower portion. Silent luxury: generous
+/// space, no fills, nothing decorated.
 private struct WelcomeCard: View {
-    let onQuickAction: (String) -> Void
+    var onAction: (String) -> Void
+    @State private var appeared = false
+    @AppStorage("oxy_starter_actions") private var storedActions = "Send an email\nPlay some music\nBook a ride"
+
+    private static let pool: [(icon: String, label: String)] = [
+        ("envelope", "Send an email"),
+        ("music.note", "Play some music"),
+        ("car", "Book a ride"),
+        ("magnifyingglass", "Search the web"),
+        ("calendar", "Add to my calendar"),
+        ("cloud.sun", "What's the weather"),
+        ("message", "Send a message"),
+        ("map", "Get directions"),
+        ("bell", "Set a reminder")
+    ]
+
+    private var actions: [String] {
+        let parts = storedActions.split(separator: "\n").map(String.init)
+        return parts.isEmpty ? Array(Self.pool.prefix(3).map(\.label)) : parts
+    }
+
+    private func icon(for label: String) -> String {
+        Self.pool.first { $0.label == label }?.icon ?? "sparkles"
+    }
+
+    private func replace(slot: Int, with label: String) {
+        var parts = actions
+        guard slot < parts.count else { return }
+        parts[slot] = label
+        storedActions = parts.joined(separator: "\n")
+        HapticManager.shared.impact(.light)
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color.oxyStone.opacity(0.2), Color.oxyStone.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 72, height: 72)
+        VStack(alignment: .leading, spacing: 0) {
+            // Quick start actions
+            VStack(alignment: .leading, spacing: 20) {
+                // BrandWordmark removed — less precious, more direct.
 
-                Image(systemName: "sparkles")
-                    .font(.system(size: 36))
-                    .foregroundStyle(Color.oxyStone)
+                Text("What can I do for you?")
+                    .font(.appTitle(28, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 18)
+                    .animation(.appSpring.delay(0.1), value: appeared)
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 52)
 
-            VStack(spacing: 6) {
-                Text("Hey, I'm Oxy")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color.oxyText)
+            Spacer()
 
-                Text("What can I help with?")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.oxySub)
-                    .multilineTextAlignment(.center)
+            // ── Action rows ─────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 0) {
+                Rectangle()
+                    .fill(Color.appHairline)
+                    .frame(height: 0.5)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(.appSpring.delay(0.18), value: appeared)
+
+                ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
+                    Button { onAction(label) } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: icon(for: label))
+                                .font(.system(size: 14, weight: .ultraLight))
+                                .foregroundStyle(Color.appMuted.opacity(0.5))
+                                .frame(width: 18, alignment: .center)
+                            Text(label)
+                                .font(.appBody(16, weight: .light))
+                                .foregroundStyle(Color.appMuted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 9, weight: .light))
+                                .foregroundStyle(Color.appMuted.opacity(0.3))
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 20)
+                        .contentShape(Rectangle())
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Color.appHairline).frame(height: 0.5)
+                        }
+                    }
+                    .buttonStyle(.appScale(0.97))
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 10)
+                    .animation(.appSpring.delay(0.22 + Double(index) * 0.07), value: appeared)
+                    .contextMenu {
+                        ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
+                            Button { replace(slot: index, with: option.label) } label: {
+                                Label(option.label, systemImage: option.icon)
+                            }
+                        }
+                    }
+                }
             }
-
-            HStack(spacing: 8) {
-                QuickChip(icon: "envelope.fill", label: "Check emails") {
-                    onQuickAction("Check my emails")
-                }
-                QuickChip(icon: "calendar", label: "My schedule") {
-                    onQuickAction("What's my schedule today?")
-                }
-                QuickChip(icon: "car.fill", label: "Book a ride") {
-                    onQuickAction("Book me a ride")
-                }
-            }
+            .padding(.bottom, 16)
         }
-        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .onAppear { withAnimation { appeared = true } }
     }
 }
 
-private struct QuickChip: View {
-    let icon: String
-    let label: String
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(Color.oxyStone)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Color.oxySub)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
+// ScaleButtonStyle kept for local usage — delegates to AppScaleButtonStyle at 0.96
+private typealias ScaleButtonStyle = AppScaleButtonStyle
 
 // MARK: - Chat Input Bar
 
@@ -1123,17 +1037,15 @@ private struct ChatInputBar: View {
     let attachmentData: Data?
     let attachmentIsImage: Bool
     var isFocused: FocusState<Bool>.Binding
+    let incognito: Bool
     let onSend: () -> Void
     let onVoice: () -> Void
     let onAttach: () -> Void
     let onRemoveAttachment: () -> Void
-    @State private var voicePulse = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Divider()
-                .overlay(Color.oxyLine2)
-
+            // Attachment strip
             if let attachmentLabel {
                 HStack(spacing: 10) {
                     if attachmentIsImage, let attachmentData, let uiImage = UIImage(data: attachmentData) {
@@ -1142,110 +1054,115 @@ private struct ChatInputBar: View {
                             .scaledToFill()
                             .frame(width: 38, height: 38)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
+                            // A hairline edge so the photo reads as a crisp object, not a
+                            // torn-out scrap. Color.primary is pure-ish black in light /
+                            // white in dark — never a tinted neutral that reads as dirt.
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                            )
                     } else {
                         Image(systemName: attachmentIsImage ? "photo.fill" : "doc.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Color.oxyStone)
+                            .foregroundStyle(Color.appMuted)
                             .frame(width: 38, height: 38)
-                            .background(Color.oxySurface3)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .appGlass(RoundedRectangle(cornerRadius: 8))
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text(attachmentLabel)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.oxyText)
+                            .foregroundStyle(Color.appInk)
                             .lineLimit(1)
                         Text(attachmentIsImage ? "Ready for analysis" : "Ready to read")
                             .font(.system(size: 11))
-                            .foregroundStyle(Color.oxyDim)
+                            .foregroundStyle(Color.appMuted)
                     }
                     Spacer()
                     Button(action: onRemoveAttachment) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 16))
-                            .foregroundStyle(Color.oxyDim)
+                            .foregroundStyle(Color.appMuted)
+                            // Glyph stays 16pt; the tap target grows to the 40×40 minimum.
+                            .frame(width: 40, height: 40)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.appScale)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Color.oxySurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.appSurface)
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
             }
 
             HStack(alignment: .bottom, spacing: 10) {
+                // Attach
                 Button(action: onAttach) {
                     Image(systemName: "plus")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(Color.oxySub)
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(Color.appMuted)
                         .frame(width: 36, height: 36)
+                        .appGlass(Circle(), interactive: true)
                 }
+                .buttonStyle(.appScale)
                 .disabled(isSending)
 
-                HStack(spacing: 8) {
-                    TextField("Message Oxy...", text: $text, axis: .vertical)
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.oxyText)
-                        .lineLimit(1...5)
-                        .focused(isFocused)
-                        .onSubmit {
-                            if canSend { onSend() }
-                        }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.oxySurface2)
-                .clipShape(RoundedRectangle(cornerRadius: 22))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22)
-                        .stroke(Color.oxyLine2, lineWidth: 1)
-                )
+                // Text field in a rounded container — the chat surface
+                TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
+                    .font(.system(size: 15, weight: .light))
+                    .foregroundStyle(Color.appInk)
+                    .tint(Color.appMuted)
+                    .lineLimit(1...6)
+                    .focused(isFocused)
+                    .onSubmit { if canSend { onSend() } }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.appSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                            .strokeBorder(
+                                isFocused.wrappedValue
+                                    ? Color.appAccent.opacity(0.35)
+                                    : Color.appHairline,
+                                lineWidth: isFocused.wrappedValue ? 1.0 : 0.5
+                            )
+                            .animation(.appFast, value: isFocused.wrappedValue)
+                    )
 
+                // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
-                        if isRecording && !canSend {
-                            Circle()
-                                .stroke(Color.oxyGreen.opacity(0.30), lineWidth: 2)
-                                .frame(width: 50, height: 50)
-                                .scaleEffect(voicePulse ? 1.32 : 0.78)
-                                .opacity(voicePulse ? 0 : 0.85)
-                            Circle()
-                                .stroke(Color.oxyGreen.opacity(0.20), lineWidth: 1.5)
-                                .frame(width: 62, height: 62)
-                                .scaleEffect(voicePulse ? 1.18 : 0.72)
-                                .opacity(voicePulse ? 0 : 0.65)
-                        }
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(Color.oxyOnAccent)
+                                .tint(Color.appObsidian)
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                                 .font(.system(size: 15, weight: .semibold))
+                                .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .foregroundStyle(canAct ? Color.oxyOnAccent : Color.oxyDim)
+                    .foregroundStyle(canAct ? Color.appObsidian : Color.appMuted)
                     .frame(width: 36, height: 36)
-                    .background(canAct ? (isRecording && !canSend ? Color.oxyRed : Color.oxyStone) : Color.oxySurface3)
-                    .clipShape(Circle())
-                    .scaleEffect(isRecording && !canSend && voicePulse ? 1.05 : 1.0)
+                    .contentShape(Circle())
+                    .appGlass(
+                        Circle(),
+                        tint: canAct ? (isRecording && !canSend ? Color.appDanger : Color.appMuted) : nil,
+                        interactive: false
+                    )
+                    .shadow(color: Color.appScrim, radius: 6, y: 2)
                 }
                 .disabled(!canAct)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: canAct)
-                .animation(.easeInOut(duration: 1.05).repeatForever(autoreverses: false), value: voicePulse)
+                .buttonStyle(ScaleButtonStyle())
+                .animation(.appFast, value: canAct)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.oxySurface1)
-        }
-        .onAppear { voicePulse = true }
-        .onChange(of: isRecording) { _, recording in
-            if recording {
-                voicePulse = false
-                DispatchQueue.main.async { voicePulse = true }
-            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
         }
     }
 
@@ -1268,7 +1185,7 @@ private struct StatusIndicator: View {
             OxyThinkingIndicator(label: label, compact: true)
                 .padding(.horizontal, 11)
                 .padding(.vertical, 7)
-                .background(Color.oxyStone.opacity(0.08))
+                .background(Color.appMuted.opacity(0.08))
                 .clipShape(Capsule())
             Spacer(minLength: 60)
         }
@@ -1277,7 +1194,100 @@ private struct StatusIndicator: View {
     }
 }
 
+// MARK: - Pendant Floating Overlay
+
+struct PendantOverlay: View {
+    let state: PendantAudioBridge.BridgeState
+    let transcript: String?
+    var notice: String? = nil
+
+    var body: some View {
+        HStack(spacing: 11) {
+            if let notice {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Color.appWarning)
+                Text(notice)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            } else if state == .listening {
+                PendantWaveform(active: true)
+                Text("Listening")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+                if let t = transcript, !t.isEmpty {
+                    Text("·").foregroundStyle(.tertiary)
+                    Text(t)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .animation(.appFast, value: t)
+                }
+            } else {
+                Image(systemName: "waveform")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .symbolEffect(.variableColor.iterative, isActive: true)
+                if let t = transcript, !t.isEmpty {
+                    Text(t)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(1)
+                } else {
+                    Text("Transcribing…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 11)
+        .appGlass(Capsule())
+        .animation(.appFast, value: state)
+    }
+}
+
+struct PendantWaveform: View {
+    let active: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
+            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
+            WaveBar(maxH: 19, dur: 0.50, delay: 0.24, active: active)
+            WaveBar(maxH: 13, dur: 0.42, delay: 0.12, active: active)
+            WaveBar(maxH: 6,  dur: 0.55, delay: 0.00, active: active)
+        }
+        .frame(height: 22)
+    }
+
+    private struct WaveBar: View {
+        let maxH: CGFloat
+        let dur: Double
+        let delay: Double
+        let active: Bool
+        @State private var on = false
+
+        var body: some View {
+            Capsule()
+                .fill(Color.appMuted)
+                .frame(width: 3, height: on ? maxH : 3)
+                .animation(
+                    active
+                        ? .easeInOut(duration: dur).repeatForever(autoreverses: true).delay(delay)
+                        : .appFast,
+                    value: on
+                )
+                .onAppear { if active { on = true } }
+                .onChange(of: active) { _, a in on = a }
+        }
+    }
+}
+
 #Preview {
     ChatView()
         .environment(AppState())
+        .environment(TabBarVisibility())
 }

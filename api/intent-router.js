@@ -21,6 +21,24 @@ function looksLikeLocalPlaceRequest(message) {
   return LOCAL_PLACE_TERMS.test(text);
 }
 
+// Retailer names double as LOCAL_PLACE_TERMS ("john lewis"), so "get me pyjamas ON john
+// lewis" wrongly matched a place lookup. A request to BUY/GET a product — especially
+// "<product> on/from/at <retailer>" — is an online-shopping task (→ browser task), never a
+// request to locate a nearby branch. High precision on purpose: "nearest john lewis" has no
+// purchase verb and no on/from/at source, so it stays a place request.
+const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
+const RETAILER_SOURCE = /\b(?:on|from|at)\s+(john\s*lewis|asos|selfridges|marks\s*(?:and|&)\s*spencer|m&s|currys|nike|screwfix|wickes|toolstation|sainsbury'?s?|waitrose|amazon|argos|next|boots|zara|very|h&m|deliveroo|just\s*eat|uber\s*eats|dominos?)\b/i;
+
+function looksLikeShoppingRequest(message) {
+  const text = normalizeText(message);
+  if (!text) return false;
+  if (SHOPPING_VERB.test(text)) return true;
+  // "get/grab/find/order me <product> on/from/at <retailer>" — the acquire lead + a named
+  // retailer source together mean shopping, not navigation.
+  if (/\b(get|grab|find|order|want|need)\b/i.test(text) && RETAILER_SOURCE.test(text)) return true;
+  return false;
+}
+
 function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
 }
@@ -92,10 +110,18 @@ function cleanDestinationPhrase(message) {
   return text || normalizeText(message);
 }
 
+const TIME = /(\d{1,2}(?:[:.\s]\d{2})?\s*(?:am|pm)?)/i;
+// Arrival cues mean a deadline to BE somewhere — "at 9" here is when to ARRIVE.
+const ARRIVAL_CUE = /\b(be (there|at)|need to be|needs? to be|meeting|appointment|arrive|arriving|get there|make it|for)\b/i;
+
 function extractArrivalTime(message) {
   const text = String(message || '');
   const day = /\btomorrow\b/i.test(text) ? 'tomorrow ' : '';
-  const match = text.match(/\bby\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+  // "by X" is always an arrival deadline. "at/for X" only when an arrival cue is
+  // present ("meeting at 9", "be there at 8", "make it for 8") — otherwise a bare
+  // "at 9" is ambiguous and handled by departure detection below.
+  const match = text.match(new RegExp(`\\bby\\s+${TIME.source}`, 'i')) ||
+    (ARRIVAL_CUE.test(text) ? text.match(new RegExp(`\\b(?:at|for|by)\\s+${TIME.source}`, 'i')) : null);
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 
@@ -105,8 +131,10 @@ function extractDepartureTime(message) {
   if (/\b(first|earliest)\s+train\b/i.test(text) && /\btomorrow\b/i.test(text)) {
     return 'tomorrow 00:01';
   }
-  const match = text.match(/\b(?:at|around|about|after)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i) ||
-    text.match(/\b(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b/i);
+  // Only treat a time as a departure when the user explicitly states when they
+  // LEAVE — never from a bare "at 9" / "9pm", which is usually an arrival deadline
+  // (HARDCODED CORRECTNESS TRAP: a wrong departure_time = a missed train).
+  const match = text.match(new RegExp(`\\b(?:leav(?:e|ing)|set(?:ting)?\\s+off|depart(?:ing)?|head(?:ing)?\\s+off)\\s+(?:at|around|about|after|by)?\\s*${TIME.source}`, 'i'));
   return match ? `${day}${match[1].trim()}`.trim() : undefined;
 }
 
@@ -149,15 +177,6 @@ function cleanStationPhrase(value) {
     .trim();
 }
 
-function inferLiveRailAction(message) {
-  const text = normalizeText(message);
-  // Live rail data from the old transport connector is not reliable enough for
-  // a deterministic action. Let the model answer with search grounding instead.
-  if (!/\b(train|trains|rail|station|platform|departures?|arrival board|station board)\b/i.test(text)) return null;
-  if (!LIVE_RAIL_TERMS.test(text)) return null;
-  return null;
-}
-
 function inferDeterministicAction(message, options = {}) {
   const text = normalizeText(message);
   const preferredMode = options?.settings?.preferredTransportMode;
@@ -165,8 +184,6 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
-  const liveRail = inferLiveRailAction(text);
-  if (liveRail) return liveRail;
   if (/\b(train|trains|rail|platforms?|departures?|station board|arrival board)\b/i.test(text) &&
       !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text) &&
       (LIVE_RAIL_TERMS.test(text) || RAIL_TRIP_TERMS.test(text) || /\bfrom\b.+\bto\b/i.test(text))) {
@@ -205,6 +222,11 @@ function inferDeterministicAction(message, options = {}) {
       actions: [{ type: 'get_directions', input }]
     };
   }
+
+  // Buying a product from a named retailer must NOT deterministically become a place lookup —
+  // defer to the LLM/browser-task path. Placed after the ride & directions guards so
+  // "order me an uber" / "directions to john lewis" still route correctly.
+  if (looksLikeShoppingRequest(text)) return null;
 
   if (!looksLikeLocalPlaceRequest(text)) return null;
 

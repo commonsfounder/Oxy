@@ -1,6 +1,10 @@
 // Detect whether a message likely needs current/real-time information or other changeable facts.
 const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'current-events', pattern: /\b(news|headline|headlines|breaking|what happened|recent|latest|current|currently|today'?s?|tonight|yesterday|this week|this month|this year|trending|update on|updates on|live)\b/i },
+  // "find me a/the X under £700" / "best X under 700" / "buy X for less than 500" —
+  // shopping/product recommendations need current pricing, which is not an action
+  // (no shopping connector exists) and not training data (prices change).
+  { reason: 'shopping-product', pattern: /\b(find|get|show|recommend)\s+(?:me\s+)?(?:a|an|some)\b[^?!.]*\b(under|below|for less than|cheaper than|up to)\s*[£$€]?\s*\d|\b(best|cheapest|top|good)\b[^?!.]*\b(under|below|for less than|cheaper than|up to)\s*[£$€]?\s*\d|\bbuy\b[^?!.]*\b(under|below|for less than|cheaper than)\s*[£$€]?\s*\d/i },
   { reason: 'current-music-chart', pattern: /\b(billboard|hot\s*100|official singles chart|charts?|number\s*one|no\.?\s*1|top\s+(song|track|single)|most popular song|most streamed|viral song)\b|(?=.*\b(song|track|single|music)\b)(?=.*\b(right now|currently|today|latest|trending|most popular|top|number\s*one|no\.?\s*1)\b)/i },
   { reason: 'public-transport-live', pattern: /\b(next|first|last|live|departures?|platforms?)\s+(train|bus|tram|tube)\b|\b(what|which)\s+(train|bus|tram|tube|platform)\b|\bplatform\s*(number)?\??$|\b(train|bus|tram|tube)\s+from\b.+\bto\b/i },
   { reason: 'public-safety-events', pattern: /\b(assassination|assassinate|attempt(?:ed)?|shooting|shooter|gunman|armed|rally|campaign rally|security incident|suspect|arrested|charged|identified|names?|who did it|who was it)\b/i },
@@ -9,7 +13,16 @@ const SEARCH_KEYWORD_PATTERNS = [
   { reason: 'company-info', pattern: /\b(company|startup|firm|brand|business|corporation|corp\.?|inc\.?|plc|llc|ceo|founder|cofounder|chairman|chairwoman|board|layoffs?|funding|raised|acquired|acquisition|merger|launch(?:ed)?|release(?:d)?|product|app)\b/i },
   { reason: 'public-figure', pattern: /\b(president|prime minister|pm\b|mayor|governor|chancellor|minister|secretary|ceo|founder|captain|manager|head coach|coach|trump|biden|harris|vance)\b/i },
   { reason: 'explicit-search', pattern: /\b(search|look\s*it\s*up|look up|lookup|find out|google|check online|check it|re-?check|verify|online)\b/i },
-  { reason: 'contextual-fact-check', pattern: /\b(is|was|are|were)\s+(that|this|it)\s+(right|correct|true|accurate)\b|\b(are you sure|source\??|prove it|check that)\b/i }
+  { reason: 'contextual-fact-check', pattern: /\b(is|was|are|were)\s+(that|this|it)\s+(right|correct|true|accurate)\b|\b(are you sure|source\??|prove it|check that)\b/i },
+  // "did you hear about X" / "have you seen the news on Y" — common phrasing for
+  // "go check on this topic" that doesn't contain any of the keywords above.
+  { reason: 'heard-about-prompt', pattern: /\b(did|have|has)\s+(you|u)\s+(hear(d)?|seen|see)\b/i },
+  // Bare "check" / "well check" — a follow-up telling Oxy to go look something up.
+  // Excludes "check my/our/your ..." so checking email/calendar/reminders isn't
+  // misrouted into a web search.
+  { reason: 'bare-check', pattern: /\bcheck(ed)?\b(?!.*\b(my|our|your)\b)/i },
+  // "what did you get/find" — asking for the result of a search just requested.
+  { reason: 'search-followup', pattern: /\bwhat did (you|it) (get|find|see|say|come up with)\b/i }
 ];
 
 const CHANGEABLE_QUESTION_PATTERNS = [
@@ -37,7 +50,7 @@ const CHANGEABLE_QUESTION_PATTERNS = [
 const NON_SEARCH_PATTERNS = [
   /\b(send|text|message|email|call|ring|telegram|whatsapp|imessage)\b/i,
   /\b(remind|reminder|calendar|event|schedule me|add to calendar)\b/i,
-  /\b(book|order|get me|take me|uber|ubereats|deliveroo|train|trainline)\b/i,
+  /\b(book|order|get me|take me|uber|train|trainline)\b/i,
   /\b(play|pause|skip|spotify|music)\b/i,
   /\b(forget|delete from memory|wipe memory|remember)\b/i,
   /\bmy\b.+\b(email|calendar|memory|reminder|messages?|settings|preferences)\b/i
@@ -82,11 +95,6 @@ function getSearchReason(message) {
 
   if (hasQuestion && /\b(news|company|ceo|founder|price|stock|weather|forecast|launch|release|latest|current|today|tonight|yesterday|week|month|year)\b/i.test(text)) {
     return 'factual-question-keyword';
-  }
-
-  const looksPersonal = PERSONAL_CONTEXT_PATTERNS.some(pattern => pattern.test(text));
-  if (hasQuestion && !looksLikeToolRequest && !looksPersonal && text.length >= 18) {
-    return 'question-default-search';
   }
 
   return '';

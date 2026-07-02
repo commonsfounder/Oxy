@@ -54,6 +54,6 @@ test('connector health turns transient failures into retry recovery', () => {
 });
 
 test('connector health names user-facing connector brands', () => {
-  assert.equal(humanConnectorName('ubereats'), 'Uber Eats');
   assert.equal(humanConnectorName('trainline'), 'Trainline');
+  assert.equal(humanConnectorName('github'), 'GitHub');
 });

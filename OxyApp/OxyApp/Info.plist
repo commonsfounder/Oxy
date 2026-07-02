@@ -2,31 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Oxy uses your location to help with ride booking, directions, and local recommendations.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Oxy uses background location for useful reminders such as arriving near home.</string>
-	<key>NSAppleMusicUsageDescription</key>
-	<string>Oxy uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Oxy uses the microphone for voice input so you can talk instead of typing.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Oxy uses speech recognition to convert your voice into text messages.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Oxy lets you attach photos and images for multimodal chat when you choose them.</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Oxy reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
-	<key>NSContactsUsageDescription</key>
-	<string>Oxy uses contacts to prepare native message and FaceTime handoffs.</string>
-	<key>NSRemindersUsageDescription</key>
-	<string>Oxy uses reminders to help create native Apple Reminders when you ask.</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>Oxy uses Calendar to create native events when you ask.</string>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Oxy uses Calendar to create native events when you ask.</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>uber</string>
+		<string>bolt</string>
 		<string>spotify</string>
 		<string>tiktok</string>
 		<string>snssdk1233</string>
@@ -35,13 +14,49 @@
 		<string>whatsapp</string>
 		<string>googlechrome</string>
 		<string>googlechromes</string>
-		<string>nflx</string>
-		<string>deliveroo</string>
 		<string>tg</string>
 		<string>thetrainline</string>
 		<string>comgooglemaps</string>
 		<string>maps</string>
 		<string>music</string>
+		<string>message</string>
+		<string>calshow</string>
+		<string>x-apple-health</string>
+	</array>
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Oxy uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Oxy uses Bluetooth to discover and connect to nearby devices when you choose Bluetooth features.</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Oxy uses Bluetooth to communicate with nearby peripherals when you choose Bluetooth features.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Oxy uses Calendar to create native events when you ask.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Oxy uses Calendar to create native events when you ask.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Oxy uses contacts to prepare native message and FaceTime handoffs.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Oxy reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Oxy uses background location for useful reminders such as arriving near home.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Oxy uses your location to help with ride booking, directions, and local recommendations.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Oxy uses the microphone for voice input so you can talk instead of typing.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Oxy lets you attach photos and images for multimodal chat when you choose them.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Oxy uses reminders to help create native Apple Reminders when you ask.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Fraunces.ttf</string>
+		<string>Inter.ttf</string>
 	</array>
 </dict>
 </plist>

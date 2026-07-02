@@ -15,7 +15,7 @@ function looksLikeNearbyPlaceQuery(query) {
 }
 
 function isExplicitNearbyQuery(query) {
-  return /\b(nearest|closest|near me|nearby|around me|to me|from me)\b/i.test(String(query || ''));
+  return /\b(nearest|closest|closer|near me|nearby|around me|to me|from me)\b/i.test(String(query || ''));
 }
 
 function cleanPlaceSearchQuery(query) {
@@ -37,6 +37,8 @@ function cleanPlaceSearchQuery(query) {
     .replace(/\bnear\s+me\b/gi, ' ')
     .replace(/\bnearby\b/gi, ' ')
     .replace(/\baround\s+me\b/gi, ' ')
+    .replace(/\b(much|a\s+bit|bit)?\s*closer(\s+to\s+me)?\b/gi, ' ')
+    .replace(/\b(something|anything|somewhere)\s+(much\s+|a\s+bit\s+)?(else|closer|nearer)\b/gi, ' ')
     .replace(/\b(to|from)\s+me\b/gi, ' ')
     .replace(/\bmy\s+location\b/gi, ' ')
     .replace(/\bcurrent\s+location\b/gi, ' ')
@@ -134,7 +136,14 @@ function rankedGooglePlaceCandidates(places, location, query = '') {
       return a.distanceMeters - b.distanceMeters;
     });
   const matched = candidates.filter(place => place.queryMatch);
-  return matched.length ? matched : candidates;
+  // When the query carries a real name (meaningful tokens) and NOTHING matches it,
+  // return the empty match list rather than the nearest unrelated place. Otherwise a
+  // search for "John Lewis" with no John Lewis nearby would confidently hand back the
+  // closest building (e.g. a Tesco) as if it were the answer. With empty tokens (a
+  // generic category search like "supermarket") every candidate matches, so this still
+  // returns the full distance-ranked list.
+  if (matched.length) return matched;
+  return meaningfulPlaceTokens(query).length ? [] : candidates;
 }
 
 function googlePlaceResult(place, query) {
@@ -197,6 +206,9 @@ async function geocodeWithGoogle(locationString) {
   );
   if (response.data.status !== 'OK') {
     throw new Error(`Geocoding failed: ${response.data.status}`);
+  }
+  if (!response.data.results?.length) {
+    throw new Error(`No results found for location`);
   }
   const result = response.data.results[0];
   return {
@@ -299,23 +311,30 @@ async function resolvePlaceDestination(destination, options = {}) {
   if (!query) throw new Error('Destination is required');
 
   const location = normalizeLocation(options.location);
-  if (looksLikeNearbyPlaceQuery(query)) {
-    if (!location && isExplicitNearbyQuery(query)) {
+  const explicitNearby = isExplicitNearbyQuery(query);
+
+  // Use Places (location-biased + distance-ranked) whenever we know the user's
+  // location OR the phrasing is clearly a "nearby" ask. A plain geocode returns
+  // the most prominent national match and ignores distance entirely — which is
+  // how "jerk chicken" and "Selfridges" resolved to London from Birmingham.
+  if (location || looksLikeNearbyPlaceQuery(query)) {
+    if (!location && explicitNearby) {
       throw new Error(`I need your current location to find a nearby ${cleanPlaceSearchQuery(query)}.`);
     }
     try {
       return await searchPlaceWithGoogle(query, location);
     } catch (err) {
       if (err.code === 'PLACES_NOT_CONFIGURED') {
-        throw err;
-      }
-      if (/Places API has not been used|API has not been enabled|API_KEY_INVALID|REQUEST_DENIED|PERMISSION_DENIED|billing/i.test(err.response?.data?.error?.message || err.message)) {
+        // No Places key: only hard-fail when the user explicitly asked for "nearby";
+        // otherwise fall through to a plain geocode below.
+        if (explicitNearby) throw err;
+      } else if (/Places API has not been used|API has not been enabled|API_KEY_INVALID|REQUEST_DENIED|PERMISSION_DENIED|billing/i.test(err.response?.data?.error?.message || err.message)) {
         throw new Error('Google Places key is being rejected by the server. Check the Cloud Run API key, billing, and Places API (New) access.');
-      }
-      if (isExplicitNearbyQuery(query)) {
+      } else if (explicitNearby) {
         throw new Error(`I couldn't find a nearby ${cleanPlaceSearchQuery(query)} from your current location. Try a different place name or enable location.`);
+      } else {
+        console.warn('[places] Google Places failed, falling back to geocoding:', err.message);
       }
-      console.warn('[places] Google Places failed, falling back to geocoding:', err.message);
     }
   }
 

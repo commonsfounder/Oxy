@@ -106,9 +106,11 @@ function createActionRunner({
 
       const log = () => logAction(userId, action, result);
       if (trace) {
-        await trace.run(`action_log.insert.${action.type}`, log);
+        await trace.run(`action_log.insert.${action.type}`, log).catch(err =>
+          console.warn('[action-runner] log failed:', err.message)
+        );
       } else {
-        await log();
+        await log().catch(err => console.warn('[action-runner] log failed:', err.message));
       }
       if (callbacks.onActionComplete) callbacks.onActionComplete(action, result);
       const entry = { action: action.type, result, input: action.input };

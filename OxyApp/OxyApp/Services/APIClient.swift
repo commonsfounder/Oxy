@@ -3,6 +3,14 @@ import Foundation
 extension Notification.Name {
     static let oxySessionExpired = Notification.Name("oxy.sessionExpired")
     static let oxyJumpToChat = Notification.Name("oxy.jumpToChat")
+    static let oxyJumpToMore = Notification.Name("oxy.jumpToMore")
+    /// Carries a spoken message (from the pendant or the "Ask Oxy" Siri intent)
+    /// into the *currently visible* ChatView — userInfo["text"]. This replaces
+    /// presenting a second ChatView, which caused a duplicate-screen overlay.
+    static let oxyVoiceMessage = Notification.Name("oxy.voiceMessage")
+    /// Pre-fills the chat composer with a draft (userInfo["text"]) WITHOUT sending —
+    /// e.g. tapping a Today item to start a message about it. The user edits and sends.
+    static let oxyDraftMessage = Notification.Name("oxy.draftMessage")
 }
 
 final class APIClient: @unchecked Sendable {
@@ -33,6 +41,9 @@ final class APIClient: @unchecked Sendable {
         KeychainHelper.shared.read(key: "session_token") ?? ""
     }
 
+    // Sent on every request so the backend can attribute SSE/version issues to a build.
+    private static let clientVersion = "ios/" + ((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?")
+
     // MARK: - Requests
 
     func request(
@@ -46,6 +57,12 @@ final class APIClient: @unchecked Sendable {
         }
         if let queryItems {
             components.queryItems = (components.queryItems ?? []) + queryItems
+            // URLComponents leaves "+" unescaped in query values, and many servers
+            // decode it as a space — which corrupts ISO timestamps like
+            // "...789+00:00" into "...789 00:00" and 400s. Force it to %2B so
+            // values (e.g. session createdAt anchors) round-trip intact.
+            components.percentEncodedQuery = components.percentEncodedQuery?
+                .replacingOccurrences(of: "+", with: "%2B")
         }
         guard let url = components.url else {
             throw APIError.invalidURL
@@ -54,6 +71,7 @@ final class APIClient: @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -101,6 +119,12 @@ final class APIClient: @unchecked Sendable {
         }
         if let queryItems {
             components.queryItems = (components.queryItems ?? []) + queryItems
+            // URLComponents leaves "+" unescaped in query values, and many servers
+            // decode it as a space — which corrupts ISO timestamps like
+            // "...789+00:00" into "...789 00:00" and 400s. Force it to %2B so
+            // values (e.g. session createdAt anchors) round-trip intact.
+            components.percentEncodedQuery = components.percentEncodedQuery?
+                .replacingOccurrences(of: "+", with: "%2B")
         }
         guard let url = components.url else {
             throw APIError.invalidURL
@@ -122,6 +146,7 @@ final class APIClient: @unchecked Sendable {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
         if !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -166,6 +191,8 @@ final class APIClient: @unchecked Sendable {
                     }
                     if let queryItems {
                         components.queryItems = (components.queryItems ?? []) + queryItems
+                        components.percentEncodedQuery = components.percentEncodedQuery?
+                            .replacingOccurrences(of: "+", with: "%2B")
                     }
                     guard let url = components.url else {
                         continuation.yield(.error("Invalid URL"))
@@ -176,6 +203,7 @@ final class APIClient: @unchecked Sendable {
                     var req = URLRequest(url: url)
                     req.httpMethod = method
                     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    req.setValue(Self.clientVersion, forHTTPHeaderField: "X-Client-Version")
                     if !token.isEmpty {
                         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                     }
@@ -253,10 +281,9 @@ enum SSEEvent {
     case replace(String)
     case actions([ActionResult])
     case status(String, String)
-    case audio(String, String)
     case transcription(String)
     case transcriptionError(String)
-    case ttsError(String)
+    case sources([MessageSource])
     case done
     case error(String)
 
@@ -281,17 +308,16 @@ enum SSEEvent {
                 json["status"] as? String ?? "",
                 json["label"] as? String ?? ""
             )
-        case "audio":
-            return .audio(
-                json["data"] as? String ?? "",
-                json["mimeType"] as? String ?? "audio/wav"
-            )
         case "transcription":
             return .transcription(json["text"] as? String ?? "")
         case "transcription-error":
             return .transcriptionError(json["error"] as? String ?? "Transcription failed")
-        case "tts-error":
-            return .ttsError(json["error"] as? String ?? "TTS failed")
+        case "sources":
+            if let itemsData = try? JSONSerialization.data(withJSONObject: json["items"] ?? []),
+               let items = try? JSONDecoder().decode([MessageSource].self, from: itemsData) {
+                return .sources(items)
+            }
+            return .sources([])
         case "done":
             return .done
         case "error":

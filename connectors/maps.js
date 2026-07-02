@@ -106,7 +106,8 @@ function parseDirectionTime(value, now = new Date()) {
   const text = String(value || '').trim();
   if (!text) return null;
   const tomorrow = /\btomorrow\b/i.test(text);
-  const match = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  // Accept ":", ".", or a space between hour and minutes ("9:25", "9.25", "9 25 am").
+  const match = text.match(/(\d{1,2})(?:[:.\s](\d{2}))?\s*(am|pm)?/i);
   if (!match) return null;
   let hour = Number(match[1]);
   const minute = Number(match[2] || 0);
@@ -119,6 +120,16 @@ function parseDirectionTime(value, now = new Date()) {
   arrival.setHours(hour, minute, 0, 0);
   if (!tomorrow && arrival.getTime() < now.getTime()) arrival.setDate(arrival.getDate() + 1);
   return Math.floor(arrival.getTime() / 1000);
+}
+
+function formatClockTime(seconds) {
+  const d = new Date(Number(seconds) * 1000);
+  let hour = d.getHours();
+  const minute = d.getMinutes();
+  const meridiem = hour >= 12 ? 'pm' : 'am';
+  hour = hour % 12;
+  if (hour === 0) hour = 12;
+  return `${hour}:${String(minute).padStart(2, '0')} ${meridiem}`;
 }
 
 function minutesBetween(a, b) {
@@ -187,6 +198,13 @@ function routeTransitSteps(route) {
   return (leg?.steps || []).map(formatTransitStep).filter(Boolean);
 }
 
+// A mild nudge toward rail (in seconds, comparable to duration) so trains are
+// preferred over an equal-ish coach — but NOT a blunt override. The old flat
+// -200000 made ANY route containing rail beat ANY non-rail route regardless of
+// duration, so a multi-hour Eurostar detour won "directions to Apsley". Keeping
+// the bonus duration-comparable means a route that's wildly longer still loses.
+const RAIL_PREFERENCE_SECONDS = 1800;
+
 function scoreTripRoute(route, preference = '') {
   const leg = route?.legs?.[0];
   const steps = routeTransitSteps(route);
@@ -202,7 +220,7 @@ function scoreTripRoute(route, preference = '') {
     ? transitCount * 1400
     : transitCount * 700;
   const waitPenalty = waits.reduce((sum, wait) => sum + (wait > 45 ? wait * 80 : wait * 20), 0);
-  return (railCount ? -200000 : 0) + changePenalty + waitPenalty + duration;
+  return (railCount ? -RAIL_PREFERENCE_SECONDS : 0) + changePenalty + waitPenalty + duration;
 }
 
 function chooseBestTripRoute(routes = [], preference = '') {
@@ -223,9 +241,13 @@ function buildTransitRequestParams(destination, params = {}, railFirst = false) 
     destination: cleanPlaceSearchQuery(destination),
     mode: 'transit',
     alternatives: true,
+    // Bias geocoding to Great Britain so an ambiguous name ("Apsley") resolves to
+    // the UK town near the user, not a foreign match that routes via Eurostar.
+    region: 'gb',
     key
   };
   if (railFirst) requestParams.transit_mode = 'train|rail';
+  else if (/^bus$/i.test(params.mode)) requestParams.transit_mode = 'bus';
   const arrival = parseDirectionTime(params.arrival_time);
   const departure = parseDirectionTime(params.departure_time);
   if (arrival) requestParams.arrival_time = arrival;
@@ -275,9 +297,10 @@ function summarizeTripRoute(route, destination, params = {}, usedRailFirst = fal
     ? `First get to ${mainRail?.from || 'the station'}${mainRail?.departure ? ` before ${mainRail.departure}` : ''}.`
     : '';
   const directText = directRail ? 'direct train' : `${railSteps.length || steps.length} transit legs`;
+  const nonRailLabel = steps.some(s => /BUS/i.test(s.vehicle || '')) ? 'bus' : 'transit';
   const opener = hasRail
     ? `Best move: ${accessSteps.length ? `get to ${mainRail?.from || 'the station'}, then ` : ''}take the ${directText} to ${cleanDestination}.`
-    : `Best move: take the transit route to ${cleanDestination}.`;
+    : `Best move: take the ${nonRailLabel} to ${cleanDestination}.`;
   const timing = departure && arrival
     ? `Leave around ${departure}; you should arrive around ${arrival}${duration ? ` (${duration})` : ''}.`
     : duration ? `It takes about ${duration}.` : '';
@@ -337,7 +360,9 @@ async function planTrip(destination, params = {}) {
       success: true,
       text: `I couldn't get a rail route summary to ${cleanedDestination} because the server is missing a Google Directions key.`,
       actionSummary: 'Route unavailable',
-      cardText: 'No route summary available',
+      cardText: 'Open transit directions in Maps',
+      deepLink: fallbackLink,
+      webLink: fallbackLink,
       routeContext: {
         origin: params.origin || 'current location',
         destination: cleanedDestination,
@@ -346,11 +371,23 @@ async function planTrip(destination, params = {}) {
       }
     };
   }
-  const railRoutes = await fetchTransitRoutes(cleanedDestination, params, true).catch(err => {
+  // Resolve the destination to a GB-biased, location-aware address first (same as
+  // get_directions) so the routing request gets a precise place instead of raw text
+  // that Google can geocode to the wrong "Apsley". Fall back to the cleaned text if
+  // Places isn't configured or finds nothing.
+  let routeDestination = cleanedDestination;
+  try {
+    const place = await resolvePlaceDestination(destination, { location: params.location });
+    if (place?.formattedAddress) routeDestination = place.formattedAddress;
+  } catch (err) {
+    console.warn('[maps] plan_trip destination resolve failed, using raw text:', err.message);
+  }
+  const busPreferred = /^bus$/i.test(String(params.mode || ''));
+  const railRoutes = busPreferred ? null : await fetchTransitRoutes(routeDestination, params, true).catch(err => {
     console.warn('[maps] Rail-first Directions failed:', err.message);
     return null;
   });
-  const allRoutes = railRoutes || await fetchTransitRoutes(cleanedDestination, params, false).catch(err => {
+  const allRoutes = railRoutes || await fetchTransitRoutes(routeDestination, params, false).catch(err => {
     console.warn('[maps] Transit Directions failed:', err.message);
     return null;
   });
@@ -360,7 +397,9 @@ async function planTrip(destination, params = {}) {
       success: true,
       text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
       actionSummary: 'Route unavailable',
-      cardText: 'No route summary available',
+      cardText: 'Open transit directions in Maps',
+      deepLink: fallbackLink,
+      webLink: fallbackLink,
       routeContext: {
         origin: params.origin || 'current location',
         destination: cleanedDestination,
@@ -384,7 +423,7 @@ async function planTrip(destination, params = {}) {
   };
 }
 
-function summarizeDirectionsRoute(route, modeLabel) {
+function summarizeDirectionsRoute(route, modeLabel, arrivalSeconds = null) {
   const leg = route?.legs?.[0];
   if (!leg) return null;
   const duration = leg.duration?.text;
@@ -399,7 +438,28 @@ function summarizeDirectionsRoute(route, modeLabel) {
   const detail = transitSteps.length
     ? transitSteps.map(step => step.text).slice(0, 3).join(' · ')
     : `Open ${modeLabel} directions in Maps`;
-  if (!transitSteps.length) return { headline, detail };
+  if (!transitSteps.length) {
+    // Driving/walking: if the user gave an arrival deadline, compute and lead
+    // with the actual leave-by time instead of just opening Maps.
+    const durationSeconds = leg.duration_in_traffic?.value ?? leg.duration?.value;
+    const durationText = leg.duration_in_traffic?.text || leg.duration?.text || duration;
+    if (arrivalSeconds && Number.isFinite(durationSeconds)) {
+      const leaveText = formatClockTime(arrivalSeconds - durationSeconds);
+      const arriveText = formatClockTime(arrivalSeconds);
+      return {
+        headline: durationText,
+        detail: `Leave by ${leaveText}`,
+        text: `Leave by ${leaveText} to arrive by ${arriveText} — about ${durationText} by ${modeLabel}.`,
+        routeContext: { mode: modeLabel, duration: durationText, leaveBy: leaveText, arrival: arriveText }
+      };
+    }
+    return {
+      headline,
+      detail,
+      text: durationText ? `It's about ${durationText} by ${modeLabel}.` : undefined,
+      routeContext: { mode: modeLabel, duration: durationText }
+    };
+  }
 
   const naturalSteps = transitSteps.slice(0, 4).map((step, index) => {
     const first = index === 0 ? 'Take' : 'Then take';
@@ -466,19 +526,27 @@ async function getGoogleDirections(destination, place, params = {}) {
     destination: place?.formattedAddress || cleanPlaceSearchQuery(destination),
     mode,
     alternatives: true,
+    region: 'gb',
     key
   };
   const arrival = parseDirectionTime(params.arrival_time);
   const departure = parseDirectionTime(params.departure_time);
-  if (arrival && mode === 'transit') requestParams.arrival_time = arrival;
-  if (!arrival && departure && mode === 'transit') requestParams.departure_time = departure;
+  if (mode === 'transit') {
+    if (arrival) requestParams.arrival_time = arrival;
+    else if (departure) requestParams.departure_time = departure;
+  } else if (mode === 'driving') {
+    // The Directions API ignores arrival_time for driving, so request a
+    // traffic-aware duration (which needs a departure_time) and compute the
+    // leave time ourselves from the requested arrival.
+    requestParams.departure_time = departure || arrival || 'now';
+  }
 
   const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
     params: requestParams,
     timeout: 10000
   });
   if (response.data?.status !== 'OK' || !response.data.routes?.length) return null;
-  return summarizeDirectionsRoute(response.data.routes[0], mode);
+  return summarizeDirectionsRoute(response.data.routes[0], mode, arrival);
 }
 
 function isPlacesSetupError(err) {
@@ -496,6 +564,17 @@ async function execute(userId, action, params) {
     if (action === 'get_directions') {
       const destination = String(params?.destination || params?.query || '').trim();
       if (!destination) return { success: false, error: 'get_directions requires a destination' };
+      // Transit/bus journeys go through the robust multi-leg planner — the single-route
+      // directions path returns degenerate summaries like "7 mins by transit" for a
+      // 1-hour bus trip (it falls back to a tiny walking leg). plan_trip does rail/bus
+      // alternatives + sane scoring, so a bus ask gets the real itinerary first time.
+      if (directionModeFlag(params.mode) === 'r') {
+        const result = await planTrip(destination, params || {});
+        // planTrip is an implementation detail here — relabel so the card reads
+        // "Directions ready" not "Trip planned" for a simple commute query.
+        if (result.actionSummary === 'Trip planned') result.actionSummary = 'Directions ready';
+        return result;
+      }
       let place = null;
       try {
         place = await resolvePlaceDestination(destination, { location: params.location });
@@ -565,4 +644,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { SUPPORTED_ACTIONS, execute, chooseBestTripRoute, scoreTripRoute };

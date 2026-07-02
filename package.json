@@ -9,14 +9,15 @@
     "test": "node --test",
     "smoke": "node --test test/smoke/*.test.js",
     "brain:evals": "node --test test/smoke/brain-evals.test.js",
+    "latency": "node test/bench/latency.js",
     "release:check": "node --check api/index.js && node --check api/services/context-brain.js && node --test test/smoke/*.test.js",
     "proactive:job": "node proactive-job.js",
-    "benchmark:voice": "node scripts/benchmark-voice-pipelines.js"
+    "retention:job": "node retention-job.js"
   },
   "dependencies": {
     "@google/genai": "^2.2.0",
     "@google/generative-ai": "^0.12.0",
-    "@sentry/node": "^8.0.0",
+    "@sentry/node": "^8.55.2",
     "@supabase/supabase-js": "^2.49.0",
     "archiver": "^7.0.1",
     "axios": "^1.9.0",
@@ -24,6 +25,9 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "multer": "^1.4.5-lts.2",
+    "playwright": "^1.60.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "telegram": "^2.26.22",
     "ws": "^8.20.1"
   },
