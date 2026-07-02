@@ -119,6 +119,75 @@ const RECIPES = {
       ] },
     ],
   },
+
+  // M&S size chips are <label aria-label="Size X"> fronting a visually-hidden radio
+  // (data-selected="true"/"false" tracks the pick — no ?size= URL marker like John Lewis).
+  // Basket badge is the header bag link's aria-label ("Shopping bag with N items").
+  'marksandspencer.com': {
+    phases: {
+      product:  (u) => /\/p\/[a-z0-9]+(?:\b|\/|$)/i.test(u.pathname),
+      basket:   (u) => /^\/basket(?:\/|$)/i.test(u.pathname),
+      checkout: (u) => /^\/checkout(?:\/|$)/i.test(u.pathname),
+    },
+    size: {
+      container: ['label[aria-label^="Size " i]'],
+      chip:      ['label[aria-label^="Size " i]'],
+      selected:  ['label[aria-label^="Size " i][data-selected="true"]'],
+      basketBadge: ['a[aria-label*="Shopping bag" i]'],
+    },
+    steps: [
+      { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+        '#add-to-bag-button',
+        'text=Add to bag',
+      ] },
+      { phase: 'product', name: 'go-to-basket', when: (ctx) => ctx.basketCount > 0, action: 'click', selectorAny: [
+        'a[aria-label*="Shopping bag" i]',
+        'text=View bag',
+      ] },
+      { phase: 'basket', name: 'checkout', action: 'click', selectorAny: [
+        'text=Checkout securely',
+        'text=Checkout',
+      ] },
+    ],
+  },
+
+  // Wickes reveals "View Basket"/"Checkout" links only inside a mini-cart overlay that the
+  // header basket button toggles open (no URL change) — flyoutCheck gates a distinct
+  // open-basket step before checkout can fire. basketCount comes from a same-origin JSON
+  // endpoint (`totalItems`) since the header badge carries no visible count until opened.
+  'wickes.co.uk': {
+    phases: {
+      product:  (u) => /\/p\/\d+(?:\b|\/|$)/i.test(u.pathname),
+      cart:     (u) => /^\/cart\/?$/i.test(u.pathname),
+      checkout: (u) => /^\/cart\/checkout/i.test(u.pathname) || /^checkout\.wickes\.co\.uk$/i.test(u.hostname),
+    },
+    size: {
+      container: [], chip: [], selected: [],
+      basketCountUrl: '/cart/enhancedMiniCart/SUBTOTAL/',
+      basketCountField: 'totalItems',
+      flyoutCheck: ['.btn-checkout'],
+    },
+    steps: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+        '.btn-add-to-basket',
+        'text=Add for Delivery',
+        'text=Add for Collection',
+      ] },
+      { phase: 'product', name: 'open-basket', when: (ctx) => ctx.basketCount > 0 && !ctx.flyoutOpen, action: 'click', selectorAny: [
+        '.header-minicart__btn',
+        'text=Basket',
+      ] },
+      { phase: 'product', name: 'checkout', when: (ctx) => ctx.basketCount > 0 && ctx.flyoutOpen, action: 'click', selectorAny: [
+        '.btn-checkout',
+        'text=Checkout',
+      ] },
+      { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
+        '.btn-checkout',
+        'text=Checkout',
+      ] },
+    ],
+  },
 };
 
 // First phase whose predicate matches the url, or null. Never throws on a bad url.
@@ -157,9 +226,13 @@ function selectStep(recipe, phase, ctx, health, host) {
 }
 
 // --- DOM probes (real in prod; scripted by the fake page in unit tests) -------------------
-// Build the ctx the step gates read. Only `hasUnsatisfiedSize` for now: a size container is
-// present AND nothing in it is selected yet.
+// Build the ctx the step gates read. `hasUnsatisfiedSize`: a size container is present AND
+// nothing in it is selected yet. `basketCount`: read from a DOM badge by default (or a JSON
+// fetch when the host doesn't expose one without opening the mini-cart — Wickes). `flyoutOpen`:
+// some sites (Wickes) reveal the checkout link only inside a mini-cart overlay that a click
+// toggles open; a distinct step opens it before the checkout step can fire.
 async function readCtx(page, recipe) {
+  const size = recipe.size;
   const ctx = await page.evaluate(({ probe, size }) => {
     void probe;
     const hasAny = (sels) => sels.some((s) => { try { return !!document.querySelector(s); } catch { return false; } });
@@ -168,13 +241,34 @@ async function readCtx(page, recipe) {
     // Lewis, where size chips are hrefs — by the ?size= query param the click navigates to.
     const selectedDom = hasAny(size.selected);
     const selectedUrl = /[?&]size=/i.test(location.search || '');
-    // Basket count from the header badge: distinguishes "not added yet" (add step) from
-    // "added, go to basket" (go-to-basket step) so add doesn't re-fire on the same product.
-    const amtEl = document.querySelector('[data-testid="basket-amount"]');
-    const basketCount = amtEl ? (parseInt((amtEl.innerText || '').replace(/\D+/g, ''), 10) || 0) : 0;
-    return { hasUnsatisfiedSize: container && !selectedDom && !selectedUrl, basketCount };
-  }, { probe: 'ctx', size: recipe.size });
-  return ctx || { hasUnsatisfiedSize: false, basketCount: 0 };
+    let basketCount = 0;
+    if (!size.basketCountUrl) {
+      const badgeSels = size.basketBadge || ['[data-testid="basket-amount"]'];
+      for (const s of badgeSels) {
+        try {
+          const el = document.querySelector(s);
+          if (!el) continue;
+          const text = `${el.innerText || ''} ${el.getAttribute('aria-label') || ''}`;
+          const m = text.match(/\d+/);
+          if (m) { basketCount = parseInt(m[0], 10) || 0; break; }
+        } catch { /* keep scanning other selectors */ }
+      }
+    }
+    const visible = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    const flyoutOpen = (size.flyoutCheck || []).some((s) => { try { return visible(document.querySelector(s)); } catch { return false; } });
+    return { hasUnsatisfiedSize: container && !selectedDom && !selectedUrl, basketCount, flyoutOpen };
+  }, { probe: 'ctx', size });
+  if (size.basketCountUrl) {
+    ctx.basketCount = await page.evaluate(async ({ probe, url, field }) => {
+      void probe;
+      try {
+        const r = await fetch(url, { credentials: 'same-origin' });
+        const j = await r.json();
+        return parseInt(j[field], 10) || 0;
+      } catch { return 0; }
+    }, { probe: 'basketCountFetch', url: size.basketCountUrl, field: size.basketCountField || 'totalItems' });
+  }
+  return ctx || { hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false };
 }
 
 // Resolve a step's selectorAny to a { locatorIndex, text }, choosing the first candidate that

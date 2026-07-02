@@ -58,6 +58,46 @@ test('John Lewis recipe is registered with the expected phases and steps', () =>
   assert.ok(dataTestIdx !== -1 && textIdx !== -1 && dataTestIdx < textIdx, 'durable selector before text');
 });
 
+test('M&S recipe is registered with the expected phases and steps', () => {
+  const ms = RECIPES['marksandspencer.com'];
+  assert.ok(ms, 'marksandspencer.com recipe exists');
+  assert.deepEqual(ms.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+  assert.deepEqual(ms.size.basketBadge, ['a[aria-label*="Shopping bag" i]']);
+});
+
+test('phaseFromUrl classifies M&S product / basket / checkout urls', () => {
+  const ms = RECIPES['marksandspencer.com'];
+  assert.equal(phaseFromUrl(ms, 'https://www.marksandspencer.com/slim-fit-t-shirt/p/clp60535453'), 'product');
+  assert.equal(phaseFromUrl(ms, 'https://www.marksandspencer.com/basket/view'), 'basket');
+  assert.equal(phaseFromUrl(ms, 'https://www.marksandspencer.com/checkout/guest'), 'checkout');
+  assert.equal(phaseFromUrl(ms, 'https://www.marksandspencer.com/l/men/mens-tshirts'), null);
+});
+
+test('Wickes recipe is registered with the expected phases and steps', () => {
+  const wk = RECIPES['wickes.co.uk'];
+  assert.ok(wk, 'wickes.co.uk recipe exists');
+  assert.deepEqual(wk.steps.map((s) => s.name), ['add', 'open-basket', 'checkout', 'checkout']);
+  assert.equal(wk.size.basketCountUrl, '/cart/enhancedMiniCart/SUBTOTAL/');
+  assert.deepEqual(wk.size.flyoutCheck, ['.btn-checkout']);
+});
+
+test('phaseFromUrl classifies Wickes product / cart / checkout urls', () => {
+  const wk = RECIPES['wickes.co.uk'];
+  assert.equal(phaseFromUrl(wk, 'https://www.wickes.co.uk/Crown-Paint/p/166844'), 'product');
+  assert.equal(phaseFromUrl(wk, 'https://www.wickes.co.uk/cart'), 'cart');
+  assert.equal(phaseFromUrl(wk, 'https://www.wickes.co.uk/cart/checkout'), 'checkout');
+  assert.equal(phaseFromUrl(wk, 'https://checkout.wickes.co.uk/#/login-or-guest'), 'checkout');
+  assert.equal(phaseFromUrl(wk, 'https://www.wickes.co.uk/Products/c/1000000'), null);
+});
+
+test('selectStep on the Wickes product phase: add gates on basketCount, open-basket/checkout gate on flyoutOpen', () => {
+  const wk = RECIPES['wickes.co.uk'];
+  const health = createRecipeHealth();
+  assert.equal(selectStep(wk, 'product', { basketCount: 0, flyoutOpen: false }, health, 'wickes.co.uk').name, 'add');
+  assert.equal(selectStep(wk, 'product', { basketCount: 1, flyoutOpen: false }, health, 'wickes.co.uk').name, 'open-basket');
+  assert.equal(selectStep(wk, 'product', { basketCount: 1, flyoutOpen: true }, health, 'wickes.co.uk').name, 'checkout');
+});
+
 test('phaseFromUrl classifies John Lewis product / basket / checkout urls', () => {
   const jl = RECIPES['johnlewis.com'];
   assert.equal(phaseFromUrl(jl, 'https://www.johnlewis.com/adidas-joggers/p6543210'), 'product');
@@ -150,6 +190,17 @@ test('nextRecipeMove records a miss and returns null when the step resolves to n
   const move = await nextRecipeMove(page, { goal: 'add joggers', history: [] }, jl, health);
   assert.equal(move, null);
   assert.equal(health.isDisabled('johnlewis.com', 'add'), true);
+});
+
+test('nextRecipeMove on Wickes reads basketCount from the fetch endpoint (open-basket once added)', async () => {
+  const wk = RECIPES['wickes.co.uk'];
+  const page = fakePage('https://www.wickes.co.uk/Crown-Paint/p/166844', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false }, // overwritten by the fetch below
+    basketCountFetch: 1,
+    'resolve:open-basket': { locatorIndex: 4, text: 'Basket' },
+  });
+  const move = await nextRecipeMove(page, { goal: 'add white paint to basket', history: [] }, wk, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 4, text: 'Basket', stepName: 'open-basket' });
 });
 
 const { GENERIC } = require('../../api/services/browser-recipes');
