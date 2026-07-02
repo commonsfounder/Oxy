@@ -1188,6 +1188,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // that reset per-action counters. See computeProgressSignature.
   let lastProgressSig = session.lastProgressSig || '';
   let stepsSinceProgress = session.stepsSinceProgress || 0;
+  // Separate counter for "cart count has stayed 0 for many steps" even across page hops.
+  // Complements the full sig detector for cases where the model keeps clicking different
+  // categories/results without ever adding to basket (M&S, Currys, Deliveroo etc.).
+  let stepsSinceCartProgress = session.stepsSinceCartProgress || 0;
   // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
   // price read off the screen), we feed a pointed correction into the NEXT decision so it
   // can fix itself — instead of silently re-asking the identical prompt against the same
@@ -1206,6 +1210,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       session.consecutiveBadDecisions = consecutiveBadDecisions;
       session.lastProgressSig = lastProgressSig;
       session.stepsSinceProgress = stepsSinceProgress;
+      session.stepsSinceCartProgress = stepsSinceCartProgress;
       onProgress('Looking at the page…');
       await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
       // Learn a fast-path: if the last thing we typed now shows up as a query param in the
@@ -1248,17 +1253,33 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
       session.lastProgressSig = lastProgressSig;
       session.stepsSinceProgress = stepsSinceProgress;
+
+      // Cart-stall detector (unified, survives page changes): if cart item count has been 0
+      // across many steps (model hopping categories/search results without adding), treat
+      // as no progress on the ordering goal. Complements the exact sig match.
+      const cartMatch = String(currentSig || '').match(/\|c(\d+)/);
+      const currCount = cartMatch ? parseInt(cartMatch[1], 10) : 0;
+      if (currCount === 0) {
+        stepsSinceCartProgress += 1;
+      } else {
+        stepsSinceCartProgress = 0;
+      }
+      session.stepsSinceCartProgress = stepsSinceCartProgress;
+
       // Only enforce progress bail/correction on vision-heavy (non-specific-recipe) sites.
       // johnlewis.com has a multi-step recipe on the PDP (size→add→go-basket) that can keep
       // sig stable for a few steps; don't trip STUCK on it. The spin bugs (M&S etc) have no
       // RECIPES entry (fall to GENERIC which only helps late), so they get the detector.
       const hasSpecificRecipe = !!RECIPES[session.site];
       if (!hasSpecificRecipe) {
-        if (stepsSinceProgress >= 7) {
+        const stalled = stepsSinceProgress >= 7 || stepsSinceCartProgress >= 7;
+        if (stalled) {
           return STUCK;
         }
-        if (stepsSinceProgress >= 4) {
-          pendingCorrection = `No progress for ${stepsSinceProgress} steps (same page + cart count + DOM state). You are repeating the same ineffective pattern — do something different now: select size/option, add the item to basket, or go to the cart/checkout.`;
+        const needsNudge = stepsSinceProgress >= 4 || stepsSinceCartProgress >= 4;
+        if (needsNudge) {
+          const n = Math.max(stepsSinceProgress, stepsSinceCartProgress);
+          pendingCorrection = `No progress for ${n} steps (page/DOM state or cart count unchanged). You are repeating the same ineffective pattern — do something different now: select size/option, add the item to basket, or go to the cart/checkout.`;
         }
       }
 
@@ -1508,9 +1529,11 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // Recipe step taken — trusted mechanical progress; reset progress detector so
           // multi-click recipe sequences (e.g. JL size then add on same PDP) don't accumulate.
           stepsSinceProgress = 0;
+          stepsSinceCartProgress = 0;
           lastProgressSig = lastProgressSig + '|r';
           session.lastProgressSig = lastProgressSig;
           session.stepsSinceProgress = stepsSinceProgress;
+          session.stepsSinceCartProgress = stepsSinceCartProgress;
         }
         touchSession(userId);
         await persistStorage(userId, session);
