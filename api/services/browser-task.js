@@ -2,7 +2,7 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
-const { nextRecipeMove, RECIPES, recipeHealth } = require('./browser-recipes');
+const { nextRecipeMove, RECIPES, GENERIC, recipeHealth } = require('./browser-recipes');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
 const axios = require('axios');
@@ -139,7 +139,7 @@ function usingRemoteBrowser() {
 // are the sites that returned Access-Denied/Cloudflare, NOT my a-priori guesses: Tesco and
 // Zara actually pass on datacenter IP, so they're deliberately absent). Bare hosts, no www.
 // Override wholesale with BROWSER_REMOTE_HOSTS; force everything remote with BROWSER_REMOTE_ALWAYS=true.
-const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk'];
+const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'asos.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk'];
 
 // Pure so it's unit-testable. Decide whether a given host should use the managed browser:
 //  - no endpoint configured                 → never (free local, today's behaviour)
@@ -718,10 +718,8 @@ const SEARCH_SITES = {
     names: ['m&s', 'marks and spencer', 'marks & spencer', 'marksandspencer'],
     searchUrl: (term) => `https://www.marksandspencer.com/search?searchTerm=${encodeURIComponent(term)}`
   },
-  'asos.com': {
-    names: ['asos'],
-    searchUrl: (term) => `https://www.asos.com/search/?q=${encodeURIComponent(term)}`
-  },
+  // asos.com removed: direct-nav to /search/?q= returns 0 interactive elements on a
+  // datacenter IP (SPA blank-page / bot-wall shape). Let vision drive the search natively.
   // Grocery. Sainsbury's puts the term in the PATH (a seed's searchUrl can build any shape;
   // only the auto-LEARN path is query-param-only). Waitrose uses a normal query param.
   'sainsburys.co.uk': {
@@ -1124,13 +1122,15 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   }
 
   let steps = 0;
-  let consecutiveBadDecisions = 0;
-  let consecutiveWaits = 0;
+  let consecutiveBadDecisions = session.consecutiveBadDecisions || 0;
+  let consecutiveWaits = session.consecutiveWaits || 0;
   // A click on a VALID element "succeeds" even when it achieves nothing, so the bad-decision
   // guard never trips on a model that re-clicks the same tile forever (seen on the Uber Eats
   // item modal). Track the last action's signature and nudge, then trip, on repeats.
-  let lastActionSig = '';
-  let repeatActionCount = 0;
+  // Persisted on the session so the guard survives across turns — without this, the model
+  // resets to zero each auto-continue and can spin on the same element indefinitely.
+  let lastActionSig = session.lastActionSig || '';
+  let repeatActionCount = session.repeatActionCount || 0;
   // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
   // price read off the screen), we feed a pointed correction into the NEXT decision so it
   // can fix itself — instead of silently re-asking the identical prompt against the same
@@ -1145,6 +1145,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   try {
     while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
       steps += 1;
+      session.consecutiveWaits = consecutiveWaits;
+      session.consecutiveBadDecisions = consecutiveBadDecisions;
       onProgress('Looking at the page…');
       await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
       // Learn a fast-path: if the last thing we typed now shows up as a query param in the
@@ -1186,16 +1188,16 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
       } catch {}
 
-      // Logged-out wall: a stored login expired (or the merchant issued a fresh challenge)
-      // and we've landed on a sign-in page. Detect it BEFORE the model wastes the step
-      // budget "ordering" behind the wall, and hand off cleanly — asking the user to
-      // reconnect the site — instead of returning a vague "I got stuck". Session stays
-      // open so a later reconnect can resume the same order from persisted context.
-      if (!session.reauthChecked) {
-        session.reauthChecked = true; // check once per turn — a wall shows up immediately, not mid-order
+      // Login wall: fire whenever the URL changes — catches both expired sessions and
+      // first-time sign-in gates that appear mid-flow (e.g. after clicking checkout).
+      // Cheap: URL pattern check is a string test; DOM read only when URL matches or has
+      // a password field. Session stays open so "keep going" resumes the same order.
+      const currentUrl = session.page.url();
+      if (currentUrl !== session.lastLoginCheckUrl) {
+        session.lastLoginCheckUrl = currentUrl;
         if (await detectLoginWall(session.page, session.goal)) {
           const siteName = session.site ? session.site.replace(/\.(com|co\.uk|co|net|org)$/i, '') : 'the site';
-          return { type: 'reauth', site: session.site, question: `I need you to sign in to ${siteName} again — the saved session has expired. Once you've reconnected it, say "keep going" and I'll pick your order back up.` };
+          return { type: 'reauth', site: session.site, question: `I need to sign in to ${siteName} to continue your order — once you've signed in, say "keep going" and I'll carry on from where I left off.` };
         }
       }
 
@@ -1215,7 +1217,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       // hand-written selector move replaces the vision call. Cheap; falls through to the
       // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
       let decision, recipeStepName = null;
-      const recipe = RECIPES_ENABLED ? RECIPES[session.site] : null;
+      const recipe = RECIPES_ENABLED ? (RECIPES[session.site] ?? GENERIC) : null;
       const recipeMove = recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
       if (recipeMove) {
         decision = recipeMove;
@@ -1363,6 +1365,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // first, then force the click past any overlay. Safe — the payment guardrail
           // above means the loop never force-clicks a pay button.
           await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+          await session.page.evaluate(el => el && el.scrollIntoView({ block: 'center', behavior: 'instant' }), await locator.elementHandle().catch(() => null)).catch(() => {});
           await locator.click({ timeout: 10000, force: true });
           session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}clicked "${target.text}"`);
         } else if (decision.action === 'fill') {
@@ -1410,6 +1413,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           lastActionSig = sig;
           repeatActionCount = 0;
         }
+        session.lastActionSig = lastActionSig;
+        session.repeatActionCount = repeatActionCount;
         touchSession(userId);
         await persistStorage(userId, session);
       } catch (actionErr) {

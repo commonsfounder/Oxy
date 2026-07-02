@@ -40,6 +40,33 @@ function matchSizeChip(parsedSize, chipLabels) {
   return contains === -1 ? null : contains;
 }
 
+// Generic fallback recipe. Tried for any host not in RECIPES. No size step (too risky to
+// guess generically) — vision handles add-to-cart and navigation; recipe only takes the
+// cart→checkout step where the button text is highly consistent across sites.
+const GENERIC = {
+  phases: {
+    // checkout phase: multi-step checkout flows — recipe has no steps here, falls to vision.
+    checkout: (u) => /\/(?:checkout|order|pay(?:ment)?|purchase)\b/i.test(u.pathname),
+    // cart phase: any URL whose path contains cart/basket/bag/trolley word.
+    cart:     (u) => /\/(?:cart|basket|bag|trolley)\b/i.test(u.pathname),
+  },
+  // Empty size config: hasUnsatisfiedSize is always false → no size step fired.
+  size: { container: [], chip: [], selected: [] },
+  steps: [
+    // On the cart page click the primary checkout CTA. Payment-keyword buttons (Place Order)
+    // are caught by the payment guardrail in browser-task.js before the click fires.
+    { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
+      'text=Proceed to Checkout',
+      'text=Go to checkout',
+      'text=Checkout securely',
+      'text=Continue to checkout',
+      'text=Secure checkout',
+      'text=Checkout',
+      'text=Place Order',
+    ]},
+  ],
+};
+
 // Host-keyed registry. Selectors prefer durable attributes; visible text is last.
 // NOTE: John Lewis product-page URLs end in `/pNNNNNN`; basket is `/basket`; checkout `/checkout`.
 const RECIPES = {
@@ -210,7 +237,7 @@ const recipeHealth = createRecipeHealth();
 
 // The executor. Returns a move for the loop to execute, or null → vision fallback.
 async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
-  const host = hostOfRecipe(recipe);
+  const host = hostOfRecipe(recipe, (session && session.site) || 'unknown');
   const phase = phaseFromUrl(recipe, page.url());
   if (!phase) return null;
   const ctx = await readCtx(page, recipe);
@@ -230,10 +257,11 @@ async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   return null;
 }
 
-// Find the host key a recipe is registered under (so callers can pass the recipe object alone).
-function hostOfRecipe(recipe) {
+// Find the host key a recipe is registered under. Falls back to `fallback` for the GENERIC
+// recipe (which isn't in RECIPES), letting health be tracked per actual site host.
+function hostOfRecipe(recipe, fallback = 'unknown') {
   for (const [host, r] of Object.entries(RECIPES)) if (r === recipe) return host;
-  return 'unknown';
+  return fallback;
 }
 
-module.exports = { parseSizeFromGoal, matchSizeChip, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR };
+module.exports = { parseSizeFromGoal, matchSizeChip, GENERIC, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR };

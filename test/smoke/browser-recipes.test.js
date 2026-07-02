@@ -141,6 +141,64 @@ test('nextRecipeMove records a miss and returns null when the step resolves to n
   assert.equal(health.isDisabled('johnlewis.com', 'add'), true);
 });
 
+const { GENERIC } = require('../../api/services/browser-recipes');
+
+test('GENERIC recipe is exported with a single cart-phase checkout step', () => {
+  assert.ok(GENERIC, 'GENERIC exported');
+  assert.deepEqual(GENERIC.steps.map((s) => s.name), ['checkout']);
+  assert.equal(GENERIC.steps[0].phase, 'cart');
+  assert.ok(Array.isArray(GENERIC.steps[0].selectorAny) && GENERIC.steps[0].selectorAny.length > 0);
+  // Size config must be present (empty) so readCtx doesn't throw on missing recipe.size
+  assert.deepEqual(GENERIC.size, { container: [], chip: [], selected: [] });
+});
+
+test('GENERIC phaseFromUrl detects cart/basket/bag URLs and checkout URLs', () => {
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.amazon.co.uk/gp/cart/view.html'), 'cart');
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.asos.com/bag'), 'cart');
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.example.com/basket'), 'cart');
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.walmart.com/cart'), 'cart');
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.example.com/checkout/delivery'), 'checkout');
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.example.com/payment'), 'checkout');
+  // Product / search pages return null → recipe returns null → falls through to vision
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.amazon.co.uk/dp/B09XY12345'), null);
+  assert.equal(phaseFromUrl(GENERIC, 'https://www.asos.com/search/?q=jeans'), null);
+  assert.equal(phaseFromUrl(GENERIC, 'not a url'), null);
+});
+
+test('GENERIC nextRecipeMove returns null on a product page', async () => {
+  const move = await nextRecipeMove(
+    fakePage('https://www.amazon.co.uk/dp/B09XY12345'),
+    { goal: 'order nido milk', history: [], site: 'amazon.co.uk' }, GENERIC, createRecipeHealth());
+  assert.equal(move, null);
+});
+
+test('GENERIC nextRecipeMove returns checkout click on a cart page', async () => {
+  const page = fakePage('https://www.amazon.co.uk/gp/cart/view.html', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0 },
+    'resolve:checkout': { locatorIndex: 5, text: 'Proceed to checkout' },
+  });
+  const move = await nextRecipeMove(page, { goal: 'order nido milk', history: [], site: 'amazon.co.uk' }, GENERIC, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 5, text: 'Proceed to checkout', stepName: 'checkout' });
+});
+
+test('GENERIC health is tracked under the real site host, not "unknown"', async () => {
+  const health = createRecipeHealth(1);
+  const page = fakePage('https://www.amazon.co.uk/gp/cart/view.html', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0 },
+    'resolve:checkout': null, // miss
+  });
+  await nextRecipeMove(page, { goal: 'order nido milk', history: [], site: 'amazon.co.uk' }, GENERIC, health);
+  assert.equal(health.isDisabled('amazon.co.uk', 'checkout'), true, 'tracked under actual host');
+  assert.equal(health.isDisabled('unknown', 'checkout'), false, 'not under "unknown"');
+});
+
+test('GENERIC nextRecipeMove returns null on a checkout page (no steps → vision handles it)', async () => {
+  const move = await nextRecipeMove(
+    fakePage('https://www.example.com/checkout/delivery', { ctx: { hasUnsatisfiedSize: false, basketCount: 0 } }),
+    { goal: 'order item', history: [], site: 'example.com' }, GENERIC, createRecipeHealth());
+  assert.equal(move, null);
+});
+
 test('recipe CLICKABLE_SELECTOR equals the one browser-task uses', () => {
   const recipes = require('../../api/services/browser-recipes');
   // browser-task.js keeps CLICKABLE_SELECTOR private; it re-exports it for this guard in Task 5.

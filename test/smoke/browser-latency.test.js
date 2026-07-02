@@ -90,8 +90,8 @@ test('directSearchUrl still returns null for a truly unknown host', () => {
 test('directSearchUrl builds seeded UK dept/fashion + grocery results URLs', () => {
   assert.equal(directSearchUrl('https://www.marksandspencer.com', 'find a wool coat'),
     'https://www.marksandspencer.com/search?searchTerm=wool%20coat');
-  assert.equal(directSearchUrl('https://www.asos.com', 'find a wool coat'),
-    'https://www.asos.com/search/?q=wool%20coat');
+  // asos.com fast-path seed removed — direct URL returned blank page on datacenter IP
+  assert.equal(directSearchUrl('https://www.asos.com', 'find a wool coat'), null);
   assert.equal(directSearchUrl('https://www.sainsburys.co.uk', 'find milk'),
     'https://www.sainsburys.co.uk/gol-ui/SearchResults/milk');
   assert.equal(directSearchUrl('https://www.waitrose.com', 'find milk'),

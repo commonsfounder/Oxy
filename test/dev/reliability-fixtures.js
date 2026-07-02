@@ -17,27 +17,30 @@
 // scorecard can separate "loop can't do it" from "infra (IP) can't reach it".
 
 module.exports = [
-  // --- Department / fashion: the proven-ish core + the long tail ---
-  { site: 'johnlewis.com',      url: 'https://www.johnlewis.com',      goal: 'find a pair of mens joggers and tell me the exact price shown', expect: 'answer', tags: ['fashion', 'has-fastpath', 'has-recipe'] },
-  { site: 'selfridges.com',     url: 'https://www.selfridges.com',     goal: 'find a leather belt and tell me the price', expect: 'answer', tags: ['fashion', 'has-fastpath'] },
-  { site: 'marksandspencer.com',url: 'https://www.marksandspencer.com',goal: 'find a cotton t-shirt and tell me the price', expect: 'answer', tags: ['fashion', 'has-fastpath'] },
-  { site: 'asos.com',           url: 'https://www.asos.com',           goal: 'find black skinny jeans and tell me the price', expect: 'answer', tags: ['fashion', 'has-fastpath'] },
-  { site: 'next.co.uk',         url: 'https://www.next.co.uk',         goal: 'find a wool jumper and tell me the price', expect: 'answer', tags: ['fashion', 'known-botwall'] },
-  { site: 'zara.com',           url: 'https://www.zara.com/uk',        goal: 'find a denim jacket and tell me the price', expect: 'answer', tags: ['fashion', 'known-botwall'] },
-  { site: 'hm.com',             url: 'https://www2.hm.com/en_gb',      goal: 'find a hoodie and tell me the price', expect: 'answer', tags: ['fashion', 'known-botwall'] },
+  // --- Department / fashion ---
+  // Full order path: search → product → size → add to basket → basket → checkout (payment guardrail stops here).
+  // Size is explicit in the goal so the loop never has to ask. `reauth` counts as a ceiling (login wall),
+  // not a loop failure — the loop did its job.
+  { site: 'johnlewis.com',      url: 'https://www.johnlewis.com',      goal: 'order adidas joggers in size medium, add to basket and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath', 'has-recipe'] },
+  { site: 'selfridges.com',     url: 'https://www.selfridges.com',     goal: 'order a leather belt in size medium, add to bag and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath'] },
+  { site: 'marksandspencer.com',url: 'https://www.marksandspencer.com',goal: 'order a cotton t-shirt in size medium, add to basket and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath'] },
+  { site: 'asos.com',           url: 'https://www.asos.com',           goal: 'order black skinny jeans in size 32 waist, add to bag and go to checkout', expect: 'cart', tags: ['fashion'] },
+  { site: 'next.co.uk',         url: 'https://www.next.co.uk',         goal: 'order a wool jumper in size medium, add to bag and go to checkout', expect: 'cart', tags: ['fashion', 'known-botwall'] },
+  { site: 'zara.com',           url: 'https://www.zara.com/uk',        goal: 'order a denim jacket in size medium, add to cart and go to checkout', expect: 'cart', tags: ['fashion', 'known-botwall'] },
+  { site: 'hm.com',             url: 'https://www2.hm.com/en_gb',      goal: 'order a hoodie in size medium, add to cart and go to checkout', expect: 'cart', tags: ['fashion', 'known-botwall'] },
 
-  // --- Grocery: search shapes differ (path vs query param), heavy consent walls ---
-  { site: 'sainsburys.co.uk',   url: 'https://www.sainsburys.co.uk',   goal: 'find semi skimmed milk and tell me the price', expect: 'answer', tags: ['grocery', 'has-fastpath'] },
-  { site: 'waitrose.com',       url: 'https://www.waitrose.com',       goal: 'find olive oil and tell me the price', expect: 'answer', tags: ['grocery', 'has-fastpath'] },
-  { site: 'tesco.com',          url: 'https://www.tesco.com',          goal: 'find cheddar cheese and tell me the price', expect: 'answer', tags: ['grocery', 'known-botwall'] },
+  // --- Grocery: no size needed, just add to basket and go to checkout ---
+  { site: 'sainsburys.co.uk',   url: 'https://www.sainsburys.co.uk',   goal: 'add semi skimmed milk to basket and go to checkout', expect: 'cart', tags: ['grocery', 'has-fastpath'] },
+  { site: 'waitrose.com',       url: 'https://www.waitrose.com',       goal: 'add olive oil to basket and go to checkout', expect: 'cart', tags: ['grocery', 'has-fastpath'] },
+  { site: 'tesco.com',          url: 'https://www.tesco.com',          goal: 'add cheddar cheese to basket and go to checkout', expect: 'cart', tags: ['grocery', 'known-botwall'] },
 
   // --- Electronics / DIY / sportswear ---
-  { site: 'currys.co.uk',       url: 'https://www.currys.co.uk',       goal: 'find a wireless mouse and tell me the price', expect: 'answer', tags: ['electronics', 'has-fastpath'] },
-  { site: 'screwfix.com',       url: 'https://www.screwfix.com',       goal: 'find a cordless drill and tell me the price', expect: 'answer', tags: ['diy', 'has-fastpath'] },
-  { site: 'wickes.co.uk',       url: 'https://www.wickes.co.uk',       goal: 'find white paint and tell me the price', expect: 'answer', tags: ['diy', 'has-fastpath'] },
-  { site: 'toolstation.com',    url: 'https://www.toolstation.com',    goal: 'find a tape measure and tell me the price', expect: 'answer', tags: ['diy', 'has-fastpath'] },
-  { site: 'nike.com',           url: 'https://www.nike.com/gb',        goal: 'find mens running shoes and tell me the price', expect: 'answer', tags: ['sportswear', 'has-fastpath'] },
-  { site: 'argos.co.uk',        url: 'https://www.argos.co.uk',        goal: 'find a kettle and tell me the price', expect: 'answer', tags: ['electronics', 'known-botwall'] },
+  { site: 'currys.co.uk',       url: 'https://www.currys.co.uk',       goal: 'add a wireless mouse to basket and go to checkout', expect: 'cart', tags: ['electronics', 'has-fastpath'] },
+  { site: 'screwfix.com',       url: 'https://www.screwfix.com',       goal: 'add a cordless drill to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
+  { site: 'wickes.co.uk',       url: 'https://www.wickes.co.uk',       goal: 'add white paint to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
+  { site: 'toolstation.com',    url: 'https://www.toolstation.com',    goal: 'add a tape measure to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
+  { site: 'nike.com',           url: 'https://www.nike.com/gb',        goal: 'order mens running shoes in size UK 10, add to bag and go to checkout', expect: 'cart', tags: ['sportswear', 'has-fastpath'] },
+  { site: 'argos.co.uk',        url: 'https://www.argos.co.uk',        goal: 'add a kettle to basket and go to checkout', expect: 'cart', tags: ['electronics', 'known-botwall'] },
 
   // --- Delivery: the address-first flow + the cart-commit weak spot ---
   { site: 'ubereats.com',       url: 'https://www.ubereats.com',       goal: 'order a pizza from a pizza place near EC1A 1BB London', expect: 'cart', tags: ['delivery'] },
