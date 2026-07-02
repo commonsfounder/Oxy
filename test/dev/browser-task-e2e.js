@@ -12,16 +12,38 @@ for (const line of fs.readFileSync('.env', 'utf8').split('\n')) {
 
 // --- stub Supabase BEFORE browser-task captures it via destructure ---
 const runtime = require('../../runtime');
-const chainable = new Proxy(function () {}, {
-  get: (_t, prop) => {
-    if (prop === 'then') return undefined; // not a promise
-    if (prop === 'maybeSingle' || prop === 'single') return async () => ({ data: null });
-    if (prop === 'upsert' || prop === 'insert' || prop === 'update') return async () => ({ data: null, error: null });
-    return () => chainable;
-  },
-  apply: () => chainable
-});
-runtime.createSupabaseServiceClient = () => chainable;
+const E2E_CHECKOUT_EMAIL = process.env.OXY_E2E_CHECKOUT_EMAIL || '';
+const E2E_CHECKOUT_CONSENT = process.env.OXY_E2E_CHECKOUT_CONSENT !== 'false';
+
+function createE2eSupabase() {
+  const ctx = { table: null, op: null };
+  const resolve = async () => {
+    if (ctx.table === 'preferences' && ctx.op === 'select' && E2E_CHECKOUT_EMAIL) {
+      return {
+        data: [
+          { key: 'checkout_profile.email', value: E2E_CHECKOUT_EMAIL },
+          ...(E2E_CHECKOUT_CONSENT ? [{ key: 'checkout_profile.email_consent', value: 'true' }] : [])
+        ],
+        error: null
+      };
+    }
+    return { data: null, error: null };
+  };
+  const builder = {
+    from(t) { ctx.table = t; return builder; },
+    select() { ctx.op = 'select'; return builder; },
+    eq() { return builder; },
+    in() { return builder; },
+    maybeSingle: resolve,
+    single: resolve,
+    upsert: async () => ({ data: null, error: null }),
+    insert: async () => ({ data: null, error: null }),
+    update: async () => ({ data: null, error: null }),
+    then(onFulfilled, onRejected) { return resolve().then(onFulfilled, onRejected); }
+  };
+  return builder;
+}
+runtime.createSupabaseServiceClient = () => createE2eSupabase();
 
 const { runOrderingTurn, getSession, closeSession } = require('../../api/services/browser-task');
 

@@ -5,6 +5,15 @@ const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpat
 const { nextRecipeMove, RECIPES, GENERIC, recipeHealth } = require('./browser-recipes');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
+const {
+  classifyCheckoutAsk,
+  findEmailInputElement,
+  parseEmailFromUserText,
+  wantsSaveEmailConsent,
+  buildEmailAskWithConsent,
+  loadCheckoutProfile,
+  saveCheckoutEmail
+} = require('./checkout-profile');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
 const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
@@ -1296,6 +1305,59 @@ function blockedPageResult(session) {
     : 'I couldn\'t load the page properly just now — the site may be blocking automated access. Want me to try a different site instead?' };
 }
 
+// Checkout identity: load once per session turn, reuse the preferences KV store.
+async function getCheckoutProfileCached(session, userId) {
+  if (session.checkoutProfile) return session.checkoutProfile;
+  session.checkoutProfile = await loadCheckoutProfile(getSupabase(), userId);
+  return session.checkoutProfile;
+}
+
+// Fill a guest-checkout email field using the same index-space resolve as vision fill.
+async function autoFillCheckoutEmail(session, elements, email, steps, onProgress) {
+  let target = findEmailInputElement(elements);
+  let actionIndex = target?.locatorIndex;
+  // Fallback: extraction text may omit "email" (placeholder-only, associated <label> not in list).
+  if (actionIndex == null) {
+    const idx = await session.page.evaluate((selector) => {
+      const nodes = document.querySelectorAll(selector);
+      for (let i = 0; i < nodes.length; i++) {
+        const el = nodes[i];
+        if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') continue;
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        const hint = [el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ');
+        if (type === 'email' || /\be-?mail\b/i.test(hint)) return i;
+      }
+      return -1;
+    }, CLICKABLE_SELECTOR).catch(() => -1);
+    if (idx >= 0) {
+      actionIndex = idx;
+      target = { text: 'email', locatorIndex: idx };
+    }
+  }
+  if (actionIndex == null) return false;
+  const locator = await session.page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: actionIndex }
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!locator) return false;
+  onProgress(`Typing into "${target.text}"…`);
+  const value = String(email || '');
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  try {
+    await locator.fill(value, { timeout: 8000 });
+  } catch {
+    const nested = await locator.$('input, textarea, [contenteditable]').catch(() => null);
+    if (nested) {
+      await nested.fill(value, { timeout: 8000 });
+    } else {
+      await locator.click({ timeout: 5000, force: true }).catch(() => {});
+      await session.page.keyboard.type(value, { delay: 10 });
+    }
+  }
+  session.history.push(`Step ${steps}: [checkout-profile] filled "${target.text}" with "${value}"`);
+  return true;
+}
+
 async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // Started here, not after the session is open — a slow first-time browser launch +
   // page load must count against the same budget that bounds the step loop, or the
@@ -1363,6 +1425,17 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       session.goal = goal;
       session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
       session.autoContinueCount = 0; // a real instruction resets the runaway guard
+      // User replied with checkout identity (e.g. guest email after an ask).
+      if (session.isOrder) {
+        const replyEmail = parseEmailFromUserText(goal);
+        if (replyEmail) {
+          if (wantsSaveEmailConsent(goal)) {
+            await saveCheckoutEmail(getSupabase(), userId, replyEmail, true);
+            session.checkoutProfile = { email: replyEmail, emailConsent: true };
+          }
+          session.pendingCheckoutFill = { field: 'email', value: replyEmail };
+        }
+      }
     } else {
       session.autoContinueCount = (session.autoContinueCount || 0) + 1;
     }
@@ -1505,6 +1578,35 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
+
+      // Guest-checkout email the user just supplied, or stored with consent — fill before vision.
+      if (session.isOrder && session.pendingCheckoutFill?.field === 'email') {
+        const filled = await autoFillCheckoutEmail(session, elements, session.pendingCheckoutFill.value, steps, onProgress);
+        if (filled) {
+          session.pendingCheckoutFill = null;
+          consecutiveBadDecisions = 0;
+          consecutiveWaits = 0;
+          await settle(session.page);
+          touchSession(userId);
+          await persistStorage(userId, session);
+          continue;
+        }
+      } else if (session.isOrder) {
+        // Proactive fill: don't wait for the model to ask — fill as soon as the field is visible.
+        const profile = await getCheckoutProfileCached(session, userId);
+        if (profile.email && profile.emailConsent && findEmailInputElement(elements)) {
+          const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
+          if (filled) {
+            consecutiveBadDecisions = 0;
+            consecutiveWaits = 0;
+            await settle(session.page);
+            touchSession(userId);
+            await persistStorage(userId, session);
+            continue;
+          }
+        }
+      }
+
       // ponytail: debug-only — dump what the model can act on each step (pairs with the
       // step-N.jpg screenshots below) so element-extraction bugs are diagnosable offline.
       if (process.env.OXY_DEBUG_SCREENSHOT_DIR) {
@@ -1679,6 +1781,25 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           if (consecutiveBadDecisions >= 3) return STUCK;
           await session.page.waitForTimeout(1200);
           continue;
+        }
+        // Order-only: auto-fill guest email when stored with consent; else ask + opt-in copy.
+        if (session.isOrder) {
+          const checkoutField = classifyCheckoutAsk(decision.question);
+          if (checkoutField === 'email') {
+            const profile = await getCheckoutProfileCached(session, userId);
+            if (profile.email && profile.emailConsent) {
+              const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
+              if (filled) {
+                consecutiveBadDecisions = 0;
+                consecutiveWaits = 0;
+                await settle(session.page);
+                touchSession(userId);
+                await persistStorage(userId, session);
+                continue;
+              }
+            }
+            return { type: 'ask', question: buildEmailAskWithConsent(decision.question) };
+          }
         }
         return { type: 'ask', question: decision.question };
       }
@@ -1973,6 +2094,8 @@ module.exports = {
   isTechnicalAsk,
   looksLikeLoginWall,
   findGuestCheckoutElement,
+  classifyCheckoutAsk,
+  findEmailInputElement,
   looksLikeBlockWall,
   detectBlockWall,
   describesBlockWall,
