@@ -352,6 +352,18 @@ async function detectBlockWall(page) {
   }
 }
 
+// A genuine login wall sometimes still offers a guest path right there — M&S's CIAM login
+// page ("Sign in" + a separate "Guest Checkout" link) and Wickes' checkout "login-or-guest"
+// page both do. Clicking past it avoids asking the human to sign in for an order that never
+// needed an account — most one-off shopping tasks don't care about having a Toolstation
+// login. Pure so it's unit-testable; the live wrapper reuses the loop's already-extracted
+// clickable elements (same locatorIndex space the loop's own clicks use).
+const GUEST_CHECKOUT_PATTERN = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest|continue without (?:an )?account|shop as (?:a )?guest|guest order)\b/i;
+
+function findGuestCheckoutElement(elements) {
+  return (elements || []).find((el) => GUEST_CHECKOUT_PATTERN.test(String(el.text || ''))) || null;
+}
+
 // Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
 // failure degrades to "not a wall" so a flaky read never blocks a legitimate order.
 async function detectLoginWall(page, goal) {
@@ -1521,6 +1533,25 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       if (currentUrl !== session.lastLoginCheckUrl) {
         session.lastLoginCheckUrl = currentUrl;
         if (await detectLoginWall(session.page, session.goal)) {
+          // Take the guest path if this wall offers one — one shot per URL so a click that
+          // silently fails (or a page that just re-renders the same wall) doesn't spin.
+          const guestEl = findGuestCheckoutElement(elements);
+          if (guestEl && !session.triedGuestOnUrl?.has(currentUrl)) {
+            session.triedGuestOnUrl = session.triedGuestOnUrl || new Set();
+            session.triedGuestOnUrl.add(currentUrl);
+            const handle = await session.page.evaluateHandle(
+              ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+              { selector: CLICKABLE_SELECTOR, idx: guestEl.locatorIndex }
+            ).then((h) => h.asElement()).catch(() => null);
+            if (handle) {
+              await handle.click({ timeout: 10000, force: true }).catch(() => {});
+              session.history.push(`Step ${steps}: clicked "${guestEl.text}" (skipped sign-in — guest checkout available)`);
+              await settle(session.page);
+              consecutiveBadDecisions = 0;
+              consecutiveWaits = 0;
+              continue;
+            }
+          }
           const siteName = session.site ? session.site.replace(/\.(com|co\.uk|co|net|org)$/i, '') : 'the site';
           return { type: 'reauth', site: session.site, question: `I need to sign in to ${siteName} to continue your order — once you've signed in, say "keep going" and I'll carry on from where I left off.` };
         }
@@ -1941,6 +1972,7 @@ module.exports = {
   matchesPaymentKeyword,
   isTechnicalAsk,
   looksLikeLoginWall,
+  findGuestCheckoutElement,
   looksLikeBlockWall,
   detectBlockWall,
   describesBlockWall,

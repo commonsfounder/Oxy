@@ -1,6 +1,35 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { looksLikeLoginWall, looksLikeBlockWall, describesBlockWall } = require('../../api/services/browser-task');
+const { looksLikeLoginWall, findGuestCheckoutElement, looksLikeBlockWall, describesBlockWall } = require('../../api/services/browser-task');
+
+test('findGuestCheckoutElement finds a guest option among clickable elements (M&S/Wickes shapes)', () => {
+  const msElements = [
+    { locatorIndex: 3, text: 'Sign in' },
+    { locatorIndex: 7, text: 'Guest Checkout' },
+    { locatorIndex: 9, text: 'Reset your password' },
+  ];
+  assert.deepEqual(findGuestCheckoutElement(msElements), { locatorIndex: 7, text: 'Guest Checkout' });
+
+  const wickesElements = [
+    { locatorIndex: 1, text: 'Sign in' },
+    { locatorIndex: 2, text: 'Checkout as a guest' },
+  ];
+  assert.deepEqual(findGuestCheckoutElement(wickesElements), { locatorIndex: 2, text: 'Checkout as a guest' });
+
+  const otherPhrasing = [{ locatorIndex: 0, text: 'Continue without an account' }];
+  assert.deepEqual(findGuestCheckoutElement(otherPhrasing), otherPhrasing[0]);
+});
+
+test('findGuestCheckoutElement returns null when no guest option is present', () => {
+  assert.equal(findGuestCheckoutElement([{ locatorIndex: 0, text: 'Sign in' }, { locatorIndex: 1, text: 'Register' }]), null);
+  assert.equal(findGuestCheckoutElement([]), null);
+  assert.equal(findGuestCheckoutElement(null), null);
+});
+
+test('findGuestCheckoutElement does not false-match unrelated "guest" copy', () => {
+  // "Guest" appearing in unrelated copy (e.g. a "guest reviews" link) must not match.
+  assert.equal(findGuestCheckoutElement([{ locatorIndex: 0, text: 'Guest reviews (12)' }]), null);
+});
 
 test('looksLikeLoginWall fires on a login URL', () => {
   assert.equal(looksLikeLoginWall({ url: 'https://www.johnlewis.com/account/login', bodyText: '', hasPasswordField: false, goal: 'order joggers' }), true);
