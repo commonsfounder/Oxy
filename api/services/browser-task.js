@@ -427,12 +427,15 @@ async function computeProgressSignature(page) {
       const dialogTitle = dialogs
         ? (((document.querySelector('[role="dialog"] h1, [role="dialog"] h2, [aria-modal="true"] h1, [aria-modal="true"] h2') || {}).innerText || '').trim().slice(0, 40))
         : '';
-      return { itemCount, path: location.pathname, dialogs, dialogTitle, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40), sample };
+      // Product presence: loading results or PDP changes the "contentful" state even if title/path similar.
+      // Helps break category/search repeat loops when actual items appear.
+      const hasProducts = document.querySelectorAll('[class*="product" i], [data-testid*="product"], .item, li[class*="item"], [class*="tile" i]').length > 2 ? 1 : 0;
+      return { itemCount, path: location.pathname, dialogs, dialogTitle, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40) + '|p' + hasProducts, sample, hasProducts };
     }).catch(() => null);
     if (!info) return fallback(url);
     return {
       sig: `${url}|c${info.itemCount}|d${info.dialogs}|k${info.pageKey}|${info.dialogTitle}|${info.sample}`,
-      stateKey: `${info.path}|d${info.dialogs}|${info.pageKey}|${info.dialogTitle}`,
+      stateKey: `${info.path}|d${info.dialogs}|${info.pageKey}|${info.dialogTitle}|p${info.hasProducts || 0}`,
       itemCount: info.itemCount,
     };
   } catch {
@@ -463,9 +466,15 @@ function assessProgress(counters, { isOrder = false, cartEverNonzero = false, ha
   if (cartStallActive && stepsSinceCartProgress >= 16) return { verdict: 'stuck', correction: '' };
   if (stepsSinceProgress >= 4 || stepsSinceNewState >= 5) {
     const n = Math.max(stepsSinceProgress, stepsSinceNewState);
+    // Only point at the basket/checkout once something is IN the basket — nudging an
+    // empty-cart flow toward "Basket" just sends the model to an empty-basket dead end
+    // (Wickes did exactly that).
+    const move = cartEverNonzero
+      ? 'go to the basket and proceed to checkout'
+      : 'open the best matching product, select the required size/option, and press the Add to basket/bag button';
     return {
       verdict: 'nudge',
-      correction: `No real progress for ${n} steps — the page is not changing, or you keep returning to pages you have already visited. Do something DIFFERENT now: open the best matching product, select the required size/option, press the Add to basket/bag button, or go to the basket/checkout.`,
+      correction: `No real progress for ${n} steps — the page is not changing, or you keep returning to pages you have already visited. Do something DIFFERENT now: ${move}.`,
     };
   }
   if (cartStallActive && stepsSinceCartProgress >= 8) {
@@ -504,11 +513,18 @@ field, an item, an "Add" button) by sight, then act on it by its number. The pag
 text alone is unreliable; trust your eyes. If the page looks like it's still loading
 (spinners, blank areas, a skeleton), choose "wait".
 
-For shopping/ordering goals, COMMIT EARLY: the FIRST product in the results that clearly
-matches the goal is the right choice. Open it, select the required size/colour/options,
-and press its "Add to basket/bag/cart" button. Do NOT keep browsing categories, refining
-the search, or comparing alternatives — a good-enough match added to the basket beats a
-perfect match never added.
+For shopping/ordering goals (anything with "order", "basket", "cart", "buy", "checkout", "add to"):
+COMMIT IMMEDIATELY to the first reasonable match. Click the first plausible product tile, select size if shown, click the primary "Add to basket" / "Add to bag" / "Add to cart" button.
+NEVER repeat search, "Men", categories, "view more", or similar links.
+NEVER click the same or very similar control twice in a row unless the page visibly changed toward the cart.
+If the last two steps were similar navigation without adding an item, your next action MUST be to pick and add a specific product.
+After add, go straight to basket then checkout. "ready_for_payment" is the win condition.
+A decent item in the basket now is infinitely better than perfect research that never adds.
+
+If an item dialog/modal is open (size, options, quantity), FINISH it: choose the required
+options, then press its Add/confirm button — usually at the bottom of the dialog; scroll
+inside the dialog if you can't see it. NEVER press Close/X on a dialog for an item you
+intend to order.
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
 number, and never use a price, quantity, postcode, or any number you read off the page as
@@ -883,12 +899,26 @@ const SEARCH_SITES = {
 };
 
 // Leading intent verbs and trailing fluff that aren't part of the thing being searched for.
-const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+|the\s+)+/i;
+const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|add\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+|the\s+)+/i;
 // Strip a trailing request-about-the-result clause. Anchored to a connective ("…and tell me
 // the exact price shown", "…how much", "…and the price") so it eats the whole tail regardless
 // of adjectives, but does NOT touch a product name that merely contains "price"/"cost".
 // Also strip "i think its", "probably", "about" qualifiers.
 const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$|\s*i\s+think\s+(?:its?|it'?s)\s*(?!\d)/i;
+// Ordering-instruction tails: the "…add to basket and go to checkout" half of an order goal
+// describes what to DO with the product, not what to search for. Passing it through produced
+// garbage queries ("add a wireless mouse to basket and go to checkout") that opened every
+// seeded site on a no-results page (2026-07-02 benchmark). Applied iteratively with
+// TRAIL_NOISE. Order matters within the alternation: whole-clause forms first.
+const ORDER_TAIL_NOISE = new RegExp([
+  String.raw`\s*,?\s*(?:and\s+)?add\s+(?:it|them|one|this)?\s*to\s+(?:my\s+)?(?:basket|bag|cart|trolley)\b.*$`,
+  String.raw`\s+to\s+(?:my\s+)?(?:basket|bag|cart|trolley)\b.*$`, // after a lead "add …" was stripped
+  String.raw`\s*,?\s*(?:and\s+)?(?:go|proceed|head|continue)\s+to\s+(?:the\s+)?checkout\b.*$`,
+  String.raw`\s*,?\s*and\s+checkout\b.*$`,
+  String.raw`\s+for\s+(?:collection|delivery|pickup|click\s+and\s+collect)\b.*$`,
+  String.raw`\s+near\s+(?![a-z]*\bme\b)[\w'’]+(?:\s+[\w'’]+)*\s*$`, // "near EC1A 1BB London" ("near me" is TRAIL_NOISE's)
+  String.raw`\s+in\s+size\s+[\w. ]+$`, // size is chosen on the product page, not searched for
+].join('|'), 'i');
 
 // Pull the "thing to search for" out of a natural-language goal. Conservative: returns null
 // whenever the result looks implausible as a query, so the caller falls back to a normal open.
@@ -902,9 +932,9 @@ function deriveSearchTerm(goal, site) {
     t = t.replace(new RegExp(`\\b${name}\\b`, 'ig'), '');
   }
   t = t.replace(LEAD_NOISE, '');
-  // Trailing fluff can stack ("joggers and tell me the price please") — strip until stable.
+  // Trailing fluff can stack ("joggers to basket and go to checkout please") — strip until stable.
   let prev;
-  do { prev = t; t = t.replace(TRAIL_NOISE, ''); } while (t !== prev);
+  do { prev = t; t = t.replace(TRAIL_NOISE, '').replace(ORDER_TAIL_NOISE, ''); } while (t !== prev);
   t = t.trim().replace(/\s+/g, ' ');
   if (t.length < 2 || t.length > 80) return null; // too short to be a query / probably not one
   return t;
@@ -917,9 +947,11 @@ function directSearchUrl(url, goal) {
   if (process.env.OXY_BROWSER_FASTPATH === 'false') return null; // kill-switch / A-B isolation
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
-  // Only short-circuit a homepage/root. If the url is already a deep link (a search,
+  // Only short-circuit a homepage/root — including locale roots like /gb, /uk, /en_gb
+  // (nike.com/gb never got its seed before this). If the url is a real deep link (a search,
   // product, or category page) the caller meant to land there — don't override it.
-  if (parsed.pathname.replace(/\/+$/, '') !== '') return null;
+  const path = parsed.pathname.replace(/\/+$/, '');
+  if (path !== '' && !/^\/[a-z]{2}(?:[_-][a-z]{2})?$/i.test(path)) return null;
   const host = parsed.hostname.replace(/^www\./, '');
   const site = SEARCH_SITES[host];
   // For a curated site, use its names to strip; otherwise strip using the host's brand word.
@@ -1581,7 +1613,15 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // Remember what we typed into a SEARCH box so the next iterations can detect a
           // search-results navigation and learn this site's fast-path template. Gated to
           // search fields so we never mis-learn a filter/quantity/address as a search URL.
-          if (/search/i.test(target.text)) session.lastFilledValue = value;
+          if (/search/i.test(target.text)) {
+            session.lastFilledValue = value;
+            // Most sites only run the search on Enter — the model regularly fills the box and
+            // then clicks a "Search" icon that merely toggles the overlay, spinning forever
+            // (M&S/Nike/Wickes in the 2026-07-02 benchmark). Submit for it: the field is still
+            // focused from the fill, and Enter is universal on search inputs.
+            await session.page.keyboard.press('Enter').catch(() => {});
+            session.history[session.history.length - 1] += ' and pressed Enter to search';
+          }
         }
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0; // a real action broke the wait streak
@@ -1602,6 +1642,13 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         } else {
           lastActionSig = sig;
           repeatActionCount = 0;
+        }
+
+        // Extra: if we are repeating the exact same action AND cart is still 0 on an order goal,
+        // treat as strong no-progress signal (prevents the "click search 5 times" pattern).
+        if (session.isOrder && !session.cartEverNonzero && repeatActionCount >= 2) {
+          stepsSinceNewState = Math.max(stepsSinceNewState, repeatActionCount + 2);
+          stepsSinceCartProgress = Math.max(stepsSinceCartProgress, repeatActionCount + 3);
         }
         session.lastActionSig = lastActionSig;
         session.repeatActionCount = repeatActionCount;
