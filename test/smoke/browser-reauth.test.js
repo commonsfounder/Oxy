@@ -34,6 +34,21 @@ test('looksLikeLoginWall does NOT fire on a normal shopping page', () => {
   }), false);
 });
 
+test('looksLikeLoginWall fires on soft basket sign-in gate without pw field (M&S style)', () => {
+  assert.equal(looksLikeLoginWall({
+    url: 'https://www.marksandspencer.com/basket',
+    bodyText: 'Sign in or create an account for faster checkout and to view your basket',
+    hasPasswordField: false,
+    goal: 'order t-shirt'
+  }), true);
+  assert.equal(looksLikeLoginWall({
+    url: 'https://shop.example.com/checkout',
+    bodyText: 'Please sign in to continue to checkout',
+    hasPasswordField: false,
+    goal: 'buy it'
+  }), true);
+});
+
 test('looksLikeLoginWall tolerates missing/garbage input', () => {
   assert.equal(looksLikeLoginWall({}), false);
   assert.equal(looksLikeLoginWall({ url: null, bodyText: null, hasPasswordField: null, goal: null }), false);

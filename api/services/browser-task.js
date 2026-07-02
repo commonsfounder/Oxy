@@ -44,7 +44,7 @@ const envInt = (name, fallback) => {
   const n = Number(process.env[name]);
   return Number.isFinite(n) ? n : fallback;
 };
-const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 800), height: envInt('OXY_BROWSER_VIEWPORT_H', 600) };
+const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 1280), height: envInt('OXY_BROWSER_VIEWPORT_H', 800) };
 const SCREENSHOT_QUALITY = envInt('OXY_BROWSER_SCREENSHOT_QUALITY', 30);
 
 // Per-phase timing for latency work: set OXY_BROWSER_TIMING=1 to log how long each phase
@@ -291,16 +291,22 @@ const LOGIN_URL_PATTERN = /\/(login|log-?in|signin|sign-?in|auth|authenticate|ac
 // Copy that, TOGETHER with a password field, marks a page as a login wall (not a header
 // "Sign in" link on an otherwise-normal shopping page). Kept tight to avoid false pauses.
 const LOGIN_COPY_PATTERN = /\b(sign in to|log in to|enter your password|incorrect password|forgot your password|keep me signed in|sign in to your account)\b/i;
+// Stronger basket/checkout soft-gate (e.g. M&S "Sign in or create an account for faster checkout").
+// These often appear without a visible password field until clicked — catch them for order goals.
+const LOGIN_BASKET_PATTERN = /\b(sign in|log in|sign-in|log-in|create an account|register).*(?:basket|cart|checkout|to (?:continue|view|see|access)|for faster checkout)\b/i;
 const PASSWORD_FIELD_SELECTOR = 'input[type="password"]';
 
 // Pure so it's unit-testable without a live page. A wall is either (a) the URL is a login
 // route, or (b) there's a real password field AND login copy on the page. A password field
 // alone (inline "create account" upsell) or login copy alone (a "Sign in" nav link) is not
 // enough — both together, or a login URL, are.
+// Also (c) a strong "sign in to see basket/checkout" soft gate (no pw field yet) — helps M&S etc.
 function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
   const u = String(url || '');
   if (LOGIN_URL_PATTERN.test(u)) return true;
-  if (hasPasswordField && LOGIN_COPY_PATTERN.test(String(bodyText || ''))) return true;
+  const bt = String(bodyText || '');
+  if (hasPasswordField && LOGIN_COPY_PATTERN.test(bt)) return true;
+  if (LOGIN_BASKET_PATTERN.test(bt)) return true;
   return false;
 }
 
@@ -342,8 +348,11 @@ async function detectLoginWall(page, goal) {
     // Fast path: a login URL needs no DOM read at all.
     if (LOGIN_URL_PATTERN.test(url)) return true;
     const hasPasswordField = await page.locator(PASSWORD_FIELD_SELECTOR).first().count().then(c => c > 0).catch(() => false);
-    if (!hasPasswordField) return false; // no password field ⇒ can't be a login wall by rule (b)
     const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => '');
+    // Check basket soft-gate even if no pw field visible yet (M&S etc show "sign in to continue to basket/checkout")
+    if (!hasPasswordField && !LOGIN_BASKET_PATTERN.test(bodyText)) {
+      return false;
+    }
     return looksLikeLoginWall({ url, bodyText, hasPasswordField, goal });
   } catch {
     return false;
@@ -367,6 +376,50 @@ const SECURITY_WALL_ASK_PATTERN = /security (?:verification|check)|cloudflare|\b
 
 function describesBlockWall(question) {
   return SECURITY_WALL_ASK_PATTERN.test(String(question || ''));
+}
+
+// Unified no-progress detector. Signature = URL + cart/basket count + cheap DOM fingerprint
+// (element count + sampled interactive texts). Persisted on session so it survives auto-continue
+// turns (like lastActionSig). Clicks that don't change state no longer reset it.
+// ~4 unchanged steps → strong correction nudge; ~7 → hard STUCK bail. Fixes the M&S/Currys/Wickes
+// [click→wait×5→click→wait×5] spin, Nike size re-clicks, and Deliveroo menu wandering.
+async function computeProgressSignature(page) {
+  try {
+    const url = page.url() || '';
+    const info = await page.evaluate(() => {
+      // Cart/basket item count — try common badges/counts first (cheap, no full DOM walk).
+      // Broadened to catch JL [data-testid="basket-amount"], M&S etc.
+      let itemCount = 0;
+      const countCands = document.querySelectorAll(
+        '[class*="cart-count" i],[class*="basket-count" i],[data-testid*="cart" i],[data-testid*="basket" i],[aria-label*="cart" i],[aria-label*="basket" i],.bag-count,#bag-count,[class*="items-count" i],a[href*="/basket"],a[href*="/cart"],[class*="bag" i]'
+      );
+      for (const el of countCands) {
+        const txt = (el.textContent || el.getAttribute('aria-label') || '').replace(/[^0-9]/g, '');
+        if (txt) itemCount = Math.max(itemCount, parseInt(txt, 10) || 0);
+      }
+      if (!itemCount && /\/(cart|basket|bag|checkout)/i.test(location.pathname)) {
+        // rough fallback on cart page: count obvious item containers
+        const rough = document.querySelectorAll('[class*="item" i],[data-testid*="product"],li.product,[role="listitem"]').length;
+        if (rough > 0) itemCount = Math.min(99, rough);
+      }
+      // Page key focused on host + cartCount + main title (coarse so internal nav/category hops and rec churn
+      // don't reset "no progress" counter when itemCount stays 0). Real add-to-basket will bump count and flip sig.
+      const host = location.hostname.replace(/^www\./, '');
+      const mainTitle = (document.querySelector('main h1, main h2, h1, [data-testid*="title"], [data-testid*="product-name"], .product-title') || {}).innerText || '';
+      // Sample stable controls near content (add, sizes, titles)
+      const stableNodes = document.querySelectorAll('main h1, main h2, h1, h2, main [data-testid*="add"], [data-testid*="basket"], button[aria-label*="size" i], [role="button"]');
+      const sample = Array.from(stableNodes)
+        .slice(0, 6)
+        .map((el) => (el.innerText || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 22))
+        .filter(Boolean)
+        .join('|')
+        .slice(0, 100);
+      return { itemCount, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40), sample };
+    }).catch(() => ({ itemCount: 0, pageKey: '', sample: '' }));
+    return `${url}|c${info.itemCount}|k${info.pageKey}|${info.sample}`;
+  } catch {
+    return page && typeof page.url === 'function' ? page.url() : 'err';
+  }
 }
 
 function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
@@ -1131,6 +1184,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // resets to zero each auto-continue and can spin on the same element indefinitely.
   let lastActionSig = session.lastActionSig || '';
   let repeatActionCount = session.repeatActionCount || 0;
+  // Progress sigs persisted on session (cross-turn) — the core guard against click-wait cycles
+  // that reset per-action counters. See computeProgressSignature.
+  let lastProgressSig = session.lastProgressSig || '';
+  let stepsSinceProgress = session.stepsSinceProgress || 0;
   // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
   // price read off the screen), we feed a pointed correction into the NEXT decision so it
   // can fix itself — instead of silently re-asking the identical prompt against the same
@@ -1147,6 +1204,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       steps += 1;
       session.consecutiveWaits = consecutiveWaits;
       session.consecutiveBadDecisions = consecutiveBadDecisions;
+      session.lastProgressSig = lastProgressSig;
+      session.stepsSinceProgress = stepsSinceProgress;
       onProgress('Looking at the page…');
       await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
       // Learn a fast-path: if the last thing we typed now shows up as a query param in the
@@ -1173,6 +1232,36 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           session.consentHandled = true; // no banner showed up in the first few steps; stop checking
         }
       }
+
+      // --- Unified progress detector (PRIORITY 1) ---------------------------------------
+      // Compute after settle so DOM is stable. If URL+cart-count+DOM-hash is identical for N
+      // steps, the site-specific click/wait cycles (M&S/Currys/Wickes) or re-clicks (Nike)
+      // or menu wandering (Deliveroo) are detected globally, independent of consecutiveWaits
+      // which resets on every click. Injects correction at 4; hard STUCK at 7. Persisted via
+      // session so it carries across auto-continue turns.
+      const currentSig = await timed('step.progress-sig', () => computeProgressSignature(session.page)).catch(() => session.page.url());
+      if (currentSig && currentSig === lastProgressSig) {
+        stepsSinceProgress += 1;
+      } else if (currentSig) {
+        lastProgressSig = currentSig;
+        stepsSinceProgress = 0;
+      }
+      session.lastProgressSig = lastProgressSig;
+      session.stepsSinceProgress = stepsSinceProgress;
+      // Only enforce progress bail/correction on vision-heavy (non-specific-recipe) sites.
+      // johnlewis.com has a multi-step recipe on the PDP (size→add→go-basket) that can keep
+      // sig stable for a few steps; don't trip STUCK on it. The spin bugs (M&S etc) have no
+      // RECIPES entry (fall to GENERIC which only helps late), so they get the detector.
+      const hasSpecificRecipe = !!RECIPES[session.site];
+      if (!hasSpecificRecipe) {
+        if (stepsSinceProgress >= 7) {
+          return STUCK;
+        }
+        if (stepsSinceProgress >= 4) {
+          pendingCorrection = `No progress for ${stepsSinceProgress} steps (same page + cart count + DOM state). You are repeating the same ineffective pattern — do something different now: select size/option, add the item to basket, or go to the cart/checkout.`;
+        }
+      }
+
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
 
       // Discover deals/coupons/promos on every step (visible text + element labels). This
@@ -1415,6 +1504,14 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         }
         session.lastActionSig = lastActionSig;
         session.repeatActionCount = repeatActionCount;
+        if (recipeStepName) {
+          // Recipe step taken — trusted mechanical progress; reset progress detector so
+          // multi-click recipe sequences (e.g. JL size then add on same PDP) don't accumulate.
+          stepsSinceProgress = 0;
+          lastProgressSig = lastProgressSig + '|r';
+          session.lastProgressSig = lastProgressSig;
+          session.stepsSinceProgress = stepsSinceProgress;
+        }
         touchSession(userId);
         await persistStorage(userId, session);
       } catch (actionErr) {
