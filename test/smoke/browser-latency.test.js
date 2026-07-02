@@ -24,6 +24,26 @@ test('deriveSearchTerm strips a request-clause even with adjectives before "pric
   assert.equal(deriveSearchTerm('find a price comparison tool', jlSite), 'price comparison tool');
 });
 
+test('deriveSearchTerm strips ordering-instruction tails so the query is just the product', () => {
+  // Regression: the 2026-07-02 benchmark showed every seeded site opening on a garbage
+  // no-results page because the whole "add to basket and go to checkout" instruction was
+  // passed through as the search query (e.g. Currys searched for "add a wireless mouse to
+  // basket and go to checkout").
+  assert.equal(deriveSearchTerm('order a cotton t-shirt in size medium, add to basket and go to checkout', jlSite), 'cotton t-shirt');
+  assert.equal(deriveSearchTerm('add a wireless mouse to basket and go to checkout', jlSite), 'wireless mouse');
+  assert.equal(deriveSearchTerm('add white paint to basket and go to checkout', jlSite), 'white paint');
+  assert.equal(deriveSearchTerm('order mens running shoes in size UK 10, add to bag and go to checkout', jlSite), 'mens running shoes');
+  assert.equal(deriveSearchTerm('add a tape measure to basket for collection near EC1A 1BB and go to checkout', jlSite), 'tape measure');
+  assert.equal(deriveSearchTerm('order a burger near EC1A 1BB London', jlSite), 'burger');
+  // A product that legitimately contains "bag" must not be eaten by the basket-tail stripper.
+  assert.equal(deriveSearchTerm('find a leather tote bag', jlSite), 'leather tote bag');
+});
+
+test('directSearchUrl fires for locale-root paths like /gb on seeded sites', () => {
+  assert.equal(directSearchUrl('https://www.nike.com/gb', 'order mens running shoes in size UK 10, add to bag and go to checkout'),
+    'https://www.nike.com/gb/w?q=mens%20running%20shoes');
+});
+
 test('deriveSearchTerm removes a mention of the site itself', () => {
   assert.equal(deriveSearchTerm('find joggers on John Lewis', jlSite), 'joggers');
   assert.equal(deriveSearchTerm('search johnlewis for a kettle', jlSite), 'kettle');

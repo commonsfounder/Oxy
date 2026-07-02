@@ -57,7 +57,7 @@ async function timed(label, fn) {
   finally { console.warn(`[timing] ${label}: ${Date.now() - t}ms`); }
 }
 // Fewer numbered badges = a cleaner image and a shorter element list (fewer input tokens).
-const MAX_ELEMENTS = envInt('OXY_BROWSER_MAX_ELEMENTS', 25);
+const MAX_ELEMENTS = envInt('OXY_BROWSER_MAX_ELEMENTS', 60);
 // The loop model is a *thinking* model; thinking is what recovers from hallucinated element
 // ids, but it's also the bulk of model latency. Cap it low (not off) and tune via E2E.
 // OXY_BROWSER_THINKING_BUDGET=-1 drops the field entirely if a model version rejects it.
@@ -457,9 +457,10 @@ async function computeProgressSignature(page) {
 //    mid-normal-browse. Now it only nudges ("commit to an item") at 8 and only hard-bails at
 //    16, and is disabled once the basket has EVER been non-empty (cart badges often vanish
 //    on checkout pages, which would otherwise re-arm it against a healthy flow).
-function assessProgress(counters, { isOrder = false, cartEverNonzero = false, hasSpecificRecipe = false } = {}) {
-  // Recipe sites (e.g. John Lewis) hold the sig stable across scripted PDP steps by design.
-  if (hasSpecificRecipe) return { verdict: 'ok', correction: '' };
+function assessProgress(counters, { isOrder = false, cartEverNonzero = false } = {}) {
+  // No recipe exemption: recipe steps that genuinely advance reset the counters at the
+  // execution site, so a recipe site only accumulates stall when its recipe is spinning
+  // (same step re-firing) or its vision steps are — both real spins that must bail.
   const { stepsSinceProgress = 0, stepsSinceNewState = 0, stepsSinceCartProgress = 0 } = counters || {};
   if (stepsSinceProgress >= 7 || stepsSinceNewState >= 9) return { verdict: 'stuck', correction: '' };
   const cartStallActive = isOrder && !cartEverNonzero;
@@ -525,6 +526,11 @@ If an item dialog/modal is open (size, options, quantity), FINISH it: choose the
 options, then press its Add/confirm button — usually at the bottom of the dialog; scroll
 inside the dialog if you can't see it. NEVER press Close/X on a dialog for an item you
 intend to order.
+
+If you pressed Add and nothing changed, a REQUIRED option (size, colour, delivery method)
+is probably unselected — select it first, then press Add again. If the requested size or
+option is OUT OF STOCK or unavailable, do NOT ask the user — go back to the results and
+pick a different product that matches the goal.
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
 number, and never use a price, quantity, postcode, or any number you read off the page as
@@ -617,7 +623,29 @@ async function extractClickableElements(page) {
       .map((el) => { const r = el.getBoundingClientRect(); return { el, area: r.width * r.height }; })
       .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
       .sort((a, b) => b.area - a.area)[0];
-    const scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
+    let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
+    // Commercial pages front-load 20-40 header/nav controls in DOM order, which used to
+    // consume the whole element budget before the first product tile — the model could only
+    // ever see site chrome (2026-07-02 Currys screenshots: every badge in the header, zero
+    // on products or the consent dialog, so it clicked "Search" forever). Re-order the
+    // candidates: in-viewport CONTENT first, then chrome controls that matter to the goal
+    // (search, basket, consent), then the rest of the chrome, then off-viewport elements.
+    if (!dialog) {
+      const inViewport = (el) => {
+        const r = el.getBoundingClientRect();
+        return r.top < window.innerHeight && r.bottom > 0 && r.left < window.innerWidth && r.right > 0;
+      };
+      const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
+      const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept/i;
+      const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
+      const content = [], keyChrome = [], chrome = [], offscreen = [];
+      for (const el of scope) {
+        if (!inViewport(el)) { offscreen.push(el); continue; }
+        if (!inChrome(el)) { content.push(el); continue; }
+        (KEY_CHROME.test(labelOf(el)) ? keyChrome : chrome).push(el);
+      }
+      scope = [...content, ...keyChrome, ...chrome, ...offscreen];
+    }
     const out = [];
     for (const el of scope) {
       if (out.length >= max) break;
@@ -1377,11 +1405,9 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
       session.stepsSinceCartProgress = stepsSinceCartProgress;
 
-      // johnlewis.com has a multi-step recipe on the PDP (size→add→go-basket) that can keep
-      // sig stable for a few steps; assessProgress exempts specific-recipe sites entirely.
       const assessed = assessProgress(
         { stepsSinceProgress, stepsSinceNewState, stepsSinceCartProgress },
-        { isOrder: session.isOrder, cartEverNonzero: session.cartEverNonzero, hasSpecificRecipe: !!RECIPES[session.site] }
+        { isOrder: session.isOrder, cartEverNonzero: session.cartEverNonzero }
       );
       if (assessed.verdict === 'stuck') {
         // Reset counters before bailing so a user "keep going" gets fresh room to retry
@@ -1576,7 +1602,36 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
       }
 
-      const locator = session.page.locator(CLICKABLE_SELECTOR).nth(target.locatorIndex);
+      // The DOM often re-renders between perception and action (hydration, results refresh,
+      // a dismissed banner shifting indices), leaving locatorIndex pointing at a DIFFERENT —
+      // frequently hidden — node: Wickes' "Add for Delivery" failed "Element is not visible"
+      // three times in a row this way while a visible twin sat elsewhere in the DOM. If the
+      // indexed node's label no longer matches what the model chose, re-find the element by
+      // its visible text (fresh extraction only lists visible nodes, so a hidden mobile/
+      // desktop duplicate resolves to the visible one).
+      let actionIndex = target.locatorIndex;
+      if (target.text) {
+        const drifted = await session.page.evaluate(({ selector, idx, want }) => {
+          const el = document.querySelectorAll(selector)[idx];
+          if (!el) return true;
+          // Text alone can't detect drift between DUPLICATES: Wickes renders one hidden
+          // "Add for Delivery" twin per product tile, so the shifted index still text-matches
+          // while pointing at a zero-size node ("Element is not visible" ×3, 2026-07-02).
+          // A control the model just SAW must have a real box — treat a sizeless/hidden one
+          // as drift so we re-resolve to the visible twin.
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          if (!r.width || !r.height || s.visibility === 'hidden' || s.display === 'none') return true;
+          const label = ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+          return label !== want;
+        }, { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex, want: target.text }).catch(() => false);
+        if (drifted) {
+          const fresh = await extractClickableElements(session.page);
+          const match = findElementByText(fresh, target.text);
+          if (match) actionIndex = match.locatorIndex;
+        }
+      }
+      const locator = session.page.locator(CLICKABLE_SELECTOR).nth(actionIndex);
       try {
         if (decision.action === 'click') {
           onProgress(`Clicking "${target.text}"…`);
@@ -1588,7 +1643,31 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // above means the loop never force-clicks a pay button.
           await locator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
           await session.page.evaluate(el => el && el.scrollIntoView({ block: 'center', behavior: 'instant' }), await locator.elementHandle().catch(() => null)).catch(() => {});
-          await locator.click({ timeout: 10000, force: true });
+          try {
+            await locator.click({ timeout: 10000, force: true });
+          } catch (clickErr) {
+            // Hidden-twin recovery: sites render the same control several times (desktop/
+            // mobile/sticky variants — Wickes has one "Add for Delivery" per layout) and the
+            // indexed node can be the clipped twin that has a size but no clickable point,
+            // failing "Element is not visible" even with force. Let Playwright's own
+            // visibility semantics arbitrate: scan same-text candidates and click the one it
+            // deems visible. Only for this error shape — anything else propagates as before.
+            if (!/not visible|outside of the viewport/i.test(String(clickErr.message)) || !target.text) throw clickErr;
+            const exact = new RegExp(`^\\s*${target.text.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`);
+            const cands = session.page.locator(CLICKABLE_SELECTOR).filter({ hasText: exact });
+            const n = Math.min(await cands.count().catch(() => 0), 12);
+            let clicked = false;
+            for (let i = 0; i < n; i++) {
+              const cand = cands.nth(i);
+              if (await cand.isVisible().catch(() => false)) {
+                await cand.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+                await cand.click({ timeout: 5000, force: true });
+                clicked = true;
+                break;
+              }
+            }
+            if (!clicked) throw clickErr;
+          }
           session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}clicked "${target.text}"`);
         } else if (decision.action === 'fill') {
           onProgress(`Typing into "${target.text}"…`);
@@ -1653,16 +1732,31 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         session.lastActionSig = lastActionSig;
         session.repeatActionCount = repeatActionCount;
         if (recipeStepName) {
-          // Recipe step taken — trusted mechanical progress; reset progress detector so
-          // multi-click recipe sequences (e.g. JL size then add on same PDP) don't accumulate.
-          stepsSinceProgress = 0;
-          stepsSinceNewState = 0;
-          stepsSinceCartProgress = 0;
-          lastProgressSig = lastProgressSig + '|r';
-          session.lastProgressSig = lastProgressSig;
-          session.stepsSinceProgress = stepsSinceProgress;
-          session.stepsSinceNewState = stepsSinceNewState;
-          session.stepsSinceCartProgress = stepsSinceCartProgress;
+          const sameStep = session.lastRecipeStep === recipeStepName;
+          session.lastRecipeStep = recipeStepName;
+          if (sameStep) {
+            // The SAME recipe step firing again means the last firing didn't advance the
+            // page — a silent loop the health tracker can't see (it only counts selector
+            // misses; Wickes' GENERIC cart step clicked "Checkout" 20× this way). Count
+            // ineffective repeats as misses so the step self-disables and vision takes
+            // over, and leave the progress counters running so a stuck recipe ultimately
+            // bails like any other spin.
+            session.recipeStepRepeats = (session.recipeStepRepeats || 0) + 1;
+            if (session.recipeStepRepeats >= 2) recipeHealth.recordMiss(session.site, recipeStepName);
+          } else {
+            session.recipeStepRepeats = 0;
+            // Recipe advanced to a different step — trusted mechanical progress; reset the
+            // detector so multi-click recipe sequences (e.g. JL size then add on the same
+            // PDP) don't accumulate.
+            stepsSinceProgress = 0;
+            stepsSinceNewState = 0;
+            stepsSinceCartProgress = 0;
+            lastProgressSig = lastProgressSig + '|r';
+            session.lastProgressSig = lastProgressSig;
+            session.stepsSinceProgress = stepsSinceProgress;
+            session.stepsSinceNewState = stepsSinceNewState;
+            session.stepsSinceCartProgress = stepsSinceCartProgress;
+          }
         }
         touchSession(userId);
         await persistStorage(userId, session);
