@@ -378,12 +378,18 @@ function describesBlockWall(question) {
   return SECURITY_WALL_ASK_PATTERN.test(String(question || ''));
 }
 
-// Unified no-progress detector. Signature = URL + cart/basket count + cheap DOM fingerprint
-// (element count + sampled interactive texts). Persisted on session so it survives auto-continue
-// turns (like lastActionSig). Clicks that don't change state no longer reset it.
-// ~4 unchanged steps → strong correction nudge; ~7 → hard STUCK bail. Fixes the M&S/Currys/Wickes
-// [click→wait×5→click→wait×5] spin, Nike size re-clicks, and Deliveroo menu wandering.
+// Unified no-progress detector inputs. Returns { sig, stateKey, itemCount }:
+//  - sig: exact fingerprint (URL + cart count + dialogs + DOM sample) — equality across steps
+//    means the page is literally frozen (wait-loops, dead clicks).
+//  - stateKey: coarse page identity (host+path + cart + open-dialog count + titles, NO query/
+//    sample churn) — fed into a per-session seen-set so we can tell "a page we've already
+//    visited" (cycling/wandering) from "a new page" (forward progress). Normal shopping flows
+//    produce a NEW stateKey nearly every step; spins revisit old ones.
+// Both persisted on session so they survive auto-continue turns (like lastActionSig).
+// Dialog count/title are included so an item modal (Deliveroo/Uber Eats) counts as a state
+// change even when the URL and main <h1> don't move.
 async function computeProgressSignature(page) {
+  const fallback = (u) => ({ sig: u, stateKey: u, itemCount: 0 });
   try {
     const url = page.url() || '';
     const info = await page.evaluate(() => {
@@ -414,12 +420,61 @@ async function computeProgressSignature(page) {
         .filter(Boolean)
         .join('|')
         .slice(0, 100);
-      return { itemCount, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40), sample };
-    }).catch(() => ({ itemCount: 0, pageKey: '', sample: '' }));
-    return `${url}|c${info.itemCount}|k${info.pageKey}|${info.sample}`;
+      // Open dialogs flip the state: an item-options modal is real progress even when the
+      // URL/main title stay put, and closing it back to a seen page is a revisit.
+      const dialogEls = document.querySelectorAll('[role="dialog"],[aria-modal="true"]');
+      const dialogs = dialogEls.length;
+      const dialogTitle = dialogs
+        ? (((document.querySelector('[role="dialog"] h1, [role="dialog"] h2, [aria-modal="true"] h1, [aria-modal="true"] h2') || {}).innerText || '').trim().slice(0, 40))
+        : '';
+      return { itemCount, path: location.pathname, dialogs, dialogTitle, pageKey: host + '|c' + itemCount + '|' + mainTitle.slice(0,40), sample };
+    }).catch(() => null);
+    if (!info) return fallback(url);
+    return {
+      sig: `${url}|c${info.itemCount}|d${info.dialogs}|k${info.pageKey}|${info.dialogTitle}|${info.sample}`,
+      stateKey: `${info.path}|d${info.dialogs}|${info.pageKey}|${info.dialogTitle}`,
+      itemCount: info.itemCount,
+    };
   } catch {
-    return page && typeof page.url === 'function' ? page.url() : 'err';
+    return fallback(page && typeof page.url === 'function' ? page.url() : 'err');
   }
+}
+
+// Pure verdict over the persisted no-progress counters — exported for unit tests
+// (test/smoke/browser-progress-detector.test.js pins these thresholds).
+//  - stepsSinceProgress: consecutive steps with an IDENTICAL exact sig → frozen page /
+//    wait-loop. Nudge at 4, stuck at 7.
+//  - stepsSinceNewState: steps since we last saw a stateKey NOT already visited this
+//    session → catches cycles ([click→wait×5→click back], modal open/close churn, category
+//    ping-pong) WITHOUT punishing long-but-forward flows where each step is a new page.
+//    Nudge at 5, stuck at 9.
+//  - stepsSinceCartProgress: order-only slow backstop for "browsing forever, never adding".
+//    A normal flow legitimately needs 7-12 empty-cart steps (search→results→PDP→size→add) —
+//    this was the premature-STUCK bug: bailing at 7 killed M&S/Currys/Wickes/Nike/Deliveroo
+//    mid-normal-browse. Now it only nudges ("commit to an item") at 8 and only hard-bails at
+//    16, and is disabled once the basket has EVER been non-empty (cart badges often vanish
+//    on checkout pages, which would otherwise re-arm it against a healthy flow).
+function assessProgress(counters, { isOrder = false, cartEverNonzero = false, hasSpecificRecipe = false } = {}) {
+  // Recipe sites (e.g. John Lewis) hold the sig stable across scripted PDP steps by design.
+  if (hasSpecificRecipe) return { verdict: 'ok', correction: '' };
+  const { stepsSinceProgress = 0, stepsSinceNewState = 0, stepsSinceCartProgress = 0 } = counters || {};
+  if (stepsSinceProgress >= 7 || stepsSinceNewState >= 9) return { verdict: 'stuck', correction: '' };
+  const cartStallActive = isOrder && !cartEverNonzero;
+  if (cartStallActive && stepsSinceCartProgress >= 16) return { verdict: 'stuck', correction: '' };
+  if (stepsSinceProgress >= 4 || stepsSinceNewState >= 5) {
+    const n = Math.max(stepsSinceProgress, stepsSinceNewState);
+    return {
+      verdict: 'nudge',
+      correction: `No real progress for ${n} steps — the page is not changing, or you keep returning to pages you have already visited. Do something DIFFERENT now: open the best matching product, select the required size/option, press the Add to basket/bag button, or go to the basket/checkout.`,
+    };
+  }
+  if (cartStallActive && stepsSinceCartProgress >= 8) {
+    return {
+      verdict: 'nudge',
+      correction: `You have taken ${stepsSinceCartProgress} steps and the basket is still EMPTY. Stop browsing and comparing. Pick the best matching product visible right now, open it, select any required size/option, and press its Add to basket/bag button.`,
+    };
+  }
+  return { verdict: 'ok', correction: '' };
 }
 
 function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
@@ -448,6 +503,12 @@ below. LOOK at the screenshot first — find the thing you need (search box, add
 field, an item, an "Add" button) by sight, then act on it by its number. The page
 text alone is unreliable; trust your eyes. If the page looks like it's still loading
 (spinners, blank areas, a skeleton), choose "wait".
+
+For shopping/ordering goals, COMMIT EARLY: the FIRST product in the results that clearly
+matches the goal is the right choice. Open it, select the required size/colour/options,
+and press its "Add to basket/bag/cart" button. Do NOT keep browsing categories, refining
+the search, or comparing alternatives — a good-enough match added to the basket beats a
+perfect match never added.
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a
 number, and never use a price, quantity, postcode, or any number you read off the page as
@@ -1188,9 +1249,11 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
   // that reset per-action counters. See computeProgressSignature.
   let lastProgressSig = session.lastProgressSig || '';
   let stepsSinceProgress = session.stepsSinceProgress || 0;
-  // Separate counter for "cart count has stayed 0 for many steps" even across page hops.
-  // Complements the full sig detector for cases where the model keeps clicking different
-  // categories/results without ever adding to basket (M&S, Currys, Deliveroo etc.).
+  // Steps since the page reached a state we had NOT already visited this session — the
+  // wandering/cycling detector. Backed by session.seenStateKeys (see assessProgress).
+  let stepsSinceNewState = session.stepsSinceNewState || 0;
+  // Order-only slow backstop: steps with the basket still empty. Only meaningful alongside
+  // the new-state counter — normal browsing keeps this climbing for 7-12 steps legitimately.
   let stepsSinceCartProgress = session.stepsSinceCartProgress || 0;
   // When the model picks an element that isn't on the page (a hallucinated id, e.g. a
   // price read off the screen), we feed a pointed correction into the NEXT decision so it
@@ -1210,6 +1273,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       session.consecutiveBadDecisions = consecutiveBadDecisions;
       session.lastProgressSig = lastProgressSig;
       session.stepsSinceProgress = stepsSinceProgress;
+      session.stepsSinceNewState = stepsSinceNewState;
       session.stepsSinceCartProgress = stepsSinceCartProgress;
       onProgress('Looking at the page…');
       await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
@@ -1239,12 +1303,17 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       }
 
       // --- Unified progress detector (PRIORITY 1) ---------------------------------------
-      // Compute after settle so DOM is stable. If URL+cart-count+DOM-hash is identical for N
-      // steps, the site-specific click/wait cycles (M&S/Currys/Wickes) or re-clicks (Nike)
-      // or menu wandering (Deliveroo) are detected globally, independent of consecutiveWaits
-      // which resets on every click. Injects correction at 4; hard STUCK at 7. Persisted via
-      // session so it carries across auto-continue turns.
-      const currentSig = await timed('step.progress-sig', () => computeProgressSignature(session.page)).catch(() => session.page.url());
+      // Three signals, combined in assessProgress (thresholds pinned by unit tests):
+      //  1. exact sig unchanged        → frozen page (wait-loops, dead clicks)
+      //  2. no NEW stateKey seen       → cycling/revisiting (the real spin patterns), while
+      //     forward flows reset it every step because each page is new
+      //  3. basket empty for very long → order-only backstop so a never-committing browse
+      //     still bails fast (~turn 2) instead of burning the full turn budget
+      // The old detector bailed on signal 3 alone at 7 steps, which is INSIDE the range a
+      // normal search→PDP→size→add flow needs — it killed M&S/Currys/Wickes/Nike/Deliveroo
+      // mid-browse in one turn. Persisted via session so all of it survives auto-continue.
+      const prog = await timed('step.progress-sig', () => computeProgressSignature(session.page)).catch(() => null);
+      const currentSig = prog ? prog.sig : (session.page.url() || '');
       if (currentSig && currentSig === lastProgressSig) {
         stepsSinceProgress += 1;
       } else if (currentSig) {
@@ -1254,33 +1323,44 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       session.lastProgressSig = lastProgressSig;
       session.stepsSinceProgress = stepsSinceProgress;
 
-      // Cart-stall detector (unified, survives page changes): if cart item count has been 0
-      // across many steps (model hopping categories/search results without adding), treat
-      // as no progress on the ordering goal. Complements the exact sig match.
-      const cartMatch = String(currentSig || '').match(/\|c(\d+)/);
-      const currCount = cartMatch ? parseInt(cartMatch[1], 10) : 0;
-      if (currCount === 0) {
-        stepsSinceCartProgress += 1;
+      // Seen-set of coarse page states: a state we've already visited (or never leaving the
+      // current one) counts toward "no new state"; a genuinely new page resets the counter.
+      const stateKey = prog ? prog.stateKey : currentSig;
+      session.seenStateKeys = session.seenStateKeys || [];
+      if (stateKey && !session.seenStateKeys.includes(stateKey)) {
+        session.seenStateKeys.push(stateKey);
+        if (session.seenStateKeys.length > 80) session.seenStateKeys.shift();
+        stepsSinceNewState = 0;
       } else {
+        stepsSinceNewState += 1;
+      }
+      session.stepsSinceNewState = stepsSinceNewState;
+
+      const currCount = prog ? prog.itemCount : 0;
+      if (currCount > 0) {
         stepsSinceCartProgress = 0;
+        session.cartEverNonzero = true; // basket badge seen non-empty → backstop off for good
+      } else {
+        stepsSinceCartProgress += 1;
       }
       session.stepsSinceCartProgress = stepsSinceCartProgress;
 
-      // Only enforce progress bail/correction on vision-heavy (non-specific-recipe) sites.
       // johnlewis.com has a multi-step recipe on the PDP (size→add→go-basket) that can keep
-      // sig stable for a few steps; don't trip STUCK on it. The spin bugs (M&S etc) have no
-      // RECIPES entry (fall to GENERIC which only helps late), so they get the detector.
-      const hasSpecificRecipe = !!RECIPES[session.site];
-      if (!hasSpecificRecipe) {
-        const stalled = stepsSinceProgress >= 7 || stepsSinceCartProgress >= 7;
-        if (stalled) {
-          return STUCK;
-        }
-        const needsNudge = stepsSinceProgress >= 4 || stepsSinceCartProgress >= 4;
-        if (needsNudge) {
-          const n = Math.max(stepsSinceProgress, stepsSinceCartProgress);
-          pendingCorrection = `No progress for ${n} steps (page/DOM state or cart count unchanged). You are repeating the same ineffective pattern — do something different now: select size/option, add the item to basket, or go to the cart/checkout.`;
-        }
+      // sig stable for a few steps; assessProgress exempts specific-recipe sites entirely.
+      const assessed = assessProgress(
+        { stepsSinceProgress, stepsSinceNewState, stepsSinceCartProgress },
+        { isOrder: session.isOrder, cartEverNonzero: session.cartEverNonzero, hasSpecificRecipe: !!RECIPES[session.site] }
+      );
+      if (assessed.verdict === 'stuck') {
+        // Reset counters before bailing so a user "keep going" gets fresh room to retry
+        // instead of instantly re-tripping on the persisted values.
+        session.stepsSinceProgress = 0;
+        session.stepsSinceNewState = 0;
+        session.stepsSinceCartProgress = 0;
+        return STUCK;
+      }
+      if (assessed.verdict === 'nudge') {
+        pendingCorrection = assessed.correction;
       }
 
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
@@ -1529,10 +1609,12 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
           // Recipe step taken — trusted mechanical progress; reset progress detector so
           // multi-click recipe sequences (e.g. JL size then add on same PDP) don't accumulate.
           stepsSinceProgress = 0;
+          stepsSinceNewState = 0;
           stepsSinceCartProgress = 0;
           lastProgressSig = lastProgressSig + '|r';
           session.lastProgressSig = lastProgressSig;
           session.stepsSinceProgress = stepsSinceProgress;
+          session.stepsSinceNewState = stepsSinceNewState;
           session.stepsSinceCartProgress = stepsSinceCartProgress;
         }
         touchSession(userId);
@@ -1611,6 +1693,7 @@ module.exports = {
   looksLikeBlockWall,
   describesBlockWall,
   isOrderGoal,
+  assessProgress,
   buildDecisionPrompt,
   parseModelDecision,
   findElementByText,
