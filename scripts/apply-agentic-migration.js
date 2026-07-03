@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Agentic Migration Runner for Oxy
- * Loads the SQL from supabase-migration-agentic.sql and provides instructions + attempts basic verification.
+ * Loads the SQL from supabase/migrations/supabase-migration-agentic.sql and provides instructions + attempts basic verification.
  * 
  * Because Supabase client doesn't support arbitrary DDL, this script:
  * 1. Prints the full SQL for you to paste into the Supabase SQL Editor (recommended).
@@ -48,7 +48,7 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const migrationPath = path.join(__dirname, '..', 'supabase-migration-agentic.sql');
+const migrationPath = path.join(__dirname, '..', 'supabase/migrations/supabase-migration-agentic.sql');
 const sql = fs.readFileSync(migrationPath, 'utf8');
 
 console.log('\n=== OXY AGENTIC MIGRATION ===\n');

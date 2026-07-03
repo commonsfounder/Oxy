@@ -114,7 +114,7 @@ Connectors are modular service integrations in `connectors/`. Each exports:
 | `connectors` | Per-user connector state and OAuth tokens |
 | `preferences` | Learned user preferences (response length, tone, format) |
 
-Schema is in `supabase-migration.sql`.
+Schema is in `supabase/migrations/supabase-migration.sql`.
 
 ## Getting Started
 
@@ -159,7 +159,7 @@ Schema is in `supabase-migration.sql`.
 
 4. **Run the database migrations**
 
-   Execute the SQL in `supabase-migration.sql` + `supabase-migration-agentic.sql` (and any v2 etc.) against your Supabase project (via the SQL editor in the Supabase dashboard).
+   Execute the SQL in `supabase/migrations/supabase-migration.sql` + `supabase/migrations/supabase-migration-agentic.sql` (and any v2 etc.) against your Supabase project (via the SQL editor in the Supabase dashboard).
 
    The agentic migration adds agent_tasks, agent_traces, simulation_runs for persistent goals, planning, and dry-run support.
 
@@ -289,7 +289,7 @@ Oxy/
 ├── manifest.json           # PWA manifest
 ├── package.json            # Dependencies and scripts
 ├── .env.example            # Environment variable template
-├── supabase-migration.sql  # Database schema
+├── supabase/migrations/supabase-migration.sql  # Database schema
 ├── mcp-server.js           # Standalone MCP tool server
 ├── create-shortcut.js      # Apple Shortcuts generator
 ├── Oxy.shortcut            # Pre-built Apple Shortcut file
