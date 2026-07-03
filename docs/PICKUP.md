@@ -1,48 +1,61 @@
-# Browser-task pickup (2026-07-01)
+# Browser-task pickup (2026-07-03)
 
-Everything below is committed and pushed (`3be9685` on `origin/main`).
-
----
-
-## Browser-task reliability — pickup context
-
-**Repo:** `/Users/chizigamonyewuchi/Documents/Oxy` · branch `main` (feature work commits directly to main here)
-
-**Where we are:** `run_browser_task` orders/looks-up on real retail sites. John Lewis is proven E2E; this session added a **cross-site benchmark** and measured a **baseline of 63% overall / 71% loop pass (12/17 sites)**. Failures are mostly datacenter-IP bot-walls (infra), not loop bugs.
-
-### Read these first
-- `docs/BROWSER_TASK_SESSION_HANDOFF.md` — **UPDATE (d)** at the bottom is this session; full narrative + roadmap.
-- `api/services/browser-task.js` — the main loop (`runOrderingTurn`), bot-wall detection, browser routing.
-- `api/services/browser-recipes.js` — Tier-2 deterministic recipes (host-keyed, only John Lewis today).
-- `api/services/browser-fastpaths.js` — self-learning search-URL templates.
-- `test/dev/reliability-benchmark.js` + `reliability-fixtures.js` + `reliability-classify.js` — the benchmark.
-
-### Run the benchmark (needs `.env` GEMINI_API_KEY + local Chromium, from repo root)
-```
-node test/dev/reliability-benchmark.js            # full 19-site basket (~4 min)
-node test/dev/reliability-benchmark.js grocery    # filter by tag or site
-node test/dev/browser-task-e2e.js "<goal>" "<url>" 3   # single-shot debug
-node --test test/smoke/*.test.js                  # 243 pass
-```
-
-### NEXT TASK (top priority) — no-browser "Tier-0" price lookups
-For **info goals (price/availability), not orders**, skip the browser entirely. Most retailers server-render `schema.org/Product` JSON-LD, so 2 plain HTTP GETs get the price with no browser/model/proxy, <1s. **Proven in a probe:** John Lewis (£39.99) and Screwfix work; ASOS/Currys/Argos bot-wall the fetch too and must fall through to the existing browser loop.
-
-Build:
-1. A **pure, unit-testable parser**: given HTML → price from JSON-LD `offers.price`, then `og:price:amount` meta, then microdata fallbacks.
-2. A **fetch tier before `openNewSession`** for non-order goals: derive search URL (reuse `deriveSearchTerm`/`directSearchUrl` in `browser-task.js`) → GET search → extract first product URL → GET product → parse. Confident price → return; else fall through to the browser loop unchanged.
-3. Gate it so orders never take this path (`isOrderGoal`).
-
-### Then, in order
-2. **Generic pattern-recipes** — lift `RECIPES[host]` in `browser-recipes.js` from host-keyed to convention-keyed (`data-testid`/aria/button-text for size→add→cart→checkout) so the deterministic tail works across many sites, not just John Lewis. Vision loop stays the per-step fallback.
-3. **Delivery cart-commit fix** — Uber Eats / Deliveroo get deep then stall on the pay button (named loop bug).
-4. **Managed browser E2E** — `shouldUseRemoteForHost` routing is wired + unit-tested but **unverified against a live provider**. Once a Bright Data/Browserbase key exists, set `BROWSER_REMOTE_ENDPOINT` and run `node test/dev/reliability-benchmark.js next argos just-eat` (should flip `botwall`→`pass`).
-
-### Cost (thousands of users, for reference)
-~$0.03–0.05 per end-to-end task blended; ~$1–2/user/mo at 50 tasks. 85% of cost is residential proxy on the ⅓ of walled tasks — Tier-0 lookups + shrinking the walled fraction is the lever. Model (Gemini 3 Flash Preview) is ~1.5¢/task, negligible.
+All changes below are **committed and pushed** to `origin/main` (commits below).
 
 ---
 
-**Status after Tier-0:** Implemented + unit tests + live probe (John Lewis info goal returns `done` with price via 2x HTTP, no browser). Orders gated. Falls back cleanly. Full smoke 252 pass.
+## What's been done (sessions 1–7 + checkout identity v2)
 
-Want me to drop this into a file like `docs/PICKUP.md` so it's in the repo, or is the paste enough?
+| Commit | What |
+|--------|------|
+| `3be9685` | Sessions 1–5: reliability foundation, bot-wall detection, managed-browser routing, Tier-0 price lookups |
+| `70e592c` | Session-6a: guest-checkout path (skip false sign-in ask on M&S/Wickes/JL) |
+| `70fdcb4` | Session-6b: checkout profile v1 — email ask-once-store-reuse |
+| `08e4e5d` | Connector scrub (removed deeplink-only ubereats/deliveroo/netflix) |
+| `e944fc4` | Session-7: retailer-name resolver, generic recipe selection, faster settle, DOM guest-click |
+| *(this)* | Checkout identity v2 — name/phone/address, consolidated consent, forget path |
+
+---
+
+## Repo orientation
+
+- `api/services/browser-task.js` — the main ordering loop (`runOrderingTurn`), all session state
+- `api/services/checkout-profile.js` — pure identity functions + Supabase KV persistence
+- `api/services/browser-recipes.js` — Tier-2 deterministic recipe steps (JL, M&S, Wickes)
+- `api/services/retailer-sites.js` — retailer name → URL resolver (UK + US)
+- `api/services/browser-price-parser.js` — Tier-0 HTTP price extraction (JSON-LD / og:price)
+- `api/services/browser-fastpaths.js` — self-learning search-URL templates
+- `test/dev/reliability-benchmark.js` — cross-site benchmark (19 UK sites)
+- `test/dev/browser-task-e2e.js` — single-site E2E debugger
+
+## Running things
+
+```bash
+node --test test/smoke/*.test.js                          # 333 pass
+node test/dev/browser-task-e2e.js "goal" "url" 3         # single-shot debug
+node test/dev/reliability-benchmark.js                   # full basket (~4 min)
+node test/dev/reliability-benchmark.js marksandspencer   # filter by site
+```
+
+---
+
+## Checkout identity state (v2 shipped)
+
+Guest checkout flow now handles:
+1. **Guest fork** — DOM click on "checkout as guest" (Wickes-style login-or-guest page)
+2. **Email** — auto-filled from `checkout_profile.email` when consent; else asks once with "save my details" opt-in
+3. **Name / phone / address** — auto-filled via `autoFillCheckoutDetails` DOM enumeration from `checkout_profile.{name,phone,address}`; else asks once for all missing fields together
+4. **Payment** — always a hard human ask; never auto-filled; untouched by this feature
+
+Preferences keys: `checkout_profile.email`, `.name`, `.phone`, `.address` (JSON), `.consent`
+
+User can clear with: "forget my checkout details" → `forget_memory(query:'checkout details')`
+
+---
+
+## NEXT (recommended order)
+
+1. **Delivery cart-commit fix** — Uber Eats/Deliveroo reach cart but stall on the pay button. No delivery-specific recipe yet; likely needs a modal-dismiss + pay-button recipe step.
+2. **Generic recipe breadth** — the foundation (session-7) is in; now lift step conventions (`data-testid`/aria/button-text) so the deterministic tail covers more sites.
+3. **Managed-browser E2E** — code is wired, unverified. Once a Bright Data/Browserbase key exists: `BROWSER_REMOTE_ENDPOINT=… node test/dev/reliability-benchmark.js next argos just-eat` (expect botwall→pass).
+4. **Country selects / non-UK address** — v2 skips `<select>` tags (too site-specific); per-site recipe or smarter label-match strategy needed later.

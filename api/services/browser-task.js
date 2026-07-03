@@ -9,11 +9,15 @@ const { parseGoalContext } = require('./browser-goal-context');
 const {
   classifyCheckoutAsk,
   findEmailInputElement,
+  matchProfileFieldForInput,
   parseEmailFromUserText,
-  wantsSaveEmailConsent,
+  parseCheckoutReplyFromUserText,
+  wantsSaveDetailsConsent,
   buildEmailAskWithConsent,
+  buildDetailsAskWithConsent,
   loadCheckoutProfile,
-  saveCheckoutEmail
+  saveCheckoutProfile,
+  saveCheckoutEmail,
 } = require('./checkout-profile');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
@@ -1338,26 +1342,32 @@ async function getCheckoutProfileCached(session, userId) {
   return session.checkoutProfile;
 }
 
-// Fill a guest-checkout email field using the same index-space resolve as vision fill.
-async function autoFillCheckoutEmail(session, elements, email, steps, onProgress) {
-  let target = findEmailInputElement(elements);
+// Fill a single checkout field by locator index + optional DOM fallback probe.
+// fieldPredicate(el, hint) → boolean: true when this DOM input matches the field.
+async function autoFillCheckoutField(session, elements, value, steps, onProgress, labelText, fieldPredicate) {
+  let target = (elements || []).find((el) => {
+    const t = String(el.text || '');
+    return t && fieldPredicate(null, t);
+  });
   let actionIndex = target?.locatorIndex;
-  // Fallback: extraction text may omit "email" (placeholder-only, associated <label> not in list).
   if (actionIndex == null) {
-    const idx = await session.page.evaluate((selector) => {
+    const idx = await session.page.evaluate((selector, predSrc, predFlags) => {
+      const pat = new RegExp(predSrc, predFlags);
       const nodes = document.querySelectorAll(selector);
       for (let i = 0; i < nodes.length; i++) {
         const el = nodes[i];
         if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') continue;
         const type = (el.getAttribute('type') || '').toLowerCase();
-        const hint = [el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ');
-        if (type === 'email' || /\be-?mail\b/i.test(hint)) return i;
+        if (type === 'hidden' || type === 'password') continue;
+        const hint = [type, el.getAttribute('name'), el.getAttribute('id'),
+          el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ');
+        if (pat.test(hint)) return i;
       }
       return -1;
-    }, CLICKABLE_SELECTOR).catch(() => -1);
+    }, CLICKABLE_SELECTOR, fieldPredicate.source || '', fieldPredicate.flags || 'i').catch(() => -1);
     if (idx >= 0) {
       actionIndex = idx;
-      target = { text: 'email', locatorIndex: idx };
+      target = { text: labelText, locatorIndex: idx };
     }
   }
   if (actionIndex == null) return false;
@@ -1366,22 +1376,103 @@ async function autoFillCheckoutEmail(session, elements, email, steps, onProgress
     { selector: CLICKABLE_SELECTOR, idx: actionIndex }
   ).then((h) => h.asElement()).catch(() => null);
   if (!locator) return false;
-  onProgress(`Typing into "${target.text}"…`);
-  const value = String(email || '');
+  onProgress(`Typing into "${target?.text || labelText}"…`);
+  const val = String(value || '');
   await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   try {
-    await locator.fill(value, { timeout: 8000 });
+    await locator.fill(val, { timeout: 8000 });
   } catch {
     const nested = await locator.$('input, textarea, [contenteditable]').catch(() => null);
     if (nested) {
-      await nested.fill(value, { timeout: 8000 });
+      await nested.fill(val, { timeout: 8000 });
     } else {
       await locator.click({ timeout: 5000, force: true }).catch(() => {});
-      await session.page.keyboard.type(value, { delay: 10 });
+      await session.page.keyboard.type(val, { delay: 10 });
     }
   }
-  session.history.push(`Step ${steps}: [checkout-profile] filled "${target.text}" with "${value}"`);
+  session.history.push(`Step ${steps}: [checkout-profile] filled "${target?.text || labelText}" with "${val}"`);
   return true;
+}
+
+// Convenience wrapper for email (preserves existing call sites).
+async function autoFillCheckoutEmail(session, elements, email, steps, onProgress) {
+  return autoFillCheckoutField(
+    session, elements, email, steps, onProgress, 'email',
+    /\be-?mail\b/i
+  );
+}
+
+// Multi-field pass for delivery-details pages. Enumerates visible inputs, matches each
+// to a profile value via matchProfileFieldForInput, fills confident matches.
+// Does NOT auto-submit — returns the count filled; let the vision loop click continue.
+async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
+  // Build a map of profileField → value from what we have stored
+  const values = {};
+  if (profile.email) values.email = profile.email;
+  if (profile.name) {
+    const parts = String(profile.name).trim().split(/\s+/);
+    values.full_name = profile.name;
+    values.first_name = parts[0] || profile.name;
+    values.last_name = parts.slice(1).join(' ') || parts[0];
+  }
+  if (profile.phone) values.phone = profile.phone;
+  if (profile.address) {
+    if (profile.address.line1) values.line1 = profile.address.line1;
+    if (profile.address.line2) values.line2 = profile.address.line2;
+    if (profile.address.city) values.city = profile.address.city;
+    if (profile.address.postcode) values.postcode = profile.address.postcode;
+  }
+
+  // Enumerate candidate inputs from the DOM (skip hidden/password/select/iframe)
+  const candidates = await session.page.evaluate((selector, paymentPatSrc, paymentPatFlags) => {
+    const payPat = new RegExp(paymentPatSrc, paymentPatFlags);
+    const nodes = document.querySelectorAll(selector);
+    const results = [];
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      if (el.tagName === 'SELECT') continue;
+      if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') continue;
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (type === 'hidden' || type === 'password' || type === 'checkbox' || type === 'radio') continue;
+      const s = window.getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden') continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const hint = [type, el.getAttribute('name'), el.getAttribute('id'),
+        el.getAttribute('placeholder'), el.getAttribute('aria-label'),
+        el.getAttribute('autocomplete')].join(' ');
+      if (payPat.test(hint)) continue; // never touch payment fields
+      results.push({ idx: i, hint: hint.toLowerCase() });
+    }
+    return results;
+  }, CLICKABLE_SELECTOR,
+    /\b(card\s*(?:number|details)?|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number)\b/.source,
+    'i'
+  ).catch(() => []);
+
+  let filled = 0;
+  for (const { idx, hint } of candidates) {
+    const profileField = matchProfileFieldForInput(hint);
+    if (!profileField || !(profileField in values)) continue;
+    const value = values[profileField];
+
+    const locator = await session.page.evaluateHandle(
+      ({ selector, i }) => document.querySelectorAll(selector)[i] || null,
+      { selector: CLICKABLE_SELECTOR, i: idx }
+    ).then((h) => h.asElement()).catch(() => null);
+    if (!locator) continue;
+
+    onProgress(`Typing "${profileField}"…`);
+    await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    try {
+      await locator.fill(String(value), { timeout: 6000 });
+      session.history.push(`Step ${steps}: [checkout-profile] filled "${hint.trim().slice(0, 40)}" with "${profileField}"`);
+      filled++;
+    } catch {
+      // Skip fields that don't respond — continue to next
+    }
+  }
+  return filled;
 }
 
 // After a recipe click, wait for the DOM/URL state the NEXT recipe gate reads — stops the
@@ -1605,15 +1696,16 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       session.goal = goal;
       session.isOrder = session.isOrder || isOrderGoal(goal); // latch once an order, always an order
       session.autoContinueCount = 0; // a real instruction resets the runaway guard
-      // User replied with checkout identity (e.g. guest email after an ask).
+      // User replied with checkout identity (email, name, address, phone).
       if (session.isOrder) {
-        const replyEmail = parseEmailFromUserText(goal);
-        if (replyEmail) {
-          if (wantsSaveEmailConsent(goal)) {
-            await saveCheckoutEmail(getSupabase(), userId, replyEmail, true);
-            session.checkoutProfile = { email: replyEmail, emailConsent: true };
+        const parsed = parseCheckoutReplyFromUserText(goal);
+        if (Object.keys(parsed).length > 0) {
+          const consent = wantsSaveDetailsConsent(goal);
+          if (consent) {
+            await saveCheckoutProfile(getSupabase(), userId, parsed, true);
+            session.checkoutProfile = null; // force reload with updated values next step
           }
-          session.pendingCheckoutFill = { field: 'email', value: replyEmail };
+          session.pendingCheckoutFill = { fields: parsed };
         }
       }
     } else {
@@ -1852,17 +1944,41 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
       }
 
-      // Guest-checkout email — AFTER login-wall/guest fork so we don't fill email on the
+      // Guest-checkout identity fills — AFTER login-wall/guest fork so we never fill on the
       // sign-in page before clicking "Checkout as a guest".
-      if (session.isOrder && session.pendingCheckoutFill?.field === 'email') {
-        const filled = await autoFillCheckoutEmail(session, elements, session.pendingCheckoutFill.value, steps, onProgress);
-        if (filled) {
+      if (session.isOrder && session.pendingCheckoutFill?.fields) {
+        const fields = session.pendingCheckoutFill.fields;
+        session.pendingCheckoutFill._attempts = (session.pendingCheckoutFill._attempts || 0) + 1;
+        // Email: keep the v1 submit-after-fill path.
+        if (fields.email) {
+          const filled = await autoFillCheckoutEmail(session, elements, fields.email, steps, onProgress);
+          if (filled) {
+            delete fields.email;
+            if (!Object.keys(fields).length) session.pendingCheckoutFill = null;
+            return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
+          }
+        }
+        // Other fields (name/phone/address): multi-field fill, no auto-submit.
+        const nonEmailFields = Object.keys(fields).filter((k) => k !== 'email');
+        if (nonEmailFields.length > 0) {
+          const fakeProfile = { name: fields.name, phone: fields.phone, address: fields.address };
+          const count = await autoFillCheckoutDetails(session, fakeProfile, steps, onProgress);
+          if (count > 0) {
+            nonEmailFields.forEach((k) => delete fields[k]);
+            if (!Object.keys(fields).length) session.pendingCheckoutFill = null;
+            touchSession(userId);
+            await persistStorage(userId, session);
+            // Let the vision loop click "continue" — return awaiting_more
+            return checkoutEmailFilledResult(session);
+          }
+        }
+        // Give up on pending fill after 3 attempts to avoid a stuck loop
+        if (session.pendingCheckoutFill && session.pendingCheckoutFill._attempts >= 3) {
           session.pendingCheckoutFill = null;
-          return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
         }
       } else if (session.isOrder && session.guestCheckoutDone) {
         const profile = await getCheckoutProfileCached(session, userId);
-        if (profile.email && profile.emailConsent) {
+        if (profile.email && profile.consent) {
           const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
           if (filled) {
             return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
@@ -2033,10 +2149,11 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           await session.page.waitForTimeout(1200);
           continue;
         }
-        // Order-only: auto-fill guest email when stored with consent; else ask + opt-in copy.
+        // Order-only: auto-fill checkout identity when stored with consent; else ask once.
         if (session.isOrder) {
           const checkoutField = classifyCheckoutAsk(decision.question);
           if (checkoutField === 'email') {
+            // Try guest-checkout fork first (Wickes-style login-or-guest page)
             if (!session.guestCheckoutDone && (isGuestCheckoutUrl(session.page.url()) || findGuestCheckoutElement(elements))) {
               const guestClicked = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
               if (guestClicked) {
@@ -2049,13 +2166,35 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
               }
             }
             const profile = await getCheckoutProfileCached(session, userId);
-            if (profile.email && profile.emailConsent) {
+            if (profile.email && profile.consent) {
               const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
               if (filled) {
                 return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
               }
             }
             return { type: 'ask', question: buildEmailAskWithConsent(decision.question) };
+          }
+          if (checkoutField === 'name' || checkoutField === 'phone' || checkoutField === 'address') {
+            const profile = await getCheckoutProfileCached(session, userId);
+            const hasField = checkoutField === 'name' ? !!profile.name
+              : checkoutField === 'phone' ? !!profile.phone
+              : !!(profile.address?.line1 || profile.address?.postcode);
+            if (profile.consent && hasField) {
+              const count = await autoFillCheckoutDetails(session, profile, steps, onProgress);
+              if (count > 0) {
+                consecutiveBadDecisions = 0;
+                consecutiveWaits = 0;
+                touchSession(userId);
+                await persistStorage(userId, session);
+                continue; // let the vision loop click continue
+              }
+            }
+            // Ask for all missing fields in one go
+            const missing = [];
+            if (!profile.name) missing.push('full name');
+            if (!profile.address?.line1) missing.push('delivery address and postcode');
+            if (!profile.phone) missing.push('phone number');
+            return { type: 'ask', question: buildDetailsAskWithConsent(decision.question, missing) };
           }
         }
         return { type: 'ask', question: decision.question };
@@ -2374,6 +2513,9 @@ module.exports = {
   findGuestCheckoutElement,
   classifyCheckoutAsk,
   findEmailInputElement,
+  matchProfileFieldForInput,
+  autoFillCheckoutField,
+  autoFillCheckoutDetails,
   isSearchResultsUrl,
   isGuestCheckoutUrl,
   looksLikeBlockWall,

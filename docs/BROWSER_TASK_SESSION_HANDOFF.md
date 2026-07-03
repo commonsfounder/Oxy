@@ -243,3 +243,30 @@ Implemented the top-priority item: pure `api/services/browser-price-parser.js` (
 - No change to cost/latency for order flows or walled info flows.
 
 Next remains: generic pattern-recipes (Tier-2 breadth), delivery cart-commit, managed-browser verification.
+
+## UPDATE 2026-07-03 (f) — Session-7 + checkout identity v2
+
+### Session-7 changes (commits 08e4e5d, e944fc4)
+- **Connector scrub**: removed deeplink-only ubereats/deliveroo/netflix connectors + phantom test files that tested non-existent APIs. Suite went 252→312 pass with real tests.
+- **Retailer-name resolver** (`api/services/retailer-sites.js`): maps "order me X from M&S" to a home/search URL without guessing; UK + US retailers, covers delivery/grocery/retail kinds.
+- **Generic recipe selection** (`selectRecipeForHost` in `browser-recipes.js`): replaces the direct `RECIPES[host]` lookup so Tier-2 deterministic steps are easier to extend.
+- **Faster recipe settle**: `RECIPE_SETTLE_MS=50` vs `STEP_SETTLE_MS=80` saves ~0.5–1s per recipe step.
+- **DOM-based guest-checkout click** (`tryGuestCheckoutClick`): covers sites like Wickes where element extraction only returns 2–3 nodes but the guest CTA is still in the DOM.
+
+### Checkout identity v2 (this session)
+`api/services/checkout-profile.js` extended from email-only to full guest identity:
+- **New fields**: name, phone, address `{line1,line2?,city,postcode}` stored as `checkout_profile.*` preferences keys. Consolidated consent flag `checkout_profile.consent` (reads legacy `checkout_profile.email_consent` too).
+- **`classifyCheckoutAsk`** now returns `'email'|'name'|'phone'|'address'|null`. Payment pattern always wins → null.
+- **`parseCheckoutReplyFromUserText`**: extracts email/phone/name/address from a freeform reply like `"Chizi M, 12 High Street, London, SW1A 1AA, 07700 900123"`. Conservative: returns `{}` rather than guessing.
+- **`matchProfileFieldForInput`**: maps a DOM input's hint text to a profile key (`first_name`, `last_name`, `full_name`, `phone`, `line1`, `line2`, `city`, `postcode`). Payment hints → null.
+- **`autoFillCheckoutDetails`** (`browser-task.js`): one DOM enumeration pass that fills all matched visible inputs in one step. Does NOT auto-submit — lets the vision loop click continue.
+- **Ask gate** (`browser-task.js` ~line 2152): email path unchanged; name/phone/address path auto-fills from stored profile when consent, else asks once with consolidated consent line ("save my details").
+- **Reply capture** updated to call `parseCheckoutReplyFromUserText` instead of email-only parse.
+- **`forget_memory`**: scope=all clears `checkout_profile.*` preferences too; query matching checkout/delivery/address/email/phone clears profile separately.
+- **Smoke: 333/333 pass.**
+
+### NEXT (in order)
+1. **Delivery cart-commit fix** (Uber Eats/Deliveroo) — the last named loop bug. Gets deep (adds to cart), stalls on pay button/handoff ask. No delivery handler in the recipes layer yet.
+2. **Generic pattern-recipes breadth** (session-7 work was the foundation) — lift recipe step conventions (`data-testid`, aria, button-text) so the deterministic tail works on many sites, not just JL/M&S/Wickes.
+3. **Managed-browser E2E** — `shouldUseRemoteForHost` is wired + tested but unverified against a real provider. Once a Bright Data/Browserbase key is available: `BROWSER_REMOTE_ENDPOINT=… node test/dev/reliability-benchmark.js next argos just-eat`.
+4. **Non-UK address / country select** — checkout-profile v2 deliberately skips `<select>` fields (country dropdowns are too site-specific); needs per-site recipe handling or a smarter label-match strategy.

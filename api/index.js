@@ -67,6 +67,7 @@ const taskManager = require('./services/task-manager');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
+const { clearCheckoutProfile } = require('./services/checkout-profile');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -2378,7 +2379,8 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
   if (normalizedScope === 'all') {
     const { error } = await supabase.from('memories').delete().eq('user_id', userId);
     if (error) throw error;
-    return { success: true, text: 'I cleared what I had in memory.' };
+    await clearCheckoutProfile(supabase, userId).catch(() => {});
+    return { success: true, text: 'I cleared what I had in memory, including any saved checkout details.' };
   }
 
   if (normalizedScope === 'recent') {
@@ -2393,6 +2395,16 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
     const { error: deleteError } = await supabase.from('memories').delete().eq('id', data[0].id);
     if (deleteError) throw deleteError;
     return { success: true, text: 'I forgot the most recent memory.' };
+  }
+
+  // Checkout-specific forget: "forget my checkout details / address / email" etc.
+  const CHECKOUT_FORGET_PATTERN = /\b(checkout|delivery\s+details?|my\s+(?:email|address|phone|details?))\b/i;
+  if (normalizedQuery && CHECKOUT_FORGET_PATTERN.test(normalizedQuery)) {
+    const cleared = await clearCheckoutProfile(supabase, userId).catch(() => null);
+    if (cleared) {
+      return { success: true, text: `I've cleared your saved ${cleared}.` };
+    }
+    return { success: true, text: "You don't have any saved checkout details — nothing to clear." };
   }
 
   if (normalizedQuery) {
