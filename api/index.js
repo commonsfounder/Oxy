@@ -26,6 +26,7 @@ const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
+const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const { createActionRunner } = require('./services/action-runner');
 const { checkSpendLimit } = require('./services/money-guard');
 const {
@@ -550,6 +551,8 @@ ABSOLUTE RULES:
 21b. If the user corrects you with "I mean..." or "not that", preserve the original task details and only change the misunderstood part.
 22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
 22-CRITICAL. Never use find_place for product searches, price lookups, or online shopping — even if the request mentions a retailer name like "John Lewis", "ASOS", or "Amazon". find_place is only for finding physical locations (buildings, stores as places to visit, restaurants, etc.). "Find me grey jeans on John Lewis" is an online shopping task (use browser_task), NOT a place lookup.
+22-CRITICAL-B. When a user says "wrong price", "that's wrong", "incorrect price", or any price correction, ALWAYS re-check the exact same retailer/site that produced the previous price — not the brand's own website, not a different retailer. If they said "on John Lewis" earlier, re-check johnlewis.com. Never drift to another site on a correction.
+22-CRITICAL-C. For follow-up product questions ("what's the price?", "link to that?", "is it in stock?", "check again") where no retailer is stated, resolve the product and retailer from CONTEXT in this conversation. Check "CONTEXT YOU ALREADY STATED IN THIS CONVERSATION" and conversation history for the last mentioned retailer and product before acting.
 22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
 22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
 22c. Action risk policy: searches, place lookup, train lookup, directions, and opening Uber/Maps to a destination are low risk. Drafting is medium risk. Sending messages/emails, spending money, confirming an actual booking/payment, placing orders, or making calls require a clear user request and review.
@@ -819,6 +822,52 @@ function extractAlreadyStatedContext(history = []) {
   }
 
   return lines;
+}
+
+// Scans recent conversation turns (both user and assistant) to extract the active
+// shopping context: which retailer the user specified and what URL was actually visited.
+// This is separate from extractAlreadyStatedContext which only reads assistant turns.
+function extractShoppingContextHints(history = []) {
+  const recent = history.slice(-8);
+  const hints = [];
+
+  // Track the most recently user-specified retailer and the last domain actually visited
+  let specifiedRetailer = null;
+  let visitedDomain = null;
+  const aliases = allRetailerAliases();
+
+  for (const turn of recent) {
+    const content = String(turn.content || '');
+    const lower = content.toLowerCase();
+
+    if (turn.role === 'user') {
+      // Try resolving retailer from the full user message (handles "on john lewis", "from asos", etc.)
+      const resolved = resolveRetailerFromGoal(content);
+      if (resolved) {
+        specifiedRetailer = resolved.displayName;
+      } else {
+        // Fallback: bare retailer alias in user message
+        for (const alias of aliases) {
+          if (lower.includes(alias)) {
+            specifiedRetailer = alias;
+            break;
+          }
+        }
+      }
+    }
+
+    if (turn.role === 'assistant') {
+      // Extract domain from any URL the assistant returned
+      const urlMatch = content.match(/https?:\/\/(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})/i);
+      if (urlMatch) visitedDomain = urlMatch[1].toLowerCase();
+    }
+  }
+
+  if (specifiedRetailer) hints.push(`Shopping: user specified retailer "${specifiedRetailer}" — use this for any follow-up price or product queries.`);
+  if (visitedDomain && (!specifiedRetailer || !specifiedRetailer.toLowerCase().includes(visitedDomain.split('.')[0]))) {
+    hints.push(`Last browsed site: ${visitedDomain}`);
+  }
+  return hints;
 }
 
 function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
@@ -4004,7 +4053,10 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions)
   ]);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
-  const statedContext = extractAlreadyStatedContext(history);
+  const statedContext = [
+    ...extractAlreadyStatedContext(history),
+    ...extractShoppingContextHints(history)
+  ];
   const resolvedContext = requestContext.resolvedContext || (!quickTurn && isContextualReference(message)
     ? buildResolvedContext(history, recentActions)
     : null);
