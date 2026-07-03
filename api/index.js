@@ -549,6 +549,7 @@ ABSOLUTE RULES:
 21a. Calendar beats music. If the user says "calendar", "schedule", or "event", do not use Apple Music just because the phrase contains "add". Use create_calendar_event or ask for the missing date/time.
 21b. If the user corrects you with "I mean..." or "not that", preserve the original task details and only change the misunderstood part.
 22. For plain local place requests like "nearest gym", "closest McDonald's", or "coffee near me", use find_place with the user's natural phrase as query. Do not ask for a full address or branch details.
+22-CRITICAL. Never use find_place for product searches, price lookups, or online shopping — even if the request mentions a retailer name like "John Lewis", "ASOS", or "Amazon". find_place is only for finding physical locations (buildings, stores as places to visit, restaurants, etc.). "Find me grey jeans on John Lewis" is an online shopping task (use browser_task), NOT a place lookup.
 22a. For ride/taxi/Uber requests like "get me an Uber to the nearest gym", use book_uber and pass the user's natural destination phrase. Do not invent branch addresses.
 22b. Missing-info policy: infer low-risk context from device location, memory, or the user's phrase when available; ask only for genuinely blocking details like a missing contact, ambiguous recipient, or unavailable location permission.
 22c. Action risk policy: searches, place lookup, train lookup, directions, and opening Uber/Maps to a destination are low risk. Drafting is medium risk. Sending messages/emails, spending money, confirming an actual booking/payment, placing orders, or making calls require a clear user request and review.
@@ -1054,7 +1055,7 @@ function getDeterministicQuickReply(message) {
   if (/^(evening|good evening)$/.test(normalized)) return 'Evening.';
   if (/^(thanks|thank you)$/.test(normalized)) return 'Anytime.';
   if (/^(haha|lol)$/.test(normalized)) return 'Yeah.';
-  if (/^(ok|okay|kk|cool|nice|great|sure|yep|yes)$/.test(normalized)) return 'Got it.';
+  if (/^(ok|okay|kk|cool|nice|great)$/.test(normalized)) return 'Got it.';
   if (/^(nah|no)$/.test(normalized)) return 'Got you.';
   return '';
 }
