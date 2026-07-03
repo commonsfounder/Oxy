@@ -1426,7 +1426,9 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   if (useAgentTools) {
     try {
       config.tools = buildToolsForGemini(!!useSearch);
-      config.toolConfig = { functionCallingConfig: { mode: 'AUTO' } };
+      // googleSearch alongside functionDeclarations 400s unless server-side tool
+      // invocations are enabled.
+      config.toolConfig = { functionCallingConfig: { mode: 'AUTO' }, ...(useSearch ? { includeServerSideToolInvocations: true } : {}) };
     } catch (e) {
       console.warn('[tools] failed to build function declarations, falling back', e.message);
       if (useSearch) config.tools = [{ googleSearch: {} }];

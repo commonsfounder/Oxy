@@ -110,7 +110,9 @@ async function runAgentLoop({
     temperature: 0.2,
     topP: 0.8,
     tools: buildToolsForGemini ? buildToolsForGemini(useSearch) : [{ functionDeclarations: [] }],
-    toolConfig: { functionCallingConfig: { mode: 'AUTO' } }
+    // googleSearch alongside functionDeclarations 400s unless server-side tool
+    // invocations are enabled — this is what silently killed grounded turns.
+    toolConfig: { functionCallingConfig: { mode: 'AUTO' }, ...(useSearch ? { includeServerSideToolInvocations: true } : {}) }
   };
 
   for (let i = 0; i < maxIterations; i++) {
