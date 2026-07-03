@@ -16,9 +16,9 @@ struct PendantStatusView: View {
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
 
     // Persisted hardware configuration.
-    @AppStorage("nml_hw_wakeword") private var wakeword = "CHIN TILT"
-    @AppStorage("nml_hw_audio") private var audioOutput = "BLE BUDS"
-    @AppStorage("nml_hw_haptic") private var hapticForce = "MID"
+    @AppStorage("oxy_hw_wakeword") private var wakeword = "CHIN TILT"
+    @AppStorage("oxy_hw_audio") private var audioOutput = "BLE BUDS"
+    @AppStorage("oxy_hw_haptic") private var hapticForce = "MID"
 
     var body: some View {
         NavigationStack {

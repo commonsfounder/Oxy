@@ -102,7 +102,7 @@ struct ChatHomeView: View {
                 Text("CONVERSATIONS")
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(3.5)
-                    .foregroundStyle(Color.appMuted.opacity(0.6))
+                    .foregroundStyle(Color.appMuted.opacity(0.8))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
@@ -518,7 +518,7 @@ private struct SidebarSectionHeader: View {
             Text(label.uppercased())
                 .font(.system(size: 10, weight: .regular))
                 .tracking(2.8)
-                .foregroundStyle(Color.appMuted.opacity(0.5))
+                .foregroundStyle(Color.appMuted.opacity(0.8))
             Spacer()
         }
         .padding(.horizontal, 16)

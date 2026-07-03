@@ -46,17 +46,24 @@ struct MessageBubble: View {
                                 lineSpacing: isCompact ? 4 : 5
                             )
                         } else {
-                            Text(message.content)
+                            // Assistant prose is parsed as markdown (bold, links); the
+                            // user's own words stay verbatim — asterisks they typed are
+                            // content, not styling.
+                            Text(isUser ? AttributedString(message.content) : .chatMarkdown(message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
                                 .foregroundStyle(Color.appInk)
                                 .lineSpacing(isCompact ? 4 : 5)
+                                .textSelection(.enabled)
                         }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background {
+                        // appSurface is the same pure black as the canvas, which made
+                        // assistant replies read as floating bare text; a faint fill
+                        // keeps the bubble legible without breaking the flat language.
                         bubbleShape
-                            .fill(isUser ? Color.appAccent.opacity(0.18) : Color.appSurface)
+                            .fill(isUser ? Color.appAccent.opacity(0.18) : Color.appFillSubtle)
                     }
                     .overlay {
                         if !isUser {
@@ -123,7 +130,7 @@ struct MessageBubble: View {
                 Text(message.timestamp, style: .time)
                     .font(.appBody(10))
                     .monospacedDigit()
-                    .foregroundStyle(Color.appMuted.opacity(0.6))
+                    .foregroundStyle(Color.appMuted)
                     .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
                     .padding(.top, 1)
             }
@@ -139,6 +146,39 @@ struct MessageBubble: View {
         // Animate the streaming→settled flip, not every token. Animating on
         // `content` re-ran a spring layout pass per streamed word — a stutter source.
         .animation(.appSpring, value: message.isStreaming)
+    }
+}
+
+// MARK: - Chat markdown
+
+extension AttributedString {
+    /// Markdown for chat prose: inline styles and tappable links, with heading
+    /// markers flattened to plain lines — full block parsing would collapse the
+    /// newlines chat text relies on. Bare URLs are promoted to links first.
+    static func chatMarkdown(_ text: String) -> AttributedString {
+        var source = text.replacingOccurrences(
+            of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
+        source = source.replacingOccurrences(
+            of: #"(?<![("\[])(https?://[^\s<>()\[\]]+)"#,
+            with: "[$1]($1)", options: .regularExpression)
+        guard var parsed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) else { return AttributedString(text) }
+        for run in parsed.runs where run.link != nil {
+            parsed[run.range].underlineStyle = .single
+        }
+        return parsed
+    }
+}
+
+extension String {
+    /// Plain-prose version for card excerpts — heading, emphasis, and code
+    /// markers removed rather than rendered.
+    var strippingMarkdown: String {
+        self
+            .replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[*_`]{1,3}"#, with: "", options: .regularExpression)
     }
 }
 
@@ -268,6 +308,7 @@ struct ActionCard: View {
     private var detailText: String? {
         guard let raw = action.cardText ?? action.text ?? action.error else { return nil }
         let compact = raw
+            .strippingMarkdown
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
         if !action.success && action.action == "book_uber" {
@@ -391,7 +432,7 @@ struct ActionCard: View {
                 .foregroundStyle(muted ? Color.appMuted : Color.appInk)
                 .frame(maxWidth: .infinity)
                 .frame(height: 42)
-                .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
         }
         .buttonStyle(.appScale)
     }
@@ -605,7 +646,7 @@ struct TravelResultCard: View {
             }
 
             if let text = action.text, !text.isEmpty {
-                Text(text)
+                Text(text.strippingMarkdown)
                     .font(.appBody(13, weight: .light))
                     .foregroundStyle(action.success ? Color.appInk : Color.appMuted)
                     .lineLimit(6)
@@ -616,8 +657,8 @@ struct TravelResultCard: View {
         .background(Color.appSurface)
         // Rounded card silhouette to match every other card in the message stream
         // (UberHandoffCard/ActionCard/pendingCard) — was the lone sharp-edged Rectangle.
-        .clipShape(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: NMLRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
     }
 }
 

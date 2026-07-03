@@ -37,7 +37,7 @@ struct MemoryView: View {
 
     private var memoryContent: some View {
         ZStack {
-            Color.edCanvas.ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if !embedded {

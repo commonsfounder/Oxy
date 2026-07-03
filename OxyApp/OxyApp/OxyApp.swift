@@ -5,13 +5,10 @@ import UIKit
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    // The single source of truth for light/dark. `.system` follows iOS; light/dark
-    // are the user's manual override (Settings → Appearance). Changing it re-renders
-    // the root, re-applies preferredColorScheme, and every screen reads the result
-    // from its environment colorScheme.
-    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
-
-    private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .system }
+    // Every app* token is hardcoded to its dark value (the light-mode pivot was
+    // reverted), so system chrome must be pinned dark too: letting the scheme follow
+    // iOS light mode renders a light liquid-glass tab bar/keyboard over the pure-black
+    // canvas — glyphs become invisible and the bar reads as an empty pill.
 
     init() {
         // Slider's unfilled track is near-invisible on pure black by default; give it a
@@ -24,7 +21,7 @@ struct OxyApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .preferredColorScheme(appearance.colorScheme)
+                .preferredColorScheme(.dark)
                 .tint(Color.appAccent)
         }
     }

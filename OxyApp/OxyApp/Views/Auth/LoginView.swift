@@ -12,7 +12,7 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.edCanvas.ignoresSafeArea()
+            Color.appBackground.ignoresSafeArea()
 
             // Straight to the sign-in form — no intro carousel, no mic slide.
             LoginFormPage(
@@ -85,7 +85,7 @@ private struct LoginFormPage: View {
 
                 Text(isRegistering ? "Create your account." : "Welcome back.")
                     .font(.appDisplay(30, weight: .light))
-                    .foregroundStyle(Color.edInk)
+                    .foregroundStyle(Color.appInk)
                     .padding(.bottom, 44)
 
                 VStack(alignment: .leading, spacing: 28) {
@@ -106,21 +106,21 @@ private struct LoginFormPage: View {
                     HStack(spacing: 8) {
                         if isLoading {
                             ProgressView()
-                                .tint(Color.edCanvas)
+                                .tint(Color.appBackground)
                                 .scaleEffect(0.8)
                         }
                         Text(isRegistering ? "Create Account" : "Sign In")
                             .font(.system(size: 14, weight: .semibold))
                             .tracking(1.5)
                     }
-                    // On-ink, not pure black: contrasts with edInk in BOTH finishes (the same
+                    // On-ink, not pure black: contrasts with appInk in BOTH finishes (the same
                     // primary button accent. appBackground.
                     // enabled button in light mode rendered black text on a near-black fill —
-                    // invisible. edCanvas flips with the finish and stays legible.
-                    .foregroundStyle(Color.edCanvas)
+                    // invisible. appBackground flips with the finish and stays legible.
+                    .foregroundStyle(Color.appBackground)
                     .frame(maxWidth: .infinity)
                     .frame(height: 58)
-                    .background(Color.edInk)
+                    .background(Color.appInk)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.appScale)

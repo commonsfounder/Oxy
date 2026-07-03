@@ -109,19 +109,13 @@ struct ConnectorsView: View {
                 Button(action: handleGoogleAction) {
                     ConnectorPill(
                         label: googleButtonLabel,
-                        tint: googleStatus == .connected ? Color.oxySub : Color.oxyStone,
+                        tint: googleStatus == .connected ? Color.oxySub : Color.oxyText,
                         isBusy: googleStatus == .connecting
                     )
                 }
                 .disabled(googleStatus == .connecting)
             }
             .padding(14)
-            .background(Color.oxySurface2)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.oxyLine2, lineWidth: 1)
-            )
         }
     }
 
@@ -361,13 +355,7 @@ private struct ConnectorCard: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
-        .background(Color.oxySurface2)
         .opacity(connector.implemented ? 1.0 : 0.45)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
     }
 }
 
@@ -386,7 +374,7 @@ private struct ConnectorCheckmark: View {
             }
             .scaleEffect(isDrawn ? 1 : 0.72)
             .onAppear { isDrawn = true }
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isDrawn)
+            .animation(.easeOut(duration: 0.25), value: isDrawn)
     }
 }
 
@@ -405,6 +393,8 @@ private struct ConnectorPill: View {
     let tint: Color
     let isBusy: Bool
 
+    // No fill, no border, no pill shape — tracked-out uppercase type carries the
+    // affordance per the pure-black minimalist directive.
     var body: some View {
         HStack(spacing: 6) {
             if isBusy {
@@ -414,17 +404,13 @@ private struct ConnectorPill: View {
             }
             Text(label)
                 .font(.system(size: 12, weight: .semibold))
+                .tracking(1.2)
+                .textCase(.uppercase)
                 .lineLimit(1)
         }
         .foregroundStyle(tint)
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
-        .background(tint.opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(tint.opacity(0.28), lineWidth: 1)
-        )
     }
 }
 
@@ -455,10 +441,6 @@ private struct AppIconView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.oxyLine2, lineWidth: 1)
-        )
     }
 
     private var brandFallback: some View {
@@ -559,7 +541,7 @@ struct Connector: Codable, Identifiable {
     var actionTint: Color {
         if !implemented { return Color.oxyDim }
         if connectionState == "needs_reconnect" || connectionState == "needs_setup" || connectionState == "degraded" { return Color.oxyStone }
-        return enabled ? Color.oxySub : Color.oxyGreen
+        return enabled ? Color.oxySub : Color.oxyText
     }
 
     var statusColor: Color {

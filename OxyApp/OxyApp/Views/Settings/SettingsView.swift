@@ -13,7 +13,6 @@ struct SettingsView: View {
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
     // Light/dark/system — the single source of truth read by the app root's
     // preferredColorScheme. Writing it re-themes the whole app live.
-    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.system.rawValue
 
     // Same living aurora as Today/Chat — the glass cards below need it behind them
     // to refract, otherwise they're just dark blobs on black.
@@ -31,20 +30,9 @@ struct SettingsView: View {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 36) {
                         settingsSection(title: "Appearance") {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Theme")
-                                    .font(.system(size: 14, weight: .regular))
-                                    .foregroundStyle(Color.mgHeading)
-                                MilgrainSegmentedControl(
-                                    options: AppAppearance.allCases.map(\.rawValue),
-                                    labels: AppAppearance.allCases.map(\.label),
-                                    selection: $appearanceRaw
-                                )
-                            }
-                            .padding(.vertical, 16)
-
-                            MilgrainDivider()
-
+                            // Theme picker removed: every app* token is hardcoded dark and the
+                            // root pins .preferredColorScheme(.dark), so the control was a no-op
+                            // that could only break system chrome (light tab bar over black).
                             segmentRow(
                                 "Bubbles",
                                 options: ["comfort", "compact"],

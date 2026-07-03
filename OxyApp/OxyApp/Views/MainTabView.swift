@@ -39,6 +39,7 @@ struct MainTabView: View {
                 MoreView().tag(Tab.more)
             }
             .tint(Color.appAccent)
+            .environment(TabBarVisibility())
             .onChange(of: selectedTab) { _, _ in
                 HapticManager.shared.select()
             }
@@ -107,7 +108,9 @@ struct MoreView: View {
                     .padding(.bottom, 48)
                 }
                 .onAppear {
-                    appeared = false
+                    // First visit only — TabView re-fires onAppear on every tab switch,
+                    // and replaying the entrance stagger each time reads as a glitch.
+                    guard !appeared else { return }
                     withAnimation { appeared = true }
                 }
                 .hidesTabBarOnScroll()

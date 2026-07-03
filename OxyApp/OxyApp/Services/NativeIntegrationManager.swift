@@ -78,6 +78,24 @@ struct NativeWorkoutSummary: Codable, Equatable {
     let endedAt: Date
 }
 
+// MARK: - Today dashboard models
+
+struct TodayEvent: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let start: Date
+    let end: Date
+    let isAllDay: Bool
+    let location: String?
+}
+
+struct TodayReminder: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let due: Date?
+    let overdue: Bool
+}
+
 private struct ITunesSongResult: Decodable {
     let resultCount: Int
     let results: [ITunesSong]
@@ -210,6 +228,167 @@ final class NativeIntegrationManager {
         await syncNativeContext(userId: userId)
     }
 
+    func currentCapabilities() async -> NativeCapabilities {
+        await nativeCapabilities()
+    }
+
+    func requestContactsAccess() async {
+        await requestContactsPermission()
+    }
+
+    func requestHealthAccess() async {
+        await requestHealthPermission()
+        UserDefaults.standard.set(true, forKey: "oxy_today_health_asked")
+    }
+
+    /// Whether we've already asked iOS for Health access — read status isn't reliably
+    /// queryable, so this is the only signal the Today card has for "asked vs never asked".
+    var healthPermissionRequested: Bool {
+        UserDefaults.standard.bool(forKey: "oxy_today_health_asked")
+    }
+
+    func requestRemindersAccess() async {
+        await requestReminderPermission()
+    }
+
+    func requestMusicAccess() async {
+        _ = await requestMusicPermission()
+    }
+
+    // MARK: - Today dashboard
+
+    /// Request the permissions the Today dashboard reads, only when still undetermined so we
+    /// don't re-prompt. Health read status isn't reliably queryable, so it's gated by a flag.
+    func prepareTodayAccess() async {
+        if EKEventStore.authorizationStatus(for: .event) == .notDetermined { await requestCalendarPermission() }
+        if EKEventStore.authorizationStatus(for: .reminder) == .notDetermined { await requestReminderPermission() }
+        if !UserDefaults.standard.bool(forKey: "oxy_today_health_asked") {
+            await requestHealthPermission()
+            UserDefaults.standard.set(true, forKey: "oxy_today_health_asked")
+        }
+    }
+
+    /// All calendars the user can pick from for the Agenda card, title + stable id.
+    func availableCalendars() -> [(id: String, title: String)] {
+        eventStore.calendars(for: .event).map { ($0.calendarIdentifier, $0.title) }
+    }
+
+    /// All reminder lists the user can pick from for the Reminders card, title + stable id.
+    func availableReminderLists() -> [(id: String, title: String)] {
+        eventStore.calendars(for: .reminder).map { ($0.calendarIdentifier, $0.title) }
+    }
+
+    /// Today's remaining calendar events (all-day events plus anything not yet finished), soonest first.
+    /// `excludedCalendarIDs` lets the Agenda card hide calendars the user has turned off.
+    func todaysEvents(excludedCalendarIDs: Set<String> = []) async -> [TodayEvent] {
+        guard calendarAuthorized else { return [] }
+        let cal = Calendar.current
+        let now = Date()
+        let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        let predicate = eventStore.predicateForEvents(withStart: cal.startOfDay(for: now), end: endOfDay, calendars: nil)
+        var seen = Set<String>()
+        return eventStore.events(matching: predicate)
+            .filter { !excludedCalendarIDs.contains($0.calendar.calendarIdentifier) }
+            .filter { $0.isAllDay || $0.endDate > now }
+            .sorted { $0.startDate < $1.startDate }
+            // Same event synced across calendars (or double-booked by the brain) shows once.
+            .filter { event in
+                let key = (event.title ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                    + "|" + String(event.startDate.timeIntervalSinceReferenceDate)
+                return seen.insert(key).inserted
+            }
+            .prefix(6)
+            .map { event in
+                let location = (event.location?.isEmpty == false) ? event.location : nil
+                return TodayEvent(
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    title: event.title ?? "Untitled",
+                    start: event.startDate, end: event.endDate,
+                    isAllDay: event.isAllDay, location: location
+                )
+            }
+    }
+
+    /// Incomplete reminders due today or overdue, soonest first.
+    /// `excludedListIDs` lets the Reminders card hide lists the user has turned off.
+    func todaysReminders(excludedListIDs: Set<String> = []) async -> [TodayReminder] {
+        guard remindersAuthorized else { return [] }
+        let predicate = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+        let reminders: [EKReminder] = await withCheckedContinuation { cont in
+            eventStore.fetchReminders(matching: predicate) { cont.resume(returning: $0 ?? []) }
+        }
+        let now = Date()
+        let cal = Calendar.current
+        let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: now) ?? now
+        // A reminder from months ago is stale noise, not "today". Only surface things due
+        // today/upcoming, or overdue within a short grace window. ponytail: 2-day floor,
+        // make it a setting if users want a longer overdue tail.
+        let overdueFloor = cal.date(byAdding: .day, value: -2, to: now) ?? now
+        var seen = Set<String>()
+        return reminders
+            .filter { !excludedListIDs.contains($0.calendar.calendarIdentifier) }
+            .compactMap { reminder -> TodayReminder? in
+                // No due date at all (plain to-do, the common case) still belongs on
+                // today's list — only reminders with a due date get windowed.
+                let due: Date?
+                if let comps = reminder.dueDateComponents, let parsed = cal.date(from: comps) {
+                    guard parsed <= endOfDay, parsed >= overdueFloor else { return nil }
+                    due = parsed
+                } else {
+                    due = nil
+                }
+                // Reminders created elsewhere (or by an older path) can carry a dangling
+                // time preposition with no object — "call mum at". Trim a trailing
+                // at/on/by/for so the card never shows a sentence missing its tail.
+                let rawTitle = reminder.title ?? "Reminder"
+                let title = rawTitle
+                    .replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
+                    .trimmingCharacters(in: .whitespaces)
+                guard seen.insert(title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)).inserted else { return nil }
+                return TodayReminder(id: reminder.calendarItemIdentifier, title: title, due: due, overdue: (due ?? .distantFuture) < now)
+            }
+            .sorted { ($0.due ?? .distantFuture) < ($1.due ?? .distantFuture) }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    /// Marks a reminder complete by its calendar item identifier. Returns true on success.
+    @discardableResult
+    func completeReminder(id: String) async -> Bool {
+        guard remindersAuthorized,
+              let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else { return false }
+        reminder.isCompleted = true
+        do {
+            try eventStore.save(reminder, commit: true)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Step count since midnight, or nil if unavailable.
+    func todaysSteps() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let value = await stepCount(start: Calendar.current.startOfDay(for: Date()), end: Date()) else { return nil }
+        return Int(value.rounded())
+    }
+
+    /// Last night's total sleep, in whole minutes — for the Today vitals row.
+    func todaysSleepMinutes() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let minutes = await sleepMinutesLastNight() else { return nil }
+        let rounded = Int(minutes.rounded())
+        return rounded > 0 ? rounded : nil
+    }
+
+    /// Most recent resting heart rate (bpm), or nil if unavailable — for the Today vitals row.
+    func todaysRestingHeartRate() async -> Int? {
+        guard HKHealthStore.isHealthDataAvailable(),
+              let bpm = await latestQuantity(.restingHeartRate, unit: HKUnit.count().unitDivided(by: .minute())) else { return nil }
+        let rounded = Int(bpm.rounded())
+        return rounded > 0 ? rounded : nil
+    }
+
     func syncNativeContext(userId: String) async {
         guard !userId.isEmpty else { return }
         let settings = loadSettings()
@@ -306,6 +485,31 @@ final class NativeIntegrationManager {
             }
         }
 
+        if let result = await prepareNativeMessage(from: normalized) {
+            return result
+        }
+
+        if let result = await answerNativeHealthRequest(normalized) {
+            return result
+        }
+
+        if let result = await createNativeReminder(from: normalized) {
+            return result
+        }
+
+        if let result = await createNativeCalendarEvent(from: normalized) {
+            return result
+        }
+
+        if !requiresOnlineMusicResolution(normalized),
+           let result = await handleNativeMusicRequest(normalized) {
+            return result
+        }
+
+        if shouldUseNativePlaceSearch(normalized), let result = await findNativePlace(for: normalized) {
+            return result
+        }
+
         return nil
     }
 
@@ -379,35 +583,6 @@ final class NativeIntegrationManager {
         if let u = URL(string: urlStr) {
             UIApplication.shared.open(u)
         }
-    }
-        }
-
-        if let result = await prepareNativeMessage(from: normalized) {
-            return result
-        }
-
-        if let result = await answerNativeHealthRequest(normalized) {
-            return result
-        }
-
-        if let result = await createNativeReminder(from: normalized) {
-            return result
-        }
-
-        if let result = await createNativeCalendarEvent(from: normalized) {
-            return result
-        }
-
-        if !requiresOnlineMusicResolution(normalized),
-           let result = await handleNativeMusicRequest(normalized) {
-            return result
-        }
-
-        if shouldUseNativePlaceSearch(normalized), let result = await findNativePlace(for: normalized) {
-            return result
-        }
-
-        return nil
     }
 
     private func shouldLetBrainHandleFirst(_ message: String) -> Bool {
@@ -2711,6 +2886,25 @@ private extension HKWorkoutActivityType {
 
 final class PendantBLEManager: NSObject {
     static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
+    static let didConnect = Notification.Name("PendantBLEManagerDidConnect")
+    static let didDisconnect = Notification.Name("PendantBLEManagerDidDisconnect")
+
+    enum ConnectionState {
+        case disconnected
+        case scanning
+        case connecting
+        case connected
+        case error
+    }
+
+    private(set) var connectionState: ConnectionState = .disconnected
+    var isConnected: Bool { connectionState == .connected }
+    private(set) var lastError: String?
+    var peripheralName: String? { peripheral?.name }
+
+    /// Streaming audio hook. When set, complete utterances (chunks terminated by
+    /// the DONE signal) are delivered here instead of via `didReceiveData`.
+    var onAudioData: ((Data) -> Void)?
 
     private enum UART {
         static let service    = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -2751,10 +2945,37 @@ final class PendantBLEManager: NSObject {
         p.writeValue(data, for: rx, type: .withResponse)
     }
 
-    private func startScan() {
+    /// Sends a plain-text control command (e.g. "THINK", "START") to the pendant.
+    func sendCommand(_ command: String) {
+        write(Data(command.utf8))
+    }
+
+    func startScan() {
         guard central.state == .poweredOn else { return }
+        lastError = nil
+        connectionState = .scanning
         print("[Pendant] Scanning for Nordic UART Service (\(UART.service))")
         central.scanForPeripherals(withServices: [UART.service], options: nil)
+    }
+
+    /// Stops an in-progress scan without connecting.
+    func stopScan() {
+        central.stopScan()
+        if connectionState == .scanning || connectionState == .connecting {
+            connectionState = .disconnected
+        }
+    }
+
+    /// Disconnects and forgets the currently paired pendant.
+    func unpair() {
+        if let peripheral {
+            central.cancelPeripheralConnection(peripheral)
+        }
+        central.stopScan()
+        rxCharacteristic = nil
+        txCharacteristic = nil
+        peripheral = nil
+        connectionState = .disconnected
     }
 }
 
@@ -2770,6 +2991,7 @@ extension PendantBLEManager: CBCentralManagerDelegate {
                         rssi RSSI: NSNumber) {
         print("[Pendant] Discovered peripheral — name: \(peripheral.name ?? "<nil>"), UUID: \(peripheral.identifier), RSSI: \(RSSI)")
         central.stopScan()
+        connectionState = .connecting
         self.peripheral = peripheral
         peripheral.delegate = self
         print("[Pendant] Connecting to \(peripheral.name ?? peripheral.identifier.uuidString)…")
@@ -2777,7 +2999,10 @@ extension PendantBLEManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connectionState = .connected
+        lastError = nil
         print("[Pendant] Connected to \(peripheral.name ?? peripheral.identifier.uuidString)")
+        NotificationCenter.default.post(name: PendantBLEManager.didConnect, object: nil)
         peripheral.discoverServices([UART.service])
     }
 
@@ -2789,9 +3014,11 @@ extension PendantBLEManager: CBCentralManagerDelegate {
         } else {
             print("[Pendant] Disconnected from \(peripheral.name ?? peripheral.identifier.uuidString)")
         }
+        connectionState = .disconnected
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
+        NotificationCenter.default.post(name: PendantBLEManager.didDisconnect, object: nil)
         startScan()
     }
 
@@ -2799,6 +3026,8 @@ extension PendantBLEManager: CBCentralManagerDelegate {
                         didFailToConnect peripheral: CBPeripheral,
                         error: Error?) {
         print("[Pendant] Failed to connect to \(peripheral.name ?? peripheral.identifier.uuidString): \(error?.localizedDescription ?? "unknown error")")
+        connectionState = .error
+        lastError = error?.localizedDescription ?? "Couldn’t connect to the pendant."
         rxCharacteristic = nil
         txCharacteristic = nil
         self.peripheral = nil
@@ -2856,6 +3085,14 @@ extension PendantBLEManager: CBPeripheralDelegate {
                 let handler = recordingCompletion
                 recordingCompletion = nil
                 handler?(completed)
+            } else {
+                audioBuffer.append(data)
+            }
+        } else if let onAudioData {
+            if data == PendantBLEManager.doneSignal {
+                let completed = audioBuffer
+                audioBuffer = Data()
+                onAudioData(completed)
             } else {
                 audioBuffer.append(data)
             }
