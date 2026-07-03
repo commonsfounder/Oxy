@@ -5904,5 +5904,10 @@ app.post('/agent/recipes/:id/execute', requireSessionAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(JSON.stringify({ severity: 'INFO', event: 'server.started', port: PORT }));
+});
+
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
