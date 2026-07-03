@@ -311,7 +311,12 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+// Chat/agentic reasoning needs the capable model: the lite helper model fabricates
+// required tool params (e.g. get_directions with a made-up destination) instead of
+// asking, which makes every vague/multi-step turn misfire. d426ae2 defaulted this to
+// flash-lite "everywhere" for cost and silently downgraded the whole agent loop in prod
+// (no OXY_REASONING_MODEL override was set). Keep chat on flash-preview; helpers stay lite.
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
 if ([PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL].some(m => m.includes('3.5'))) {

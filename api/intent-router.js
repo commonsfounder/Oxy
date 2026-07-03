@@ -58,6 +58,18 @@ function looksLikeDirectionsRequest(message) {
   return DIRECTIONS_TERMS.test(normalizeText(message));
 }
 
+// True only when a phrase names an actual place — i.e. something survives after stripping
+// the directions/navigation trigger words and generic filler. "Get directions" -> false;
+// "directions to the gym" -> "the gym" -> true.
+function hasRealDestination(phrase) {
+  const residue = normalizeText(phrase)
+    .replace(new RegExp(DIRECTIONS_TERMS.source, 'gi'), ' ')
+    .replace(/\b(get|show|give|find|open|take|me|my|please|pls|a|an|the|to|for|some|now|here)\b/gi, ' ')
+    .replace(/[^a-z0-9]+/gi, ' ')
+    .trim();
+  return residue.length > 0;
+}
+
 function looksLikeMemoryWrite(message) {
   const text = normalizeText(message);
   return /^(remember|save|note down)\b/i.test(text) ||
@@ -215,8 +227,16 @@ function inferDeterministicAction(message, options = {}) {
     if (!fromTo && !headingDestination && /\b(yeah|yes|but|that|it|this|same|there|direct|changes?|tomorrow)\b/i.test(text)) {
       return null;
     }
+    const destination = fromTo?.destination || headingDestination || cleanDestinationPhrase(text);
+    // A bare directions command ("Get directions", "directions please" — e.g. the app's
+    // starter suggestion chip) has no actual place: cleanDestinationPhrase just echoes the
+    // command back. Never fabricate a destination out of the command itself — defer to the
+    // LLM so it asks "where to?" instead of routing to a garbage location.
+    if (!fromTo && !headingDestination && !hasRealDestination(destination)) {
+      return null;
+    }
     const input = {
-      destination: fromTo?.destination || headingDestination || cleanDestinationPhrase(text),
+      destination,
       mode: TRANSIT_TERMS.test(text) ? 'transit' : defaultMode
     };
     if (fromTo?.origin) input.origin = fromTo.origin;
