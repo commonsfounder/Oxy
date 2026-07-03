@@ -11,6 +11,15 @@ test('nearest McDonald’s routes to find_place, not Uber', () => {
   ]);
 });
 
+test('bare "Get directions" with no destination defers to the LLM instead of routing to itself', () => {
+  // Starter suggestion chips send the bare label. Without an actual place the router
+  // must NOT fabricate destination="Get directions" — it should return null so the
+  // model asks "where to?".
+  assert.equal(inferDeterministicAction('Get directions'), null);
+  assert.equal(inferDeterministicAction('directions'), null);
+  assert.equal(inferDeterministicAction('directions please'), null);
+});
+
 test('coffee near me routes to find_place with casual phrase preserved', () => {
   const routed = inferDeterministicAction('coffee near me');
   assert.equal(routed.actions[0].type, 'find_place');
