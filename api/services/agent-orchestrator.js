@@ -3,7 +3,7 @@ let modernGenAI;
 let PRIMARY_CHAT_MODEL = 'gemini-3-flash-preview';
 
 try {
-  const { ModernGoogleGenAI } = require('@google/genai');
+  const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
   modernGenAI = new ModernGoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
   PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || PRIMARY_CHAT_MODEL;
 } catch (e) {
@@ -130,9 +130,11 @@ async function runAgentLoop({
           resp = await callGeminiWithTools(modelName, contents, baseConfig, trace);
         } catch (e2) {
           logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
+          agentTrace.status = 'error';
           break;
         }
       } else {
+        agentTrace.status = 'error';
         break;
       }
     }
@@ -232,8 +234,13 @@ async function runAgentLoop({
     } catch (e) {}
   }
 
+  // Never claim "Done." when the loop died without doing anything — that reads as a
+  // (false) success to the user. Surface the failure so they know to retry.
+  const fallback = agentTrace.status === 'error' && !executedActions.length
+    ? "I hit a problem finishing that — give me a moment and try again."
+    : 'Done.';
   return {
-    spoken: spoken || lastToolResultsText || 'Done.',
+    spoken: spoken || lastToolResultsText || fallback,
     actions: executedActions,
     traceId: agentTrace.id,
     iterations: agentTrace.steps.length,
