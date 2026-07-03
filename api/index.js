@@ -4044,7 +4044,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
   const historyOptions = { since: requestContext.chatStartedAt };
   const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
-    quickTurn ? Promise.resolve('') : getMemory(userId, trace, initialMessage || ''),
+    quickTurn ? Promise.resolve('') : getMemory(userId, trace, message || ''),
     getHistory(userId, trace, 12, historyOptions),
     getPreferences(userId, trace),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
@@ -4109,7 +4109,7 @@ const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains', 'station_board']);
 
 async function buildMorningBriefing(userId, now = new Date()) {
   const [memory, history] = await Promise.all([
-    getMemory(userId, null, message || ''),
+    getMemory(userId, null, ''),
     getHistory(userId)
   ]);
 
@@ -4180,7 +4180,7 @@ async function getLatestNativeContext(userId) {
 
 async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
   const [memory, history, preferences] = await Promise.all([
-    getMemory(userId, null, message || ''),
+    getMemory(userId, null, ''),
     getHistory(userId),
     getPreferences(userId)
   ]);
@@ -5020,7 +5020,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       chatStartedAt,
       pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
     };
-    const { history, useSearch, dynamicSystemPrompt, cachedContentName } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
+    const { history, useSearch, dynamicSystemPrompt, cachedContentName, quickTurn } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({
       dynamicSystemPrompt,

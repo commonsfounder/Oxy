@@ -96,7 +96,7 @@ async function runAgentLoop({
   // Cream-of-the-crop: auto plan for complex goals
   if (initialMessage.length > 50 || /plan|book|research|find|organize|handle|arrange/i.test(initialMessage)) {
     try {
-      const plan = await generatePlan(userId, initialMessage, contextSummary || '');
+      const plan = await generatePlan(userId, initialMessage, context.summary || '');
       if (plan?.steps?.length > 1) {
         logAgentStep(agentTrace, { type: 'auto_plan', plan: plan.title });
         // Inject plan into context for agent
