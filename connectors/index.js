@@ -1,8 +1,5 @@
 const google = require('./google');
 const uber = require('./uber');
-const ubereats = require('./ubereats');
-const deliveroo = require('./deliveroo');
-const netflix = require('./netflix');
 const telegram = require('./telegram');
 const trainline = require('./trainline');
 const maps = require('./maps');
@@ -29,9 +26,6 @@ const registry = {};
 
 for (const action of google.SUPPORTED_ACTIONS) registry[action] = google;
 for (const action of uber.SUPPORTED_ACTIONS) registry[action] = uber;
-for (const action of ubereats.SUPPORTED_ACTIONS) registry[action] = ubereats;
-for (const action of deliveroo.SUPPORTED_ACTIONS) registry[action] = deliveroo;
-for (const action of netflix.SUPPORTED_ACTIONS) registry[action] = netflix;
 for (const action of telegram.SUPPORTED_ACTIONS) registry[action] = telegram;
 for (const action of trainline.SUPPORTED_ACTIONS) registry[action] = trainline;
 for (const action of maps.SUPPORTED_ACTIONS) registry[action] = maps;
@@ -56,7 +50,7 @@ for (const action of stocks.SUPPORTED_ACTIONS) registry[action] = stocks;
 const REAL_API_CONNECTORS = new Set(['google', 'telegram', 'maps', 'notion', 'github', 'monzo', 'stripe', 'plaid', 'weather', 'slack', 'strava', 'oura', 'eventbrite', 'flights', 'hotels', 'stocks']);
 
 // Handoff / convenience connectors (open apps with prefill - still useful for consumer)
-const HANDOFF_CONNECTORS = new Set(['uber', 'ubereats', 'deliveroo', 'netflix', 'trainline', 'spotify', 'lyft', 'amazon']);
+const HANDOFF_CONNECTORS = new Set(['uber', 'trainline', 'spotify', 'lyft', 'amazon']);
 
 // All "implemented" for UI purposes
 const IMPLEMENTED_CONNECTORS = new Set([...REAL_API_CONNECTORS, ...HANDOFF_CONNECTORS]);
