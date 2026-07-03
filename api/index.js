@@ -69,6 +69,7 @@ const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
+const { encryptTokens } = require('./services/token-crypto');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -3073,7 +3074,7 @@ app.post('/auth/forgot-password', forgotPasswordRateLimiter, async (req, res) =>
     await supabase.from('password_reset_tokens').insert({ user_id: account.user_id, token, expires_at: expiresAt });
 
     const resetUrl = `${process.env.APP_URL || ''}/auth/reset-password?token=${token}`;
-    log('info', 'password_reset.token_created', { event: '[password-reset]', url: resetUrl });
+    log('info', 'password_reset.token_created', { event: '[password-reset]', userId: account.user_id, expiresAt });
 
     try {
       const { sendPasswordResetEmail } = require('./services/email');
@@ -3423,6 +3424,39 @@ app.get('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     res.json({ summary: await getMemorySummary(req.params.userId) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/memory/:userId/items', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 250);
+    const { data, error } = await supabase
+      .from('memories')
+      .select('id, content, source, created_at')
+      .eq('user_id', req.params.userId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    res.json({ items: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/memory/:userId/items/:id', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const { error, count } = await supabase
+      .from('memories')
+      .delete({ count: 'exact' })
+      .eq('user_id', req.params.userId)
+      .eq('id', req.params.id);
+    if (error) throw error;
+    if (!count) return res.status(404).json({ error: 'Memory not found.' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -5464,7 +5498,7 @@ app.get('/auth/google/callback', async (req, res) => {
     };
 
     const { error: upsertError } = await supabase.from('connectors').upsert(
-      { user_id: userId, connector_id: 'google', enabled: true, tokens, updated_at: new Date().toISOString() },
+      { user_id: userId, connector_id: 'google', enabled: true, tokens: encryptTokens(tokens), updated_at: new Date().toISOString() },
       { onConflict: 'user_id,connector_id' }
     );
     if (upsertError) throw upsertError;

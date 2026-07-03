@@ -44,7 +44,7 @@ function isEncryptedTokenEnvelope(value) {
 }
 
 function encryptTokens(tokensObj = {}) {
-  const key = encryptionKey({ strict: true });
+  const key = encryptionKey();
   if (!key || isEncryptedTokenEnvelope(tokensObj)) return tokensObj;
 
   const iv = crypto.randomBytes(12);

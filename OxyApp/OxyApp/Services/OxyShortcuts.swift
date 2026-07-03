@@ -28,11 +28,11 @@ final class SiriRequestBus: @unchecked Sendable {
 /// the app to a fresh chat and sends the spoken query straight through the
 /// normal chat pipeline (so streaming, TTS, actions and review all still apply).
 struct AskOxyIntent: AppIntent {
-    static var title: LocalizedStringResource = "Ask Oxy"
-    static var description = IntentDescription("Ask Oxy a question or give it a task by voice.")
+    static let title: LocalizedStringResource = "Ask Oxy"
+    static let description = IntentDescription("Ask Oxy a question or give it a task by voice.")
 
     /// Bring the app to the foreground — the chat surface handles the request.
-    static var openAppWhenRun: Bool = true
+    static let openAppWhenRun: Bool = true
 
     @Parameter(title: "Request", requestValueDialog: "What should I ask Oxy?")
     var query: String
@@ -54,9 +54,9 @@ struct AskOxyIntent: AppIntent {
 /// "Open Oxy" — just launches the app to the chat tab. Lightweight counterpart
 /// for the Action Button / a simple Shortcut.
 struct OpenOxyIntent: AppIntent {
-    static var title: LocalizedStringResource = "Open Oxy"
-    static var description = IntentDescription("Open Oxy and start a conversation.")
-    static var openAppWhenRun: Bool = true
+    static let title: LocalizedStringResource = "Open Oxy"
+    static let description = IntentDescription("Open Oxy and start a conversation.")
+    static let openAppWhenRun: Bool = true
 
     @MainActor
     func perform() async throws -> some IntentResult {
