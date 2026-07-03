@@ -24,28 +24,28 @@ for (const line of fs.readFileSync('.env', 'utf8').split('\n')) {
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
 
-// --- stub Supabase BEFORE browser-task captures it via destructure (same as e2e harness) ---
+// --- stub Supabase with checkout profile so cart cases reach ready_for_payment ---
 const runtime = require('../../runtime');
-const chainable = new Proxy(function () {}, {
-  get: (_t, prop) => {
-    if (prop === 'then') return undefined;
-    if (prop === 'maybeSingle' || prop === 'single') return async () => ({ data: null });
-    if (prop === 'upsert' || prop === 'insert' || prop === 'update') return async () => ({ data: null, error: null });
-    return () => chainable;
-  },
-  apply: () => chainable
-});
-runtime.createSupabaseServiceClient = () => chainable;
+const { createCheckoutProfileSupabase } = require('./checkout-profile-stub');
+const BENCH_EMAIL = process.env.OXY_BENCH_CHECKOUT_EMAIL || process.env.OXY_E2E_CHECKOUT_EMAIL || 'guest@oxy-test.example';
+process.env.OXY_BENCH_CHECKOUT_EMAIL = BENCH_EMAIL;
+runtime.createSupabaseServiceClient = () => createCheckoutProfileSupabase();
 
 const { runOrderingTurn, getSession, closeSession } = require('../../api/services/browser-task');
 const { classifyOutcome, LOOP_FAILURE_BUCKETS, INFRA_BUCKETS } = require('./reliability-classify');
 const FIXTURES = require('./reliability-fixtures');
 
 const MAX_TURNS = Number(process.env.OXY_BENCH_TURNS || 8);
+const MAX_CASE_MS = Number(process.env.OXY_BENCH_MAX_MS || 10 * 60 * 1000);
 const filters = process.argv.slice(2).map(s => s.toLowerCase());
+const excludeTags = (process.env.OXY_BENCH_EXCLUDE || 'known-botwall')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 // A case matches a filter if the filter is one of its tags OR a substring of its site.
 function selected(c) {
+  if (excludeTags.some((t) => (c.tags || []).includes(t))) return false;
   if (!filters.length) return true;
   return filters.some(f => (c.tags || []).includes(f) || c.site.toLowerCase().includes(f));
 }
@@ -60,6 +60,10 @@ async function runCase(c) {
   let outcome, turns = 0, threw = null;
   const t0 = Date.now();
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
+    if (Date.now() - t0 > MAX_CASE_MS) {
+      outcome = { type: 'error', error: `benchmark case timeout (${MAX_CASE_MS}ms)` };
+      break;
+    }
     turns = turn;
     const args = turn === 1
       ? { url: c.url, goal: c.goal, onProgress: () => {} }

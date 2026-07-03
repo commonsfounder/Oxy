@@ -14,6 +14,7 @@ const PREF_CONSENT = 'checkout_profile.consent'; // consolidated consent flag
 const PAYMENT_ASK_PATTERN = /\b(card\s*(?:number|details)?|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number)\b/i;
 
 const EMAIL_ASK_PATTERN = /\b(e-?mail(?:\s*address)?|your\s+email|guest\s+email)\b/i;
+const TITLE_ASK_PATTERN = /\b(title|salutation|preferred\s+title|mr\/mrs|how\s+should\s+we\s+address)\b/i;
 const NAME_ASK_PATTERN = /\b(your\s+(?:full\s+|first\s+|last\s+)?name|name\s+for\s+(?:the\s+)?(?:order|delivery))\b/i;
 const PHONE_ASK_PATTERN = /\b((?:mobile|phone|contact)\s+number|your\s+(?:mobile|phone))\b/i;
 const ADDRESS_ASK_PATTERN = /\b(delivery\s+address|shipping\s+address|your\s+address|address\s+line|post\s?code|zip\s+code|house\s+number|street\s+address)\b/i;
@@ -32,17 +33,22 @@ function classifyCheckoutAsk(question) {
   const q = String(question || '');
   if (!q || PAYMENT_ASK_PATTERN.test(q)) return null;
   if (EMAIL_ASK_PATTERN.test(q)) return 'email';
+  if (TITLE_ASK_PATTERN.test(q)) return 'title';
   if (NAME_ASK_PATTERN.test(q)) return 'name';
   if (PHONE_ASK_PATTERN.test(q)) return 'phone';
   if (ADDRESS_ASK_PATTERN.test(q)) return 'address';
   return null;
 }
 
+const GUEST_CHECKOUT_LABEL = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest|continue without (?:an )?account|shop as (?:a )?guest)\b/i;
+
 /** Find an email input in the loop's extracted clickable elements. */
 function findEmailInputElement(elements) {
   return (elements || []).find((el) => {
     const t = String(el.text || '');
-    if (!t || PAYMENT_ASK_PATTERN.test(t)) return false;
+    if (!t || PAYMENT_ASK_PATTERN.test(t) || GUEST_CHECKOUT_LABEL.test(t)) return false;
+    // Buttons/links labelled "Continue with email" etc. are not inputs — DOM fill handles those.
+    if (/\b(sign in|log in|continue|submit)\b/i.test(t) && /\b(e-?mail)\b/i.test(t)) return false;
     return /\b(e-?mail|email address)\b/i.test(t);
   }) || null;
 }
@@ -57,16 +63,26 @@ function matchProfileFieldForInput(hintText) {
   if (PAYMENT_ASK_PATTERN.test(h)) return null;
   // Email
   if (/e-?mail/.test(h)) return 'email';
+  // Title / salutation (Wickes Hybris checkout)
+  if (/\b(title|salutation)\b/.test(h) && !/subtitle/.test(h)) return 'title';
+  // HTML autocomplete tokens
+  if (/\bgiven-name\b/.test(h)) return 'first_name';
+  if (/\bfamily-name\b/.test(h)) return 'last_name';
+  if (/\bstreet-address\b/.test(h)) return 'line1';
+  if (/\baddress-level2\b/.test(h)) return 'city';
+  if (/\bpostal-code\b/.test(h)) return 'postcode';
   // Name variants — order matters: full > first/given > last/sur/family
   if (/full.?name/.test(h)) return 'full_name';
-  if (/first.?name|given.?name|forename/.test(h)) return 'first_name';
-  if (/last.?name|surname|family.?name/.test(h)) return 'last_name';
-  // Phone
-  if (/\b(mobile|phone|tel\b|contact.?number)/.test(h)) return 'phone';
+  if (/first.?name|given.?name|forename|\bfirstname\b/.test(h)) return 'first_name';
+  if (/last.?name|surname|family.?name|\blastname\b|\bsur\b/.test(h)) return 'last_name';
+  // Phone — include bare input type=tel (Wickes SPA uses type without name/autocomplete)
+  if (/\b(mobile|phone|tel\b|contact.?number)/.test(h) || /\binput\s+tel\b/.test(h)) return 'phone';
+  // Wickes delivery line 1 uses autocomplete=none on a lone text field
+  if (/\bautocomplete\s+none\b/.test(h) && /\btext\b/.test(h)) return 'line1';
   // Address — line2 before line1 so "address line 2" doesn't match "line 1"
   if (/address.?line.?2|apt|apartment|flat|unit/.test(h)) return 'line2';
-  if (/address.?line|street|house.?number|building/.test(h)) return 'line1';
-  if (/post.?code|zip/.test(h)) return 'postcode';
+  if (/address.?line|street|house.?number|building|\bline1\b|\baddress1\b/.test(h)) return 'line1';
+  if (/post.?code|postal|zip/.test(h)) return 'postcode';
   if (/\b(city|town)\b/.test(h)) return 'city';
   return null;
 }
@@ -298,6 +314,7 @@ module.exports = {
   PREF_PHONE,
   PREF_ADDRESS,
   PREF_CONSENT,
+  TITLE_ASK_PATTERN,
   classifyCheckoutAsk,
   findEmailInputElement,
   matchProfileFieldForInput,

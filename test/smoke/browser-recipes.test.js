@@ -51,17 +51,14 @@ test('John Lewis recipe is registered with the expected phases and steps', () =>
   const jl = RECIPES['johnlewis.com'];
   assert.ok(jl, 'johnlewis.com recipe exists');
   assert.deepEqual(jl.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
-  // durable attribute candidate comes before the visible-text candidate
   const add = jl.steps.find((s) => s.name === 'add');
-  const dataTestIdx = add.selectorAny.findIndex((s) => /data-test/i.test(s));
-  const textIdx = add.selectorAny.findIndex((s) => /^text=/i.test(s));
-  assert.ok(dataTestIdx !== -1 && textIdx !== -1 && dataTestIdx < textIdx, 'durable selector before text');
+  assert.equal(typeof add.resolve, 'function', 'add uses resolveJohnLewisAdd (skips express-only ship-from-store)');
 });
 
 test('M&S recipe is registered with the expected phases and steps', () => {
   const ms = RECIPES['marksandspencer.com'];
   assert.ok(ms, 'marksandspencer.com recipe exists');
-  assert.deepEqual(ms.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+  assert.deepEqual(ms.steps.map((s) => s.name), ['guest', 'advance', 'guest', 'size', 'add', 'go-to-basket', 'checkout']);
   assert.deepEqual(ms.size.basketBadge, ['a[aria-label*="Shopping bag" i]']);
 });
 
@@ -177,7 +174,7 @@ test('nextRecipeMove returns a click for add-to-basket once size is satisfied', 
   const jl = RECIPES['johnlewis.com'];
   const page = fakePage('https://www.johnlewis.com/x/p6543210', {
     ctx: { hasUnsatisfiedSize: false },
-    'resolve:add': { locatorIndex: 17, text: 'Add to basket' }, // scripted resolution
+    'resolve:jl-add': { locatorIndex: 17, text: 'Add to basket' }, // scripted resolution
   });
   const move = await nextRecipeMove(page, { goal: 'add the joggers to my basket', history: [] }, jl, createRecipeHealth());
   assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
@@ -186,7 +183,7 @@ test('nextRecipeMove returns a click for add-to-basket once size is satisfied', 
 test('nextRecipeMove records a miss and returns null when the step resolves to nothing', async () => {
   const jl = RECIPES['johnlewis.com'];
   const health = createRecipeHealth(1);
-  const page = fakePage('https://www.johnlewis.com/x/p6543210', { ctx: { hasUnsatisfiedSize: false }, 'resolve:add': null });
+  const page = fakePage('https://www.johnlewis.com/x/p6543210', { ctx: { hasUnsatisfiedSize: false }, 'resolve:jl-add': null });
   const move = await nextRecipeMove(page, { goal: 'add joggers', history: [] }, jl, health);
   assert.equal(move, null);
   assert.equal(health.isDisabled('johnlewis.com', 'add'), true);

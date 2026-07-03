@@ -94,6 +94,15 @@ test('findEmailInputElement matches email-labelled inputs only', () => {
   assert.equal(found.locatorIndex, 3);
 });
 
+test('findEmailInputElement rejects guest-checkout CTAs and sign-in-with-email buttons', () => {
+  const elements = [
+    { id: 0, text: 'Checkout as a guest', locatorIndex: 1 },
+    { id: 1, text: 'Continue with email', locatorIndex: 2 },
+    { id: 2, text: 'Sign in with your email', locatorIndex: 3 },
+  ];
+  assert.equal(findEmailInputElement(elements), null);
+});
+
 // --------------- parseEmailFromUserText ---------------
 
 test('parseEmailFromUserText extracts and normalises an email', () => {
@@ -179,6 +188,14 @@ test('buildEmailAskWithConsent still appends save instruction once', () => {
 test('matchProfileFieldForInput maps email hints', () => {
   assert.equal(matchProfileFieldForInput('email address'), 'email');
   assert.equal(matchProfileFieldForInput('e-mail'), 'email');
+});
+
+test('matchProfileFieldForInput maps title and autocomplete hints', () => {
+  assert.equal(matchProfileFieldForInput('select title deliveryAddress.title'), 'title');
+  assert.equal(matchProfileFieldForInput('text given-name'), 'first_name');
+  assert.equal(matchProfileFieldForInput('text family-name'), 'last_name');
+  assert.equal(matchProfileFieldForInput('text street-address'), 'line1');
+  assert.equal(matchProfileFieldForInput('text postal-code'), 'postcode');
 });
 
 test('matchProfileFieldForInput maps name hints', () => {

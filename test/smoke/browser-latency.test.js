@@ -123,6 +123,14 @@ test('directSearchUrl builds seeded UK dept/fashion + grocery results URLs', () 
     'https://www.waitrose.com/ecom/shop/search?searchTerm=milk');
 });
 
+test('tier0NameMatchesGoal rejects homepage junk and accepts real product names', () => {
+  const { tier0NameMatchesGoal } = bt;
+  assert.equal(tier0NameMatchesGoal('Space NK Homepage', 'MAC Fix+'), false);
+  assert.equal(tier0NameMatchesGoal('Sony WH-CH720N Wireless Headphones', 'Sony WH-CH720N headphones'), true);
+  assert.equal(tier0NameMatchesGoal('Belkin UltraCharge Pro 3', 'iPhone 15 Pro Max'), false);
+  assert.equal(tier0NameMatchesGoal('Love Letters Kit', 'Pikkii Love Letters Kit'), true);
+});
+
 test('directSearchUrl builds seeded US retailer search URLs', () => {
   const nyc = { latitude: 40.7128, longitude: -74.006 };
   assert.equal(directSearchUrl('https://www.walmart.com', 'find paper towels', { location: nyc }),
