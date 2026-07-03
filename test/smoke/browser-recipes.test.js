@@ -76,7 +76,7 @@ test('phaseFromUrl classifies M&S product / basket / checkout urls', () => {
 test('Wickes recipe is registered with the expected phases and steps', () => {
   const wk = RECIPES['wickes.co.uk'];
   assert.ok(wk, 'wickes.co.uk recipe exists');
-  assert.deepEqual(wk.steps.map((s) => s.name), ['add', 'open-basket', 'checkout', 'checkout']);
+  assert.deepEqual(wk.steps.map((s) => s.name), ['guest', 'add', 'open-basket', 'checkout', 'checkout']);
   assert.equal(wk.size.basketCountUrl, '/cart/enhancedMiniCart/SUBTOTAL/');
   assert.deepEqual(wk.size.flyoutCheck, ['.btn-checkout']);
 });
@@ -203,7 +203,7 @@ test('nextRecipeMove on Wickes reads basketCount from the fetch endpoint (open-b
   assert.deepEqual(move, { action: 'click', locatorIndex: 4, text: 'Basket', stepName: 'open-basket' });
 });
 
-const { GENERIC } = require('../../api/services/browser-recipes');
+const { GENERIC, CONVENTION, DELIVERY, selectRecipeForHost } = require('../../api/services/browser-recipes');
 
 test('GENERIC recipe is exported with a single cart-phase checkout step', () => {
   assert.ok(GENERIC, 'GENERIC exported');
@@ -259,6 +259,32 @@ test('GENERIC nextRecipeMove returns null on a checkout page (no steps → visio
     fakePage('https://www.example.com/checkout/delivery', { ctx: { hasUnsatisfiedSize: false, basketCount: 0 } }),
     { goal: 'order item', history: [], site: 'example.com' }, GENERIC, createRecipeHealth());
   assert.equal(move, null);
+});
+
+test('CONVENTION recipe has product-phase size/add/basket steps', () => {
+  assert.deepEqual(CONVENTION.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+  assert.ok(CONVENTION.size.container.length > 0);
+});
+
+test('phaseFromUrl classifies CONVENTION product and cart URLs', () => {
+  assert.equal(phaseFromUrl(CONVENTION, 'https://www.currys.co.uk/products/samsung-tv-123.html'), 'product');
+  assert.equal(phaseFromUrl(CONVENTION, 'https://www.amazon.co.uk/dp/B09XY12345'), 'product');
+  assert.equal(phaseFromUrl(CONVENTION, 'https://www.boots.com/basket'), 'cart');
+});
+
+test('selectRecipeForHost picks host recipe, delivery, or convention', () => {
+  assert.equal(selectRecipeForHost('johnlewis.com'), RECIPES['johnlewis.com']);
+  assert.equal(selectRecipeForHost('ubereats.com'), DELIVERY);
+  assert.equal(selectRecipeForHost('boots.com'), CONVENTION);
+});
+
+test('DELIVERY nextRecipeMove commits from an open item modal', async () => {
+  const page = fakePage('https://www.ubereats.com/gb/store/pizza-hut', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false, dialogOpen: true },
+    'resolve:modal-add': { locatorIndex: 9, text: 'Add to order' },
+  });
+  const move = await nextRecipeMove(page, { goal: 'order pizza', history: [], site: 'ubereats.com' }, DELIVERY, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 9, text: 'Add to order', stepName: 'modal-add' });
 });
 
 test('recipe CLICKABLE_SELECTOR equals the one browser-task uses', () => {

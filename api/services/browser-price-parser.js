@@ -297,20 +297,15 @@ function cleanName(s) {
   return t.slice(0, 80);
 }
 
-/**
- * Extract the first plausible product detail page URL from a search/listing HTML.
- * Heuristic (no browser): prefers links whose path smells like a product page for common UK retailers.
- * Also uses price proximity: links that appear shortly before a £ price in the markup are strong signals.
- * Returns absolute URL or null. Pure except for URL constructor (safe).
- */
-function extractFirstProductUrl(html, baseUrl) {
-  if (typeof html !== 'string' || !html || !baseUrl) return null;
+// Collect product PDP URLs from search/listing HTML (deduped, DOM order). Pure.
+function collectProductUrlCandidates(html, baseUrl, limit = 8) {
+  if (typeof html !== 'string' || !html || !baseUrl) return [];
   let base;
-  try { base = new URL(baseUrl); } catch { return null; }
+  try { base = new URL(baseUrl); } catch { return []; }
 
-  // Collect all hrefs
   const hrefRe = /<a[^>]+href=["']([^"']+)["']/gi;
   const candidates = [];
+  const seen = new Set();
   let match;
   while ((match = hrefRe.exec(html)) !== null) {
     let href = match[1];
@@ -325,10 +320,12 @@ function extractFirstProductUrl(html, baseUrl) {
     const p = u.pathname + u.search; // include ? for some
     // Skip obvious non-product paths
     if (/\/(search|cat|browse|filter|login|signup|account|cart|basket|checkout|bag|wishlist|help|about|stores)/i.test(p)) continue;
+    if (/\/c\/\d+/i.test(p)) continue; // category/listing hubs (Wickes /Products/.../c/NNNN)
     if (/^\/(en|uk|gb|us|ie)?\/?$/.test(p) || p.length < 3) continue;
 
     // Strong product signals (order matters — first match wins bias to earlier in DOM)
     const isStrongProduct = /\/p\d{4,}/i.test(p) || // john lewis etc
+      /\/p\/\d+/i.test(p) || // Wickes, Screwfix slug/p/NNNN
       /\/product/i.test(p) ||
       /\/dp\//i.test(p) || // amazon style
       /\/item[s]?\//i.test(p) ||
@@ -337,12 +334,15 @@ function extractFirstProductUrl(html, baseUrl) {
       /\/shop\/product/i.test(p) ||
       /\/p\/[a-z0-9-]{4,}/i.test(p); // some sites like M&S use /p/slug
 
+    const abs = u.toString();
+    if (seen.has(abs)) continue;
     if (isStrongProduct) {
-      candidates.push({ url: u.toString(), strong: true });
+      seen.add(abs);
+      candidates.push({ url: abs, strong: true });
     } else if (candidates.length < 12) {
-      // Weak but plausible internal path that isn't nav
       if (/^[\/][^?#]+\/[^?#/]{3,}/i.test(p) && !/(\.jpg|\.png|\.css|\.js|\.ico|rss|xml|json)$/i.test(p)) {
-        candidates.push({ url: u.toString(), strong: false });
+        seen.add(abs);
+        candidates.push({ url: abs, strong: false });
       }
     }
   }
@@ -380,14 +380,38 @@ function extractFirstProductUrl(html, baseUrl) {
     }
   }
 
-  // Prefer strong product signals; take the first one we saw (usually first result)
-  const strong = candidates.find(c => c.strong);
-  if (strong) return strong.url;
+  const ordered = [];
+  for (const c of candidates) {
+    if (c.strong) ordered.push(c.url);
+  }
+  for (const c of candidates) {
+    if (!c.strong) ordered.push(c.url);
+  }
+  return ordered.slice(0, limit);
+}
 
-  // Fallback to first plausible (price-proximity ones are now at front)
-  if (candidates.length) return candidates[0].url;
+// HTTP preflight: skip PDPs that look undeliverable before opening the browser.
+function looksOrderablePdp(html) {
+  if (typeof html !== 'string' || !html) return false;
+  const snippet = html.slice(0, 120000);
+  const hasAdd = /btn-add-to-basket|add-to-basket|Add for Delivery|Add for Collection/i.test(snippet);
+  const blocked = /\b(out of stock|currently unavailable|not available for delivery|cannot be delivered|unavailable for delivery)\b/i.test(snippet);
+  return hasAdd && !blocked;
+}
 
-  return null;
+/**
+ * Extract the first plausible product detail page URL from a search/listing HTML.
+ * Heuristic (no browser): prefers links whose path smells like a product page for common UK retailers.
+ * Also uses price proximity: links that appear shortly before a £ price in the markup are strong signals.
+ * Returns absolute URL or null. Pure except for URL constructor (safe).
+ */
+function extractFirstProductUrl(html, baseUrl) {
+  const candidates = collectProductUrlCandidates(html, baseUrl, 1);
+  return candidates[0] || null;
+}
+
+function extractProductUrlCandidates(html, baseUrl, limit = 8) {
+  return collectProductUrlCandidates(html, baseUrl, limit);
 }
 
 /**
@@ -428,6 +452,8 @@ module.exports = {
   extractPrice,
   extractProductName,
   extractFirstProductUrl,
+  extractProductUrlCandidates,
+  looksOrderablePdp,
   extractVisibleDeals,
   // exposed for tests
   _normalizePrice: normalizePrice,

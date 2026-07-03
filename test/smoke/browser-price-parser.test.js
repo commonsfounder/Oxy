@@ -75,6 +75,34 @@ test('extractFirstProductUrl finds strong product signals and returns absolute',
   assert.ok(u.startsWith('https://'));
 });
 
+test('looksOrderablePdp accepts pages with add controls and rejects unavailable copy', () => {
+  const { looksOrderablePdp } = require('../../api/services/browser-price-parser');
+  assert.equal(looksOrderablePdp('<button class="btn-add-to-basket">Add for Delivery</button>'), true);
+  assert.equal(looksOrderablePdp('<p>not available for delivery</p><button class="btn-add-to-basket">Add</button>'), false);
+});
+
+test('extractProductUrlCandidates returns multiple Wickes PDPs in DOM order', () => {
+  const { extractProductUrlCandidates } = require('../../api/services/browser-price-parser');
+  const html = `
+    <a href="/Products/Garden/c/1002098">Garden</a>
+    <a href="/Crown-Matt-Emulsion-Paint---Pure-Brilliant-White---10L/p/166844">A</a>
+    <a href="/Leyland-Trade-Matt-Contract-Paint---Brilliant-White---10L/p/310077">B</a>
+  `;
+  const urls = extractProductUrlCandidates(html, 'https://www.wickes.co.uk/search?text=white+paint');
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /\/p\/166844$/);
+  assert.match(urls[1], /\/p\/310077$/);
+});
+
+test('extractFirstProductUrl picks Wickes slug/p/NNNN over category /c/ hubs', () => {
+  const html = `
+    <a href="/Products/Garden/c/1002098">Garden</a>
+    <a href="/Crown-Matt-Emulsion-Paint---Pure-Brilliant-White---10L/p/166844">Paint</a>
+  `;
+  const u = extractFirstProductUrl(html, 'https://www.wickes.co.uk/search?text=white+paint');
+  assert.match(u, /\/p\/166844$/);
+});
+
 test('extractFirstProductUrl skips nav/cart/search and prefers product paths', () => {
   const html = `
     <a href="/basket">basket</a>

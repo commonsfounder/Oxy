@@ -84,9 +84,14 @@ test('directSearchUrl honours the OXY_BROWSER_FASTPATH kill-switch', () => {
 });
 
 test('directSearchUrl is null for unknown sites and unusable goals', () => {
-  assert.equal(directSearchUrl('https://www.argos.co.uk', 'find joggers'), null); // not in registry
+  assert.equal(directSearchUrl('https://never-seen-this.example', 'find joggers'), null);
   assert.equal(directSearchUrl('https://www.johnlewis.com', 'find me'), null);    // no derivable term
   assert.equal(directSearchUrl('not a url', 'find joggers'), null);
+});
+
+test('directSearchUrl builds Argos search URL now that it is seeded', () => {
+  assert.equal(directSearchUrl('https://www.argos.co.uk', 'find joggers'),
+    'https://www.argos.co.uk/search/joggers/');
 });
 
 const bt = require('../../api/services/browser-task');
@@ -116,4 +121,15 @@ test('directSearchUrl builds seeded UK dept/fashion + grocery results URLs', () 
     'https://www.sainsburys.co.uk/gol-ui/SearchResults/milk');
   assert.equal(directSearchUrl('https://www.waitrose.com', 'find milk'),
     'https://www.waitrose.com/ecom/shop/search?searchTerm=milk');
+});
+
+test('directSearchUrl builds seeded US retailer search URLs', () => {
+  const nyc = { latitude: 40.7128, longitude: -74.006 };
+  assert.equal(directSearchUrl('https://www.walmart.com', 'find paper towels', { location: nyc }),
+    'https://www.walmart.com/search?q=paper%20towels');
+  assert.equal(directSearchUrl('https://www.target.com', 'find cereal', { location: nyc }),
+    'https://www.target.com/s?searchTerm=cereal');
+  const london = { latitude: 51.5074, longitude: -0.1278 };
+  assert.equal(directSearchUrl('https://www.nike.com/gb', 'order mens running shoes in size UK 10', { location: london }),
+    'https://www.nike.com/gb/w?q=mens%20running%20shoes');
 });

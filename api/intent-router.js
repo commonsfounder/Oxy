@@ -26,8 +26,18 @@ function looksLikeLocalPlaceRequest(message) {
 // "<product> on/from/at <retailer>" — is an online-shopping task (→ browser task), never a
 // request to locate a nearby branch. High precision on purpose: "nearest john lewis" has no
 // purchase verb and no on/from/at source, so it stays a place request.
+const { allRetailerAliases } = require('./services/retailer-sites');
+
 const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
-const RETAILER_SOURCE = /\b(?:on|from|at)\s+(john\s*lewis|asos|selfridges|marks\s*(?:and|&)\s*spencer|m&s|currys|nike|screwfix|wickes|toolstation|sainsbury'?s?|waitrose|amazon|argos|next|boots|zara|very|h&m|deliveroo|just\s*eat|uber\s*eats|dominos?)\b/i;
+
+function retailerMentioned(text) {
+  const norm = normalizeText(text).toLowerCase();
+  for (const alias of allRetailerAliases()) {
+    const re = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
+    if (re.test(norm)) return true;
+  }
+  return false;
+}
 
 function looksLikeShoppingRequest(message) {
   const text = normalizeText(message);
@@ -35,7 +45,8 @@ function looksLikeShoppingRequest(message) {
   if (SHOPPING_VERB.test(text)) return true;
   // "get/grab/find/order me <product> on/from/at <retailer>" — the acquire lead + a named
   // retailer source together mean shopping, not navigation.
-  if (/\b(get|grab|find|order|want|need)\b/i.test(text) && RETAILER_SOURCE.test(text)) return true;
+  if (/\b(get|grab|find|order|want|need)\b/i.test(text) && retailerMentioned(text)) return true;
+  if (/\b(?:on|from|at|using)\s+/i.test(text) && retailerMentioned(text)) return true;
   return false;
 }
 

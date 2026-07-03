@@ -2,7 +2,8 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
-const { nextRecipeMove, RECIPES, GENERIC, recipeHealth } = require('./browser-recipes');
+const { nextRecipeMove, selectRecipeForHost, recipeHealth } = require('./browser-recipes');
+const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
 const {
@@ -78,7 +79,10 @@ const BROWSER_THINKING_BUDGET = envInt('OXY_BROWSER_THINKING_BUDGET', 64);
 // site needs more.
 const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 150);
 const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 100);
-const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 120);
+const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 80);
+// Recipe-driven steps chain quickly — a shorter beat between them saves ~0.5–1s per step vs the
+// full vision-path settle without risking the old networkidle trap.
+const RECIPE_SETTLE_MS = envInt('OXY_BROWSER_RECIPE_SETTLE_MS', 50);
 function browserThinkingConfig() {
   return BROWSER_THINKING_BUDGET >= 0 ? { thinkingConfig: { thinkingBudget: BROWSER_THINKING_BUDGET } } : {};
 }
@@ -368,9 +372,60 @@ async function detectBlockWall(page) {
 // login. Pure so it's unit-testable; the live wrapper reuses the loop's already-extracted
 // clickable elements (same locatorIndex space the loop's own clicks use).
 const GUEST_CHECKOUT_PATTERN = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest|continue without (?:an )?account|shop as (?:a )?guest|guest order)\b/i;
+const GUEST_FORK_URL_PATTERN = /login-or-guest|guest[-_]checkout|checkout\/guest/i;
+
+function isGuestCheckoutUrl(url) {
+  const u = String(url || '');
+  if (!u) return false;
+  try {
+    const parsed = new URL(u);
+    return GUEST_FORK_URL_PATTERN.test(parsed.pathname) || GUEST_FORK_URL_PATTERN.test(parsed.hostname);
+  } catch {
+    return GUEST_FORK_URL_PATTERN.test(u);
+  }
+}
 
 function findGuestCheckoutElement(elements) {
   return (elements || []).find((el) => GUEST_CHECKOUT_PATTERN.test(String(el.text || ''))) || null;
+}
+
+// DOM-based guest click — does not rely on extractClickableElements (Wickes login-or-guest
+// often yields only 2–3 extracted nodes while the guest CTA is still in the DOM).
+async function tryGuestCheckoutClick(page, session, steps, onProgress) {
+  if (session.guestCheckoutDone) return false;
+  const hit = await page.evaluate((sel, patSource, patFlags) => {
+    const pat = new RegExp(patSource, patFlags);
+    const all = [...document.querySelectorAll(sel)];
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    for (const el of all) {
+      const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+      if (!pat.test(t)) continue;
+      if (!visible(el)) continue;
+      const node = el.closest(sel) || el;
+      const idx = all.indexOf(node);
+      if (idx >= 0) return { idx, text: t.replace(/\s+/g, ' ').slice(0, 80) };
+    }
+    return null;
+  }, CLICKABLE_SELECTOR, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => null);
+  if (!hit) return false;
+  const locator = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: hit.idx }
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!locator) return false;
+  onProgress(`Clicking "${hit.text}"…`);
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 10000, force: true }).catch(() => false);
+  session.guestCheckoutDone = true;
+  session.history.push(`Step ${steps}: clicked "${hit.text}" (skipped sign-in — guest checkout available)`);
+  session.lastWasRecipe = true;
+  return true;
 }
 
 // Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
@@ -379,7 +434,7 @@ async function detectLoginWall(page, goal) {
   try {
     const url = page.url();
     // Fast path: a login URL needs no DOM read at all.
-    if (LOGIN_URL_PATTERN.test(url)) return true;
+    if (LOGIN_URL_PATTERN.test(url) || isGuestCheckoutUrl(url)) return true;
     const hasPasswordField = await page.locator(PASSWORD_FIELD_SELECTOR).first().count().then(c => c > 0).catch(() => false);
     const bodyText = await page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => '');
     // Check basket soft-gate even if no pw field visible yet (M&S etc show "sign in to continue to basket/checkout")
@@ -951,72 +1006,8 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
 // submit). For sites with a stable search-results URL we can jump straight there, deleting
 // those steps — pure win on the dominant steps×model term. Best-effort: if we can't derive a
 // confident query we open the original url, i.e. exactly today's behaviour.
-const SEARCH_SITES = {
-  'johnlewis.com': {
-    names: ['john lewis', 'johnlewis'],
-    searchUrl: (term) => `https://www.johnlewis.com/search?search-term=${encodeURIComponent(term)}`
-  },
-  'selfridges.com': {
-    names: ['selfridges'],
-    searchUrl: (term) => `https://www.selfridges.com/GB/en/cat/?freeText=${encodeURIComponent(term)}&srch=Y`
-  },
-  // UK dept/fashion — patterns discovered with test/dev/discover-search-url.js and each
-  // E2E-verified via DIRECT navigation (not just interactive search). Next was dropped: it
-  // serves "Access Denied" when a search-results URL is opened directly, though interactive
-  // search works — so it must NOT have a direct-nav seed.
-  'marksandspencer.com': {
-    names: ['m&s', 'marks and spencer', 'marks & spencer', 'marksandspencer'],
-    searchUrl: (term) => `https://www.marksandspencer.com/search?searchTerm=${encodeURIComponent(term)}`
-  },
-  // asos.com removed: direct-nav to /search/?q= returns 0 interactive elements on a
-  // datacenter IP (SPA blank-page / bot-wall shape). Let vision drive the search natively.
-  // Grocery. Sainsbury's puts the term in the PATH (a seed's searchUrl can build any shape;
-  // only the auto-LEARN path is query-param-only). Waitrose uses a normal query param.
-  'sainsburys.co.uk': {
-    names: ["sainsbury's", 'sainsburys', 'sainsbury'],
-    searchUrl: (term) => `https://www.sainsburys.co.uk/gol-ui/SearchResults/${encodeURIComponent(term)}`
-  },
-  'waitrose.com': {
-    names: ['waitrose'],
-    searchUrl: (term) => `https://www.waitrose.com/ecom/shop/search?searchTerm=${encodeURIComponent(term)}`
-  },
-  // Electronics / DIY / sportswear. Each direct-nav-probed 2026-07-01 (search URL opened cold,
-  // returns a real results page with the query term present — not an Access-Denied/Cloudflare
-  // shell). NOTE: verified from a residential IP; a datacenter IP (Cloud Run) may still get
-  // walled on some — that's the BROWSER_REMOTE_ENDPOINT (managed browser) lever, not a bad seed.
-  // Deliberately NOT seeded (bot-wall direct nav): Boots (empty JS shell), Decathlon, Zara,
-  // Tesco, H&M, Superdrug, Very — plus Next/Argos from earlier. They still work via normal open.
-  'currys.co.uk': {
-    names: ['currys', 'currys pc world'],
-    searchUrl: (term) => `https://www.currys.co.uk/search?q=${encodeURIComponent(term)}`
-  },
-  'screwfix.com': {
-    names: ['screwfix'],
-    searchUrl: (term) => `https://www.screwfix.com/search?search=${encodeURIComponent(term)}`
-  },
-  'wickes.co.uk': {
-    names: ['wickes'],
-    searchUrl: (term) => `https://www.wickes.co.uk/search?text=${encodeURIComponent(term)}`
-  },
-  'toolstation.com': {
-    names: ['toolstation'],
-    searchUrl: (term) => `https://www.toolstation.com/search?q=${encodeURIComponent(term)}`
-  },
-  'nike.com': {
-    names: ['nike'],
-    searchUrl: (term) => `https://www.nike.com/gb/w?q=${encodeURIComponent(term)}`
-  },
-  // Amazon — very common for grocery/everyday items like Nido milk. Search is /s?k=term
-  // Products are /dp/ASIN . Tier-0 will try this first for info goals.
-  'amazon.co.uk': {
-    names: ['amazon', 'amazon uk', 'amazon.co.uk'],
-    searchUrl: (term) => `https://www.amazon.co.uk/s?k=${encodeURIComponent(term)}`
-  },
-  'amazon.com': {
-    names: ['amazon', 'amazon.com'],
-    searchUrl: (term) => `https://www.amazon.com/s?k=${encodeURIComponent(term)}`
-  }
-};
+// Retailer registry (name → home + search URL). Extended via api/services/retailer-sites.js.
+const SEARCH_SITES = buildSearchSites();
 
 // Leading intent verbs and trailing fluff that aren't part of the thing being searched for.
 const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would like)\s+(?:to\s+)?(?:find|buy|get|order)?\s*|find\s+(?:me\b\s*)?|search\s+(?:for\s+)?|look\s+(?:for|up)\s+|buy\s+(?:me\b\s*)?|order\s+(?:me\b\s*)?|add\s+(?:me\b\s*)?|get\s+(?:me\b\s*)?|show\s+(?:me\b\s*)?|a\s+pair\s+of\s+|some\s+|a\s+|an\s+|the\s+)+/i;
@@ -1062,7 +1053,7 @@ function deriveSearchTerm(goal, site) {
 
 // If url is a known search-site root AND we can derive a query, return the results-page url
 // to open instead; otherwise null (open url unchanged).
-function directSearchUrl(url, goal) {
+function directSearchUrl(url, goal, retailOptions = {}) {
   if (!url || !goal) return null;
   if (process.env.OXY_BROWSER_FASTPATH === 'false') return null; // kill-switch / A-B isolation
   let parsed;
@@ -1073,7 +1064,7 @@ function directSearchUrl(url, goal) {
   const path = parsed.pathname.replace(/\/+$/, '');
   if (path !== '' && !/^\/[a-z]{2}(?:[_-][a-z]{2})?$/i.test(path)) return null;
   const host = parsed.hostname.replace(/^www\./, '');
-  const site = SEARCH_SITES[host];
+  const site = resolveSearchSite(host, goal, retailOptions) || SEARCH_SITES[host];
   // For a curated site, use its names to strip; otherwise strip using the host's brand word.
   const term = deriveSearchTerm(goal, site || { names: [host.split('.')[0]] });
   if (!term) return null;
@@ -1234,7 +1225,40 @@ async function tryTier0PriceLookup(url, goal) {
   return { type: 'done', text };
 }
 
-async function openNewSession(userId, url, goal) {
+// Order open URL: search → first product PDP in one HTTP hop when possible, skipping the
+// search-results vision step (~3–5s). Falls back to search URL, then the raw url.
+async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
+  const searchUrl = directSearchUrl(url, goal, retailOptions);
+  if (!searchUrl) return url;
+  const html = await fetchHtml(searchUrl);
+  if (!html) return searchUrl;
+  const { extractProductUrlCandidates, looksOrderablePdp } = require('./browser-price-parser');
+  const candidates = extractProductUrlCandidates(html, searchUrl).slice(0, 5);
+  if (!candidates.length) return searchUrl;
+  const checked = await Promise.all(candidates.map(async (productUrl) => {
+    const pdpHtml = await fetchHtml(productUrl);
+    return { productUrl, orderable: Boolean(pdpHtml && looksOrderablePdp(pdpHtml)) };
+  }));
+  const hit = checked.find((c) => c.orderable);
+  return hit?.productUrl || candidates[0] || searchUrl;
+}
+
+async function loadUserLocation(userId) {
+  try {
+    const { data } = await getSupabase()
+      .from('native_context')
+      .select('location')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const loc = data?.location;
+    const lat = Number(loc?.latitude ?? loc?.lat);
+    const lng = Number(loc?.longitude ?? loc?.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { latitude: lat, longitude: lng };
+  } catch { /* non-critical */ }
+  return null;
+}
+
+async function openNewSession(userId, url, goal, retailOptions = {}) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
   // Route bot-walled hosts through the managed (residential) browser, everything else
@@ -1246,10 +1270,11 @@ async function openNewSession(userId, url, goal) {
   // commercial page to find a search box / first result.
   const context = await browser.newContext({ viewport: VIEWPORT, ...(storageState ? { storageState } : {}) });
   const page = await context.newPage();
-  // Jump straight to a search-results page on sites we know how to query (skips the
-  // find-box → fill → submit steps); falls back to the given url when we can't.
-  const directUrl = directSearchUrl(url, goal);
-  const openUrl = directUrl || url;
+  // Orders: open the first product PDP directly when a plain fetch can resolve it; else the
+  // search-results URL; else the caller's url. Info goals keep the search-page fastpath only.
+  const openUrl = isOrderGoal(goal)
+    ? await resolveOrderOpenUrl(url, goal, retailOptions)
+    : (directSearchUrl(url, goal, retailOptions) || url);
   await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
   // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
   // and the model thinks there's no search bar. A longer beat here (first paint is the
@@ -1260,7 +1285,8 @@ async function openNewSession(userId, url, goal) {
   await timed('open.consent', () => dismissConsent(page).catch(() => {}));
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
   const goalContext = parseGoalContext(goal);
-  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath: directUrl ? siteKeyFromUrl(url) : null, remote });
+  const usedFastpath = (openUrl !== url) ? siteKeyFromUrl(url) : null;
+  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath, remote });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -1358,11 +1384,158 @@ async function autoFillCheckoutEmail(session, elements, email, steps, onProgress
   return true;
 }
 
-async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
+// After a recipe click, wait for the DOM/URL state the NEXT recipe gate reads — stops the
+// Wickes basket/checkout double-fire (flyout not open yet → checkout invisible → spin).
+async function waitAfterRecipeStep(page, site, stepName, session) {
+  if (site === 'wickes.co.uk') {
+    if (stepName === 'add') {
+      const ok = await page.waitForFunction(async () => {
+        try {
+          const r = await fetch('/cart/enhancedMiniCart/SUBTOTAL/', { credentials: 'same-origin' });
+          const j = await r.json();
+          return (parseInt(j.totalItems, 10) || 0) > 0;
+        } catch { return false; }
+      }, { timeout: 3500, polling: 150 }).catch(() => false);
+      if (session && ok) session.wickesAddConfirmed = true;
+      return;
+    }
+    if (stepName === 'open-basket') {
+      await page.waitForSelector('.btn-checkout', { state: 'visible', timeout: 2000 }).catch(() => {});
+      return;
+    }
+    if (stepName === 'checkout') {
+      await page.waitForURL(/checkout\.wickes|\/cart\/checkout|login-or-guest/i, { timeout: 6000 }).catch(() => {});
+      return;
+    }
+  }
+  if (stepName === 'search-pick') {
+    await page.waitForURL((u) => !isSearchResultsUrl(u), { timeout: 3000 }).catch(() => {});
+    return;
+  }
+  // Delivery cart-commit: after "Add to order" the modal must close or the cart badge must tick up.
+  if (isDeliveryHost(site) && stepName === 'modal-add') {
+    const ok = await page.waitForFunction(() => {
+      const vw = window.innerWidth * window.innerHeight;
+      const visible = (el) => {
+        const s = window.getComputedStyle(el);
+        if (s.visibility === 'hidden' || s.display === 'none') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      };
+      let itemCount = 0;
+      for (const el of document.querySelectorAll('[class*="cart-count" i],[class*="basket-count" i],[data-testid*="cart" i],[aria-label*="cart" i],[aria-label*="basket" i]')) {
+        const txt = (el.textContent || el.getAttribute('aria-label') || '').replace(/[^0-9]/g, '');
+        if (txt) itemCount = Math.max(itemCount, parseInt(txt, 10) || 0);
+      }
+      const dialogOpen = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+        .filter(visible)
+        .some((el) => { const r = el.getBoundingClientRect(); return r.width * r.height > vw * 0.12; });
+      return itemCount > 0 || !dialogOpen;
+    }, { timeout: 4500, polling: 200 }).catch(() => false);
+    if (session && ok) session.deliveryAddConfirmed = true;
+    return;
+  }
+  if (['checkout', 'go-to-basket', 'add', 'modal-add'].includes(stepName)) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});
+  }
+}
+
+function isSearchResultsUrl(url) {
+  try {
+    const u = new URL(url);
+    if (/\/search\b/i.test(u.pathname)) return true;
+    if (/^\/s\/?$/i.test(u.pathname) && /[\?&]k=/i.test(u.search)) return true; // Amazon
+    return /[\?&](?:q|text|query|searchterm)=/i.test(u.search);
+  } catch { return false; }
+}
+
+// Order fast-path: on a search-results page, click the first visible product link — skips a
+// vision call (~3–5s) that otherwise picks a result from the screenshot.
+async function tryOrderSearchPick(page, session) {
+  if (!session.isOrder || session.searchPickDone || !isSearchResultsUrl(page.url())) return null;
+  const hit = await page.evaluate((sel) => {
+    const patterns = [/\/p\/\d+/i, /\/p\d+(?:\/|$)/i, /\/product\//i, /\/dp\/[A-Z0-9]/i];
+    const all = [...document.querySelectorAll(sel)];
+    for (const a of document.querySelectorAll('a[href]')) {
+      const href = a.getAttribute('href') || '';
+      if (!patterns.some((p) => p.test(href))) continue;
+      const r = a.getBoundingClientRect();
+      if (r.width < 20 || r.height < 10) continue;
+      const el = a.closest(sel) || a;
+      const idx = all.indexOf(el);
+      if (idx === -1) continue;
+      const text = (a.innerText || a.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (text.length < 3) continue;
+      return { locatorIndex: idx, text };
+    }
+    return null;
+  }, CLICKABLE_SELECTOR).catch(() => null);
+  if (!hit) return null;
+  session.searchPickDone = true;
+  return { action: 'click', locatorIndex: hit.locatorIndex, text: hit.text, stepName: 'search-pick' };
+}
+
+// After guest email fill, click Continue/Submit if visible — avoids a vision step.
+async function trySubmitCheckoutEmail(session, page, steps, onProgress) {
+  const guestFork = await page.evaluate((sel) => {
+    const pat = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest)\b/i;
+    return [...document.querySelectorAll(sel)].some((el) => pat.test((el.innerText || '').trim()));
+  }, CLICKABLE_SELECTOR).catch(() => false);
+  if (guestFork) return false;
+
+  const hit = await page.evaluate((sel) => {
+    const guestPat = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest)\b/i;
+    const wants = /^(continue|next|proceed|submit|continue to checkout)$/i;
+    const all = [...document.querySelectorAll(sel)];
+    for (const el of all) {
+      const t = (el.innerText || el.value || el.getAttribute('aria-label') || '').trim();
+      if (guestPat.test(t)) continue;
+      if (!wants.test(t) && el.getAttribute('type') !== 'submit') continue;
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      const node = el.closest(sel) || el;
+      const idx = all.indexOf(node);
+      if (idx >= 0) return { idx, text: t.slice(0, 80) || 'Continue' };
+    }
+    const sub = document.querySelector('button[type="submit"], input[type="submit"]');
+    if (sub) {
+      const idx = all.indexOf(sub);
+      if (idx >= 0) return { idx, text: 'Submit' };
+    }
+    return null;
+  }, CLICKABLE_SELECTOR).catch(() => null);
+  if (!hit) return false;
+  const locator = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: hit.idx }
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!locator) return false;
+  onProgress(`Clicking "${hit.text}"…`);
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 8000, force: true }).catch(() => false);
+  session.history.push(`Step ${steps}: [checkout-profile] clicked "${hit.text}" after email fill`);
+  return true;
+}
+
+function checkoutEmailFilledResult(session) {
+  const n = session.history.length;
+  return { type: 'awaiting_more', summary: `Working on your order — ${n} step${n === 1 ? '' : 's'} in…` };
+}
+
+async function completeCheckoutEmailFill(session, userId, page, steps, onProgress) {
+  await trySubmitCheckoutEmail(session, page, steps, onProgress);
+  touchSession(userId);
+  await persistStorage(userId, session);
+  return checkoutEmailFilledResult(session);
+}
+
+async function runOrderingTurn(userId, { url, goal, location = null, onProgress = () => {} }) {
   // Started here, not after the session is open — a slow first-time browser launch +
   // page load must count against the same budget that bounds the step loop, or the
   // open alone can eat the mobile client's 45s watchdog before a single step runs.
   const startedAt = Date.now();
+  if (!location) location = await loadUserLocation(userId);
+  const retailOptions = { location };
   let session = getSession(userId);
   // A live session left open by a finished lookup (see the 'done' keep-alive below) is a
   // continuation ("order it") ONLY if it's the same site. If a new url points at a different
@@ -1377,10 +1550,17 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     // off from persisted context so an idle-evicted order resumes instead of dead-ending.
     let openUrl = url;
     let priorHistory = null;
+    if (!openUrl && goal) {
+      const retailer = resolveRetailerFromGoal(goal, retailOptions);
+      if (retailer) {
+        openUrl = retailer.homeUrl;
+        onProgress(`Opening ${retailer.displayName}…`);
+      }
+    }
     if (!openUrl) {
       const resume = await loadResumeContext(userId);
       if (!resume) {
-        return { type: 'error', error: 'I don\'t have an order in progress to pick back up. Tell me what you\'d like and where to deliver it, and I\'ll start fresh.' };
+        return { type: 'error', error: 'I don\'t have an order in progress to pick back up. Tell me what you\'d like and where to get it from, and I\'ll start fresh.' };
       }
       openUrl = resume.last_url;
       priorHistory = Array.isArray(resume.history) ? resume.history : [];
@@ -1405,7 +1585,7 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     }
 
     try {
-      session = await openNewSession(userId, openUrl, goal);
+      session = await openNewSession(userId, openUrl, goal, retailOptions);
       if (priorHistory) {
         session.history = priorHistory;
         // A resumed session that already has steps is an order in progress — latch the
@@ -1482,6 +1662,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
     ? 'I got stuck on this page and couldn\'t make progress. Want me to try a different site or platform?'
     : 'I got stuck on this page and couldn\'t make progress. Want me to try a different site, or take another approach?' };
 
+  if (session.isOrder && !session.checkoutProfile) {
+    session.checkoutProfile = await loadCheckoutProfile(getSupabase(), userId);
+  }
+
   try {
     while (steps < MAX_STEPS && Date.now() - startedAt < MAX_DURATION_MS) {
       steps += 1;
@@ -1492,7 +1676,14 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       session.stepsSinceNewState = stepsSinceNewState;
       session.stepsSinceCartProgress = stepsSinceCartProgress;
       onProgress('Looking at the page…');
-      await timed('step.settle', () => settle(session.page, STEP_SETTLE_MS)); // let any in-flight render finish before we look
+      const stepSettleMs = session.lastWasRecipe ? RECIPE_SETTLE_MS : STEP_SETTLE_MS;
+      session.lastWasRecipe = false;
+      await timed('step.settle', () => settle(session.page, stepSettleMs)); // let any in-flight render finish before we look
+      // Wickes checkout redirect is slow — one bounded wait per session, not every step.
+      if (session.isOrder && session.site === 'wickes.co.uk' && session.wickesCheckoutSent && !session.guestCheckoutDone && !session.wickesCheckoutAwaited) {
+        session.wickesCheckoutAwaited = true;
+        await timed('step.await-checkout', () => session.page.waitForURL(/checkout\.wickes|login-or-guest/i, { timeout: 8000 }).catch(() => {}));
+      }
       // Learn a fast-path: if the last thing we typed now shows up as a query param in the
       // URL, we've discovered this site's search-results template. Don't override a code seed.
       if (session.lastFilledValue) {
@@ -1579,34 +1770,6 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
 
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
 
-      // Guest-checkout email the user just supplied, or stored with consent — fill before vision.
-      if (session.isOrder && session.pendingCheckoutFill?.field === 'email') {
-        const filled = await autoFillCheckoutEmail(session, elements, session.pendingCheckoutFill.value, steps, onProgress);
-        if (filled) {
-          session.pendingCheckoutFill = null;
-          consecutiveBadDecisions = 0;
-          consecutiveWaits = 0;
-          await settle(session.page);
-          touchSession(userId);
-          await persistStorage(userId, session);
-          continue;
-        }
-      } else if (session.isOrder) {
-        // Proactive fill: don't wait for the model to ask — fill as soon as the field is visible.
-        const profile = await getCheckoutProfileCached(session, userId);
-        if (profile.email && profile.emailConsent && findEmailInputElement(elements)) {
-          const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
-          if (filled) {
-            consecutiveBadDecisions = 0;
-            consecutiveWaits = 0;
-            await settle(session.page);
-            touchSession(userId);
-            await persistStorage(userId, session);
-            continue;
-          }
-        }
-      }
-
       // ponytail: debug-only — dump what the model can act on each step (pairs with the
       // step-N.jpg screenshots below) so element-extraction bugs are diagnosable offline.
       if (process.env.OXY_DEBUG_SCREENSHOT_DIR) {
@@ -1632,30 +1795,78 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       // Cheap: URL pattern check is a string test; DOM read only when URL matches or has
       // a password field. Session stays open so "keep going" resumes the same order.
       const currentUrl = session.page.url();
+      // Guest fork: click before vision/email — extraction often misses the CTA on sparse pages.
+      if (session.isOrder && !session.guestCheckoutDone
+        && (isGuestCheckoutUrl(currentUrl) || findGuestCheckoutElement(elements))) {
+        const guestClicked = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
+        if (guestClicked) {
+          await settle(session.page, RECIPE_SETTLE_MS);
+          consecutiveBadDecisions = 0;
+          consecutiveWaits = 0;
+          touchSession(userId);
+          await persistStorage(userId, session);
+          continue;
+        }
+      }
       if (currentUrl !== session.lastLoginCheckUrl) {
         session.lastLoginCheckUrl = currentUrl;
         if (await detectLoginWall(session.page, session.goal)) {
-          // Take the guest path if this wall offers one — one shot per URL so a click that
-          // silently fails (or a page that just re-renders the same wall) doesn't spin.
-          const guestEl = findGuestCheckoutElement(elements);
-          if (guestEl && !session.triedGuestOnUrl?.has(currentUrl)) {
-            session.triedGuestOnUrl = session.triedGuestOnUrl || new Set();
-            session.triedGuestOnUrl.add(currentUrl);
-            const handle = await session.page.evaluateHandle(
-              ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
-              { selector: CLICKABLE_SELECTOR, idx: guestEl.locatorIndex }
-            ).then((h) => h.asElement()).catch(() => null);
-            if (handle) {
-              await handle.click({ timeout: 10000, force: true }).catch(() => {});
-              session.history.push(`Step ${steps}: clicked "${guestEl.text}" (skipped sign-in — guest checkout available)`);
-              await settle(session.page);
+          if (!session.guestCheckoutDone) {
+            if (session.wickesCheckoutSent && session.site === 'wickes.co.uk') {
+              await waitAfterRecipeStep(session.page, session.site, 'checkout', session);
+            }
+            const guestClicked = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
+            if (guestClicked) {
+              await settle(session.page, RECIPE_SETTLE_MS);
               consecutiveBadDecisions = 0;
               consecutiveWaits = 0;
+              touchSession(userId);
+              await persistStorage(userId, session);
+              continue;
+            }
+            if (isGuestCheckoutUrl(session.page.url())) {
+              await settle(session.page, 300);
+              const retryGuest = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
+              if (retryGuest) {
+                await settle(session.page, RECIPE_SETTLE_MS);
+                consecutiveBadDecisions = 0;
+                consecutiveWaits = 0;
+                touchSession(userId);
+                await persistStorage(userId, session);
+                continue;
+              }
+            }
+          }
+          if (isGuestCheckoutUrl(session.page.url()) || /^checkout\./i.test((() => { try { return new URL(session.page.url()).hostname; } catch { return ''; } })())) {
+            if (!session.guestCheckoutDone) {
+              await settle(session.page, 400);
               continue;
             }
           }
+          if (session.isOrder && session.wickesCheckoutSent && !session.guestCheckoutDone) {
+            await settle(session.page, 300);
+            continue;
+          }
           const siteName = session.site ? session.site.replace(/\.(com|co\.uk|co|net|org)$/i, '') : 'the site';
           return { type: 'reauth', site: session.site, question: `I need to sign in to ${siteName} to continue your order — once you've signed in, say "keep going" and I'll carry on from where I left off.` };
+        }
+      }
+
+      // Guest-checkout email — AFTER login-wall/guest fork so we don't fill email on the
+      // sign-in page before clicking "Checkout as a guest".
+      if (session.isOrder && session.pendingCheckoutFill?.field === 'email') {
+        const filled = await autoFillCheckoutEmail(session, elements, session.pendingCheckoutFill.value, steps, onProgress);
+        if (filled) {
+          session.pendingCheckoutFill = null;
+          return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
+        }
+      } else if (session.isOrder && session.guestCheckoutDone) {
+        const profile = await getCheckoutProfileCached(session, userId);
+        if (profile.email && profile.emailConsent) {
+          const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
+          if (filled) {
+            return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
+          }
         }
       }
 
@@ -1675,9 +1886,49 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       // hand-written selector move replaces the vision call. Cheap; falls through to the
       // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
       let decision, recipeStepName = null;
-      const recipe = RECIPES_ENABLED ? (RECIPES[session.site] ?? GENERIC) : null;
-      const recipeMove = recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
-      if (recipeMove) {
+      const searchPick = session.isOrder ? await tryOrderSearchPick(session.page, session) : null;
+      const recipe = RECIPES_ENABLED ? selectRecipeForHost(session.site) : null;
+      let recipeMove = !searchPick && recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
+      // Wickes: mid-checkout redirect — ignore product-phase recipes until checkout host loads.
+      if (recipeMove && session.wickesCheckoutSent && session.site === 'wickes.co.uk' && !session.guestCheckoutDone) {
+        const host = (() => { try { return new URL(session.page.url()).hostname; } catch { return ''; } })();
+        if (!isGuestCheckoutUrl(session.page.url()) && !/^checkout\./i.test(host)) {
+          recipeMove = null;
+        }
+      }
+      // Wickes: basket JSON lags — poll once, then take the next step (open-basket), never add twice.
+      if (session.site === 'wickes.co.uk' && session.wickesAddSent && !session.wickesAddConfirmed) {
+        await waitAfterRecipeStep(session.page, session.site, 'add', session);
+        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
+      }
+      // Delivery: modal-add must register in the cart before re-clicking Add.
+      if (isDeliveryHost(session.site) && session.deliveryAddSent && !session.deliveryAddConfirmed) {
+        await waitAfterRecipeStep(session.page, session.site, 'modal-add', session);
+        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
+      }
+      if (recipeMove?.stepName === 'modal-add' && session.deliveryAddSent && session.deliveryAddConfirmed) {
+        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
+      }
+      if (recipeMove?.stepName === 'add' && session.wickesAddSent && session.site === 'wickes.co.uk') {
+        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
+      }
+      // Wickes: after checkout click, never re-open the mini-cart (flyout closes during nav).
+      if (recipeMove?.stepName === 'open-basket' && session.wickesCheckoutSent && session.site === 'wickes.co.uk') {
+        recipeMove = null;
+      }
+      if (recipeMove?.stepName === 'open-basket' && session.lastRecipeStep === 'open-basket' && session.site === 'wickes.co.uk') {
+        recipeHealth.recordMiss(session.site, 'open-basket');
+        recipeMove = null;
+      }
+      // Guest fork: recipe guest step beats a ~2s vision call on login-or-guest pages.
+      if (!recipeMove && session.isOrder && !session.guestCheckoutDone && isGuestCheckoutUrl(session.page.url()) && recipe) {
+        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
+      }
+      if (recipeMove?.stepName === 'guest' && session.guestCheckoutDone) recipeMove = null;
+      if (searchPick) {
+        decision = searchPick;
+        recipeStepName = searchPick.stepName;
+      } else if (recipeMove) {
         decision = recipeMove;
         recipeStepName = recipeMove.stepName;
       } else {
@@ -1786,16 +2037,22 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         if (session.isOrder) {
           const checkoutField = classifyCheckoutAsk(decision.question);
           if (checkoutField === 'email') {
+            if (!session.guestCheckoutDone && (isGuestCheckoutUrl(session.page.url()) || findGuestCheckoutElement(elements))) {
+              const guestClicked = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
+              if (guestClicked) {
+                await settle(session.page, RECIPE_SETTLE_MS);
+                consecutiveBadDecisions = 0;
+                consecutiveWaits = 0;
+                touchSession(userId);
+                await persistStorage(userId, session);
+                continue;
+              }
+            }
             const profile = await getCheckoutProfileCached(session, userId);
             if (profile.email && profile.emailConsent) {
               const filled = await autoFillCheckoutEmail(session, elements, profile.email, steps, onProgress);
               if (filled) {
-                consecutiveBadDecisions = 0;
-                consecutiveWaits = 0;
-                await settle(session.page);
-                touchSession(userId);
-                await persistStorage(userId, session);
-                continue;
+                return await completeCheckoutEmailFill(session, userId, session.page, steps, onProgress);
               }
             }
             return { type: 'ask', question: buildEmailAskWithConsent(decision.question) };
@@ -1842,6 +2099,21 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
       if (matchesPaymentKeyword(target.text)) {
         session.pendingPaymentLabel = target.text;
         return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
+      }
+
+      if (decision.action === 'click' && GUEST_CHECKOUT_PATTERN.test(String(target.text || '')) && session.guestCheckoutDone) {
+        session.history.push(`Step ${steps}: suppressed repeat guest checkout click on "${target.text}"`);
+        consecutiveBadDecisions = 0;
+        continue;
+      }
+
+      // Never type an email address into a non-email control (model often picks "Checkout as
+      // a guest" after the real email field was already filled by checkout-profile).
+      if (decision.action === 'fill' && /@/.test(String(decision.value || '')) && !/\b(e-?mail)\b/i.test(String(target.text || ''))) {
+        consecutiveBadDecisions += 1;
+        session.history.push(`Step ${steps}: suppressed fill of email into non-email field "${target.text}"`);
+        if (consecutiveBadDecisions >= 3) return STUCK;
+        continue;
       }
 
       // The DOM often re-renders between perception and action (hydration, results refresh,
@@ -1984,6 +2256,10 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
         session.lastActionSig = lastActionSig;
         session.repeatActionCount = repeatActionCount;
         if (recipeStepName) {
+          if (recipeStepName === 'guest') session.guestCheckoutDone = true;
+          if (recipeStepName === 'add' && session.site === 'wickes.co.uk') session.wickesAddSent = true;
+          if (recipeStepName === 'checkout' && session.site === 'wickes.co.uk') session.wickesCheckoutSent = true;
+          if (recipeStepName === 'modal-add' && isDeliveryHost(session.site)) session.deliveryAddSent = true;
           const sameStep = session.lastRecipeStep === recipeStepName;
           session.lastRecipeStep = recipeStepName;
           if (sameStep) {
@@ -2009,6 +2285,8 @@ async function runOrderingTurn(userId, { url, goal, onProgress = () => {} }) {
             session.stepsSinceNewState = stepsSinceNewState;
             session.stepsSinceCartProgress = stepsSinceCartProgress;
           }
+          session.lastWasRecipe = true;
+          await waitAfterRecipeStep(session.page, session.site, recipeStepName, session);
         }
         touchSession(userId);
         await persistStorage(userId, session);
@@ -2096,6 +2374,8 @@ module.exports = {
   findGuestCheckoutElement,
   classifyCheckoutAsk,
   findEmailInputElement,
+  isSearchResultsUrl,
+  isGuestCheckoutUrl,
   looksLikeBlockWall,
   detectBlockWall,
   describesBlockWall,

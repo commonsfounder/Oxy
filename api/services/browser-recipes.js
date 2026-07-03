@@ -2,6 +2,8 @@
 // Tier-2 deterministic recipes. See docs/superpowers/specs/2026-07-01-browser-task-tier2-recipes-design.md
 // Pure helpers first (unit-tested); the DOM-touching executor lives lower down.
 
+const { isDeliveryHost } = require('./retailer-sites');
+
 const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 // Pull a size the user has already specified out of the goal/history text. Conservative:
@@ -53,21 +55,14 @@ function matchSizeChip(parsedSize, chipLabels) {
   return null;
 }
 
-// Generic fallback recipe. Tried for any host not in RECIPES. No size step (too risky to
-// guess generically) — vision handles add-to-cart and navigation; recipe only takes the
-// cart→checkout step where the button text is highly consistent across sites.
+// Cart/checkout-only fallback kept for tests and backward compat.
 const GENERIC = {
   phases: {
-    // checkout phase: multi-step checkout flows — recipe has no steps here, falls to vision.
     checkout: (u) => /\/(?:checkout|order|pay(?:ment)?|purchase)\b/i.test(u.pathname),
-    // cart phase: any URL whose path contains cart/basket/bag/trolley word.
     cart:     (u) => /\/(?:cart|basket|bag|trolley)\b/i.test(u.pathname),
   },
-  // Empty size config: hasUnsatisfiedSize is always false → no size step fired.
   size: { container: [], chip: [], selected: [] },
   steps: [
-    // On the cart page click the primary checkout CTA. Payment-keyword buttons (Place Order)
-    // are caught by the payment guardrail in browser-task.js before the click fires.
     { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
       'text=Proceed to Checkout',
       'text=Go to checkout',
@@ -77,6 +72,111 @@ const GENERIC = {
       'text=Checkout',
       'text=Place Order',
     ]},
+  ],
+};
+
+// Convention-keyed recipe for unknown retail hosts. Uses common aria/data-testid/button-text
+// patterns for size→add→basket→checkout. Vision still picks the product; recipe drives the tail.
+const CONVENTION = {
+  phases: {
+    product:  (u) => /\/(?:p\/|product\/|products\/|item\/|sku\/|pd\/|dp\/|p\d+(?:\/|$))/i.test(u.pathname),
+    checkout: (u) => /\/(?:checkout|order|pay(?:ment)?|purchase)\b/i.test(u.pathname),
+    cart:     (u) => /\/(?:cart|basket|bag|trolley)\b/i.test(u.pathname),
+  },
+  size: {
+    container: [
+      '[data-testid*="size" i]',
+      'fieldset[class*="size" i]',
+      '[class*="size-selector" i]',
+      'label[aria-label^="Size " i]',
+    ],
+    chip: [
+      '[data-testid*="size" i] button',
+      '[data-testid*="size" i] a',
+      'label[aria-label^="Size " i]',
+      'button[aria-label^="Size " i]',
+      '[role="radio"][aria-label*="size" i]',
+    ],
+    selected: [
+      '[aria-checked="true"]',
+      '[aria-selected="true"]',
+      '[data-selected="true"]',
+      '[class*="selected" i][class*="size" i]',
+    ],
+    basketBadge: [
+      '[data-testid*="basket" i]',
+      '[data-testid*="cart" i]',
+      '[data-testid*="bag" i]',
+      'a[aria-label*="Shopping bag" i]',
+      'a[aria-label*="basket" i]',
+      'a[aria-label*="cart" i]',
+    ],
+  },
+  steps: [
+    { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
+    { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      '[data-testid*="add-to-basket" i]',
+      '[data-testid*="add-to-bag" i]',
+      '[data-testid*="add-to-cart" i]',
+      'text=Add to basket',
+      'text=Add to bag',
+      'text=Add to cart',
+      'text=Add for Delivery',
+      'text=Add for Collection',
+    ] },
+    { phase: 'product', name: 'go-to-basket', when: (ctx) => ctx.basketCount > 0, action: 'click', selectorAny: [
+      '[data-testid*="basket" i]',
+      'text=View basket',
+      'text=View bag',
+      'text=Basket',
+      'text=Bag',
+      'text=Cart',
+    ] },
+    { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
+      'text=Proceed to Checkout',
+      'text=Go to checkout',
+      'text=Checkout securely',
+      'text=Continue to checkout',
+      'text=Secure checkout',
+      'text=Checkout',
+    ]},
+  ],
+};
+
+// Delivery-site recipe: commit items from the item-options modal (Uber Eats / Deliveroo / Just Eat).
+const DELIVERY = {
+  isDelivery: true,
+  phases: {
+    modal: (u) => true, // gated by ctx.dialogOpen in nextRecipeMove
+    menu:  (u) => true,
+  },
+  size: {
+    container: [],
+    chip: [],
+    selected: [],
+    basketBadge: [
+      '[data-testid*="cart" i]',
+      '[aria-label*="cart" i]',
+      '[aria-label*="basket" i]',
+      '[class*="cart-count" i]',
+      '[class*="basket-count" i]',
+    ],
+  },
+  steps: [
+    { phase: 'modal', name: 'modal-add', when: (ctx) => ctx.dialogOpen, action: 'click', selectorAny: [
+      'text=Add to order',
+      'text=Add item',
+      'text=Add to basket',
+      'text=Add to cart',
+      'text=Add',
+    ] },
+    { phase: 'menu', name: 'view-basket', when: (ctx) => ctx.basketCount > 0, action: 'click', selectorAny: [
+      'text=View basket',
+      'text=View order',
+      'text=Go to checkout',
+      'text=Checkout',
+      'text=View cart',
+    ] },
   ],
 };
 
@@ -169,6 +269,11 @@ const RECIPES = {
       flyoutCheck: ['.btn-checkout'],
     },
     steps: [
+      { phase: 'checkout', name: 'guest', action: 'click', selectorAny: [
+        'text=Checkout as a guest',
+        'text=Continue as a guest',
+        'text=Guest checkout',
+      ] },
       { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
         '.btn-add-to-basket',
         'text=Add for Delivery',
@@ -256,7 +361,11 @@ async function readCtx(page, recipe) {
     }
     const visible = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
     const flyoutOpen = (size.flyoutCheck || []).some((s) => { try { return visible(document.querySelector(s)); } catch { return false; } });
-    return { hasUnsatisfiedSize: container && !selectedDom && !selectedUrl, basketCount, flyoutOpen };
+    const vw = window.innerWidth * window.innerHeight;
+    const dialogOpen = Array.from(document.querySelectorAll('[role="dialog"],[aria-modal="true"]'))
+      .filter(visible)
+      .some((el) => { const r = el.getBoundingClientRect(); return r.width * r.height > vw * 0.12; });
+    return { hasUnsatisfiedSize: container && !selectedDom && !selectedUrl, basketCount, flyoutOpen, dialogOpen };
   }, { probe: 'ctx', size });
   if (size.basketCountUrl) {
     ctx.basketCount = await page.evaluate(async ({ probe, url, field }) => {
@@ -268,7 +377,7 @@ async function readCtx(page, recipe) {
       } catch { return 0; }
     }, { probe: 'basketCountFetch', url: size.basketCountUrl, field: size.basketCountField || 'totalItems' });
   }
-  return ctx || { hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false };
+  return ctx || { hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false, dialogOpen: false };
 }
 
 // Resolve a step's selectorAny to a { locatorIndex, text }, choosing the first candidate that
@@ -343,11 +452,31 @@ const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, [role="button"], 
 const recipeHealth = createRecipeHealth();
 
 // The executor. Returns a move for the loop to execute, or null → vision fallback.
+function selectRecipeForHost(host) {
+  if (RECIPES[host]) return RECIPES[host];
+  if (isDeliveryHost(host)) return DELIVERY;
+  return CONVENTION;
+}
+
 async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   const host = hostOfRecipe(recipe, (session && session.site) || 'unknown');
+  const ctx = await readCtx(page, recipe);
+  // Delivery: item modal takes priority — URL doesn't change when a modal opens.
+  if (recipe.isDelivery && ctx.dialogOpen) {
+    const modalStep = selectStep(recipe, 'modal', ctx, health, host);
+    if (modalStep) {
+      if (modalStep.resolve) {
+        const move = await modalStep.resolve({ page, session, recipe, ctx, clickable: CLICKABLE_SELECTOR });
+        if (move) { health.recordHit(host, modalStep.name); return move; }
+      } else if (modalStep.selectorAny) {
+        const hit = await resolveSelectorIndex(page, modalStep.selectorAny, CLICKABLE_SELECTOR, `resolve:${modalStep.name}`);
+        if (hit) { health.recordHit(host, modalStep.name); return { action: modalStep.action, locatorIndex: hit.locatorIndex, text: hit.text, stepName: modalStep.name }; }
+      }
+      health.recordMiss(host, modalStep.name);
+    }
+  }
   const phase = phaseFromUrl(recipe, page.url());
   if (!phase) return null;
-  const ctx = await readCtx(page, recipe);
   const step = selectStep(recipe, phase, ctx, health, host);
   if (!step) return null;
 
@@ -371,4 +500,8 @@ function hostOfRecipe(recipe, fallback = 'unknown') {
   return fallback;
 }
 
-module.exports = { parseSizeFromGoal, matchSizeChip, GENERIC, RECIPES, phaseFromUrl, createRecipeHealth, selectStep, RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR };
+module.exports = {
+  parseSizeFromGoal, matchSizeChip, GENERIC, CONVENTION, DELIVERY, RECIPES,
+  phaseFromUrl, createRecipeHealth, selectStep, selectRecipeForHost,
+  RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR,
+};

@@ -37,7 +37,8 @@ module.exports = [
   // --- Electronics / DIY / sportswear ---
   { site: 'currys.co.uk',       url: 'https://www.currys.co.uk',       goal: 'add a wireless mouse to basket and go to checkout', expect: 'cart', tags: ['electronics', 'has-fastpath'] },
   { site: 'screwfix.com',       url: 'https://www.screwfix.com',       goal: 'add a cordless drill to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
-  { site: 'wickes.co.uk',       url: 'https://www.wickes.co.uk',       goal: 'add white paint to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
+  // Pinned PDP: search-first can land on intermittently undeliverable SKUs (~30s vision spin).
+  { site: 'wickes.co.uk',       url: 'https://www.wickes.co.uk/Crown-Matt-Emulsion-Paint---Pure-Brilliant-White---10L/p/166844', goal: 'add white paint to basket and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath', 'has-recipe'] },
   { site: 'toolstation.com',    url: 'https://www.toolstation.com',    goal: 'add a tape measure to basket for collection near EC1A 1BB and go to checkout', expect: 'cart', tags: ['diy', 'has-fastpath'] },
   { site: 'nike.com',           url: 'https://www.nike.com/gb',        goal: 'order mens running shoes in size UK 10, add to bag and go to checkout', expect: 'cart', tags: ['sportswear', 'has-fastpath'] },
   { site: 'argos.co.uk',        url: 'https://www.argos.co.uk',        goal: 'add a kettle to basket and go to checkout', expect: 'cart', tags: ['electronics', 'known-botwall'] },

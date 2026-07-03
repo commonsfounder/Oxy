@@ -288,6 +288,9 @@ async function searchPlaceWithGoogle(query, location = null) {
 }
 
 const geocodeLocation = async (locationString) => {
+  if (looksLikeNonDestination(String(locationString || '').trim())) {
+    throw new Error(`"${locationString}" doesn't look like a destination. What's the actual place or address?`);
+  }
   try {
     if (process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY) {
       return await geocodeWithGoogle(locationString);
@@ -306,9 +309,21 @@ const geocodeLocation = async (locationString) => {
   }
 };
 
+// Bare interjections/fillers ("huh", "what", "idk") are not place names. Geocoders
+// will still fuzzy-match them to *something* nearby, producing a fabricated
+// destination with a fake ETA/fare. Reject these before they ever reach Places/geocoding.
+const NON_DESTINATION_PHRASES = /^(huh|hm+|uh+|um+|eh|what|wat|who|why|no|nah|nope|yes|yeah|yep|ok|okay|sure|idk|dunno|i\s*don'?t\s*know|wait|hold\s*on|nvm|never\s*mind|cancel|stop|nothing|none|n\/?a)\??!?$/i;
+
+function looksLikeNonDestination(query) {
+  return NON_DESTINATION_PHRASES.test(query.trim());
+}
+
 async function resolvePlaceDestination(destination, options = {}) {
   const query = String(destination || '').trim();
   if (!query) throw new Error('Destination is required');
+  if (looksLikeNonDestination(query)) {
+    throw new Error(`"${query}" doesn't look like a destination. What's the actual place or address?`);
+  }
 
   const location = normalizeLocation(options.location);
   const explicitNearby = isExplicitNearbyQuery(query);
