@@ -161,6 +161,27 @@ async function resolveEmailFill({ page, session, clickable }) {
   return { action: 'fill', locatorIndex: idx, value: email, stepName: 'fill-email', text: 'Email address' };
 }
 
+// Guest-checkout selector list, byte-identical across CONVENTION (cart+checkout) and John
+// Lewis (checkout) today. Other retailers use their own wording/order/count (e.g. M&S omits
+// "Continue without an account", Currys/Selfridges/Wickes lead with "Continue as guest") —
+// those are left as separate literals since they are NOT the same list and consolidating them
+// would silently change which button text each site matches.
+const STANDARD_GUEST_SELECTORS = [
+  'text=Guest checkout',
+  'text=Checkout as a guest',
+  'text=Continue as a guest',
+  'text=Continue without an account',
+];
+
+// "Advance past the guest-email step" selector list — byte-identical across all 5 retailers
+// that have this step (CONVENTION, John Lewis, M&S, Currys, Selfridges), same `when` guard too.
+const CHECKOUT_ADVANCE_SELECTORS = [
+  'text=Continue to delivery',
+  'text=Continue to payment',
+  'text=Save and continue',
+  'text=Continue to billing',
+];
+
 // Cart/checkout-only fallback kept for tests and backward compat.
 const GENERIC = {
   phases: {
@@ -242,12 +263,7 @@ const CONVENTION = {
       'text=Bag',
       'text=Cart',
     ] },
-    { phase: 'cart', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
-      'text=Guest checkout',
-      'text=Checkout as a guest',
-      'text=Continue as a guest',
-      'text=Continue without an account',
-    ] },
+    { phase: 'cart', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: STANDARD_GUEST_SELECTORS },
     { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
       'text=Proceed to Checkout',
       'text=Go to checkout',
@@ -256,19 +272,9 @@ const CONVENTION = {
       'text=Secure checkout',
       'text=Checkout',
     ] },
-    { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
-      'text=Guest checkout',
-      'text=Checkout as a guest',
-      'text=Continue as a guest',
-      'text=Continue without an account',
-    ] },
+    { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: STANDARD_GUEST_SELECTORS },
     { phase: 'checkout', name: 'fill-email', when: (ctx) => ctx.checkoutEmailVisible && !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, resolve: (a) => resolveEmailFill(a) },
-    { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
-      'text=Continue to delivery',
-      'text=Continue to payment',
-      'text=Save and continue',
-      'text=Continue to billing',
-    ] },
+    { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
   ],
 };
 
@@ -343,18 +349,8 @@ const RECIPES = {
         'text=Secure checkout',
         'text=Continue to checkout',
       ] },
-      { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
-        'text=Guest checkout',
-        'text=Checkout as a guest',
-        'text=Continue as a guest',
-        'text=Continue without an account',
-      ] },
-      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
-        'text=Continue to delivery',
-        'text=Continue to payment',
-        'text=Save and continue',
-        'text=Continue to billing',
-      ] },
+      { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: STANDARD_GUEST_SELECTORS },
+      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
     ],
   },
 
@@ -380,12 +376,7 @@ const RECIPES = {
         'text=Checkout as a guest',
         'text=Continue as a guest',
       ] },
-      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
-        'text=Continue to delivery',
-        'text=Continue to payment',
-        'text=Save and continue',
-        'text=Continue to billing',
-      ] },
+      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
       { phase: 'basket', name: 'guest', action: 'click', selectorAny: [
         'text=Guest checkout',
         'text=Checkout as a guest',
@@ -423,12 +414,7 @@ const RECIPES = {
         'text=Guest checkout',
         'text=Checkout as a guest',
       ] },
-      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
-        'text=Continue to delivery',
-        'text=Continue to payment',
-        'text=Save and continue',
-        'text=Continue to billing',
-      ] },
+      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
       { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '[data-test*="add-to-basket" i]',
         'text=Add to basket',
@@ -522,12 +508,7 @@ const RECIPES = {
         'text=Continue as guest',
         'text=Checkout as a guest',
       ] },
-      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
-        'text=Continue to delivery',
-        'text=Continue to payment',
-        'text=Save and continue',
-        'text=Continue to billing',
-      ] },
+      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
       { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         'text=Add to bag',

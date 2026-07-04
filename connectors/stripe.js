@@ -48,7 +48,9 @@ async function stripeRequest(key, method, path, data = null) {
 async function execute(userId, action, params) {
   // Hard per-transaction ceiling before any real Stripe call — independent of the model and of
   // whether the review gate was bypassed. `stripe_charge` passes the amount in cents; every other
-  // spend action here is in dollars.
+  // spend action here is in dollars. This is one of two independent layers (the other is
+  // guardConciergeSpend in api/index.js, which also tracks the rolling daily total) — see
+  // money-guard.js for why both exist.
   if (SPEND_ACTIONS.has(action)) {
     const dollars = action === 'stripe_charge' ? Number(params?.amount || 0) / 100 : Number(params?.amount || 0);
     const verdict = checkSpendLimit({ amount: dollars });
