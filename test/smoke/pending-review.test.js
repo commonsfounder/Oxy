@@ -3,6 +3,9 @@ const test = require('node:test');
 
 const {
   buildPendingReviewResult,
+  cleanCalendarTitle,
+  formatCalendarDate,
+  formatCalendarTime,
   isPendingCancelMessage,
   isPendingConfirmMessage,
   isPendingRevisionMessage,
@@ -38,6 +41,26 @@ test('pending email card shows recipient, subject, and body for review', () => {
     }
   });
   assert.equal(detail, 'josh@example.com · Catch up · Can we meet Friday?');
+});
+
+test('pending calendar card normalizes title and formats date times', () => {
+  assert.equal(cleanCalendarTitle('dentist .'), 'Dentist');
+  const detail = reviewDetailForAction({
+    type: 'create_calendar_event',
+    input: {
+      title: 'dentist .',
+      start_date: '2026-07-05T15:00:00',
+      end_date: '2026-07-05T16:00:00',
+      timezone: 'Europe/London'
+    }
+  });
+  assert.match(detail, /Title: Dentist/);
+  assert.match(detail, /Date: /);
+  assert.match(detail, /Start: /);
+  assert.match(detail, /End: /);
+  assert.doesNotMatch(detail, /2026-07-05T15:00:00/);
+  assert.equal(formatCalendarDate('2026-07-05T15:00:00').includes('2026'), true);
+  assert.equal(formatCalendarTime('2026-07-05T15:00:00'), '15:00');
 });
 
 test('pending review result owns concise final wording for high-risk actions', () => {

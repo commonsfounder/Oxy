@@ -96,12 +96,18 @@ function createActionRunner({
         };
       } else {
         const execContext = { ...context, previousResults: results };
-        result = trace
-          ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, execContext))
-          : await executeAction(userId, action.type, action.input || {}, execContext);
-        Object.assign(result, buildActionRecovery(action, result));
-        Object.assign(result, diagnoseConnectorIssue(action, result));
-        result = applyActionContractResultMetadata(action, result);
+        try {
+          result = trace
+            ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, execContext))
+            : await executeAction(userId, action.type, action.input || {}, execContext);
+          Object.assign(result, buildActionRecovery(action, result));
+          Object.assign(result, diagnoseConnectorIssue(action, result));
+          result = applyActionContractResultMetadata(action, result);
+        } catch (e) {
+          // Isolate this action's failure so a throw here doesn't discard the
+          // results already collected for actions earlier in the batch.
+          result = { success: false, error: e.message };
+        }
       }
 
       const log = () => logAction(userId, action, result);

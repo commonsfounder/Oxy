@@ -60,12 +60,22 @@ final class VoiceInputManager {
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             let rec = try AVAudioRecorder(url: url, settings: settings)
-            rec.record()
+            rec.prepareToRecord()
+            guard rec.record() else {
+                throw NSError(domain: "VoiceInputManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Recorder did not start."])
+            }
             recorder = rec
             tempURL = url
             isRecording = true
+            #if DEBUG
+            print("[VoiceInput] recording url=\(url.lastPathComponent) format=wav sampleRate=16000 channels=1")
+            #endif
         } catch {
             errorMessage = "Audio setup failed: \(error.localizedDescription)"
+            // The session may have been activated above even though recording
+            // never actually started; leaving it active blocks other audio
+            // (e.g. music ducking) until the app backgrounds.
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
     }
 
@@ -90,6 +100,12 @@ final class VoiceInputManager {
             guard !Task.isCancelled else { return }
             do {
                 let audioData = try Data(contentsOf: url)
+                #if DEBUG
+                print("[VoiceInput] upload bytes=\(audioData.count) field=audio file=voice.wav mime=audio/wav")
+                #endif
+                guard !audioData.isEmpty else {
+                    throw NSError(domain: "VoiceInputManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "Recorded audio was empty."])
+                }
                 let responseData = try await APIClient.shared.multipartRequest(
                     path: "/pendant/transcribe",
                     fields: ["userId": uid],
@@ -107,6 +123,9 @@ final class VoiceInputManager {
                 }
             } catch {
                 if !Task.isCancelled {
+                    #if DEBUG
+                    print("[VoiceInput] transcription failed: \(error.localizedDescription)")
+                    #endif
                     errorMessage = "Transcription failed. Please try again."
                 }
             }

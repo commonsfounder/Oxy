@@ -547,12 +547,10 @@ function isLinkSendRequest(message) {
 module.exports = {
   ACTION_CONTRACTS,
   getActionContract,
-  normalizeActionInput,
   validateActionWithContract,
   buildActionRecovery,
   applyActionContractResultMetadata,
   actionPromptBlock,
   buildFunctionDeclarations,
-  buildToolsForGemini,
-  actionToFunctionDeclaration
+  buildToolsForGemini
 };

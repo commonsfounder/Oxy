@@ -169,18 +169,15 @@ async function runAgentLoop({
 
     if (onStep) onStep({ phase: 'executing', actions });
 
-    // Execute in parallel where safe (cream-of-crop agents do this for speed)
+    // Execute one model turn's tool calls as an ordered batch so compound
+    // requests preserve dependencies and result order.
     let results = [];
     if (typeof executeActionsFn === 'function') {
-      // Run actions in parallel for independent tools
-      results = await Promise.all(actions.map(async (a) => {
-        try {
-          const res = await executeActionsFn(userId, [a], { ...context, agentIteration: i }, trace);
-          return res[0] || { action: a.type, result: { success: true } };
-        } catch (e) {
-          return { action: a.type, result: { success: false, error: e.message } };
-        }
-      }));
+      try {
+        results = await executeActionsFn(userId, actions, { ...context, agentIteration: i, sequential: true }, trace);
+      } catch (e) {
+        results = actions.map(a => ({ action: a.type, result: { success: false, error: e.message } }));
+      }
     } else {
       results = actions.map(a => ({ action: a.type, result: { success: true, text: `Executed ${a.type}` } }));
     }

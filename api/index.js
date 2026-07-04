@@ -69,7 +69,11 @@ const {
   verifyPassword,
   verifySignedPayload
 } = require('../auth');
-const { runAgentLoop, generatePlan, reflectOnResults } = require('./services/agent-orchestrator');
+const {
+  runAgentLoop: runAgenticLoop,
+  generatePlan,
+  reflectOnResults
+} = require('./services/agent-orchestrator');
 const taskManager = require('./services/task-manager');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
@@ -521,22 +525,76 @@ function normalizeGeminiHistory(history) {
 }
 
 function parseActions(fullResponse) {
-  const match = fullResponse.match(/<action>([\s\S]*?)<\/action>/);
-  const spoken = fullResponse.replace(/<action>[\s\S]*?<\/action>/g, '').trim();
+  const text = String(fullResponse || '');
+  const matches = [...text.matchAll(/<action>([\s\S]*?)<\/action>/gi)];
+  const spoken = text.replace(/<action>[\s\S]*?<\/action>/gi, '').trim();
   let actions = [];
+  let parseError = false;
 
-  if (match) {
+  for (const match of matches) {
     try {
       // Strip markdown code fences Gemini sometimes wraps around JSON
       const raw = match[1].trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
       const parsed = JSON.parse(raw);
-      actions = parsed.actions || [];
+      actions.push(...(parsed.actions || []));
     } catch (e) {
+      parseError = true;
       console.warn('[parseActions] failed:', e.message, '| raw:', match[1].trim().slice(0, 200));
     }
   }
 
-  return { spoken, actions };
+  return { spoken, actions, parseError };
+}
+
+function mentionsActionCommitment(text = '') {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  return /\b(i['’]?ll|i will|going to|about to)\s+(set|create|add|send|book|order|call|check|search|look up|open)\b/i.test(value) ||
+    /\b(done|all set|sent|booked|created|added|ordered|called|reminder set)\b/i.test(value);
+}
+
+function parsePrice(text = '') {
+  const value = String(text || '');
+  if (/\bfree\b/i.test(value)) return null;
+  const match = value.match(/(?:£|\$|€)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)(?:\s*(?:gbp|usd|eur))?/i);
+  if (!match) return null;
+  const amount = Number(match[1].replace(/,/g, ''));
+  return Number.isFinite(amount) ? amount : null;
+}
+
+function decidePaymentByCap(totalText, budgetCap) {
+  const total = parsePrice(totalText);
+  const cap = Number(budgetCap);
+  if (!total || !cap || cap <= 0) return { decision: 'approve', total, cap: Number.isFinite(cap) ? cap : null };
+  return { decision: total <= cap ? 'pay' : 'approve', total, cap };
+}
+
+async function runLegacyActionLoop({ generate, execute, confirm, maxSteps = 6, budgetCap = null }) {
+  const actions = [];
+  let spoken = '';
+  for (let step = 1; step <= maxSteps; step += 1) {
+    const response = await generate();
+    const text = typeof response === 'string' ? response : (response?.text || '');
+    const parsed = parseActions(text);
+    spoken = parsed.spoken || spoken;
+    if (!parsed.actions.length) return { status: 'done', spoken, actions, steps: step };
+
+    const batch = await execute(parsed.actions);
+    actions.push(...batch);
+    const pending = batch.find(entry => entry?.result?.confirmation === 'review_required' || entry?.result?.pending);
+    if (pending) {
+      if (pending.action === 'run_browser_task') {
+        const decision = decidePaymentByCap(pending.result?.total, budgetCap);
+        if (decision.decision === 'pay') {
+          const confirmed = await confirm(pending);
+          actions.push({ action: pending.action, result: confirmed });
+          continue;
+        }
+      }
+      return { status: 'paused', spoken, actions, steps: step };
+    }
+  }
+  return { status: 'maxSteps', spoken, actions, steps: maxSteps };
 }
 
 function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
@@ -547,6 +605,81 @@ function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
     if (intent === 'write') return action;
     return { ...buildCalendarReadAction(userMessage).actions[0], _reroutedFrom: 'create_calendar_event' };
   });
+}
+
+function emailReadActionForMessage(message = '') {
+  const text = String(message || '');
+  const important = /\b(important|urgent|priority|need my attention|actionable)\b/i.test(text);
+  const input = { max_results: important ? 10 : 5, label: 'INBOX' };
+  if (/\btoday\b/i.test(text)) input.query = 'newer_than:1d';
+  if (important) input.query = [input.query, '(important OR urgent OR action required)'].filter(Boolean).join(' ');
+  if (input.query) {
+    return { type: 'search_emails', input: { query: input.query, max_results: input.max_results } };
+  }
+  return { type: 'get_emails', input };
+}
+
+function inferCompoundReadOnlyTurn(message = '') {
+  const text = String(message || '');
+  const hits = [];
+  const emailMatch = text.match(/\b(email|emails|gmail|inbox)\b/i);
+  if (emailMatch) {
+    hits.push({ index: emailMatch.index ?? 0, kind: 'email', label: 'emails' });
+  }
+  const calendarMatch = text.match(/\b(calendar|schedule|events?)\b/i);
+  if (calendarMatch && isCalendarReadRequest(text)) {
+    hits.push({ index: calendarMatch.index ?? 0, kind: 'calendar', label: 'calendar' });
+  }
+  const orderedHits = hits.sort((a, b) => a.index - b.index);
+  // Split on ", then"/"then" clause connectors so each domain's segment keeps
+  // qualifiers ("important", "today") that precede its own trigger keyword
+  // within the same clause, without bleeding into the other clause's
+  // date/priority words (slicing purely by keyword index either dropped
+  // leading qualifiers or let a date word from one clause leak into the
+  // other). Falls back to keyword-index slicing when there's no explicit
+  // connector to split the clauses on.
+  const clauseBreaks = [...text.matchAll(/,?\s*\bthen\b\s*/gi)].map(m => m.index + m[0].length);
+  const boundaries = [0, ...clauseBreaks, text.length];
+  const clauseFor = (idx) => {
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      if (idx >= boundaries[i] && idx < boundaries[i + 1]) return { start: boundaries[i], end: boundaries[i + 1] };
+    }
+    return { start: 0, end: text.length };
+  };
+  const actions = orderedHits.map((hit, idx) => {
+    let start, end;
+    if (clauseBreaks.length) {
+      ({ start, end } = clauseFor(hit.index));
+    } else {
+      start = idx === 0 ? 0 : orderedHits[idx - 1].index;
+      end = orderedHits[idx + 1]?.index ?? text.length;
+    }
+    const segment = text.slice(start, end);
+    return hit.kind === 'calendar'
+      ? buildCalendarReadAction(segment).actions[0]
+      : emailReadActionForMessage(segment);
+  });
+  const uniqueTypes = new Set(actions.map(action => action.type));
+  if (actions.length < 2 || uniqueTypes.size < 2) return null;
+  return {
+    reason: 'compound_read_only',
+    spoken: "I'll check those and give you one combined summary.",
+    actions
+  };
+}
+
+function summarizeReadOnlyActionResults(actionResults = []) {
+  const dataResults = getStructuredDataResults(actionResults);
+  const failures = (actionResults || []).filter(entry => DATA_ACTIONS.has(entry?.action) && entry?.result?.success === false);
+  if (!dataResults.length && !failures.length) return '';
+  const parts = [];
+  if (dataResults.length) {
+    parts.push(`Here’s what I found:\n\n${dataResults.map(entry => entry.text).join('\n\n')}`);
+  }
+  if (failures.length) {
+    parts.push(failures.map(entry => `${humanizeActionType(entry.action)} failed: ${userFacingActionFailure(entry)}`).join('\n'));
+  }
+  return parts.join('\n\n');
 }
 
 // Convert Gemini native function calls (from response.functionCalls or parts) to internal action format
@@ -713,6 +846,20 @@ async function transcribeAudio(buffer) {
   }
 
   return isImplausibleTranscript(lastTranscript, durationMs) ? '' : lastTranscript;
+}
+
+function validatePendantTranscriptionUpload(file) {
+  if (!file) return { ok: false, status: 400, error: 'No audio file received.' };
+  const size = file.size || file.buffer?.length || 0;
+  if (!size) return { ok: false, status: 400, error: 'Audio file was empty.' };
+  const mimetype = String(file.mimetype || '').toLowerCase();
+  const originalname = String(file.originalname || '').toLowerCase();
+  const supportedMime = ['audio/wav', 'audio/x-wav', 'audio/wave', 'audio/m4a', 'audio/mp4', 'audio/mpeg', 'audio/webm'];
+  const supportedExt = /\.(wav|m4a|mp4|mp3|webm)$/i.test(originalname);
+  if (mimetype && !supportedMime.includes(mimetype) && !supportedExt) {
+    return { ok: false, status: 415, error: 'Unsupported audio format.' };
+  }
+  return { ok: true, size, mimetype: mimetype || 'unknown', originalname };
 }
 
 function firstSentences(text, max = 2) {
@@ -1237,6 +1384,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
       };
     }
   }
+
+  const compoundReadOnly = inferCompoundReadOnlyTurn(text);
+  if (compoundReadOnly) return compoundReadOnly;
 
   if (isCalendarReadRequest(text)) {
     return buildCalendarReadAction(text);
@@ -2666,6 +2816,8 @@ async function getPreferenceMap(userId) {
 // model asked for. Reads the user's rolling-day spend tally, applies the per-txn + per-day
 // limits, and (when allowed) advances the tally. Returns { ok, error }. Callers MUST honour
 // a false `ok` and abort the spend before touching balance or any real payment API.
+// This is one of two independent layers (the other is the checkSpendLimit call in
+// connectors/stripe.js) — see money-guard.js for why both exist.
 async function guardConciergeSpend(userId, amount, prefsMap = null) {
   const prefs = prefsMap || await getPreferenceMap(userId);
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
@@ -2701,6 +2853,7 @@ async function getPendingAction(userId) {
   try {
     const parsed = JSON.parse(data.value);
     if (!parsed?.action?.type) return null;
+    parsed._raw = data.value;
     return parsed;
   } catch {
     return null;
@@ -2724,6 +2877,25 @@ async function clearPendingAction(userId) {
     .delete()
     .eq('user_id', userId)
     .eq('key', PENDING_ACTION_PREF);
+}
+
+// Atomically deletes the pending action only if it still matches exactly what
+// the caller read, and reports whether it won the claim. The in-memory
+// pendingActionConfirmLocks Set only protects against a double-tap landing on
+// the same Cloud Run instance; this DB-level compare-and-delete is what
+// actually prevents two requests (on two different instances) from both
+// executing the same review-gated action after the user says "yes".
+async function claimPendingAction(userId, pendingAction) {
+  if (!pendingAction?._raw) return false;
+  const { data, error } = await supabase
+    .from('preferences')
+    .delete()
+    .eq('user_id', userId)
+    .eq('key', PENDING_ACTION_PREF)
+    .eq('value', pendingAction._raw)
+    .select('value');
+  if (error) return false;
+  return Array.isArray(data) && data.length > 0;
 }
 
 async function getEnabledConnectors(userId, trace = null) {
@@ -3243,7 +3415,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       if (text) fullText += text;
     }
 
-    let { spoken, actions } = parseActions(fullText);
+    let { spoken, actions, parseError } = parseActions(fullText);
+    if (parseError) console.warn('[process-audio] one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, userText);
 
     let actionResults = [];
@@ -3299,11 +3472,16 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
 app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No audio file received.' });
-    }
+    const uploadCheck = validatePendantTranscriptionUpload(req.file);
+    if (!uploadCheck.ok) return res.status(uploadCheck.status).json({ error: uploadCheck.error });
     const userId = req.body.userId;
     if (!requireMatchingUser(req, res, userId)) return;
+    console.log('[pendant/transcribe] upload', {
+      userId,
+      bytes: uploadCheck.size,
+      mimetype: uploadCheck.mimetype,
+      name: uploadCheck.originalname
+    });
 
     const now = Date.now();
     const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
@@ -3314,11 +3492,20 @@ app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
 
     const transcript = (await transcribeAudio(req.file.buffer)).trim();
     if (!transcript) {
+      console.warn('[pendant/transcribe] empty transcript', {
+        userId,
+        bytes: uploadCheck.size,
+        durationMs: getWavDurationMs(req.file.buffer)
+      });
       return res.status(422).json({ error: "I couldn't clearly make out what you said." });
     }
     res.json({ transcript });
   } catch (err) {
-    console.error('/pendant/transcribe error:', err.message);
+    console.error('/pendant/transcribe error:', {
+      message: err.message,
+      status: err?.response?.status,
+      provider: err?.response?.data?.error?.message
+    });
     res.status(500).json({ error: 'Transcription failed. Please try again.' });
   }
 });
@@ -3383,7 +3570,8 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       contents: initialRequest.contents,
       config: initialRequest.config
     });
-    let { spoken, actions } = parseActions(geminiRes.text || '');
+    let { spoken, actions, parseError } = parseActions(geminiRes.text || '');
+    if (parseError) console.warn('[chat-with-image] one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
     let actionResults = [];
     if (actions.length > 0) {
@@ -3653,6 +3841,7 @@ const CONNECTOR_TYPES = {
 const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 const PENDING_ACTION_PREF = 'pending.action';
+const pendingActionConfirmLocks = new Set();
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
@@ -4615,6 +4804,17 @@ function normalizeActionResultsForClient(actionResults) {
   const seen = new Set();
   const out = [];
   for (const entry of actionResults || []) {
+    const result = entry?.result || {};
+    if ((entry?.action === 'get_emails' || entry?.action === 'search_emails') && Array.isArray(result.emails)) {
+      const count = result.emails.length;
+      result.cardText = `${count} ${count === 1 ? 'email' : 'emails'} reviewed`;
+    } else if (entry?.action === 'get_calendar_events' && Array.isArray(result.events)) {
+      const count = result.events.length;
+      result.cardText = `${count} calendar ${count === 1 ? 'item' : 'items'} checked`;
+    } else if (entry?.action === 'web_search') {
+      const count = Array.isArray(result.results) ? result.results.length : (Array.isArray(result.sources) ? result.sources.length : null);
+      if (count != null) result.cardText = `${count} search ${count === 1 ? 'result' : 'results'} checked`;
+    }
     const error = entry?.result?.error || '';
     const text = entry?.result?.text || '';
     const key = `${entry?.action || ''}:${entry?.result?.success === false ? error : text}`;
@@ -4877,30 +5077,82 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     if (pendingAction && isPendingConfirmMessage(message)) {
-      trace.log(`pending_action.confirm ${pendingAction.action.type}`);
-      let actionResults = await executeActions(userId, [pendingAction.action], {
-        userMessage: pendingAction.userMessage || message,
-        location,
-        nativeHints: pendingAction.nativeHints || nativeHints,
-        bypassReview: true,
-        trace
-      }, trace);
-      actionResults = normalizeActionResultsForClient(actionResults);
-      await clearPendingAction(userId);
-      const spoken = summarizeFinishedActionsForUser(actionResults) ||
-        actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
-        'Done.';
-      await respondWithResult({
-        res,
-        streaming,
-        wantsTTS,
-        settings,
-        trace,
-        userId,
-        message,
-        spoken,
-        actionResults
-      });
+      const pendingKey = `${userId}:${pendingAction.createdAt || ''}:${pendingAction.action.type}:${JSON.stringify(pendingAction.action.input || {})}`;
+      if (pendingActionConfirmLocks.has(pendingKey)) {
+        await respondWithResult({
+          res,
+          streaming,
+          wantsTTS,
+          settings,
+          trace,
+          userId,
+          message,
+          spoken: 'Already confirming that request.'
+        });
+        return;
+      }
+      pendingActionConfirmLocks.add(pendingKey);
+      try {
+        // The in-memory Set above only catches a double-tap landing on this
+        // same process. Cloud Run can run several instances concurrently, so
+        // the real guard against double-executing a confirmed action is this
+        // atomic compare-and-delete: only the request that actually removes
+        // the stored pending action gets to run it.
+        const claimed = await claimPendingAction(userId, pendingAction);
+        if (!claimed) {
+          await respondWithResult({
+            res,
+            streaming,
+            wantsTTS,
+            settings,
+            trace,
+            userId,
+            message,
+            spoken: 'Already confirming that request.'
+          });
+          return;
+        }
+        // Audit trail for the sole bypassReview call site: this is a user-confirmed
+        // execution of a previously review-gated action, so the trace should capture
+        // exactly what is about to run (spend caps still apply downstream regardless).
+        trace.log(`pending_action.confirm ${pendingAction.action.type}`, JSON.stringify(pendingAction.action.input || {}));
+        try {
+          let actionResults = await executeActions(userId, [pendingAction.action], {
+            userMessage: pendingAction.userMessage || message,
+            location,
+            nativeHints: pendingAction.nativeHints || nativeHints,
+            bypassReview: true,
+            trace
+          }, trace);
+          actionResults = normalizeActionResultsForClient(actionResults);
+          const spoken = summarizeFinishedActionsForUser(actionResults) ||
+            actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
+            'Done.';
+          await respondWithResult({
+            res,
+            streaming,
+            wantsTTS,
+            settings,
+            trace,
+            userId,
+            message,
+            spoken,
+            actionResults
+          });
+        } catch (e) {
+          // Execution itself blew up (not just an action-level failure, which
+          // executeActions already turns into a result rather than a throw).
+          // Restore the claimed action so the user can retry by saying "yes"
+          // again instead of losing the pending confirmation entirely.
+          await setPendingAction(userId, pendingAction.action, {
+            userMessage: pendingAction.userMessage,
+            nativeHints: pendingAction.nativeHints
+          }).catch(() => {});
+          throw e;
+        }
+      } finally {
+        pendingActionConfirmLocks.delete(pendingKey);
+      }
       return;
     }
 
@@ -4977,15 +5229,23 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.flushHeaders();
         const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
-        sendStatus('action_start', getActionStatusLabel(deterministicAction.actions[0].type, 'start'), { action: deterministicAction.actions[0].type });
-        let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace }, trace, {
+        let actionResults = await executeActions(userId, deterministicAction.actions, {
+          userMessage: message,
+          location,
+          nativeHints,
+          trace,
+          sequential: deterministicAction.actions.length > 1
+        }, trace, {
+          onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
           onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
             action: action.type,
             success: result?.success !== false
           })
         });
         actionResults = normalizeActionResultsForClient(actionResults);
-        const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
+        const spoken = summarizeReadOnlyActionResults(actionResults) ||
+          summarizeFinishedActionsForUser(actionResults) ||
+          deterministicAction.spoken;
         sse({ type: 'actions', results: actionResults });
         sse({ type: 'replace', text: spoken });
         if (wantsTTS) {
@@ -5006,9 +5266,17 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         return;
       }
 
-      let actionResults = await executeActions(userId, deterministicAction.actions, { userMessage: message, location, nativeHints, trace }, trace);
+      let actionResults = await executeActions(userId, deterministicAction.actions, {
+        userMessage: message,
+        location,
+        nativeHints,
+        trace,
+        sequential: deterministicAction.actions.length > 1
+      }, trace);
       actionResults = normalizeActionResultsForClient(actionResults);
-      const spoken = summarizeFinishedActionsForUser(actionResults) || deterministicAction.spoken;
+      const spoken = summarizeReadOnlyActionResults(actionResults) ||
+        summarizeFinishedActionsForUser(actionResults) ||
+        deterministicAction.spoken;
       saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
         .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
       const result = { text: spoken, actions: actionResults };
@@ -5055,7 +5323,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     if (useAgentic) {
       const isBroadMoneyGoal = /make money|earn cash|side hustle|monetize|make income|financial freedom|profit/i.test(message);
       try {
-        const agentResult = await runAgentLoop({
+        const agentResult = await runAgenticLoop({
           userId,
           initialMessage: message,
           dynamicSystemPrompt: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
@@ -5211,14 +5479,16 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           if (fullText) trace.log('gemini.empty_recovery_success');
         }
 
-        let { spoken, actions } = parseActions(fullText);
+        let { spoken, actions, parseError } = parseActions(fullText);
+        if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
         actions = guardCalendarActionsForUserMessage(actions, message);
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
           if (recovered) {
             fullText = recovered;
-            ({ spoken, actions } = parseActions(fullText));
+            ({ spoken, actions, parseError } = parseActions(fullText));
+            if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
             actions = guardCalendarActionsForUserMessage(actions, message);
             spoken = stripActionMarkupForDisplay(spoken).trim();
             trace.log('gemini.blank_spoken_recovery_success');
@@ -5228,6 +5498,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // Execute actions in parallel
         let actionResults = [];
         if (actions.length > 0) {
+          if (hasStreamedText) {
+            sse({ type: 'replace', text: '' });
+            hasStreamedText = false;
+          }
           actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
@@ -5340,12 +5614,14 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }));
 
     const rawText = geminiRes.text || '';
-    let { spoken, actions } = parseActions(rawText);
+    let { spoken, actions, parseError } = parseActions(rawText);
+    if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
     if (!rawText.trim() || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
       if (recovered) {
-        ({ spoken, actions } = parseActions(recovered));
+        ({ spoken, actions, parseError } = parseActions(recovered));
+        if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
         actions = guardCalendarActionsForUserMessage(actions, message);
       }
     }
@@ -5875,7 +6151,7 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   const task = await taskManager.getTask(userId, req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
   // Kick a background agent run for the goal (fire and forget)
-  runAgentLoop({
+  runAgenticLoop({
     userId,
     initialMessage: task.goal,
     dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
@@ -5930,3 +6206,11 @@ app.post('/agent/recipes/:id/execute', requireSessionAuth, async (req, res) => {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+module.exports.parseActions = parseActions;
+module.exports.mentionsActionCommitment = mentionsActionCommitment;
+module.exports.parsePrice = parsePrice;
+module.exports.decidePaymentByCap = decidePaymentByCap;
+module.exports.runAgentLoop = runLegacyActionLoop;
+module.exports.inferCompoundReadOnlyTurn = inferCompoundReadOnlyTurn;
+module.exports.summarizeReadOnlyActionResults = summarizeReadOnlyActionResults;
+module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;

@@ -381,12 +381,12 @@ struct ActionCard: View {
             if ["get_emails", "search_emails"].contains(action.action) {
                 if isSoftMiss { return compact }
                 let count = firstInteger(in: compact)
-                return count.map { "\($0) emails reviewed" } ?? "Email results reviewed"
+                return count.map { "\($0) \($0 == 1 ? "email" : "emails") reviewed" } ?? "Email results reviewed"
             }
             if action.action == "get_calendar_events" {
                 if isSoftMiss { return compact }
                 let count = firstInteger(in: compact)
-                return count.map { "\($0) calendar items checked" } ?? "Calendar checked"
+                return count.map { "\($0) calendar \($0 == 1 ? "item" : "items") checked" } ?? "Calendar checked"
             }
             if action.action == "web_search" {
                 return "Search completed"

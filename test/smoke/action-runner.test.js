@@ -25,6 +25,28 @@ test('action runner parks high-risk actions for review', async () => {
   assert.equal(logs[0].result.pending, true);
 });
 
+test('action runner parks high-risk actions for review even inside an agent loop iteration', async () => {
+  // Regression guard: agentIteration:true routes through the sequential execution
+  // path (action-runner.js), which is a separate code path from the parallel one.
+  // Money actions must hit the same review gate on both paths.
+  const pending = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => {
+      throw new Error('should not execute before review, even in an agent loop');
+    },
+    setPendingAction: async (userId, action, context) => pending.push({ userId, action, context }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'spend_from_concierge_account', input: { amount: 25.5, description: 'book table at restaurant' } }
+  ], { userMessage: 'spend $25.50 booking a table', agentIteration: true });
+
+  assert.equal(result[0].result.pending, true);
+  assert.equal(pending.length, 1);
+});
+
 test('action runner opens Uber directly because payment is confirmed in Uber', async () => {
   let executed = false;
   const executeActions = createActionRunner({
@@ -128,4 +150,30 @@ test('action runner adds connector health metadata to connector failures', async
   assert.equal(result[0].result.healthStatus, 'needs_reconnect');
   assert.equal(result[0].result.recoveryAction.connectorId, 'google');
   assert.match(result[0].result.cardText, /Reconnect Google/);
+});
+
+test('a later action throwing in a sequential batch does not discard earlier successful results', async () => {
+  // Regression guard: sequential (agent-loop) execution runs one executeActions
+  // call for the whole batch. If a single action's executeAction throws, only
+  // that action should end up marked failed — not every action in the batch,
+  // which would misreport an already-completed side effect (e.g. a sent email)
+  // as failed and risk a duplicate retry.
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type) => {
+      if (type === 'action_a') return { success: true, text: 'Sent.' };
+      throw new Error('connector timed out');
+    },
+    setPendingAction: async () => {},
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'action_a', input: {} },
+    { type: 'action_b', input: {} }
+  ], { sequential: true });
+
+  assert.equal(result[0].result.success, true);
+  assert.equal(result[0].result.text, 'Sent.');
+  assert.equal(result[1].result.success, false);
 });

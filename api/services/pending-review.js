@@ -56,6 +56,77 @@ function reviewTitleForAction(action) {
   }
 }
 
+function cleanCalendarTitle(title) {
+  const text = String(title || '').trim().replace(/\s+/g, ' ');
+  if (!text) return '';
+  const cleaned = text.replace(/\s*\.$/, '').replace(/\s+([,;:!?])/g, '$1');
+  if (!cleaned) return '';
+  return cleaned.charAt(0).toLocaleUpperCase() + cleaned.slice(1);
+}
+
+function parseCalendarDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(raw)
+    ? `${raw}Z`
+    : raw;
+  const date = new Date(normalized);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatCalendarDate(value, locale = 'en-GB', timeZone = 'Europe/London') {
+  const naive = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (naive) {
+    const date = new Date(Date.UTC(Number(naive[1]), Number(naive[2]) - 1, Number(naive[3])));
+    return new Intl.DateTimeFormat(locale, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC'
+    }).format(date);
+  }
+  const date = parseCalendarDate(value);
+  if (!date) return String(value || '').trim();
+  return new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone
+  }).format(date);
+}
+
+function formatCalendarTime(value, locale = 'en-GB', timeZone = 'Europe/London') {
+  const naive = String(value || '').trim().match(/^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})/);
+  if (naive) {
+    const date = new Date(Date.UTC(2000, 0, 1, Number(naive[1]), Number(naive[2])));
+    return new Intl.DateTimeFormat(locale, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'UTC'
+    }).format(date);
+  }
+  const date = parseCalendarDate(value);
+  if (!date) return String(value || '').trim();
+  return new Intl.DateTimeFormat(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone
+  }).format(date);
+}
+
+function reviewCalendarDetail(input = {}) {
+  const title = cleanCalendarTitle(input.title) || 'Untitled event';
+  const timeZone = input.timezone || 'Europe/London';
+  return [
+    `Title: ${title}`,
+    input.start_date ? `Date: ${formatCalendarDate(input.start_date, 'en-GB', timeZone)}` : '',
+    input.start_date ? `Start: ${formatCalendarTime(input.start_date, 'en-GB', timeZone)}` : '',
+    input.end_date ? `End: ${formatCalendarTime(input.end_date, 'en-GB', timeZone)}` : ''
+  ].filter(Boolean).join('\n');
+}
+
 function reviewDetailForAction(action) {
   const input = action?.input || {};
   switch (action?.type) {
@@ -76,7 +147,7 @@ function reviewDetailForAction(action) {
     case 'book_uber':
       return input.destination ? `Destination: ${input.destination}` : '';
     case 'create_calendar_event':
-      return [input.title, input.start_date, input.end_date].filter(Boolean).join(' · ');
+      return reviewCalendarDetail(input);
     case 'make_call':
       return input.contact ? `Contact: ${input.contact}` : '';
     default:
@@ -108,6 +179,9 @@ module.exports = {
   isPendingCancelMessage,
   isPendingConfirmMessage,
   isPendingRevisionMessage,
+  cleanCalendarTitle,
+  formatCalendarDate,
+  formatCalendarTime,
   reviewDetailForAction,
   reviewTitleForAction
 };

@@ -37,6 +37,8 @@ final class ChatViewModel {
     @ObservationIgnored private var activeChatStartedAt: String?
     @ObservationIgnored private var pendingLocalAction: ActionResult?
     @ObservationIgnored private var lastFailedText: String?
+    @ObservationIgnored private var lastFailedUserMessageID: UUID?
+    @ObservationIgnored private var lastFailedAssistantMessageID: UUID?
 
     // Sent instead of typed text to silently keep an in-progress browser/ordering task
     // moving — never shown as a chat bubble, must match BROWSER_TASK_CONTINUE in api/index.js.
@@ -137,6 +139,10 @@ final class ChatViewModel {
     }
 
     func sendMessage(userId: String) {
+        sendMessage(userId: userId, retryingUserMessageID: nil)
+    }
+
+    private func sendMessage(userId: String, retryingUserMessageID: UUID?) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
         if isViewingHistorySnapshot {
@@ -153,8 +159,22 @@ final class ChatViewModel {
         statusLabel = nil
         networkError = nil
 
-        let userMessage = Message(role: .user, content: text)
-        messages.append(userMessage)
+        let userMessageID: UUID
+        if let retryingUserMessageID,
+           messages.contains(where: { $0.id == retryingUserMessageID && $0.role == .user }) {
+            userMessageID = retryingUserMessageID
+        } else {
+            let userMessage = Message(role: .user, content: text)
+            messages.append(userMessage)
+            userMessageID = userMessage.id
+        }
+        // Only drop the previous partial-failure bubble when this send is actually
+        // retrying that same turn — an unrelated new message shouldn't erase a
+        // still-visible (if incomplete) reply from an earlier failed turn.
+        if retryingUserMessageID != nil, let lastFailedAssistantMessageID {
+            removeMessage(id: lastFailedAssistantMessageID)
+            self.lastFailedAssistantMessageID = nil
+        }
 
         let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
         messages.append(assistantMessage)
@@ -304,18 +324,23 @@ final class ChatViewModel {
                         statusLabel = nil
                         networkError = nil
                         lastFailedText = nil
+                        lastFailedUserMessageID = nil
+                        lastFailedAssistantMessageID = nil
                         isSending = false
                         currentSendTask = nil
                         HapticManager.shared.impact(.soft)
 
                     case .error(let error):
                         lastFailedText = text
+                        lastFailedUserMessageID = userMessageID
                         networkError = friendlyNetworkError(error)
                         HapticManager.shared.error()
                         if fullText.isEmpty {
                             removeMessage(id: assistantID)
+                            lastFailedAssistantMessageID = nil
                         } else {
                             _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
+                            lastFailedAssistantMessageID = assistantID
                         }
                         statusLabel = nil
                         isSending = false
@@ -516,10 +541,10 @@ final class ChatViewModel {
     }
 
     func retryLastFailedMessage(userId: String) {
-        guard let lastFailedText, !isSending else { return }
+        guard let lastFailedText, let lastFailedUserMessageID, !isSending else { return }
         networkError = nil
         inputText = lastFailedText
-        sendMessage(userId: userId)
+        sendMessage(userId: userId, retryingUserMessageID: lastFailedUserMessageID)
     }
 
     func sendImageMessage(userId: String, imageData: Data, fileName: String, mimeType: String, isImage: Bool = true) {
@@ -586,8 +611,10 @@ final class ChatViewModel {
             } catch {
                 await MainActor.run {
                     lastFailedText = text
+                    lastFailedUserMessageID = userMessage.id
                     networkError = friendlyNetworkError(error.localizedDescription)
                     removeMessage(id: assistantID)
+                    lastFailedAssistantMessageID = nil
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
@@ -603,6 +630,9 @@ final class ChatViewModel {
         sendWatchdogTask?.cancel()
         sendWatchdogTask = nil
         pendingLocalAction = nil
+        lastFailedText = nil
+        lastFailedUserMessageID = nil
+        lastFailedAssistantMessageID = nil
         messages.removeAll()
         inputText = ""
         isSending = false

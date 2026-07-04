@@ -238,6 +238,9 @@ final class PendantAudioBridge {
         state = .transcribing
 
         let wav = buildWAV(from: audio)
+        #if DEBUG
+        print("[PendantBridge] upload bytes=\(wav.count) pcmBytes=\(audio.count) field=audio file=pendant.wav mime=audio/wav")
+        #endif
         do {
             let data = try await APIClient.shared.multipartRequest(
                 path: "/pendant/transcribe",
