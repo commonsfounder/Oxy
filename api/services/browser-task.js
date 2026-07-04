@@ -965,6 +965,9 @@ async function extractClickableElements(page) {
       const raw = (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
       let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
       if (!text) continue;
+      // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
+      // they are off-screen by design and clicking them throws "outside of viewport".
+      if (el.tagName === 'A' && /^skip\b/i.test(text)) continue;
       // Surface disabled state (out-of-stock size chips, inactive CTAs) so the model can
       // reason about it instead of clicking a dead control forever (Nike: sold-out sizes
       // are aria-disabled radios behind styled labels — 2026-07-02, 273s of "UK 10" clicks).
@@ -1792,7 +1795,11 @@ async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
   ).catch(() => []);
 
   filled = 0;
+  // Fields that look like search/finder inputs (restaurant finder, store locator, etc.)
+  // should never receive profile data — they're not checkout form fields.
+  const SEARCH_FIELD_PAT = /\b(search|find|look up|locate|near|restaurant|store finder|delivery address search)\b/i;
   for (const { idx, hint, tag } of candidates) {
+    if (SEARCH_FIELD_PAT.test(hint)) continue;
     const profileField = matchProfileFieldForInput(hint);
     if (!profileField || !(profileField in values)) continue;
     const value = values[profileField];
@@ -2069,8 +2076,13 @@ async function waitAfterRecipeStep(page, site, stepName, session) {
     return;
   }
   if (stepName === 'fill-email') {
-    // Press Enter to submit the email form (mirrors fillEmailInputDirect's behaviour).
-    // The input is still focused from the fill action — page.keyboard routes to it.
+    // Fill all other visible profile fields (name, phone, etc.) before submitting —
+    // some sites (Wickes) show a combined email+name+phone form and reject Continue
+    // if only email is filled. Do this before Enter so the form is complete.
+    const profile = session?.checkoutProfile;
+    if (profile?.consent) {
+      await autoFillCheckoutDetails(session, profile, session?.history?.length || 0, onProgress).catch(() => {});
+    }
     await page.keyboard.press('Enter').catch(() => {});
     await settle(page, 600);
     return;

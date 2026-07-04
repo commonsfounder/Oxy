@@ -222,7 +222,7 @@ const CONVENTION = {
   },
   steps: [
     { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-    { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+    { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
       '[data-testid*="add-to-basket" i]',
       '[data-testid*="add-to-bag" i]',
       '[data-testid*="add-to-cart" i]',
@@ -327,7 +327,7 @@ const RECIPES = {
     steps: [
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
       // Only add while nothing is in the basket yet, so this doesn't re-fire once the item's in.
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, resolve: (a) => resolveJohnLewisAdd(a) },
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, resolve: (a) => resolveJohnLewisAdd(a) },
       // Once the item is in the basket, go to the basket page via the header anchor (or a
       // "View basket" affordance from the add interstitial).
       { phase: 'product', name: 'go-to-basket', when: (ctx) => ctx.basketCount > 0, action: 'click', selectorAny: [
@@ -390,7 +390,7 @@ const RECIPES = {
         'text=Continue as a guest',
       ] },
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '#add-to-bag-button',
         'text=Add to bag',
       ] },
@@ -427,7 +427,7 @@ const RECIPES = {
         'text=Save and continue',
         'text=Continue to billing',
       ] },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '[data-test*="add-to-basket" i]',
         'text=Add to basket',
       ] },
@@ -455,7 +455,7 @@ const RECIPES = {
     },
     steps: [
       { phase: 'product', name: 'fulfillment', when: (ctx) => ctx.needsScrewfixFulfillment && !ctx.basketCount, resolve: (a) => resolveScrewfixFulfillment(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '#add_to_basket_btn',
         '[id*="addToBasket" i]',
         'text=Add to basket',
@@ -488,7 +488,7 @@ const RECIPES = {
         'text=Continue as guest',
       ] },
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '[data-qa="atb-button"]',
         'text=Add to Bag',
         'text=Add to bag',
@@ -527,7 +527,7 @@ const RECIPES = {
         'text=Continue to billing',
       ] },
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         'text=Add to bag',
         '[data-testid*="add-to-bag" i]',
       ] },
@@ -554,7 +554,7 @@ const RECIPES = {
         'text=Checkout as a guest',
       ] },
       { phase: 'product', name: 'collection', when: (ctx) => ctx.needsCollectionPostcode, resolve: (a) => resolveToolstationCollection(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         'text=Add to basket',
         '[id*="addToBasket" i]',
       ] },
@@ -574,14 +574,14 @@ const RECIPES = {
       checkout: (u) => /\/checkout/i.test(u.pathname),
     },
     size: {
-      container: ['[id*="size" i]', '[class*="size" i]', 'select[id*="size" i]', '[data-testid*="size" i]'],
-      chip:      ['[id*="size" i] button', '[class*="size" i] button', 'select[id*="size" i] option', '[data-testid*="size" i] button'],
-      selected:  ['[class*="selected" i][class*="size" i]', '[aria-checked="true"]', 'select[id*="size" i] option:checked'],
+      container: ['[id*="size" i]', '[class*="size" i]', 'select[id*="size" i]', '[data-testid*="size" i]', '[data-auto-id*="size" i]'],
+      chip:      ['[data-auto-id*="size" i] button', '[id*="size" i] button', '[class*="size" i] button', 'select[id*="size" i] option', '[data-testid*="size" i] button'],
+      selected:  ['[class*="selected" i][class*="size" i]', '[aria-checked="true"]', '[aria-pressed="true"]', 'select[id*="size" i] option:checked'],
       basketBadge: ['[data-testid="bag-item-count"]', 'a[href*="/bag"]', '[data-testid="bag-link"]'],
     },
     steps: [
       { phase: 'product', name: 'size', when: (ctx) => ctx.hasUnsatisfiedSize, resolve: (a) => resolveSizeMove(a) },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '[data-testid="addToBag"]',
         'text=Add to bag',
         'text=Add to Bag',
@@ -614,7 +614,7 @@ const RECIPES = {
         'text=Continue as guest',
         'text=Checkout as a guest',
       ] },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         'text=Add to trolley',
         'text=Add',
       ] },
@@ -648,7 +648,7 @@ const RECIPES = {
         'text=Continue as a guest',
         'text=Guest checkout',
       ] },
-      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount, action: 'click', selectorAny: [
+      { phase: 'product', name: 'add', when: (ctx) => !ctx.basketCount && !ctx.hasUnsatisfiedSize, action: 'click', selectorAny: [
         '.btn-add-to-basket',
         'text=Add for Delivery',
         'text=Add for Collection',
@@ -1005,13 +1005,16 @@ async function resolveSizeMove({ page, session, recipe, clickable }) {
   if (!want) return { action: 'ask', question: 'What size would you like?', stepName: 'size' };
   const chips = await page.evaluate(({ probe, chipSel, clickableSelector }) => {
     void probe;
+    // Exclude nav-style links that share "size" vocabulary but aren't actual size chips.
+    const NAV_EXCLUDE = /\b(size guide|size chart|fitting guide|view size guide|size info|size help)\b/i;
     const all = Array.from(document.querySelectorAll(clickableSelector));
     const out = [];
     for (const sel of chipSel) {
       for (const el of document.querySelectorAll(sel)) {
         const label = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim().split(/\n/)[0].trim();
+        if (!label || NAV_EXCLUDE.test(label)) continue;
         const idx = all.indexOf(el.closest(clickableSelector) || el);
-        if (label && idx !== -1) out.push({ label, idx });
+        if (idx !== -1) out.push({ label, idx });
       }
       if (out.length) break; // first selector that yields chips wins
     }
