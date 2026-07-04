@@ -50,7 +50,9 @@ const ACTION_CONTRACTS = {
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
     successSummary: 'Calendar updated',
     failureSummary: 'Calendar failed',
-    confirmation: 'none'
+    confirmation: 'review_required',
+    executionMode: 'review',
+    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me.'
   },
   get_calendar_events: {
     risk: 'low',

@@ -6,10 +6,14 @@ struct ErrorBanner: View {
     var onDismiss: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Group { Text(message) }
+        HStack(spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.appMuted)
+
+            Text(message)
                 .font(Font.appBody(13))
-                .foregroundStyle(Color.appDanger)
+                .foregroundStyle(Color.appMuted)
                 .lineLimit(2)
 
             Spacer(minLength: 8)
@@ -19,7 +23,7 @@ struct ErrorBanner: View {
                     Text("Retry")
                         .font(.appBody(12, weight: .semibold))
                         .tracking(0.3)
-                        .foregroundStyle(Color.appTitanium)
+                        .foregroundStyle(Color.appAccent)
                         // Pad the label to a ~40pt tap target without distorting the row.
                         .padding(.vertical, 11)
                         .padding(.horizontal, 4)
@@ -30,23 +34,24 @@ struct ErrorBanner: View {
 
             if let onDismiss {
                 Button(action: onDismiss) {
-                    Text("Dismiss")
-                        .font(.appBody(12, weight: .semibold))
-                        .tracking(0.3)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.appMuted)
-                        .padding(.vertical, 11)
-                        .padding(.horizontal, 4)
+                        .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.appScale)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .background(Color.appObsidian)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(Color.appFillSubtle).frame(height: 0.5)
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(Color.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+        )
+        .padding(.horizontal, 12)
     }
 }
 

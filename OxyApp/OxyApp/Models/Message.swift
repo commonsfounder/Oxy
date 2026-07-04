@@ -212,6 +212,48 @@ struct ActionResult: Codable, Identifiable, Equatable {
     }
 }
 
+extension Array where Element == ActionResult {
+    /// Folds a new batch of `.actions` SSE results into the existing list instead of
+    /// replacing it outright. A turn can fire several distinct tool calls (e.g. two
+    /// separate email searches); overwriting the array on every event silently dropped
+    /// every result but the last one, so the visible receipt could show a completely
+    /// different tool call than the one the assistant's own text just narrated.
+    mutating func merging(_ incoming: [ActionResult]) {
+        for result in incoming {
+            if let idx = firstIndex(where: { $0.pending && $0.action == result.action }) {
+                // A pending confirmation resolving to its final state — update in place.
+                self[idx] = result
+            } else if let idx = firstIndex(where: { $0.mergeKey == result.mergeKey }) {
+                self[idx] = result
+            } else {
+                append(result)
+            }
+        }
+    }
+}
+
+private extension ActionResult {
+    /// `id` intentionally stays short for SwiftUI identity, but merging SSE action
+    /// batches needs a wider key. Several tool calls can share the same action and
+    /// empty text while differing in card/deep-link payload; matching only on
+    /// `action + text` can overwrite an earlier receipt in the same assistant turn.
+    var mergeKey: String {
+        [
+            action,
+            text ?? "",
+            error ?? "",
+            deepLink ?? "",
+            webLink ?? "",
+            cardText ?? "",
+            actionSummary ?? "",
+            confirmation ?? "",
+            connectorId ?? "",
+            healthStatus ?? "",
+            pending ? "pending" : "done"
+        ].joined(separator: "\u{1F}")
+    }
+}
+
 struct AuthResponse: Codable {
     let success: Bool
     let token: String?

@@ -50,6 +50,12 @@ const {
 } = require('../runtime');
 const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
+  buildCalendarReadAction,
+  calendarIntentKind,
+  isCalendarReadRequest,
+  isExplicitCalendarWrite
+} = require('./services/calendar-intent');
+const {
   buildResolvedContext,
   isContextualReference,
   resolveContextualTurn
@@ -531,6 +537,16 @@ function parseActions(fullResponse) {
   }
 
   return { spoken, actions };
+}
+
+function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
+  const intent = calendarIntentKind(userMessage);
+  if (!Array.isArray(actions) || !actions.length) return [];
+  return actions.map(action => {
+    if (action?.type !== 'create_calendar_event') return action;
+    if (intent === 'write') return action;
+    return { ...buildCalendarReadAction(userMessage).actions[0], _reroutedFrom: 'create_calendar_event' };
+  });
 }
 
 // Convert Gemini native function calls (from response.functionCalls or parts) to internal action format
@@ -1088,6 +1104,7 @@ function cleanCalendarTitle(text) {
 function isCalendarCorrectionOnly(text) {
   const cleaned = String(text || '')
     .toLowerCase()
+    .replace(/\bnot\s+the\s+\w+\b/g, ' ')
     .replace(/[?.!]+$/g, '')
     .replace(/\b(today|tomorrow)\b/g, ' ')
     .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b/g, ' ')
@@ -1101,9 +1118,7 @@ function extractCalendarEventInput(message, fallbackMessage = '') {
   const source = String(message || '');
   const fallback = String(fallbackMessage || '');
   const combined = `${source} ${fallback}`.trim();
-  const hasCalendarIntent = /\b(calendar|schedule|event)\b/i.test(combined) ||
-    /\b(add|put|create)\b.+\b(tomorrow|today|all day)\b/i.test(combined);
-  if (!hasCalendarIntent) return null;
+  if (!isExplicitCalendarWrite(source) && !isCalendarCorrectionOnly(source)) return null;
 
   const dateYMD = extractRelativeDateYMD(combined);
   if (!dateYMD) return null;
@@ -1223,10 +1238,13 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
     }
   }
 
-  const isCalendarCorrection = /\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text);
-  const isDatedCalendarAdd = /\b(add|put|create)\b.+\b(today|tomorrow|all day|at\s+\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i.test(text) &&
-    !/\b(song|album|playlist|music|apple music)\b/i.test(text);
-  if (/\b(calendar|schedule|event)\b/i.test(text) || isCalendarCorrection || isDatedCalendarAdd) {
+  if (isCalendarReadRequest(text)) {
+    return buildCalendarReadAction(text);
+  }
+
+  const isCalendarCorrection = isCalendarCorrectionOnly(text) ||
+    (/\bi\s+mean\b/i.test(text) && /\bcalendar\b/i.test(text) && !isCalendarReadRequest(text));
+  if (isExplicitCalendarWrite(text) || isCalendarCorrection) {
     const history = await getHistory(userId, trace, 8, historyOptions);
     const previousUser = [...history].reverse()
       .find(row => row.role === 'user' && row.content !== message && (
@@ -3225,7 +3243,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       if (text) fullText += text;
     }
 
-    const { spoken, actions } = parseActions(fullText);
+    let { spoken, actions } = parseActions(fullText);
+    actions = guardCalendarActionsForUserMessage(actions, userText);
 
     let actionResults = [];
     let audioBase64 = null;
@@ -3275,6 +3294,32 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
   } catch (err) {
     console.error('/process-audio error:', err.message);
     try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+  }
+});
+
+app.post('/pendant/transcribe', upload.single('audio'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No audio file received.' });
+    }
+    const userId = req.body.userId;
+    if (!requireMatchingUser(req, res, userId)) return;
+
+    const now = Date.now();
+    const recentHits = (audioRateLimit.get(userId) || []).filter(t => now - t < 60000);
+    if (recentHits.length >= 10) {
+      return res.status(429).json({ error: 'Too many requests. Try again in a minute.' });
+    }
+    audioRateLimit.set(userId, [...recentHits, now]);
+
+    const transcript = (await transcribeAudio(req.file.buffer)).trim();
+    if (!transcript) {
+      return res.status(422).json({ error: "I couldn't clearly make out what you said." });
+    }
+    res.json({ transcript });
+  } catch (err) {
+    console.error('/pendant/transcribe error:', err.message);
+    res.status(500).json({ error: 'Transcription failed. Please try again.' });
   }
 });
 
@@ -3339,6 +3384,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       config: initialRequest.config
     });
     let { spoken, actions } = parseActions(geminiRes.text || '');
+    actions = guardCalendarActionsForUserMessage(actions, message);
     let actionResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message });
@@ -5048,7 +5094,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         try {
           const reflection = await reflectOnResults(message, actionResults, actionResults);
           if (reflection && !reflection.achieved && reflection.nextAction) {
-            spoken += ` (Reflection: ${reflection.summary || ''}. Suggested next: ${reflection.nextAction})`;
+            trace && trace.log && trace.log('agent.reflection.next_action', JSON.stringify({
+              summary: String(reflection.summary || '').slice(0, 240),
+              nextAction: reflection.nextAction
+            }));
           }
         } catch {}
 
@@ -5163,12 +5212,14 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
 
         let { spoken, actions } = parseActions(fullText);
+        actions = guardCalendarActionsForUserMessage(actions, message);
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
           if (recovered) {
             fullText = recovered;
             ({ spoken, actions } = parseActions(fullText));
+            actions = guardCalendarActionsForUserMessage(actions, message);
             spoken = stripActionMarkupForDisplay(spoken).trim();
             trace.log('gemini.blank_spoken_recovery_success');
           }
@@ -5290,10 +5341,12 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     const rawText = geminiRes.text || '';
     let { spoken, actions } = parseActions(rawText);
+    actions = guardCalendarActionsForUserMessage(actions, message);
     if (!rawText.trim() || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions } = parseActions(recovered));
+        actions = guardCalendarActionsForUserMessage(actions, message);
       }
     }
 

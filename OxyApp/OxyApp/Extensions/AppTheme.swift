@@ -48,6 +48,26 @@ extension Color {
     static let appFillScrim = appScrim
     static let appObsidian = appBackground
     static let appTitanium = appMuted
+
+    /// User chat bubble fill — a flat neutral, not a translucent accent wash.
+    /// Alpha-blending `appAccent` at low opacity directly over the near-black
+    /// canvas desaturates warm gold into a muddy brown (basic alpha-compositing:
+    /// a warm color loses saturation against a near-black backdrop). `appSurface2`
+    /// is already a tested, legible flat tone, so the bubble reads as a clean
+    /// neutral chip instead — the accent stays reserved for the assistant's voice.
+    static let appUserBubble = appSurface2
+}
+
+// MARK: - Spacing (consistent rhythm; use these instead of new magic numbers)
+enum AppSpacing {
+    static let xs: CGFloat = 4
+    static let sm: CGFloat = 8
+    static let md: CGFloat = 12
+    static let lg: CGFloat = 16
+    static let xl: CGFloat = 24
+    /// Chat's outer content margin — slightly wider than the old 16pt so text
+    /// doesn't crowd the screen edges now that assistant replies sit flush.
+    static let chatMargin: CGFloat = 20
 }
 
 // MARK: - Radius (concentric friendly)

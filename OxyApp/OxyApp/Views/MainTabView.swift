@@ -34,9 +34,15 @@ struct MainTabView: View {
             // Standard tab view — reliable muscle memory. No more fussy page swipe + tucked glass.
             // Accent color now drives selection and life in the UI.
             TabView(selection: $selectedTab) {
-                ChatHomeView().tag(Tab.chat)
-                ProactiveView().tag(Tab.today)
-                MoreView().tag(Tab.more)
+                ChatHomeView()
+                    .tag(Tab.chat)
+                    .tabItem { Label(Tab.chat.label, systemImage: Tab.chat.icon) }
+                ProactiveView()
+                    .tag(Tab.today)
+                    .tabItem { Label(Tab.today.label, systemImage: Tab.today.icon) }
+                MoreView()
+                    .tag(Tab.more)
+                    .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
             }
             .tint(Color.appAccent)
             .environment(TabBarVisibility())

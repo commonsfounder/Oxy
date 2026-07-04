@@ -68,8 +68,13 @@ struct AppHeaderView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        // Transparent: this floats as a glass overlay (see ChatView's .safeAreaInset(.top))
-        // so messages scroll cleanly underneath, matching the bottom tab bar.
+        .background(Color.appBackground)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.appHairline)
+                .frame(height: 0.5)
+        }
+        .zIndex(10)
     }
 }
 

@@ -7,15 +7,25 @@ struct MessageBubble: View {
     var isGroupStart: Bool = true
     /// True when this message is the last in a run from the same sender.
     var isGroupEnd: Bool = true
+    /// Parent-level decision so timestamps can be grouped by conversation cadence,
+    /// not blindly emitted after every transient action/status update.
+    var showsTimestamp: Bool = true
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
     private var visibleActions: [ActionResult] {
-        message.actions.filter { action in
+        var seenSearchReceipt = false
+        return message.actions.filter { action in
             !action.pending &&
             !(action.action == "send_message" && action.success)
+        }.filter { action in
+            let isSearchReceipt = action.action == "web_search" || action.actionSummary == "Search results"
+            guard isSearchReceipt else { return true }
+            if seenSearchReceipt { return false }
+            seenSearchReceipt = true
+            return true
         }
     }
 
@@ -25,69 +35,57 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.pending }
     }
 
-    // New direction bubbles: clear distinction, accent for the AI voice and user actions.
-    // Friendly, not literary. User on right with accent tint. AI on left with presence.
+    // User turns stay compact rounded bubbles, right-aligned. Assistant turns sit
+    // as plain text directly on the canvas — no fill, no accent bar — so the
+    // conversation reads like a considered reply, not a chat-widget echo.
     private var bubbleShape: some Shape {
         RoundedRectangle(cornerRadius: AppRadius.bubble, style: .continuous)
     }
 
     var body: some View {
         VStack(alignment: isUser ? .trailing : .leading, spacing: isCompact ? 2 : 6) {
-            // Message content — real bubbles now.
+            // Message content
             if !message.content.isEmpty && uberAction == nil {
-                HStack(alignment: .bottom, spacing: 0) {
-                    if isUser { Spacer(minLength: 48) }
-
+                if isUser {
+                    HStack(alignment: .bottom, spacing: 0) {
+                        Spacer(minLength: 48)
+                        Text(AttributedString(message.content))
+                            .font(.appBody(isCompact ? 15 : 16))
+                            .foregroundStyle(Color.appInk)
+                            .lineSpacing(isCompact ? 4 : 5)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(bubbleShape.fill(Color.appUserBubble))
+                    }
+                } else {
                     Group {
-                        if message.isStreaming && !isUser {
+                        if message.isStreaming {
                             StreamingWordText(
                                 text: message.content,
                                 fontSize: isCompact ? 15 : 16,
                                 lineSpacing: isCompact ? 4 : 5
                             )
                         } else {
-                            // Assistant prose is parsed as markdown (bold, links); the
-                            // user's own words stay verbatim — asterisks they typed are
-                            // content, not styling.
-                            Text(isUser ? AttributedString(message.content) : .chatMarkdown(message.content))
+                            // Assistant prose is parsed as markdown (bold, links); if
+                            // parsing fails, fall back to stripped plain text rather
+                            // than raw source so `*`/`#` never leak into the chat.
+                            Text(.chatMarkdown(message.content))
                                 .font(.appBody(isCompact ? 15 : 16))
                                 .foregroundStyle(Color.appInk)
                                 .lineSpacing(isCompact ? 4 : 5)
                                 .textSelection(.enabled)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background {
-                        // appSurface is the same pure black as the canvas, which made
-                        // assistant replies read as floating bare text; a faint fill
-                        // keeps the bubble legible without breaking the flat language.
-                        bubbleShape
-                            .fill(isUser ? Color.appAccent.opacity(0.18) : Color.appFillSubtle)
-                    }
-                    .overlay {
-                        if !isUser {
-                            // Subtle left accent bar for AI "voice"
-                            HStack {
-                                RoundedRectangle(cornerRadius: 1)
-                                    .fill(Color.appAccent)
-                                    .frame(width: 3)
-                                Spacer()
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.leading, 4)
-                        }
-                    }
-
-                    if !isUser { Spacer(minLength: 48) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
             // Streaming indicator
             if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
                 HStack {
-                    OxyThinkingIndicator()
-                        .padding(.vertical, 4)
+                    OxyThinkingIndicator(label: "Millie is working")
+                        .padding(.vertical, 6)
                     Spacer(minLength: 64)
                 }
             }
@@ -126,16 +124,16 @@ struct MessageBubble: View {
             }
 
             // Timestamp — group-end only, very quiet
-            if isGroupEnd {
+            if showsTimestamp {
                 Text(message.timestamp, style: .time)
                     .font(.appBody(10))
                     .monospacedDigit()
-                    .foregroundStyle(Color.appMuted)
+                    .foregroundStyle(Color.appMuted.opacity(0.72))
                     .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                    .padding(.top, 1)
+                    .padding(.top, 2)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, AppSpacing.chatMargin)
         .padding(.vertical, isCompact ? 1 : 2)
         .transition(.asymmetric(
             insertion: .opacity
@@ -156,7 +154,7 @@ extension AttributedString {
     /// markers flattened to plain lines — full block parsing would collapse the
     /// newlines chat text relies on. Bare URLs are promoted to links first.
     static func chatMarkdown(_ text: String) -> AttributedString {
-        var source = text.replacingOccurrences(
+        var source = text.normalizingChatBullets.replacingOccurrences(
             of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
         source = source.replacingOccurrences(
             of: #"(?<![("\[])(https?://[^\s<>()\[\]]+)"#,
@@ -164,7 +162,7 @@ extension AttributedString {
         guard var parsed = try? AttributedString(
             markdown: source,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return AttributedString(text) }
+        ) else { return AttributedString(text.strippingMarkdown) }
         for run in parsed.runs where run.link != nil {
             parsed[run.range].underlineStyle = .single
         }
@@ -177,8 +175,23 @@ extension String {
     /// markers removed rather than rendered.
     var strippingMarkdown: String {
         self
+            .normalizingChatBullets
             .replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"[*_`]{1,3}"#, with: "", options: .regularExpression)
+    }
+
+    /// Turns a leading `*`/`-`/`+` list marker at the start of a line into a plain
+    /// "•" bullet. `AttributedString(markdown:)` is parsed with `.inlineOnlyPreservingWhitespace`
+    /// (block-level parsing would collapse the newlines chat prose relies on), so it
+    /// never recognizes `* item` as a real list — the asterisk survives verbatim as a
+    /// literal character. Converting it before parsing removes the raw symbol without
+    /// needing block-level markdown support.
+    var normalizingChatBullets: String {
+        replacingOccurrences(
+            of: #"(?m)^(\s*)[*+-]\s+"#,
+            with: "$1• ",
+            options: .regularExpression
+        )
     }
 }
 
@@ -188,7 +201,11 @@ private struct StreamingWordText: View {
     let lineSpacing: CGFloat
 
     private var words: [String] {
-        text.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        // Streaming renders raw text with no markdown parsing (word-by-word fades
+        // can't wait for a full AttributedString pass), so at minimum strip the
+        // literal bullet markers here too — otherwise every list leaks `*`/`-` for
+        // the entire duration of the stream, not just a brief flash.
+        text.strippingMarkdown.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
     }
 
     var body: some View {
@@ -231,7 +248,7 @@ private struct DirectionsLink: View {
         Button(action: open) {
             HStack(spacing: 6) {
                 Text("Open in Maps")
-                    .font(.appBody(13, weight: .light))
+                    .font(.appBody(13))
                     .foregroundStyle(Color.appTitanium)
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
@@ -296,6 +313,55 @@ private struct MessageSourceChips: View {
 
 // MARK: - Action Card
 
+private enum ToolStatusState {
+    case success
+    case failure
+    case neutral
+}
+
+private struct ToolStatusGlyph: View {
+    let state: ToolStatusState
+
+    var body: some View {
+        Group {
+            switch state {
+            case .success:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.appSuccess)
+            case .failure:
+                Image(systemName: "exclamationmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.appDanger)
+            case .neutral:
+                Circle()
+                    .fill(Color.appMuted.opacity(0.5))
+                    .frame(width: 6, height: 6)
+            }
+        }
+        .frame(width: 16, height: 19, alignment: .center)
+    }
+}
+
+private struct ToolHeader: View {
+    let icon: String
+    let eyebrow: String
+    let state: ToolStatusState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(Color.appMuted)
+                .frame(width: 14, alignment: .center)
+            Text(eyebrow)
+                .appEyebrow()
+            Spacer()
+            ToolStatusGlyph(state: state)
+        }
+    }
+}
+
 struct ActionCard: View {
     let action: ActionResult
     var onCommand: ((String) -> Void)? = nil
@@ -311,6 +377,21 @@ struct ActionCard: View {
             .strippingMarkdown
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "  ", with: " ")
+        if action.success {
+            if ["get_emails", "search_emails"].contains(action.action) {
+                if isSoftMiss { return compact }
+                let count = firstInteger(in: compact)
+                return count.map { "\($0) emails reviewed" } ?? "Email results reviewed"
+            }
+            if action.action == "get_calendar_events" {
+                if isSoftMiss { return compact }
+                let count = firstInteger(in: compact)
+                return count.map { "\($0) calendar items checked" } ?? "Calendar checked"
+            }
+            if action.action == "web_search" {
+                return "Search completed"
+            }
+        }
         if !action.success && action.action == "book_uber" {
             if compact.localizedCaseInsensitiveContains("need your current location") ||
                 compact.localizedCaseInsensitiveContains("enable location") {
@@ -328,6 +409,34 @@ struct ActionCard: View {
             }
         }
         return compact
+    }
+
+    private func firstInteger(in text: String) -> Int? {
+        guard let range = text.range(of: #"\b\d+\b"#, options: .regularExpression) else { return nil }
+        return Int(text[range])
+    }
+
+    /// An action whose text describes a benign "nothing to return" result (no
+    /// emails matching a filter, no flights for that route, etc.) rather than a
+    /// real error or a completed action. These search-connector calls actually
+    /// return `success: true` with an empty result set (confirmed against
+    /// connectors/google.js's `search_emails`) — a zero-result query isn't a
+    /// failure, so keying this off `action.success` (as an earlier pass did)
+    /// missed the real-world case entirely. It's also not a genuine "success" —
+    /// it shouldn't get the same green-check treatment as a completed action,
+    /// especially when the assistant's own reply already covers the actual
+    /// answer from elsewhere. Matched on text, gated to the start of a short
+    /// string so a long multi-result summary that happens to mention "no
+    /// results" for one sub-item isn't misclassified.
+    private var isSoftMiss: Bool {
+        let haystack = (action.text ?? action.cardText ?? action.error ?? "").lowercased()
+        guard haystack.count < 120 else { return false }
+        let softPhrases = [
+            "no matching", "no matches", "nothing matching", "no results",
+            "no emails matching", "no messages matching", "couldn't find any",
+            "found nothing", "0 results", "no upcoming", "no events matching"
+        ]
+        return softPhrases.contains { haystack.hasPrefix($0) || haystack.contains($0) && haystack.count < 60 }
     }
 
     var body: some View {
@@ -352,10 +461,10 @@ struct ActionCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(headline)
                     .font(.appBody(14))
-                    .foregroundStyle(action.success ? Color.appInk : Color.appDanger)
+                    .foregroundStyle(action.success || isSoftMiss ? Color.appInk : Color.appDanger)
                 if let detail = detailText {
                     Text(detail)
-                        .font(.appBody(13, weight: .light))
+                        .font(.appBody(13))
                         .foregroundStyle(Color.appMuted)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
@@ -385,15 +494,15 @@ struct ActionCard: View {
 
     @ViewBuilder
     private var statusGlyph: some View {
-        Image(systemName: action.success ? "checkmark" : "exclamationmark")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(action.success ? Color.appGlow : Color.appDanger)
-            .frame(width: 16, height: 19, alignment: .center)
+        ToolStatusGlyph(state: isSoftMiss ? .neutral : (action.success ? .success : .failure))
     }
 
-    /// Title Case confirmation copy, e.g. "Email Sent", "Place Found".
+    /// Title Case confirmation copy, e.g. "Email Sent", "Place Found". A soft
+    /// miss gets its own neutral phrasing so it doesn't read as "X failed" next
+    /// to an assistant reply that already answered the question.
     private var headline: String {
-        actionSummary.capitalized
+        if isSoftMiss { return "No matches" }
+        return actionSummary.capitalized
     }
 
     /// A high-risk action awaiting the user's confirmation keeps a bordered
@@ -407,7 +516,7 @@ struct ActionCard: View {
                         .foregroundStyle(Color.appInk)
                     if let detail = detailText {
                         Text(detail)
-                            .font(.appBody(13, weight: .light))
+                            .font(.appBody(13))
                             .foregroundStyle(Color.appMuted)
                             .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: true)
@@ -487,8 +596,6 @@ struct UberHandoffCard: View {
     let action: ActionResult
     var onOpen: () -> Void
 
-    @State private var confirmed = false
-
     // Destination comes from the assistant text ("Opening Uber to X…"); the
     // metrics live in cardText ("X · 9 min · £8.40").
     private var destinationSource: String {
@@ -500,6 +607,9 @@ struct UberHandoffCard: View {
 
     private var destination: String {
         var tail = destinationSource
+        // TODO(backend): destination selection can resolve "King's Cross" to a
+        // nearby POI such as the Harry Potter Shop. Fix ranking/canonical
+        // destination choice server-side rather than special-casing it here.
         if let range = tail.range(of: " to ", options: .caseInsensitive) {
             tail = String(tail[range.upperBound...])
         }
@@ -517,40 +627,33 @@ struct UberHandoffCard: View {
         Button(action: onOpen) {
             TodayCard {
                 VStack(alignment: .leading, spacing: 14) {
-                    HStack {
-                        Text("RIDE · UBER")
-                            .font(.appMono(11))
-                            .tracking(1.4)
-                            .foregroundStyle(Color.appMuted)
-                        Spacer()
-                        ConfirmTick(active: confirmed)
-                    }
+                    ToolHeader(icon: "car", eyebrow: "Ride · Uber", state: action.success ? .success : .failure)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        handoffRow("DEST", destination)
-                        handoffRow("ETA", eta == "—" ? "—" : "\(eta) MIN")
-                        handoffRow("EST", estimate)
+                        handoffRow("Dest", destination)
+                        handoffRow("ETA", eta == "—" ? "—" : "\(eta) min")
+                        handoffRow("Est.", estimate)
                     }
                 }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.appScale(0.98))
-        .onAppear {
-            withAnimation(.appRelax.delay(0.15)) { confirmed = true }
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
     }
 
     private func handoffRow(_ label: String, _ value: String) -> some View {
         HStack(spacing: 12) {
+            // Label in the same sans as every other card's copy — only the value
+            // stays monospace, since a numeric/time readout is the one legitimate
+            // use for it, per the type system's own rule.
             Text(label)
-                .font(.appMono(11))
+                .font(.appBody(13))
                 .foregroundStyle(Color.appMuted)
-                .frame(width: 38, alignment: .leading)
+                .frame(width: 40, alignment: .leading)
             Text(value)
-                .font(.appMono(11))
+                .font(.appMono(13))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -566,34 +669,6 @@ struct UberHandoffCard: View {
             ? match.range(at: 1) : match.range
         guard let r = Range(target, in: text) else { return nil }
         return String(text[r])
-    }
-}
-
-/// A 1px silver ring that draws a check on appear — a quiet "confirmed" beat.
-private struct ConfirmTick: View {
-    let active: Bool
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
-                .frame(width: 18, height: 18)
-            CheckPath()
-                .trim(from: 0, to: active ? 1 : 0)
-                .stroke(Color.appInk, style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
-                .frame(width: 9, height: 7)
-        }
-        .frame(width: 18, height: 18)
-    }
-}
-
-private struct CheckPath: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        return path
     }
 }
 
@@ -625,34 +700,16 @@ struct TravelResultCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(Color.appTitanium)
-                Text(eyebrow)
-                    .font(.appMono(11))
-                    .tracking(0.8)
-                    .foregroundStyle(Color.appMuted)
-                Spacer()
-                if action.success {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.appTitanium)
-                } else {
-                    Image(systemName: "exclamationmark")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Color.appMuted)
-                }
-            }
+            ToolHeader(icon: icon, eyebrow: eyebrow, state: action.success ? .success : .failure)
 
             if let text = action.text, !text.isEmpty {
                 Text(text.strippingMarkdown)
-                    .font(.appBody(13, weight: .light))
+                    .font(.appBody(13))
                     .foregroundStyle(action.success ? Color.appInk : Color.appMuted)
                     .lineLimit(6)
             }
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.appSurface)
         // Rounded card silhouette to match every other card in the message stream

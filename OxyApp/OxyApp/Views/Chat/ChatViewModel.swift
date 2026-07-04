@@ -269,7 +269,7 @@ final class ChatViewModel {
                         guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
 
                     case .actions(let results):
-                        guard updateAssistantMessage(id: assistantID, { $0.actions = results }) else { return }
+                        guard updateAssistantMessage(id: assistantID, { $0.actions.merging(results) }) else { return }
                         openDeepLinks(results)
                         if results.contains(where: { $0.success }) {
                             HapticManager.shared.success()
@@ -313,9 +313,10 @@ final class ChatViewModel {
                         networkError = friendlyNetworkError(error)
                         HapticManager.shared.error()
                         if fullText.isEmpty {
-                            _ = updateAssistantMessage(id: assistantID, { $0.content = "Something went wrong: \(error)" })
+                            removeMessage(id: assistantID)
+                        } else {
+                            _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         }
-                        _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         statusLabel = nil
                         isSending = false
                         currentSendTask = nil
@@ -490,7 +491,7 @@ final class ChatViewModel {
                         // "Paused" card on the live bubble. Only terminal turns get a card.
                         needsMore = true
                     } else {
-                        _ = updateAssistantMessage(id: assistantID, { $0.actions = results })
+                        _ = updateAssistantMessage(id: assistantID, { $0.actions.merging(results) })
                         openDeepLinks(results)
                     }
                 case .status(let status, let label):
@@ -586,10 +587,7 @@ final class ChatViewModel {
                 await MainActor.run {
                     lastFailedText = text
                     networkError = friendlyNetworkError(error.localizedDescription)
-                    _ = updateAssistantMessage(id: assistantID) {
-                        $0.content = "Something went wrong with that \(isImage ? "image" : "file"): \(error.localizedDescription)"
-                        $0.isStreaming = false
-                    }
+                    removeMessage(id: assistantID)
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
@@ -707,6 +705,10 @@ final class ChatViewModel {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return false }
         update(&messages[index])
         return true
+    }
+
+    private func removeMessage(id: UUID) {
+        messages.removeAll { $0.id == id }
     }
 
     private func shouldFetchLocation(for text: String) -> Bool {

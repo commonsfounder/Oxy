@@ -33,6 +33,7 @@ struct ChatView: View {
     @State private var pendingImageMimeType = "image/jpeg"
     @State private var pendingIsImage = true
     @State private var isOffline = false
+    @State private var voiceErrorMessage: String?
     // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
@@ -108,6 +109,18 @@ struct ChatView: View {
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
 
+                    if let voiceErrorMessage {
+                        ErrorBanner(
+                            message: voiceErrorMessage,
+                            onDismiss: {
+                                self.voiceErrorMessage = nil
+                                voiceInput.errorMessage = nil
+                            }
+                        )
+                        .padding(.top, 8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     // Messages
                     ScrollViewReader { proxy in
                         ScrollView {
@@ -118,11 +131,19 @@ struct ChatView: View {
                                     let nextRole = idx < msgs.count - 1 ? msgs[idx + 1].role : nil
                                     let isGroupStart = prevRole != message.role
                                     let isGroupEnd = nextRole != message.role
+                                    let nextMessage = idx < msgs.count - 1 ? msgs[idx + 1] : nil
+                                    let previousMessage = idx > 0 ? msgs[idx - 1] : nil
                                     MessageBubble(
                                         message: message,
                                         showsTypingIndicator: viewModel.statusLabel == nil,
                                         isGroupStart: isGroupStart,
                                         isGroupEnd: isGroupEnd,
+                                        showsTimestamp: shouldShowTimestamp(
+                                            for: message,
+                                            previous: previousMessage,
+                                            next: nextMessage,
+                                            isGroupEnd: isGroupEnd
+                                        ),
                                         onActionCommand: { command in
                                             viewModel.sendCommand(command, userId: appState.userId)
                                         },
@@ -217,26 +238,13 @@ struct ChatView: View {
                         }
                     }
 
-                    // Voice recording overlay
-                    if voiceInput.isRecording || voiceInput.isTranscribing {
-                        VoiceRecordingBar(
-                            transcript: voiceInput.isTranscribing ? nil : voiceInput.transcript,
-                            isTranscribing: voiceInput.isTranscribing,
-                            onStop: {
-                                if !voiceInput.isTranscribing { voiceInput.stopRecording() }
-                            },
-                            onCancel: {
-                                voiceInput.cancel()
-                            }
-                        )
-                    }
-
                     // Input bar
                     ChatInputBar(
                         text: $viewModel.inputText,
                         isSending: viewModel.isSending || isOffline,
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isTranscribing,
+                        voiceTranscript: voiceInput.transcript,
                         attachmentLabel: pendingImageName,
                         attachmentData: pendingImageData,
                         attachmentIsImage: pendingIsImage,
@@ -258,6 +266,9 @@ struct ChatView: View {
                             HapticManager.shared.impact(.light)
                             isInputFocused = false
                             withAnimation(.easeOut(duration: 0.2)) { showAttachMenu = true }
+                        },
+                        onCancelVoice: {
+                            voiceInput.cancel()
                         },
                         onRemoveAttachment: {
                             pendingImageData = nil
@@ -342,11 +353,14 @@ struct ChatView: View {
             }
             .onChange(of: voiceInput.isTranscribing) { _, nowTranscribing in
                 guard !nowTranscribing else { return }
-                let text = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                voiceInput.transcript = ""
-                guard !text.isEmpty else { return }
-                viewModel.inputText = text
-                viewModel.sendMessage(userId: appState.userId)
+                submitVoiceTranscriptIfReady()
+            }
+            .onChange(of: voiceInput.transcript) {
+                guard !voiceInput.isTranscribing else { return }
+                submitVoiceTranscriptIfReady()
+            }
+            .onChange(of: voiceInput.errorMessage) {
+                voiceErrorMessage = voiceInput.errorMessage
             }
             // Spoken input from the pendant or the "Ask Oxy" Siri intent — routed
             // into this existing chat instead of opening a second screen.
@@ -456,6 +470,15 @@ struct ChatView: View {
         viewModel.sendMessage(userId: appState.userId)
     }
 
+    private func submitVoiceTranscriptIfReady() {
+        let text = voiceInput.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        voiceInput.transcript = ""
+        voiceErrorMessage = nil
+        viewModel.inputText = text
+        viewModel.sendMessage(userId: appState.userId)
+    }
+
     private func sendCurrentDraft() {
         HapticManager.shared.impact(.light)
         if let pendingImageData {
@@ -559,6 +582,20 @@ struct ChatView: View {
         @unknown default:
             viewModel.statusLabel = nil
         }
+    }
+
+    private func shouldShowTimestamp(
+        for message: Message,
+        previous: Message?,
+        next: Message?,
+        isGroupEnd: Bool
+    ) -> Bool {
+        guard isGroupEnd, !message.isStreaming else { return false }
+        if next == nil { return true }
+        if message.role == .assistant, !(message.content.isEmpty && message.actions.isEmpty) { return true }
+        if let next, next.timestamp.timeIntervalSince(message.timestamp) > 5 * 60 { return true }
+        if let previous, message.timestamp.timeIntervalSince(previous.timestamp) > 5 * 60 { return true }
+        return false
     }
 }
 
@@ -780,66 +817,6 @@ private struct ActionReviewSheet: View {
     }
 }
 
-// MARK: - Voice Recording Bar
-
-private struct VoiceRecordingBar: View {
-    let transcript: String?
-    let isTranscribing: Bool
-    let onStop: () -> Void
-    let onCancel: () -> Void
-
-    @State private var pulse = false
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Divider().overlay(Color.appHairline)
-
-            HStack(spacing: 12) {
-                Button(action: onCancel) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundStyle(Color.appMuted)
-                }
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(isTranscribing ? Color.appMuted : Color.appDanger)
-                            .frame(width: 8, height: 8)
-                            .scaleEffect(pulse ? 1.2 : 0.8)
-                            .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
-                        Text(isTranscribing ? "Transcribing…" : "Listening...")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Color.appInk)
-                    }
-                    if let t = transcript, !t.isEmpty {
-                        Text(t)
-                            .font(.system(size: 13))
-                            .foregroundStyle(Color.appMuted)
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer()
-
-                if !isTranscribing {
-                    Button(action: onStop) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.appObsidian)
-                            .frame(width: 36, height: 36)
-                            .appGlass(Circle(), tint: Color.appMuted, interactive: true)
-                    }
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .background(.ultraThinMaterial)
-        .onAppear { pulse = true }
-    }
-}
-
 struct SearchResult: Codable, Identifiable {
     let messageId: String?
     let role: String
@@ -985,16 +962,16 @@ private struct WelcomeCard: View {
                     Button { onAction(label) } label: {
                         HStack(spacing: 14) {
                             Image(systemName: icon(for: label))
-                                .font(.system(size: 14, weight: .ultraLight))
-                                .foregroundStyle(Color.appMuted.opacity(0.5))
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundStyle(Color.appMuted)
                                 .frame(width: 18, alignment: .center)
                             Text(label)
-                                .font(.appBody(16, weight: .light))
-                                .foregroundStyle(Color.appMuted)
+                                .font(.appBody(16, weight: .regular))
+                                .foregroundStyle(Color.appInk)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 9, weight: .light))
-                                .foregroundStyle(Color.appMuted.opacity(0.3))
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(Color.appMuted.opacity(0.5))
                         }
                         .padding(.horizontal, 24)
                         .padding(.vertical, 20)
@@ -1033,6 +1010,7 @@ private struct ChatInputBar: View {
     let isSending: Bool
     let isRecording: Bool
     let isPreparingVoice: Bool
+    let voiceTranscript: String
     let attachmentLabel: String?
     let attachmentData: Data?
     let attachmentIsImage: Bool
@@ -1041,7 +1019,10 @@ private struct ChatInputBar: View {
     let onSend: () -> Void
     let onVoice: () -> Void
     let onAttach: () -> Void
+    let onCancelVoice: () -> Void
     let onRemoveAttachment: () -> Void
+
+    @State private var pulse = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1102,35 +1083,22 @@ private struct ChatInputBar: View {
                 Button(action: onAttach) {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .regular))
-                        .foregroundStyle(Color.appMuted)
+                        .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
                         .frame(width: 36, height: 36)
-                        .appGlass(Circle(), interactive: true)
+                        .background(Circle().fill(Color.appSurface))
+                        .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
                 }
                 .buttonStyle(.appScale)
-                .disabled(isSending)
+                .disabled(isSending || isVoiceActive)
 
-                // Text field in a rounded container — the chat surface
-                TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
-                    .font(.system(size: 15, weight: .light))
-                    .foregroundStyle(Color.appInk)
-                    .tint(Color.appMuted)
-                    .lineLimit(1...6)
-                    .focused(isFocused)
-                    .onSubmit { if canSend { onSend() } }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(Color.appSurface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
-                            .strokeBorder(
-                                isFocused.wrappedValue
-                                    ? Color.appAccent.opacity(0.35)
-                                    : Color.appHairline,
-                                lineWidth: isFocused.wrappedValue ? 1.0 : 0.5
-                            )
-                            .animation(.appFast, value: isFocused.wrappedValue)
-                    )
+                Group {
+                    if isVoiceActive {
+                        voiceField
+                    } else {
+                        textField
+                    }
+                }
+                .frame(minHeight: 40)
 
                 // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
@@ -1138,36 +1106,123 @@ private struct ChatInputBar: View {
                         if isPreparingVoice && !canSend {
                             ProgressView()
                                 .controlSize(.small)
-                                .tint(Color.appObsidian)
+                                .tint(Color.appMuted)
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
                                 .font(.system(size: 15, weight: .semibold))
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
-                    .foregroundStyle(canAct ? Color.appObsidian : Color.appMuted)
+                    // A filled circle when there's something to act on (send or stop
+                    // recording); a quiet bordered outline for the idle mic — no
+                    // reliance on the (now no-op) glass effect for legibility.
+                    .foregroundStyle(buttonForeground)
                     .frame(width: 36, height: 36)
                     .contentShape(Circle())
-                    .appGlass(
-                        Circle(),
-                        tint: canAct ? (isRecording && !canSend ? Color.appDanger : Color.appMuted) : nil,
-                        interactive: false
-                    )
-                    .shadow(color: Color.appScrim, radius: 6, y: 2)
+                    .background {
+                        Circle().fill(buttonFill)
+                        if !canSend && !isRecording {
+                            Circle().strokeBorder(Color.appHairline, lineWidth: 0.5)
+                        }
+                    }
                 }
                 .disabled(!canAct)
                 .buttonStyle(ScaleButtonStyle())
                 .animation(.appFast, value: canAct)
+                .animation(.appFast, value: canSend)
+                .animation(.appFast, value: isRecording)
             }
             .padding(.horizontal, 14)
             .padding(.top, 10)
             .padding(.bottom, 12)
             // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
         }
+        .onAppear { pulse = true }
+    }
+
+    private var textField: some View {
+        TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
+            .font(.system(size: 15, weight: .regular))
+            .foregroundStyle(Color.appInk)
+            .tint(Color.appMuted)
+            .lineLimit(1...6)
+            .focused(isFocused)
+            .onSubmit { if canSend { onSend() } }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.appSurface)
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                    .strokeBorder(
+                        isFocused.wrappedValue
+                            ? Color.appAccent.opacity(0.12)
+                            : Color.appHairline,
+                        lineWidth: isFocused.wrappedValue ? 0.75 : 0.5
+                    )
+                    .animation(.appFast, value: isFocused.wrappedValue)
+            )
+    }
+
+    private var voiceField: some View {
+        HStack(spacing: 10) {
+            Button(action: onCancelVoice) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.appScale)
+
+            Circle()
+                .fill(isPreparingVoice ? Color.appMuted : Color.appDanger)
+                .frame(width: 7, height: 7)
+                .scaleEffect(pulse && isRecording ? 1.2 : 0.85)
+                .opacity(isPreparingVoice ? 0.65 : 1)
+                .animation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true), value: pulse)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(isPreparingVoice ? "Transcribing" : "Listening")
+                    .font(.appBody(13, weight: .medium))
+                    .foregroundStyle(Color.appInk)
+                if !voiceTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isPreparingVoice {
+                    Text(voiceTranscript)
+                        .font(.appBody(12))
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
+                .strokeBorder(isRecording ? Color.appDanger.opacity(0.22) : Color.appHairline, lineWidth: 0.75)
+        )
     }
 
     private var canSend: Bool {
         !isSending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentLabel != nil)
+    }
+
+    private var isVoiceActive: Bool {
+        isRecording || isPreparingVoice
+    }
+
+    private var buttonFill: Color {
+        if canSend { return Color.appAccent }
+        if isRecording { return Color.appDanger }
+        return Color.appSurface
+    }
+
+    private var buttonForeground: Color {
+        if canSend { return Color.appOnAccent }
+        if isRecording { return Color.appInk }
+        return canAct ? Color.appMuted : Color.appMuted.opacity(0.5)
     }
 
     private var canAct: Bool {

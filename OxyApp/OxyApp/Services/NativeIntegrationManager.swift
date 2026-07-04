@@ -497,9 +497,8 @@ final class NativeIntegrationManager {
             return result
         }
 
-        if let result = await createNativeCalendarEvent(from: normalized) {
-            return result
-        }
+        // Calendar writes are intentionally handled by the backend action contract
+        // so read/write routing and review confirmation are enforced in one place.
 
         if !requiresOnlineMusicResolution(normalized),
            let result = await handleNativeMusicRequest(normalized) {

@@ -24,29 +24,30 @@ struct OxyThinkingIndicator: View {
     @State private var active = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(Color.appMuted)
-                    .frame(width: 5, height: 5)
-                    .scaleEffect(active ? (index == 1 ? 1.12 : 1.0) : 0.65)
-                    .opacity(active ? 1 : 0.25)
-                    .offset(y: active ? -1.5 : 0)
+        HStack(spacing: compact ? 7 : 9) {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.appHairline)
+                    .frame(width: compact ? 22 : 28, height: 3)
+                Capsule()
+                    .fill(Color.appAccent.opacity(0.72))
+                    .frame(width: compact ? 8 : 10, height: 3)
+                    .offset(x: active ? (compact ? 14 : 18) : 0)
                     .animation(
-                        .easeInOut(duration: 0.55)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
+                        .easeInOut(duration: 0.9)
+                            .repeatForever(autoreverses: true),
                         value: active
                     )
             }
             if let label, !label.isEmpty {
                 Text(label)
-                    .font(.system(size: compact ? 12 : 13, weight: .regular))
+                    .font(.appBody(compact ? 12 : 13))
                     .foregroundStyle(Color.appMuted)
                     .lineLimit(1)
-                    .padding(.leading, 4)
             }
         }
+        .padding(.horizontal, label == nil ? 0 : (compact ? 0 : 2))
+        .frame(minHeight: compact ? 18 : 24, alignment: .leading)
         .accessibilityLabel(label ?? "Thinking")
         .onAppear { active = true }
     }

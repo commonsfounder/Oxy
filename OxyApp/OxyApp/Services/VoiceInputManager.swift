@@ -102,6 +102,9 @@ final class VoiceInputManager {
                 struct TranscriptResponse: Decodable { let transcript: String }
                 let result = try JSONDecoder().decode(TranscriptResponse.self, from: responseData)
                 transcript = result.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                if transcript.isEmpty {
+                    errorMessage = "I couldn't clearly make out what you said. Please try again."
+                }
             } catch {
                 if !Task.isCancelled {
                     errorMessage = "Transcription failed. Please try again."

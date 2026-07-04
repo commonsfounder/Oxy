@@ -1,11 +1,16 @@
 # DESIGN.md — Milgrain app
 
 **Register:** product
-**Last captured:** 2026-07-03 (post-QA rebuild)
+**Last captured:** 2026-07-04 (chat de-bubbled)
 **Supersedes:** the pure-black "editorial minimalism" direction and the earlier teal
 "warm companion" palette. Both are scrapped. The July 3 on-device QA found the
 editorial language unreadable and unusable (black-on-black surfaces, Didot prose,
-light-weight dim text, invisible navigation); do not reintroduce it.
+light-weight dim text, invisible navigation); do not reintroduce those specific
+mistakes. July 4 walked back one part of the July 3 rebuild: giving assistant
+replies a filled bubble made chat read like a generic chatbot widget. Assistant
+text is plain on the canvas again, but keeps the July 3 legibility fixes
+(regular-weight SF, `appInk`, no dim text) — the earlier failure was the weight/
+color/contrast, not the absence of a bubble.
 
 ## Principles
 
@@ -48,9 +53,17 @@ light-weight dim text, invisible navigation); do not reintroduce it.
 - **TodayCard** — the standard container: `appSurface` fill, 16pt continuous
   radius, 0.5pt white-6% border. Today board sections, pending action cards.
 - **Card headers** — SF Symbol in accent + `appDisplay(16)` title.
-- **Chat bubbles** — user: accent 18% tint; assistant: `appFillSubtle` (white 8%)
-  with a 3pt accent voice bar. Assistant prose renders markdown; links are
-  underlined and tappable; all message text is selectable.
+- **Chat messages** — user: compact rounded bubble, accent 18% tint, right-aligned.
+  Assistant: plain text directly on the canvas, no fill, no accent bar, full-width,
+  left-aligned — reads as a reply, not a chat-widget echo. Assistant prose renders
+  markdown (with a plain-text fallback so `*`/`#` never leak on a parse miss);
+  links are underlined and tappable; all message text is selectable.
+- **Tool/action receipts** — one-line hairline row (status glyph + Title Case
+  summary + optional detail + Open), not a boxed card. A pending action awaiting
+  confirmation is the one exception and keeps a bordered `TodayCard` surface,
+  since it's a decision, not a receipt.
+- **Network error banner** — quiet recovery state: muted icon + message in
+  `appMuted` inside a bordered `appSurface` pill, accent-colored Retry, no red text.
 - **Buttons** — primary: accent capsule with `appOnAccent` text. Secondary: plain
   text in `appMuted`. Destructive: `mgDestructive`.
 - **Toggles** — accent fill when on.

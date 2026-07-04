@@ -77,6 +77,10 @@ function getSearchReason(message) {
 
   const hasQuestion = /[?]/.test(text) || FACTUAL_QUESTION_START.test(text);
   const looksLikeToolRequest = NON_SEARCH_PATTERNS.some(pattern => pattern.test(text));
+  if (/\b(cook|cooking|recipe|meal|dinner|lunch|breakfast|food advice|what should i eat)\b/i.test(text) &&
+      !/\b(search|look up|google|current|latest|news|restaurant|near me|price|open now|delivery)\b/i.test(text)) {
+    return '';
+  }
 
   for (const entry of SEARCH_KEYWORD_PATTERNS) {
     if (entry.pattern.test(text)) return entry.reason;
