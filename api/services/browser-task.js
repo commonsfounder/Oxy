@@ -2068,6 +2068,13 @@ async function waitAfterRecipeStep(page, site, stepName, session) {
     if (session && ok) session.waitroseAddConfirmed = true;
     return;
   }
+  if (stepName === 'fill-email') {
+    // Press Enter to submit the email form (mirrors fillEmailInputDirect's behaviour).
+    // The input is still focused from the fill action — page.keyboard routes to it.
+    await page.keyboard.press('Enter').catch(() => {});
+    await settle(page, 600);
+    return;
+  }
   if (['checkout', 'go-to-basket', 'add', 'modal-add', 'navigate'].includes(stepName)) {
     await page.waitForLoadState('domcontentloaded', { timeout: 1500 }).catch(() => {});
   }
@@ -3996,6 +4003,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
             const stillGuest = findGuestCheckoutElement(await extractClickableElements(session.page).catch(() => []));
             if (!stillGuest) session.guestCheckoutDone = true;
           }
+          if (recipeStepName === 'fill-email') session.checkoutEmailFilled = true;
           if (recipeStepName === 'add' && session.site === 'johnlewis.com') session.jlAddSent = true;
           if (recipeStepName === 'add' && session.site === 'nike.com') session.nikeAddSent = true;
           if (recipeStepName === 'add' && session.site === 'marksandspencer.com') session.msAddSent = true;

@@ -268,8 +268,17 @@ test('GENERIC nextRecipeMove returns null on a checkout page (no steps → visio
   assert.equal(move, null);
 });
 
-test('CONVENTION recipe has product-phase size/add/basket steps', () => {
-  assert.deepEqual(CONVENTION.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+test('CONVENTION recipe has the full universal checkout pipeline', () => {
+  const names = CONVENTION.steps.map((s) => s.name);
+  // Product phase
+  assert.ok(names.includes('size'), 'size step present');
+  assert.ok(names.includes('add'), 'add step present');
+  assert.ok(names.includes('go-to-basket'), 'go-to-basket step present');
+  // Cart + checkout phases
+  assert.ok(names.includes('guest'), 'guest step present');
+  assert.ok(names.includes('checkout'), 'checkout step present');
+  assert.ok(names.includes('fill-email'), 'fill-email step present');
+  assert.ok(names.includes('advance'), 'advance step present');
   assert.ok(CONVENTION.size.container.length > 0);
 });
 

@@ -74,6 +74,93 @@ function matchSizeChip(parsedSize, chipLabels) {
   return null;
 }
 
+// Dismiss pattern: upsell/cross-sell drawers that appear after "Add to basket" on
+// Currys (Care & Repair), Selfridges (accessories), etc. Matched against overlay text
+// AND against aria-label="Close" / × symbols.
+const UPSELL_DISMISS_PATTERN = /no thanks|skip\b|maybe later|dismiss|close|continue without|go to basket/i;
+
+// Click the first dismiss-type affordance inside any large visible overlay.
+// Fires up to 3 times per session (tracked via session.upsellDismissCount), then gives up.
+async function resolveUpsellDismiss({ page, session, clickable }) {
+  const count = session?.upsellDismissCount || 0;
+  if (count >= 3) return null;
+  const hit = await page.evaluate(({ sel, patSrc, patFlags }) => {
+    const pat = new RegExp(patSrc, patFlags);
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const vw = window.innerWidth * window.innerHeight;
+    const overlays = [
+      ...document.querySelectorAll('dialog,[role="dialog"],[class*="modal" i],[class*="drawer" i]')
+    ].filter((el) => {
+      if (!visible(el)) return false;
+      const r = el.getBoundingClientRect();
+      return r.width * r.height > vw * 0.04;
+    });
+    if (!overlays.length) return null;
+    const all = [...document.querySelectorAll(sel)];
+    for (const overlay of overlays) {
+      const inside = [...overlay.querySelectorAll(sel)].filter(visible);
+      // 1. Button/link with dismiss text
+      for (const el of inside) {
+        const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+        if (!pat.test(t)) continue;
+        const idx = all.indexOf(el.closest(sel) || el);
+        if (idx >= 0) return { idx, text: t.replace(/\s+/g, ' ').slice(0, 80) };
+      }
+      // 2. Explicit close button (aria-label="Close" or ×/✕ symbol)
+      for (const el of inside) {
+        const label = (el.getAttribute('aria-label') || '').trim();
+        const t = (el.innerText || '').trim();
+        if (/^close$/i.test(label) || /^[×✕✗]$/.test(t)) {
+          const idx = all.indexOf(el.closest(sel) || el);
+          if (idx >= 0) return { idx, text: label || t || 'Close' };
+        }
+      }
+    }
+    return null;
+  }, { sel: clickable, patSrc: UPSELL_DISMISS_PATTERN.source, patFlags: UPSELL_DISMISS_PATTERN.flags }).catch(() => null);
+  if (!hit) return null;
+  if (session) session.upsellDismissCount = count + 1;
+  return { action: 'click', locatorIndex: hit.idx, text: hit.text, stepName: 'upsell-dismiss' };
+}
+
+// Fill a visible email input with the stored checkout profile email.
+// Returns a fill move so the standard executor handles the actual DOM interaction.
+async function resolveEmailFill({ page, session, clickable }) {
+  const email = session?.checkoutProfile?.email;
+  if (!email || session?.checkoutEmailFilled) return null;
+  const idx = await page.evaluate(({ sel }) => {
+    const NON_EMAIL = /^(radio|checkbox|password|hidden|submit|button|reset)$/i;
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const all = [...document.querySelectorAll(sel)];
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      if (el.tagName !== 'INPUT') continue;
+      const type = (el.getAttribute('type') || 'text').toLowerCase();
+      if (NON_EMAIL.test(type)) continue;
+      if (type !== 'email') {
+        const hint = `${el.name || ''} ${el.id || ''} ${el.placeholder || ''} ${el.getAttribute('aria-label') || ''}`.toLowerCase();
+        if (!/e-?mail/.test(hint)) continue;
+      }
+      if (!visible(el)) continue;
+      return i;
+    }
+    return -1;
+  }, { sel: clickable }).catch(() => -1);
+  if (idx < 0) return null;
+  return { action: 'fill', locatorIndex: idx, value: email, stepName: 'fill-email', text: 'Email address' };
+}
+
 // Cart/checkout-only fallback kept for tests and backward compat.
 const GENERIC = {
   phases: {
@@ -95,7 +182,9 @@ const GENERIC = {
 };
 
 // Convention-keyed recipe for unknown retail hosts. Uses common aria/data-testid/button-text
-// patterns for size→add→basket→checkout. Vision still picks the product; recipe drives the tail.
+// patterns for size→add→basket→checkout→guest→fill-email→advance. Vision still picks the
+// product; recipe drives the deterministic tail. Upsell-dismiss fires universally via
+// nextRecipeMove's pre-phase check rather than as a step here.
 const CONVENTION = {
   phases: {
     product:  (u) => /\/(?:p\/|product\/|products\/|item\/|sku\/|pd\/|dp\/|p\d+(?:\/|$))/i.test(u.pathname),
@@ -151,6 +240,12 @@ const CONVENTION = {
       'text=Bag',
       'text=Cart',
     ] },
+    { phase: 'cart', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
+      'text=Guest checkout',
+      'text=Checkout as a guest',
+      'text=Continue as a guest',
+      'text=Continue without an account',
+    ] },
     { phase: 'cart', name: 'checkout', action: 'click', selectorAny: [
       'text=Proceed to Checkout',
       'text=Go to checkout',
@@ -158,7 +253,20 @@ const CONVENTION = {
       'text=Continue to checkout',
       'text=Secure checkout',
       'text=Checkout',
-    ]},
+    ] },
+    { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
+      'text=Guest checkout',
+      'text=Checkout as a guest',
+      'text=Continue as a guest',
+      'text=Continue without an account',
+    ] },
+    { phase: 'checkout', name: 'fill-email', when: (ctx) => ctx.checkoutEmailVisible && !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, resolve: (a) => resolveEmailFill(a) },
+    { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
+      'text=Continue to delivery',
+      'text=Continue to payment',
+      'text=Save and continue',
+      'text=Continue to billing',
+    ] },
   ],
 };
 
@@ -647,6 +755,19 @@ async function readCtx(page, recipe) {
     const needsScrewfixFulfillment = /\/p\//i.test(location.pathname)
       && /\b(deliver(?:y)?|click\s*&\s*collect|collect in store)\b/i.test(bodySnippet)
       && !document.querySelector('[class*="fulfil" i][class*="selected" i], [class*="fulfillment" i][aria-checked="true"], input[name*="fulfil" i]:checked');
+    // Upsell/cross-sell overlay detection: any large visible drawer/modal that contains
+    // a dismiss-type affordance (e.g. Currys' Care & Repair upsell after add-to-basket).
+    const UPSELL_TEXT_PAT = /no thanks|skip\b|maybe later|dismiss|close|continue without|go to basket/i;
+    const upsellModalOpen = (() => {
+      const overlays = [
+        ...document.querySelectorAll('dialog,[role="dialog"],[class*="modal" i],[class*="drawer" i]')
+      ].filter((el) => {
+        if (!visible(el)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width * r.height > vw * 0.04;
+      });
+      return overlays.some((el) => UPSELL_TEXT_PAT.test(el.innerText || ''));
+    })();
     let checkoutEmailVisible = false;
     let checkoutIdentityFields = 0;
     let isGuestEmailSubmit = false;
@@ -671,6 +792,7 @@ async function readCtx(page, recipe) {
     return {
       hasUnsatisfiedSize: container && !selectedDom && !selectedUrl,
       basketCount, flyoutOpen, dialogOpen, needsCollectionPostcode, needsScrewfixFulfillment,
+      upsellModalOpen,
       checkoutEmailVisible, checkoutIdentityFields, isGuestEmailSubmit, checkoutPastEmail,
     };
   }, { probe: 'ctx', size });
@@ -686,7 +808,7 @@ async function readCtx(page, recipe) {
   }
   return ctx || {
     hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false, dialogOpen: false,
-    needsCollectionPostcode: false, needsScrewfixFulfillment: false,
+    needsCollectionPostcode: false, needsScrewfixFulfillment: false, upsellModalOpen: false,
     checkoutEmailVisible: false, checkoutIdentityFields: 0, isGuestEmailSubmit: false, checkoutPastEmail: false,
   };
 }
@@ -939,6 +1061,15 @@ async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
       health.recordMiss(host, modalStep.name);
     }
   }
+  // Universal upsell-dismiss: fires for all retail recipes (not delivery) before phase dispatch.
+  // Catches post-add drawers like Currys' Care & Repair / accessories cross-sell that block
+  // the "Go to basket" affordance. Max 3 dismissals per session; resolveUpsellDismiss gives up
+  // after that and falls through to vision.
+  if (!recipe.isDelivery && ctx.upsellModalOpen && (session?.upsellDismissCount || 0) < 3) {
+    const move = await resolveUpsellDismiss({ page, session, recipe, ctx, clickable: CLICKABLE_SELECTOR });
+    if (move) { health.recordHit(host, 'upsell-dismiss'); return move; }
+    health.recordMiss(host, 'upsell-dismiss');
+  }
   const phase = phaseFromUrl(recipe, page.url());
   if (!phase) return null;
   let step = null;
@@ -977,7 +1108,8 @@ function hostOfRecipe(recipe, fallback = 'unknown') {
 
 module.exports = {
   parseSizeFromGoal, matchSizeChip, johnLewisSizeQueryValue, GENERIC, CONVENTION, DELIVERY, RECIPES,
-  resolveNavigateBasket,
+  resolveNavigateBasket, resolveUpsellDismiss, resolveEmailFill,
+  UPSELL_DISMISS_PATTERN,
   phaseFromUrl, createRecipeHealth, selectStep, selectRecipeForHost,
   RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR,
   isJohnLewisExpressOnlyPdp,
