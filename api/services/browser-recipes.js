@@ -233,6 +233,18 @@ const RECIPES = {
         'text=Secure checkout',
         'text=Continue to checkout',
       ] },
+      { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: [
+        'text=Guest checkout',
+        'text=Checkout as a guest',
+        'text=Continue as a guest',
+        'text=Continue without an account',
+      ] },
+      { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: [
+        'text=Continue to delivery',
+        'text=Continue to payment',
+        'text=Save and continue',
+        'text=Continue to billing',
+      ] },
     ],
   },
 

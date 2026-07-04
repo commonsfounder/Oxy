@@ -50,7 +50,7 @@ const { RECIPES, phaseFromUrl } = require('../../api/services/browser-recipes');
 test('John Lewis recipe is registered with the expected phases and steps', () => {
   const jl = RECIPES['johnlewis.com'];
   assert.ok(jl, 'johnlewis.com recipe exists');
-  assert.deepEqual(jl.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout']);
+  assert.deepEqual(jl.steps.map((s) => s.name), ['size', 'add', 'go-to-basket', 'checkout', 'guest', 'advance']);
   const add = jl.steps.find((s) => s.name === 'add');
   assert.equal(typeof add.resolve, 'function', 'add uses resolveJohnLewisAdd (skips express-only ship-from-store)');
 });
@@ -115,6 +115,16 @@ test('selectStep picks the first matching, enabled step for the phase', () => {
   assert.equal(selectStep(jl, 'product', { hasUnsatisfiedSize: false }, health, 'johnlewis.com').name, 'add');
   // Basket phase → checkout.
   assert.equal(selectStep(jl, 'basket', {}, health, 'johnlewis.com').name, 'checkout');
+  // Checkout identity gate → deterministic guest step before the vision loop can spin.
+  assert.equal(selectStep(jl, 'checkout', {
+    isGuestEmailSubmit: false,
+    checkoutPastEmail: false,
+  }, health, 'johnlewis.com').name, 'guest');
+  // Once past the email gate → deterministic checkout advance.
+  assert.equal(selectStep(jl, 'checkout', {
+    isGuestEmailSubmit: false,
+    checkoutPastEmail: true,
+  }, health, 'johnlewis.com').name, 'advance');
   // No step for a phase the recipe doesn't cover.
   assert.equal(selectStep(jl, 'search', {}, health, 'johnlewis.com'), null);
 });

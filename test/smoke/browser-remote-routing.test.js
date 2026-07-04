@@ -10,16 +10,22 @@ test('never uses remote when no endpoint is configured (today\'s default)', () =
   assert.equal(shouldUseRemoteForHost('johnlewis.com', { BROWSER_REMOTE_HOSTS: 'next.co.uk' }), false);
 });
 
-test('with an endpoint, routes the default bot-wall hosts to remote and leaves others local', () => {
+test('with an endpoint, routes every host remote by default', () => {
   const env = { BROWSER_REMOTE_ENDPOINT: EP };
-  // walled → remote
   assert.equal(shouldUseRemoteForHost('next.co.uk', env), true);
   assert.equal(shouldUseRemoteForHost('argos.co.uk', env), true);
   assert.equal(shouldUseRemoteForHost('just-eat.co.uk', env), true);
-  // working-on-datacenter-IP → stays local (free): John Lewis, Tesco, Zara all passed the benchmark
+  assert.equal(shouldUseRemoteForHost('johnlewis.com', env), true);
+  assert.equal(shouldUseRemoteForHost('tesco.com', env), true);
+  assert.equal(shouldUseRemoteForHost('zara.com', env), true);
+});
+
+test('BROWSER_REMOTE_DEFAULT=false restores default allowlist routing', () => {
+  const env = { BROWSER_REMOTE_ENDPOINT: EP, BROWSER_REMOTE_DEFAULT: 'false' };
+  assert.equal(shouldUseRemoteForHost('next.co.uk', env), true);
+  assert.equal(shouldUseRemoteForHost('argos.co.uk', env), true);
   assert.equal(shouldUseRemoteForHost('johnlewis.com', env), false);
   assert.equal(shouldUseRemoteForHost('tesco.com', env), false);
-  assert.equal(shouldUseRemoteForHost('zara.com', env), false);
 });
 
 test('www. and subdomains of a walled host still route remote', () => {
@@ -43,7 +49,7 @@ test('BROWSER_REMOTE_HOSTS overrides the default set wholesale', () => {
 });
 
 test('tolerates missing/garbage host', () => {
-  const env = { BROWSER_REMOTE_ENDPOINT: EP };
+  const env = { BROWSER_REMOTE_ENDPOINT: EP, BROWSER_REMOTE_DEFAULT: 'false' };
   assert.equal(shouldUseRemoteForHost('', env), false);
   assert.equal(shouldUseRemoteForHost(null, env), false);
   assert.equal(shouldUseRemoteForHost(undefined, env), false);

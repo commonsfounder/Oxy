@@ -145,9 +145,10 @@ function siteKeyFromUrl(url) {
 // (Bright Data, Browserbase, …) routes through residential IPs + real fingerprints and clears
 // those walls — but it's METERED ($/GB or $/browser-hour), so we do NOT want every task on it.
 //
-// Cost control: route ONLY the hosts that actually need residential through the managed
-// browser; keep the ~two-thirds that work on datacenter IP on the free local pool. Which
-// hosts are "remote" is a pure, testable decision (shouldUseRemoteForHost) driven by env.
+// Cost control originally routed only empirically bot-walled hosts through the managed
+// browser. The product direction is now stricter: if Browserbase/remote is configured,
+// browser-agent shopping should use the realistic browser by default. Local remains an
+// explicit debug escape hatch via BROWSER_REMOTE_DEFAULT=false or a narrowed host list.
 function usingRemoteBrowser() {
   return Boolean(process.env.BROWSERBASE_API_KEY || process.env.BROWSER_REMOTE_ENDPOINT);
 }
@@ -156,6 +157,7 @@ function usingRemoteBrowser() {
 // are the sites that returned Access-Denied/Cloudflare, NOT my a-priori guesses: Tesco and
 // Zara actually pass on datacenter IP, so they're deliberately absent). Bare hosts, no www.
 // Override wholesale with BROWSER_REMOTE_HOSTS; force everything remote with BROWSER_REMOTE_ALWAYS=true.
+// Set BROWSER_REMOTE_DEFAULT=false to restore allowlist-only routing for local/cost debugging.
 const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'asos.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk', 'sainsburys.co.uk', 'boots.com'];
 
 // Pure so it's unit-testable. Decide whether a given host should use the managed browser:
@@ -167,6 +169,7 @@ const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'asos.com', 'nike.com', 'a
 function shouldUseRemoteForHost(host, env = process.env) {
   if (!env.BROWSERBASE_API_KEY && !env.BROWSER_REMOTE_ENDPOINT) return false;
   if (String(env.BROWSER_REMOTE_ALWAYS).toLowerCase() === 'true') return true;
+  if (!env.BROWSER_REMOTE_HOSTS && String(env.BROWSER_REMOTE_DEFAULT).toLowerCase() !== 'false') return true;
   const list = env.BROWSER_REMOTE_HOSTS
     ? env.BROWSER_REMOTE_HOSTS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
     : DEFAULT_REMOTE_HOSTS;
@@ -510,6 +513,70 @@ async function tryGuestCheckoutClick(page, session, steps, onProgress) {
   session.checkoutEmailSubmitted = false;
   session.history.push(`Step ${steps}: clicked "${hit.text}" (skipped sign-in — guest checkout available)`);
   session.lastWasRecipe = true;
+  return true;
+}
+
+// JL / Auth0 checkout page: two collapsed radio cards — "Sign in" and "Guest checkout".
+// Auth0's SPA needs the radio <input> clicked (not its label) to expand the email form.
+// If the email form is already showing (second call after expansion), fill + submit.
+async function tryAuth0GuestCheckout(page, session, steps, onProgress) {
+  if (session.auth0GuestDone) return false;
+  try {
+    const parsed = new URL(page.url());
+    if (!parsed.hostname.startsWith('auth.')) return false;
+  } catch { return false; }
+
+  // If an email input is already visible, we're past the radio step — fill & submit.
+  const emailVisible = await page.locator('input[type="email"]:visible, input[name*="email" i]:visible').first().isVisible({ timeout: 800 }).catch(() => false);
+  if (emailVisible) {
+    const profile = await getCheckoutProfileCached(session, session._userId || '').catch(() => null);
+    const email = profile?.email || 'guest@example.com';
+    onProgress('Filling email on Auth0 page…');
+    const emailInput = page.locator('input[type="email"]:visible, input[name*="email" i]:visible').first();
+    await emailInput.fill(email, { timeout: 6000 }).catch(() => {});
+    session.checkoutEmailFilled = true;
+    // Click the Continue/Next/Submit button
+    const continueBtn = page.locator('button[type="submit"], button:has-text("Continue"), button:has-text("Next")').first();
+    const btnVisible = await continueBtn.isVisible({ timeout: 1000 }).catch(() => false);
+    if (btnVisible) {
+      onProgress('Submitting email on Auth0 page…');
+      await continueBtn.click({ timeout: 8000 }).catch(() => {});
+      session.guestCheckoutDone = true;
+      session.checkoutEmailSubmitted = true;
+      session.auth0GuestDone = true;
+      session.history.push(`Step ${steps}: [auth0] filled email and submitted guest checkout form`);
+      return true;
+    }
+    return true;
+  }
+
+  // Click the guest checkout radio <input> to expand the email form.
+  if (session.auth0RadioClicked) return false;
+  onProgress('Selecting guest checkout on Auth0 page…');
+  const clicked = await page.evaluate(() => {
+    // Find the radio whose label/sibling text contains "Guest checkout"
+    const radios = [...document.querySelectorAll('input[type="radio"]')];
+    for (const r of radios) {
+      const card = r.closest('[class*="card"], [class*="option"], [class*="item"], label, li, div') || r.parentElement;
+      const text = card ? card.innerText || '' : '';
+      if (/guest checkout/i.test(text)) {
+        r.click();
+        return true;
+      }
+    }
+    // Fallback: click any label/div whose text matches
+    const all = document.querySelectorAll('label, [role="radio"], [role="option"]');
+    for (const el of all) {
+      if (/guest checkout/i.test(el.innerText || '')) { el.click(); return true; }
+    }
+    return false;
+  }).catch(() => false);
+
+  if (!clicked) return false;
+  session.auth0RadioClicked = true;
+  session.history.push(`Step ${steps}: [auth0] clicked guest checkout radio`);
+  // Give the SPA time to render the email form
+  await page.waitForSelector('input[type="email"], input[name*="email" i]', { state: 'visible', timeout: 5000 }).catch(() => {});
   return true;
 }
 
@@ -1352,22 +1419,47 @@ async function tryTier0PriceLookup(url, goal) {
   return tryTier0SearchGrounding(url, goal, searchTerm);
 }
 
-// Order open URL: search → first product PDP in one HTTP hop when possible, skipping the
-// search-results vision step (~3–5s). Falls back to search URL, then the raw url.
+// Score a product name against the goal for candidate ranking.
+// Rewards goal words present in name; penalises differentiator words in name that aren't
+// in the goal (e.g. "Pro Max" in name but not goal → negative score).
+const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base)\b/i;
+function scoreProductNameVsGoal(name, goal) {
+  if (!name || !goal) return 0;
+  const words = (s) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 1));
+  const goalWords = words(goal);
+  const nameWords = words(name);
+  let score = 0;
+  for (const w of nameWords) {
+    if (goalWords.has(w)) score += 2;
+    else if (PRODUCT_DIFFERENTIATORS.test(w)) score -= 3; // punish unmentioned tier words
+  }
+  return score;
+}
+
+// Order open URL: search → best-matching orderable product PDP in one HTTP hop when
+// possible, skipping the search-results vision step (~3–5s). Falls back to search URL.
 async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
   const searchUrl = directSearchUrl(url, goal, retailOptions);
   if (!searchUrl) return url;
   const html = await fetchHtml(searchUrl);
   if (!html) return searchUrl;
-  const { extractProductUrlCandidates, looksOrderablePdp } = require('./browser-price-parser');
-  const candidates = extractProductUrlCandidates(html, searchUrl).slice(0, 5);
+  const { extractProductUrlCandidates, looksOrderablePdp, extractProductName } = require('./browser-price-parser');
+  const candidates = extractProductUrlCandidates(html, searchUrl).slice(0, 8);
   if (!candidates.length) return searchUrl;
   const checked = await Promise.all(candidates.map(async (productUrl) => {
     const pdpHtml = await fetchHtml(productUrl);
-    return { productUrl, orderable: Boolean(pdpHtml && looksOrderablePdp(pdpHtml)) };
+    if (!pdpHtml) return null;
+    const orderable = looksOrderablePdp(pdpHtml);
+    const name = extractProductName(pdpHtml) || '';
+    const score = scoreProductNameVsGoal(name, goal);
+    return { productUrl, orderable, name, score };
   }));
-  const hit = checked.find((c) => c.orderable);
-  return hit?.productUrl || candidates[0] || searchUrl;
+  const orderable = checked.filter((c) => c?.orderable);
+  if (orderable.length) {
+    orderable.sort((a, b) => b.score - a.score);
+    return orderable[0].productUrl;
+  }
+  return candidates[0] || searchUrl;
 }
 
 async function loadUserLocation(userId) {
@@ -1477,9 +1569,20 @@ async function getCheckoutProfileCached(session, userId) {
 // Fill a visible email <input> directly — avoids mis-targeting guest-checkout CTAs from
 // extracted clickable labels ("Continue with email", etc.).
 async function fillEmailInputDirect(session, email, steps, onProgress) {
+  // Exclude radio/checkbox — name*="email" otherwise matches marketing opt-in inputs
+  // (e.g. Selfridges' receiveEmailPreference). Exclude password inputs too.
+  const NON_EMAIL_TYPES = /^(radio|checkbox|password|hidden|submit|button|reset)$/i;
+  const isRealEmailInput = async (loc) => {
+    try {
+      const type = await loc.evaluate((el) => (el.getAttribute('type') || 'text').toLowerCase());
+      return !NON_EMAIL_TYPES.test(type);
+    } catch { return false; }
+  };
+
   const selectors = [
     'input[type="email"]:visible',
     'input[autocomplete="email"]:visible',
+    // name/id/placeholder matches — filtered below to exclude non-text inputs
     'input[name*="email" i]:visible',
     'input[id*="email" i]:visible',
     'input[placeholder*="email" i]:visible',
@@ -1488,6 +1591,7 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
     const loc = session.page.locator(sel).first();
     const ok = await loc.isVisible({ timeout: 600 }).catch(() => false);
     if (!ok) continue;
+    if (!(await isRealEmailInput(loc))) continue;
     onProgress('Typing into email field…');
     await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     try {
@@ -1505,6 +1609,44 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
       return true;
     } catch { /* try next selector */ }
   }
+
+  // Label-based fallback: find a visible text input associated with a label containing "email".
+  // Handles sites that use type="text" for the email field (e.g. Selfridges).
+  const emailInputIdx = await session.page.evaluate(() => {
+    const labels = [...document.querySelectorAll('label')];
+    for (const label of labels) {
+      if (!/e-?mail/i.test(label.textContent || '')) continue;
+      let input = label.control;
+      if (!input && label.htmlFor) input = document.getElementById(label.htmlFor);
+      if (!input) input = label.querySelector('input');
+      if (!input) continue;
+      const type = (input.getAttribute('type') || 'text').toLowerCase();
+      if (/radio|checkbox|password|hidden|submit|button|reset/.test(type)) continue;
+      const s = window.getComputedStyle(input);
+      const r = input.getBoundingClientRect();
+      if (s.display === 'none' || s.visibility === 'hidden' || r.width === 0) continue;
+      const all = [...document.querySelectorAll('input')];
+      return all.indexOf(input);
+    }
+    return -1;
+  }).catch(() => -1);
+
+  if (emailInputIdx >= 0) {
+    const loc = session.page.locator('input').nth(emailInputIdx);
+    const ok = await loc.isVisible({ timeout: 600 }).catch(() => false);
+    if (ok) {
+      onProgress('Typing into email field…');
+      await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+      try {
+        await loc.fill(String(email || ''), { timeout: 8000 });
+        await loc.press('Enter').catch(() => {});
+        session.checkoutEmailFilled = true;
+        session.history.push(`Step ${steps}: [checkout-profile] filled email via label lookup`);
+        return true;
+      } catch { /* fall through */ }
+    }
+  }
+
   return false;
 }
 
@@ -2481,6 +2623,18 @@ async function tryGenericCheckoutProgress(session, userId, page, steps, onProgre
   return null;
 }
 
+async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress) {
+  if (session.jlBasketFallbackDone) return false;
+  let origin;
+  try { origin = new URL(page.url()).origin; } catch { return false; }
+  session.jlBasketFallbackDone = true;
+  onProgress('Opening basket…');
+  await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(() => {});
+  session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
+  await settle(page, RECIPE_SETTLE_MS);
+  return true;
+}
+
 async function navigateToSiteBasket(session, page, steps, onProgress) {
   const recipe = RECIPES[session.site];
   if (!recipe?.basketUrl) return false;
@@ -2738,6 +2892,21 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       }
       if (assessed.verdict === 'nudge') {
         pendingCorrection = assessed.correction;
+      }
+
+      // Auth0 guest checkout: must run BEFORE element extraction / vision so we don't let
+      // Gemini see the Auth0 login page and return an early ask/error.
+      if (session.isOrder && !session.auth0GuestDone) {
+        session._userId = userId;
+        const auth0handled = await tryAuth0GuestCheckout(session.page, session, steps, onProgress);
+        if (auth0handled) {
+          await settle(session.page, RECIPE_SETTLE_MS);
+          consecutiveBadDecisions = 0;
+          consecutiveWaits = 0;
+          touchSession(userId);
+          await persistStorage(userId, session);
+          continue;
+        }
       }
 
       const elements = await timed('step.extract', () => extractClickableElements(session.page));
@@ -3041,6 +3210,10 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       // John Lewis: add click may lag — poll basket badge before re-firing add.
       if (session.site === 'johnlewis.com' && session.jlAddSent && !session.jlAddConfirmed) {
         await waitAfterRecipeStep(session.page, session.site, 'add', session);
+        if (!session.jlAddConfirmed) {
+          await navigateJohnLewisBasketAfterAdd(session, session.page, steps, onProgress);
+          await waitAfterRecipeStep(session.page, session.site, 'add', session);
+        }
         if (!session.jlAddConfirmed) {
           recipeHealth.recordMiss(session.site, 'add');
           session.jlAddGiveUp = true;
