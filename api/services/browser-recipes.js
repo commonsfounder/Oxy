@@ -77,7 +77,7 @@ function matchSizeChip(parsedSize, chipLabels) {
 // Dismiss pattern: upsell/cross-sell drawers that appear after "Add to basket" on
 // Currys (Care & Repair), Selfridges (accessories), etc. Matched against overlay text
 // AND against aria-label="Close" / × symbols.
-const UPSELL_DISMISS_PATTERN = /no thanks|skip\b|maybe later|dismiss|close|continue without|go to basket/i;
+const UPSELL_DISMISS_PATTERN = /no,?\s*thanks|skip\b|maybe later|dismiss|close|continue without|go to basket|continue to basket|continue to checkout|no thanks|not (now|interested)|remind me later/i;
 
 // Click the first dismiss-type affordance inside any large visible overlay.
 // Fires up to 3 times per session (tracked via session.upsellDismissCount), then gives up.
@@ -236,6 +236,8 @@ const CONVENTION = {
       '[data-testid*="basket" i]',
       'text=View basket',
       'text=View bag',
+      'text=Go to basket',
+      'text=Go to bag',
       'text=Basket',
       'text=Bag',
       'text=Cart',
@@ -757,7 +759,7 @@ async function readCtx(page, recipe) {
       && !document.querySelector('[class*="fulfil" i][class*="selected" i], [class*="fulfillment" i][aria-checked="true"], input[name*="fulfil" i]:checked');
     // Upsell/cross-sell overlay detection: any large visible drawer/modal that contains
     // a dismiss-type affordance (e.g. Currys' Care & Repair upsell after add-to-basket).
-    const UPSELL_TEXT_PAT = /no thanks|skip\b|maybe later|dismiss|close|continue without|go to basket/i;
+    const UPSELL_TEXT_PAT = /no,?\s*thanks|skip\b|maybe later|dismiss|close|continue without|go to basket|continue to basket|continue to checkout|no thanks|not (now|interested)|remind me later/i;
     const upsellModalOpen = (() => {
       const overlays = [
         ...document.querySelectorAll('dialog,[role="dialog"],[class*="modal" i],[class*="drawer" i]')

@@ -967,7 +967,7 @@ async function extractClickableElements(page) {
       if (!text) continue;
       // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
       // they are off-screen by design and clicking them throws "outside of viewport".
-      if (el.tagName === 'A' && /^skip\b/i.test(text)) continue;
+      if (/^skip\s+(to|the)\b/i.test(text)) continue;
       // Surface disabled state (out-of-stock size chips, inactive CTAs) so the model can
       // reason about it instead of clicking a dead control forever (Nike: sold-out sizes
       // are aria-disabled radios behind styled labels — 2026-07-02, 273s of "UK 10" clicks).
@@ -1581,6 +1581,27 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
       return !NON_EMAIL_TYPES.test(type);
     } catch { return false; }
   };
+
+  // If this is a sign-in form (password field visible) AND a guest checkout CTA is also present,
+  // skip filling — the guest CTA should be clicked first (M&S, Selfridges sign-in gate).
+  // Setting checkoutEmailFilled here would block the guest-checkout click guard.
+  const pwVisible = await session.page.locator('input[type="password"]:visible').first().isVisible({ timeout: 400 }).catch(() => false);
+  if (pwVisible) {
+    const hasGuestCta = await session.page.evaluate((patSrc, patFlags) => {
+      const pat = new RegExp(patSrc, patFlags);
+      const all = document.querySelectorAll('button, a, input[type="submit"]');
+      for (const el of all) {
+        const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+        if (pat.test(t)) {
+          const s = window.getComputedStyle(el);
+          const r = el.getBoundingClientRect();
+          if (s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0) return true;
+        }
+      }
+      return false;
+    }, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => false);
+    if (hasGuestCta) return false;
+  }
 
   const selectors = [
     'input[type="email"]:visible',

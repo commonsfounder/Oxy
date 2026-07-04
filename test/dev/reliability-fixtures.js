@@ -21,7 +21,7 @@ module.exports = [
   // Full order path: search → product → size → add to basket → basket → checkout (payment guardrail stops here).
   // Size is explicit in the goal so the loop never has to ask. `reauth` counts as a ceiling (login wall),
   // not a loop failure — the loop did its job.
-  { site: 'johnlewis.com',      url: 'https://www.johnlewis.com',      goal: 'order adidas joggers in size medium, add to basket and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath', 'has-recipe'] },
+  { site: 'johnlewis.com',      url: 'https://www.johnlewis.com',      goal: 'order a men\'s plain crew-neck sweatshirt in size medium, add to basket and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath', 'has-recipe'] },
   { site: 'selfridges.com',     url: 'https://www.selfridges.com',     goal: 'order a leather belt in size medium, add to bag and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath'] },
   { site: 'marksandspencer.com',url: 'https://www.marksandspencer.com',goal: 'order a cotton t-shirt in size medium, add to basket and go to checkout', expect: 'cart', tags: ['fashion', 'has-fastpath'] },
   { site: 'asos.com',           url: 'https://www.asos.com',           goal: 'order black skinny jeans in size 32 waist, add to bag and go to checkout', expect: 'cart', tags: ['fashion'] },
