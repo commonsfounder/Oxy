@@ -297,7 +297,7 @@ Keep steps actionable and minimal. For broad goals like making money, prioritize
 // Reflection step: after execution, reflect and suggest next or correction
 async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY_CHAT_MODEL) {
   const summary = `Goal: ${goal}\nActions: ${JSON.stringify(actionsTaken.map(a => a.action))}\nResults summary: ${JSON.stringify(results.map(r => ({a: r.action, ok: r.result?.success !== false})))}`;
-  const prompt = `You are Oxy's reflection module. Analyze if the goal was achieved. Output JSON: { "achieved": boolean, "summary": "one sentence", "nextAction" : "null or suggested follow up action type", "issues": [] }`;
+  const prompt = `You are the assistant's reflection module. Analyze if the goal was achieved. Output JSON: { "achieved": boolean, "summary": "one sentence", "nextAction" : "null or suggested follow up action type", "issues": [] }`;
   const resp = await modernGenAI.models.generateContent({
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: prompt + '\n\n' + summary }] }],

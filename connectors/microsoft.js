@@ -129,7 +129,7 @@ async function execute(userId, action, params) {
         const body = String(params?.body || '').trim();
         if (!to) return { success: false, error: 'send_outlook_email requires a recipient (to)' };
         if (!body) return { success: false, error: 'send_outlook_email requires a body' };
-        const subject = params?.subject ? String(params.subject) : (body.split('\n')[0].slice(0, 78) || 'Message from Oxy');
+        const subject = params?.subject ? String(params.subject) : (body.split('\n')[0].slice(0, 78) || 'Message from Milgrain');
         await axios.post(`${GRAPH}/me/sendMail`, {
           message: {
             subject,

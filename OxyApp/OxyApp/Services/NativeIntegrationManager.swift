@@ -797,7 +797,7 @@ final class NativeIntegrationManager {
         guard let recipient, !recipient.isEmpty else {
             return NativeLocalActionResult(
                 action: "send_message",
-                text: "I need a phone number for \(parsed.contact). Turn on Contacts access for Oxy or include the number.",
+                text: "I need a phone number for \(parsed.contact). Turn on Contacts access for Milgrain or include the number.",
                 cardText: "No phone number found for \(parsed.contact)",
                 actionSummary: "Message needs contact",
                 deepLink: nil,
@@ -2139,8 +2139,8 @@ final class NativeIntegrationManager {
     private func noHealthDataResult(_ label: String) -> NativeLocalActionResult {
         NativeLocalActionResult(
             action: "check_health",
-            text: "I could not read \(label) from Health yet. Open Health permissions for Oxy, then try again.",
-            cardText: "Enable Health access for Oxy",
+            text: "I could not read \(label) from Health yet. Open Health permissions for Milgrain, then try again.",
+            cardText: "Enable Health access for Milgrain",
             actionSummary: "Health needs access",
             deepLink: "x-apple-health://"
         )

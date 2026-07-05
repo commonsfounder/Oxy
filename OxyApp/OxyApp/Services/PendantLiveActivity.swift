@@ -64,7 +64,7 @@ final class PendantLiveActivityManager {
             activity = existing
             return
         }
-        let attributes = PendantActivityAttributes(deviceName: "Oxy Pendant")
+        let attributes = PendantActivityAttributes(deviceName: "Milgrain Pendant")
         let state = PendantActivityAttributes.ContentState(status: status, isListening: listening)
         do {
             activity = try Activity.request(

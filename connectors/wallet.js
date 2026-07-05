@@ -40,7 +40,7 @@ function buildPassJson(booking, serialNumber) {
     passTypeIdentifier: process.env.WALLET_PASS_TYPE_ID,
     serialNumber,
     teamIdentifier: process.env.WALLET_TEAM_ID,
-    organizationName: 'Oxy',
+    organizationName: 'Milgrain',
     description: booking.description || 'Trip',
     backgroundColor: 'rgb(250,249,246)',
     foregroundColor: 'rgb(30,30,30)',
