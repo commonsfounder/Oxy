@@ -15,19 +15,35 @@ struct MessageBubble: View {
 
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
-    private var visibleActions: [ActionResult] {
-        var seenSearchReceipt = false
-        return message.actions.filter { action in
-            !action.pending &&
-            !(action.action == "send_message" && action.success)
-        }.filter { action in
-            let isSearchReceipt = action.action == "web_search" || action.actionSummary == "Search results"
-            guard isSearchReceipt else { return true }
-            if seenSearchReceipt { return false }
-            seenSearchReceipt = true
-            return true
+
+    /// Completed, renderable actions. Pending confirmations are handled by the
+    /// review flow in ChatView; a successful send_message hands off to the native
+    /// composer. Neither belongs in the stream.
+    private var completedActions: [ActionResult] {
+        message.actions.filter {
+            !$0.pending && !($0.action == "send_message" && $0.success)
         }
     }
+
+    /// Actions that keep a dedicated rich card (native handoffs and results the
+    /// prose can't carry). Everything else folds into the one-line turn receipt.
+    private static func isRichAction(_ action: ActionResult) -> Bool {
+        switch action.action {
+        case "book_uber",
+             "search_flights", "get_flight_prices",
+             "search_hotels", "check_hotel_availability",
+             "search_activities", "get_activity_details",
+             "save_trip":
+            return true
+        case "get_directions", "plan_trip":
+            return action.success && (action.deepLink != nil || action.webLink != nil)
+        default:
+            return false
+        }
+    }
+
+    private var richActions: [ActionResult] { completedActions.filter(Self.isRichAction) }
+    private var receiptActions: [ActionResult] { completedActions.filter { !Self.isRichAction($0) } }
 
     /// A ride booking gets a dedicated native handoff card; suppress the
     /// assistant's "Opening Uber…" chat text so the card stands alone.
@@ -63,18 +79,11 @@ struct MessageBubble: View {
                         if message.isStreaming {
                             StreamingWordText(
                                 text: message.content,
-                                fontSize: isCompact ? 15 : 16,
+                                fontSize: isCompact ? 15 : 15.5,
                                 lineSpacing: isCompact ? 4 : 5
                             )
                         } else {
-                            // Assistant prose is parsed as markdown (bold, links); if
-                            // parsing fails, fall back to stripped plain text rather
-                            // than raw source so `*`/`#` never leak into the chat.
-                            Text(.chatMarkdown(message.content))
-                                .font(.appBody(isCompact ? 15 : 16))
-                                .foregroundStyle(Color.appInk)
-                                .lineSpacing(isCompact ? 4 : 5)
-                                .textSelection(.enabled)
+                            AssistantAnswerView(text: message.content, compact: isCompact)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,10 +99,11 @@ struct MessageBubble: View {
                 }
             }
 
-            // Action cards
-            if !visibleActions.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(visibleActions) { action in
+            // Agent work: rich handoff cards keep their surface; everything else
+            // collapses into one quiet receipt line per turn.
+            if !richActions.isEmpty || !receiptActions.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(richActions) { action in
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
                         } else if ["search_flights", "get_flight_prices"].contains(action.action) {
@@ -104,16 +114,19 @@ struct MessageBubble: View {
                             TravelResultCard(action: action, kind: .activities)
                         } else if action.action == "save_trip" {
                             TravelResultCard(action: action, kind: .trip)
-                        } else if ["get_directions", "plan_trip"].contains(action.action) && action.success {
-                            if action.deepLink != nil || action.webLink != nil {
-                                DirectionsLink(action: action)
-                            }
-                        } else {
-                            ActionCard(action: action, onCommand: onActionCommand, onOpenAction: onOpenAction)
+                        } else if ["get_directions", "plan_trip"].contains(action.action) {
+                            DirectionsLink(action: action)
+                        }
+                    }
+
+                    if !receiptActions.isEmpty {
+                        TurnReceiptRow(actions: receiptActions) { action in
+                            onOpenAction?(action)
                         }
                     }
                 }
-                .padding(.top, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 6)
             }
 
             // Sources
@@ -134,7 +147,7 @@ struct MessageBubble: View {
             }
         }
         .padding(.horizontal, AppSpacing.chatMargin)
-        .padding(.vertical, isCompact ? 1 : 2)
+        .padding(.vertical, isCompact ? 2 : 4)
         .transition(.asymmetric(
             insertion: .opacity
                 .combined(with: .move(edge: .bottom))
@@ -234,6 +247,140 @@ private struct StreamingWordText: View {
             output += part
         }
         return output
+    }
+}
+
+private struct AssistantAnswerView: View {
+    let text: String
+    let compact: Bool
+
+    private var blocks: [AssistantTextBlock] {
+        AssistantTextBlock.parse(text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 9 : 12) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .paragraph(let text):
+                    Text(.chatMarkdown(text))
+                        .font(.appBody(compact ? 14.5 : 15.5))
+                        .foregroundStyle(Color.appInk.opacity(0.96))
+                        .lineSpacing(compact ? 4 : 5.5)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                case .heading(let text):
+                    Text(text.strippingMarkdown)
+                        .font(.appBody(compact ? 14 : 15, weight: .semibold))
+                        .foregroundStyle(Color.appInk)
+                        .padding(.top, 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+
+                case .bullet(let text):
+                    AssistantListRow(marker: "•", text: text, compact: compact)
+
+                case .numbered(let index, let text):
+                    AssistantListRow(marker: "\(index)", text: text, compact: compact)
+                }
+            }
+        }
+    }
+}
+
+private struct AssistantListRow: View {
+    let marker: String
+    let text: String
+    let compact: Bool
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Text(marker)
+                .font(.appBody(compact ? 12 : 13, weight: .medium))
+                .foregroundStyle(Color.appAccent.opacity(0.86))
+                .frame(width: marker == "•" ? 14 : 18, alignment: .trailing)
+            Text(.chatMarkdown(text))
+                .font(.appBody(compact ? 14.5 : 15.5))
+                .foregroundStyle(Color.appInk.opacity(0.94))
+                .lineSpacing(compact ? 4 : 5)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+    }
+}
+
+private enum AssistantTextBlock {
+    case heading(String)
+    case paragraph(String)
+    case bullet(String)
+    case numbered(Int, String)
+
+    static func parse(_ raw: String) -> [AssistantTextBlock] {
+        let normalized = raw
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
+        var blocks: [AssistantTextBlock] = []
+        var paragraph: [String] = []
+
+        func flushParagraph() {
+            let joined = paragraph
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !joined.isEmpty {
+                blocks.append(.paragraph(joined))
+            }
+            paragraph.removeAll()
+        }
+
+        for line in normalized.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                flushParagraph()
+                continue
+            }
+
+            if let match = trimmed.firstMatch(of: #"^#{1,4}\s+(.+)$"#) {
+                flushParagraph()
+                blocks.append(.heading(match))
+            } else if let match = trimmed.firstMatch(of: #"^[*+-]\s+(.+)$"#) {
+                flushParagraph()
+                blocks.append(.bullet(match))
+            } else if let match = trimmed.firstNumberedListItem {
+                flushParagraph()
+                blocks.append(.numbered(match.index, match.text))
+            } else {
+                paragraph.append(trimmed)
+            }
+        }
+        flushParagraph()
+        return blocks.isEmpty ? [.paragraph(raw)] : blocks
+    }
+}
+
+private extension String {
+    func firstMatch(of pattern: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(startIndex..., in: self)
+        guard let match = regex.firstMatch(in: self, range: range),
+              match.numberOfRanges > 1,
+              let bodyRange = Range(match.range(at: 1), in: self) else {
+            return nil
+        }
+        return String(self[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var firstNumberedListItem: (index: Int, text: String)? {
+        guard let regex = try? NSRegularExpression(pattern: #"^(\d+)[.)]\s+(.+)$"#) else { return nil }
+        let range = NSRange(startIndex..., in: self)
+        guard let match = regex.firstMatch(in: self, range: range),
+              match.numberOfRanges > 2,
+              let indexRange = Range(match.range(at: 1), in: self),
+              let bodyRange = Range(match.range(at: 2), in: self),
+              let index = Int(self[indexRange]) else {
+            return nil
+        }
+        return (index, String(self[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
 
@@ -362,236 +509,10 @@ private struct ToolHeader: View {
     }
 }
 
-struct ActionCard: View {
-    let action: ActionResult
-    var onCommand: ((String) -> Void)? = nil
-    var onOpenAction: ((ActionResult) -> Void)? = nil
-
-    private var hasLink: Bool {
-        action.deepLink != nil || action.webLink != nil
-    }
-
-    private var detailText: String? {
-        guard let raw = action.cardText ?? action.text ?? action.error else { return nil }
-        let compact = raw
-            .strippingMarkdown
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "  ", with: " ")
-        if action.success {
-            if ["get_emails", "search_emails"].contains(action.action) {
-                if isSoftMiss { return compact }
-                let count = firstInteger(in: compact)
-                return count.map { "\($0) \($0 == 1 ? "email" : "emails") reviewed" } ?? "Email results reviewed"
-            }
-            if action.action == "get_calendar_events" {
-                if isSoftMiss { return compact }
-                let count = firstInteger(in: compact)
-                return count.map { "\($0) calendar \($0 == 1 ? "item" : "items") checked" } ?? "Calendar checked"
-            }
-            if action.action == "web_search" {
-                return "Search completed"
-            }
-        }
-        if !action.success && action.action == "book_uber" {
-            if compact.localizedCaseInsensitiveContains("need your current location") ||
-                compact.localizedCaseInsensitiveContains("enable location") {
-                return "Enable location and try again."
-            }
-            if compact.localizedCaseInsensitiveContains("places api") ||
-                compact.localizedCaseInsensitiveContains("google places is not ready") {
-                return "Nearby place ranking needs Google Places."
-            }
-            if compact.localizedCaseInsensitiveContains("nearby match") ||
-                compact.localizedCaseInsensitiveContains("couldn't find a nearby") ||
-                compact.localizedCaseInsensitiveContains("geocoding error") ||
-                compact.localizedCaseInsensitiveContains("no results found") {
-                return "Try a different place name or enable location."
-            }
-        }
-        return compact
-    }
-
-    private func firstInteger(in text: String) -> Int? {
-        guard let range = text.range(of: #"\b\d+\b"#, options: .regularExpression) else { return nil }
-        return Int(text[range])
-    }
-
-    /// An action whose text describes a benign "nothing to return" result (no
-    /// emails matching a filter, no flights for that route, etc.) rather than a
-    /// real error or a completed action. These search-connector calls actually
-    /// return `success: true` with an empty result set (confirmed against
-    /// connectors/google.js's `search_emails`) — a zero-result query isn't a
-    /// failure, so keying this off `action.success` (as an earlier pass did)
-    /// missed the real-world case entirely. It's also not a genuine "success" —
-    /// it shouldn't get the same green-check treatment as a completed action,
-    /// especially when the assistant's own reply already covers the actual
-    /// answer from elsewhere. Matched on text, gated to the start of a short
-    /// string so a long multi-result summary that happens to mention "no
-    /// results" for one sub-item isn't misclassified.
-    private var isSoftMiss: Bool {
-        let haystack = (action.text ?? action.cardText ?? action.error ?? "").lowercased()
-        guard haystack.count < 120 else { return false }
-        let softPhrases = [
-            "no matching", "no matches", "nothing matching", "no results",
-            "no emails matching", "no messages matching", "couldn't find any",
-            "found nothing", "0 results", "no upcoming", "no events matching"
-        ]
-        return softPhrases.contains { haystack.hasPrefix($0) || haystack.contains($0) && haystack.count < 60 }
-    }
-
-    var body: some View {
-        if action.pending {
-            pendingCard
-        } else {
-            Button(action: openLink) {
-                confirmationRow
-            }
-            .buttonStyle(.appScale(0.98))
-            .disabled(!hasLink)
-        }
-    }
-
-    /// A completed action, rendered as a quiet receipt line — a status mark, a
-    /// confident Title Case confirmation, optional detail, and an Open affordance
-    /// when there's somewhere to go. Flat (a single hairline), never a boxed card.
-    private var confirmationRow: some View {
-        HStack(alignment: .top, spacing: 12) {
-            statusGlyph
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(headline)
-                    .font(.appBody(14))
-                    .foregroundStyle(action.success || isSoftMiss ? Color.appInk : Color.appDanger)
-                if let detail = detailText {
-                    Text(detail)
-                        .font(.appBody(13))
-                        .foregroundStyle(Color.appMuted)
-                        .lineLimit(3)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            Spacer(minLength: 8)
-
-            if hasLink {
-                HStack(spacing: 3) {
-                    Text("Open")
-                        .font(.appBody(13))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                }
-                .foregroundStyle(Color.appTitanium)
-            }
-        }
-        .padding(.vertical, 15)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) {
-            Rectangle().fill(Color.appHairline).frame(height: 0.5)
-        }
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private var statusGlyph: some View {
-        ToolStatusGlyph(state: isSoftMiss ? .neutral : (action.success ? .success : .failure))
-    }
-
-    /// Title Case confirmation copy, e.g. "Email Sent", "Place Found". A soft
-    /// miss gets its own neutral phrasing so it doesn't read as "X failed" next
-    /// to an assistant reply that already answered the question.
-    private var headline: String {
-        if isSoftMiss { return "No matches" }
-        return actionSummary.capitalized
-    }
-
-    /// A high-risk action awaiting the user's confirmation keeps a bordered
-    /// surface — it's a decision to make, not a receipt, so it should hold the eye.
-    private var pendingCard: some View {
-        TodayCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(headline)
-                        .font(.appBody(14))
-                        .foregroundStyle(Color.appInk)
-                    if let detail = detailText {
-                        Text(detail)
-                            .font(.appBody(13))
-                            .foregroundStyle(Color.appMuted)
-                            .lineLimit(4)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                if let onCommand {
-                    HStack(spacing: 0) {
-                        pendingButton("Confirm") { onCommand("confirm") }
-                        pendingButton("Cancel", muted: true) { onCommand("cancel") }
-                    }
-                }
-            }
-        }
-    }
-
-    private func pendingButton(_ label: String, muted: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.appBody(13, weight: .medium))
-                .foregroundStyle(muted ? Color.appMuted : Color.appInk)
-                .frame(maxWidth: .infinity)
-                .frame(height: 42)
-                .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
-        }
-        .buttonStyle(.appScale)
-    }
-
-    private func openLink() {
-        guard !action.pending else { return }
-        if let onOpenAction {
-            onOpenAction(action)
-            return
-        }
-        if let link = action.deepLink, let url = URL(string: link) {
-            UIApplication.shared.open(url)
-        } else if let link = action.webLink, let url = URL(string: link) {
-            UIApplication.shared.open(url)
-        }
-    }
-
-    private func humanize(_ type: String) -> String {
-        type.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-
-    private var actionSummary: String {
-        if let summary = action.actionSummary, !summary.isEmpty { return summary }
-        switch action.action {
-        case "send_email": return action.success ? "Email sent" : "Email failed"
-        case "send_message": return action.success ? "Message ready" : "Message failed"
-        case "send_telegram": return action.success ? "Telegram sent" : "Telegram failed"
-        case "book_uber": return action.success ? "Uber opened" : "Uber needs attention"
-        case "find_place": return action.success ? "Place found" : "Place search failed"
-        case "get_directions": return action.success ? "Directions ready" : "Directions failed"
-        case "plan_trip": return action.success ? "Trip planned" : "Trip failed"
-        case "station_board": return action.success ? "Station board ready" : "Station board failed"
-        case "open_app": return action.success ? "App opened" : "App unavailable"
-        case "play_music": return action.success ? "Music opened" : "Music failed"
-        case "add_to_music_playlist": return action.success ? "Music added" : "Music add failed"
-        case "create_reminder": return action.success ? "Reminder created" : "Reminder failed"
-        case "create_calendar_event": return action.success ? "Calendar updated" : "Calendar failed"
-        case "check_health": return action.success ? "Health checked" : "Health unavailable"
-        default: return action.success ? "\(humanize(action.action)) done" : "\(humanize(action.action)) failed"
-        }
-    }
-
-}
-
 // MARK: - Uber Handoff Card
 
-/// A native ride-booking transition card. Pure black with a 0.5px gray border,
-/// minimalist left-aligned monospace readout (destination / ETA / estimate), and
-/// a silent confirm indicator that animates on appear before the tap hands off
-/// to the Uber deep link.
+/// A native ride-booking transition card. Keeps the deep-link handoff, but reads
+/// like a consumer choice rather than a telemetry panel.
 struct UberHandoffCard: View {
     let action: ActionResult
     var onOpen: () -> Void
@@ -622,17 +543,39 @@ struct UberHandoffCard: View {
 
     private var eta: String { firstMatch(#"(\d+)\s*min"#, in: metricSource) ?? "—" }
     private var estimate: String { firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#, in: metricSource) ?? "—" }
+    private var etaPhrase: String {
+        guard let minutes = Int(eta) else { return "time estimate unavailable" }
+        if minutes < 60 { return "about \(minutes) min" }
+        let hours = minutes / 60
+        let mins = minutes % 60
+        return mins == 0 ? "about \(hours) hr" : "about \(hours) hr \(mins) min"
+    }
 
     var body: some View {
         Button(action: onOpen) {
             TodayCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    ToolHeader(icon: "car", eyebrow: "Ride · Uber", state: action.success ? .success : .failure)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "car")
+                            .font(.system(size: 12, weight: .regular))
+                            .foregroundStyle(Color.appMuted)
+                        Text("Ride to \(destination)")
+                            .font(.appBody(14.5, weight: .medium))
+                            .foregroundStyle(Color.appInk)
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        ToolStatusGlyph(state: action.success ? .success : .failure)
+                    }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        handoffRow("Dest", destination)
-                        handoffRow("ETA", eta == "—" ? "—" : "\(eta) min")
-                        handoffRow("Est.", estimate)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Uber · \(etaPhrase)")
+                            .font(.appBody(13))
+                            .foregroundStyle(Color.appMuted)
+                        if estimate != "—" {
+                            Text("\(estimate) estimated")
+                                .font(.appBody(13))
+                                .foregroundStyle(Color.appMuted)
+                        }
                     }
                 }
             }
@@ -641,23 +584,6 @@ struct UberHandoffCard: View {
         .buttonStyle(.appScale(0.98))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Ride to \(destination). Tap to open Uber.")
-    }
-
-    private func handoffRow(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 12) {
-            // Label in the same sans as every other card's copy — only the value
-            // stays monospace, since a numeric/time readout is the one legitimate
-            // use for it, per the type system's own rule.
-            Text(label)
-                .font(.appBody(13))
-                .foregroundStyle(Color.appMuted)
-                .frame(width: 40, alignment: .leading)
-            Text(value)
-                .font(.appMono(13))
-                .foregroundStyle(Color.appInk)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
     }
 
     private func firstMatch(_ pattern: String, in text: String) -> String? {

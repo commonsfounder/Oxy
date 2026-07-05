@@ -157,10 +157,10 @@ struct ChatView: View {
                                 }
 
                                 if let status = viewModel.statusLabel {
-                                    StatusIndicator(label: status)
+                                    TurnActivityView(label: progressLabel(for: status))
                                         .id("status")
-                                        .padding(.horizontal, 16)
-                                        .padding(.top, 4)
+                                        .padding(.horizontal, AppSpacing.chatMargin)
+                                        .padding(.top, 6)
                                 }
                             }
                             .padding(.vertical, 12)
@@ -406,6 +406,20 @@ struct ChatView: View {
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
         }
+    }
+
+    private func progressLabel(for raw: String) -> String {
+        let lower = raw.lowercased()
+        if lower.contains("email") { return "Checking your inbox..." }
+        if lower.contains("calendar") || lower.contains("schedule") { return "Checking tomorrow's calendar..." }
+        if lower.contains("location") { return "Finding your location..." }
+        if lower.contains("image") { return "Looking at image..." }
+        if lower.contains("file") || lower.contains("reading") { return "Reading file..." }
+        if lower.contains("order") { return "Checking the order..." }
+        if lower.contains("summary") { return "Putting it together..." }
+        if lower.contains("message sent") { return "Message sent" }
+        if lower.contains("message failed") { return "Message failed" }
+        return raw.hasSuffix("...") ? raw : "\(raw)..."
     }
 
     // MARK: - Attachment sheet (custom, flat obsidian)
@@ -726,7 +740,7 @@ private struct ActionReviewSheet: View {
     }
 
     private var detail: String {
-        action.cardText ?? action.text ?? "Ready."
+        cleanDetail(action.cardText ?? action.text ?? "Ready.")
     }
 
     var body: some View {
@@ -756,18 +770,23 @@ private struct ActionReviewSheet: View {
                 Spacer()
             }
 
-            Text(detail)
-                .font(.appBody(15))
-                .foregroundStyle(Color.appInk)
-                .lineSpacing(4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Color.appSurface)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md)
-                        .stroke(isPayment ? Color.appAccent.opacity(0.3) : Color.appHairline, lineWidth: 1)
-                )
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ready for review")
+                    .appEyebrow()
+                    .foregroundStyle(isPayment ? Color.appAccent.opacity(0.9) : Color.appMuted)
+                Text(detail)
+                    .font(.appBody(15))
+                    .foregroundStyle(Color.appInk)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(16)
+            .background(Color.appSurface.opacity(0.82))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.lg, style: .continuous)
+                    .stroke(isPayment ? Color.appAccent.opacity(0.28) : Color.appHairline, lineWidth: 0.75)
+            )
 
             if isPayment {
                 Text("Double-check the total and address on the site if anything looks off.")
@@ -800,9 +819,19 @@ private struct ActionReviewSheet: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
             }
         }
-        .padding(20)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.appBackground)
+    }
+
+    private func cleanDetail(_ raw: String) -> String {
+        raw.strippingMarkdown
+            .replacingOccurrences(of: #"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?"#, with: "$3/$2/$1 at $4:$5", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\b(title|start|end|notes|recipient|body):\s*"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\n\n+", with: "\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var iconName: String {
@@ -812,6 +841,7 @@ private struct ActionReviewSheet: View {
         case "send_message": return "message.fill"
         case "send_telegram": return "paperplane.fill"
         case "make_call": return "phone.fill"
+        case "create_calendar_event": return "calendar.badge.plus"
         default: return "checkmark.circle.fill"
         }
     }
@@ -901,9 +931,12 @@ struct ChatSessionsResponse: Codable {
 private struct WelcomeCard: View {
     var onAction: (String) -> Void
     @State private var appeared = false
-    @AppStorage("oxy_starter_actions") private var storedActions = "Send an email\nPlay some music\nBook a ride"
+    @AppStorage("oxy_starter_actions") private var storedActions = "Summarise my inbox\nCheck my calendar\nFind something for me"
 
     private static let pool: [(icon: String, label: String)] = [
+        ("envelope", "Summarise my inbox"),
+        ("calendar", "Check my calendar"),
+        ("magnifyingglass", "Find something for me"),
         ("envelope", "Send an email"),
         ("music.note", "Play some music"),
         ("car", "Book a ride"),
@@ -934,13 +967,12 @@ private struct WelcomeCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Quick start actions
-            VStack(alignment: .leading, spacing: 20) {
-                // BrandWordmark removed — less precious, more direct.
-
+            VStack(alignment: .leading, spacing: 0) {
                 Text("What can I do for you?")
-                    .font(.appTitle(28, weight: .semibold))
+                    .font(.appTitle(27, weight: .semibold))
                     .foregroundStyle(Color.appInk)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 18)
                     .animation(.appSpring.delay(0.1), value: appeared)
@@ -966,7 +998,7 @@ private struct WelcomeCard: View {
                                 .foregroundStyle(Color.appMuted)
                                 .frame(width: 18, alignment: .center)
                             Text(label)
-                                .font(.appBody(16, weight: .regular))
+                                .font(.appBody(15.5, weight: .medium))
                                 .foregroundStyle(Color.appInk)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Image(systemName: "arrow.up.right")
@@ -974,7 +1006,7 @@ private struct WelcomeCard: View {
                                 .foregroundStyle(Color.appMuted.opacity(0.5))
                         }
                         .padding(.horizontal, 24)
-                        .padding(.vertical, 20)
+                        .padding(.vertical, 18)
                         .contentShape(Rectangle())
                         .overlay(alignment: .bottom) {
                             Rectangle().fill(Color.appHairline).frame(height: 0.5)
@@ -1078,13 +1110,13 @@ private struct ChatInputBar: View {
                 .padding(.top, 10)
             }
 
-            HStack(alignment: .bottom, spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
                 // Attach
                 Button(action: onAttach) {
                     Image(systemName: "plus")
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 34, height: 34)
                         .background(Circle().fill(Color.appSurface))
                         .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
                 }
@@ -1098,7 +1130,7 @@ private struct ChatInputBar: View {
                         textField
                     }
                 }
-                .frame(minHeight: 40)
+                .frame(minHeight: 38)
 
                 // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
@@ -1109,7 +1141,7 @@ private struct ChatInputBar: View {
                                 .tint(Color.appMuted)
                         } else {
                             Image(systemName: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"))
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 14, weight: .semibold))
                                 .contentTransition(.symbolEffect(.replace))
                         }
                     }
@@ -1117,7 +1149,7 @@ private struct ChatInputBar: View {
                     // recording); a quiet bordered outline for the idle mic — no
                     // reliance on the (now no-op) glass effect for legibility.
                     .foregroundStyle(buttonForeground)
-                    .frame(width: 36, height: 36)
+                    .frame(width: 34, height: 34)
                     .contentShape(Circle())
                     .background {
                         Circle().fill(buttonFill)
@@ -1133,8 +1165,8 @@ private struct ChatInputBar: View {
                 .animation(.appFast, value: isRecording)
             }
             .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
             // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
         }
         .onAppear { pulse = true }
@@ -1142,14 +1174,14 @@ private struct ChatInputBar: View {
 
     private var textField: some View {
         TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
-            .font(.system(size: 15, weight: .regular))
+            .font(.system(size: 14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .lineLimit(1...6)
             .focused(isFocused)
             .onSubmit { if canSend { onSend() } }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
             .background(Color.appSurface)
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
             .overlay(
@@ -1230,22 +1262,39 @@ private struct ChatInputBar: View {
     }
 }
 
-// MARK: - Status Indicator
+// MARK: - Turn Activity
 
-private struct StatusIndicator: View {
+private struct TurnActivityView: View {
     let label: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
 
     var body: some View {
-        HStack {
-            OxyThinkingIndicator(label: label, compact: true)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
-                .background(Color.appMuted.opacity(0.08))
-                .clipShape(Capsule())
+        HStack(spacing: 9) {
+            Circle()
+                .fill(Color.appAccent.opacity(reduceMotion ? 0.7 : 0.86))
+                .frame(width: 7, height: 7)
+                .scaleEffect(!reduceMotion && pulse ? 1.16 : 0.9)
+                .animation(
+                    reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
+                    value: pulse
+                )
+                .accessibilityHidden(true)
+
+            Text(label)
+                .font(.appBody(13))
+                .foregroundStyle(Color.appMuted)
+                .lineLimit(1)
+                .contentTransition(.opacity)
+                .animation(.appStandard, value: label)
+
             Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 2)
+        .frame(minHeight: 28, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .onAppear { pulse = true }
     }
 }
 

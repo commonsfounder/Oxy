@@ -80,6 +80,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
+const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -403,13 +404,6 @@ function getBriefingWindow(now = new Date()) {
   return PROACTIVE_WINDOWS.find(window => hour >= window.start && hour <= window.end) || null;
 }
 
-function proactiveSweepAuthorized(req) {
-  const configuredSecret = process.env.PROACTIVE_SWEEP_SECRET;
-  if (!configuredSecret) return true;
-  const provided = req.get('x-proactive-secret') || req.query.secret || req.body?.secret;
-  return provided === configuredSecret;
-}
-
 function parseJsonObject(value) {
   const parsed = safeParseJSON(value);
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
@@ -609,10 +603,9 @@ function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
 
 function emailReadActionForMessage(message = '') {
   const text = String(message || '');
-  const important = /\b(important|urgent|priority|need my attention|actionable)\b/i.test(text);
-  const input = { max_results: important ? 10 : 5, label: 'INBOX' };
+  const broadTriage = isBroadEmailTriageRequest(text);
+  const input = { max_results: broadTriage ? 20 : 5, label: 'INBOX' };
   if (/\btoday\b/i.test(text)) input.query = 'newer_than:1d';
-  if (important) input.query = [input.query, '(important OR urgent OR action required)'].filter(Boolean).join(' ');
   if (input.query) {
     return { type: 'search_emails', input: { query: input.query, max_results: input.max_results } };
   }
@@ -668,13 +661,13 @@ function inferCompoundReadOnlyTurn(message = '') {
   };
 }
 
-function summarizeReadOnlyActionResults(actionResults = []) {
-  const dataResults = getStructuredDataResults(actionResults);
+function summarizeReadOnlyActionResults(actionResults = [], message = '') {
+  const dataResults = getStructuredDataResults(actionResults, message);
   const failures = (actionResults || []).filter(entry => DATA_ACTIONS.has(entry?.action) && entry?.result?.success === false);
   if (!dataResults.length && !failures.length) return '';
   const parts = [];
   if (dataResults.length) {
-    parts.push(`Here’s what I found:\n\n${dataResults.map(entry => entry.text).join('\n\n')}`);
+    parts.push(buildConciseDataAnswer(dataResults));
   }
   if (failures.length) {
     parts.push(failures.map(entry => `${humanizeActionType(entry.action)} failed: ${userFacingActionFailure(entry)}`).join('\n'));
@@ -769,8 +762,8 @@ function summarizeActionOutcome(entry) {
   let emailContext = '';
   if (['get_emails', 'search_emails'].includes(type) && Array.isArray(result.emails) && result.emails.length) {
     emailContext = result.emails.slice(0, 3).map((email, index) => {
-      const body = String(email.body || email.snippet || '').slice(0, 1200);
-      return `\n  Email ${index + 1}: From ${email.from || 'Unknown'} | Subject ${email.subject || '(No subject)'} | Thread ${email.threadId || 'unknown'}${body ? `\n  Body: ${body}` : ''}`;
+      const normalized = normalizeEmailForSynthesis(email);
+      return `\n  Email ${index + 1}: Sender ${normalized.sender} | Subject ${normalized.subject}${normalized.snippet ? ` | Extract ${normalized.snippet}` : ''}`;
     }).join('');
   }
   return `- ${humanizeActionType(type)}${summarizeActionInput(entry?.input || result?.input)}: ${status}${detail ? ` — ${detail}` : ''}${emailContext}`;
@@ -2117,7 +2110,7 @@ async function executeAction(userId, action, params, context = {}) {
       if (!resolvedContact.value) {
         return {
           success: false,
-          error: `I need a phone number for ${contact}. Turn on Contacts access for Oxy or include the number.`
+          error: `I need a phone number for ${contact}. Turn on Contacts access for Milgrain or include the number.`
         };
       }
       return {
@@ -3283,7 +3276,7 @@ app.post('/auth/forgot-password', forgotPasswordRateLimiter, async (req, res) =>
 app.get('/auth/reset-password', (req, res) => {
   const { token } = req.query;
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(`<!DOCTYPE html><html><head><title>Reset Password · Oxy</title>
+  res.send(`<!DOCTYPE html><html><head><title>Reset Password · Milgrain</title>
   <style>body{font-family:sans-serif;max-width:420px;margin:60px auto;padding:0 24px;color:#1a1a1a}
   h2{margin-bottom:8px}input{width:100%;padding:10px;margin:8px 0 16px;box-sizing:border-box;border:1px solid #ccc;border-radius:6px;font-size:15px}
   button{width:100%;padding:12px;background:#2563eb;color:white;border:none;border-radius:6px;font-size:15px;cursor:pointer}</style>
@@ -3422,14 +3415,14 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     let actionResults = [];
     let audioBase64 = null;
     let ttsError = '';
+    let dataResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { userMessage: userText });
+      dataResults = getStructuredDataResults(actionResults, userText);
       actionResults = normalizeActionResultsForClient(actionResults).map(enrichActionForBrowser);
     }
-    const dataResults = getStructuredDataResults(actionResults);
     let finalSpoken = canUseDirectActionSummary(actionResults) ? summarizeActionResults(actionResults) : spoken;
     if (!canUseDirectActionSummary(actionResults) && dataResults.length > 0) {
-      const context = dataResults.map(a => a.text).join('\n\n');
       const followUpRequest = buildModernGenerateRequest({
         dynamicSystemPrompt,
         useSearch,
@@ -3439,14 +3432,14 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '...' }] },
-        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+        { role: 'user', parts: [{ text: synthesisPromptForDataResults(userText, dataResults) }] }
       );
       const followUp = await modernGenAI.models.generateContent({
         model: PRIMARY_CHAT_MODEL,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       });
-      finalSpoken = parseActions(followUp.text || '').spoken || context;
+      finalSpoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken, dataResults);
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) finalSpoken = actionConfirmation;
@@ -3574,16 +3567,16 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     if (parseError) console.warn('[chat-with-image] one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
     let actionResults = [];
+    let dataResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { imageFile: req.file, userMessage: message });
+      dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 
-    const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.text).join('\n\n');
       const followUpRequest = buildModernGenerateRequest({
         dynamicSystemPrompt,
         useSearch,
@@ -3599,20 +3592,20 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '...' }] },
-        { role: 'user', parts: [{ text: `Here are the action results:\n\n${context}\n\nRespond naturally and use only the results shown here plus the attached ${fileLabel} context. Do not invent unstated facts.` }] }
+        { role: 'user', parts: [{ text: `${synthesisPromptForDataResults(message, dataResults)}\nYou may also use the attached ${fileLabel} context.` }] }
       );
       const followUp = await modernGenAI.models.generateContent({
         model: PRIMARY_CHAT_MODEL,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       });
-      spoken = parseActions(followUp.text || '').spoken || spoken || context;
+      spoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken || spoken, dataResults);
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) spoken = actionConfirmation;
 
     if (!spoken) {
-      spoken = actionResults.map(a => a.result?.text).filter(Boolean).join(' ') || 'I looked through it.';
+      spoken = dataResults.length ? buildConciseDataAnswer(dataResults) : 'I looked through it.';
     }
 
     const browserActions = (actionResults || []).map(enrichActionForBrowser);
@@ -4041,8 +4034,9 @@ app.post('/proactive/:userId/run', async (req, res) => {
 
 app.all('/proactive/sweep', async (req, res) => {
   try {
-    if (!proactiveSweepAuthorized(req)) {
-      return res.status(401).json({ error: 'Invalid proactive sweep secret.' });
+    const authorization = proactiveSweepAuthorization(req);
+    if (!authorization.ok) {
+      return res.status(authorization.status).json({ error: authorization.error });
     }
     const summary = await runProactiveSweep(console);
     res.json({ ok: true, summary });
@@ -4321,7 +4315,7 @@ async function buildMorningBriefing(userId, now = new Date()) {
 
   const hour = getLocalHour(now);
   const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const systemPrompt = `You are Oxy. It's ${greeting} and you're checking in with your friend.
+  const systemPrompt = `You are a personal assistant. It's ${greeting} and you're checking in with your friend.
 
 Here's what you know about them:
 ${memory || 'Not much yet — learn as you go.'}
@@ -4393,7 +4387,7 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
 
   const health = parseJsonObject(nativeContext?.health);
   const location = parseJsonObject(nativeContext?.location);
-  const systemPrompt = `You are Oxy writing a useful, concise ${window.label.toLowerCase()} for the user.
+  const systemPrompt = `You are a personal assistant writing a useful, concise ${window.label.toLowerCase()} for the user.
 
 Use only the information shown here. Do not invent weather, traffic, calendar events, health facts, or plans.
 If there is nothing useful, write one warm quiet-start sentence.
@@ -4804,23 +4798,30 @@ function normalizeActionResultsForClient(actionResults) {
   const seen = new Set();
   const out = [];
   for (const entry of actionResults || []) {
-    const result = entry?.result || {};
+    const result = { ...(entry?.result || {}) };
     if ((entry?.action === 'get_emails' || entry?.action === 'search_emails') && Array.isArray(result.emails)) {
       const count = result.emails.length;
       result.cardText = `${count} ${count === 1 ? 'email' : 'emails'} reviewed`;
+      result.emailCount = count;
+      delete result.emails;
+      if (result.text && /^Email results|^Latest emails/i.test(result.text)) result.text = result.cardText;
     } else if (entry?.action === 'get_calendar_events' && Array.isArray(result.events)) {
       const count = result.events.length;
       result.cardText = `${count} calendar ${count === 1 ? 'item' : 'items'} checked`;
+      result.eventCount = count;
+      delete result.events;
+      if (result.text && /^Upcoming events/i.test(result.text)) result.text = result.cardText;
     } else if (entry?.action === 'web_search') {
       const count = Array.isArray(result.results) ? result.results.length : (Array.isArray(result.sources) ? result.sources.length : null);
       if (count != null) result.cardText = `${count} search ${count === 1 ? 'result' : 'results'} checked`;
     }
-    const error = entry?.result?.error || '';
-    const text = entry?.result?.text || '';
-    const key = `${entry?.action || ''}:${entry?.result?.success === false ? error : text}`;
+    const normalizedEntry = { ...entry, result };
+    const error = result.error || '';
+    const text = result.text || '';
+    const key = `${entry?.action || ''}:${result.success === false ? error : text}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(entry);
+    out.push(normalizedEntry);
   }
   return out;
 }
@@ -4943,34 +4944,312 @@ function summarizeFinishedActionsForUser(actionResults) {
   return summarizeCompletedActionsConcise(normalizedResults);
 }
 
-function buildStructuredDataSummary(entry) {
-  const result = entry?.result || {};
-  if (entry?.action === 'get_emails' || entry?.action === 'search_emails') {
-    if (!Array.isArray(result.emails) || result.emails.length === 0) return result.text || 'No emails found.';
-    const emails = result.emails.map((email, index) => (
-      `${index + 1}. From: ${email.from || 'Unknown sender'} | Subject: ${email.subject || '(No subject)'}${email.date ? ` | Date: ${email.date}` : ''}${email.body ? `\nBody: ${String(email.body).slice(0, 1200)}` : ''}`
-    ));
-    return `Email results:\n${emails.join('\n')}`;
-  }
-  if (entry?.action === 'get_calendar_events') {
-    if (!Array.isArray(result.events) || result.events.length === 0) return result.text || 'No upcoming events found.';
-    const events = result.events.map((event, index) => (
-      `${index + 1}. ${event.title || 'Untitled'}${event.start ? ` | Starts: ${event.start}` : ''}${event.end ? ` | Ends: ${event.end}` : ''}`
-    ));
-    return `Upcoming events:\n${events.join('\n')}`;
-  }
-  if (entry?.action === 'get_telegram_contacts') {
-    if (!Array.isArray(result.contacts) || result.contacts.length === 0) return result.text || 'No contacts found.';
-    const contacts = result.contacts.map((contact, index) => `${index + 1}. ${contact.name || contact.username || 'Unnamed contact'}`);
-    return `Telegram contacts:\n${contacts.join('\n')}`;
-  }
-  return result.text || '';
+function stripTrackingUrlsAndBoilerplate(text = '') {
+  return String(text || '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\b(?:unsubscribe|manage preferences|view in browser|privacy policy|terms of use|tracking pixel|utm_[a-z_]+)[^\n.]*[.\n]?/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&amp;|&lt;|&gt;/gi, ' ')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function getStructuredDataResults(actionResults) {
+function senderDisplayName(from = '') {
+  const raw = String(from || '').trim();
+  if (!raw) return 'Unknown sender';
+  const angle = raw.match(/^"?([^"<]+)"?\s*</);
+  if (angle?.[1]) return angle[1].trim();
+  return raw.replace(/<[^>]+>/g, '').replace(/\b\S+@\S+\b/g, '').trim() || 'Unknown sender';
+}
+
+function boundedSnippet(text = '', max = 220) {
+  const cleaned = stripTrackingUrlsAndBoilerplate(text);
+  if (!cleaned) return '';
+  return cleaned.length > max ? `${cleaned.slice(0, max - 1).trim()}…` : cleaned;
+}
+
+function normalizeEmailForSynthesis(email = {}) {
+  return {
+    sender: senderDisplayName(email.from || email.sender || ''),
+    subject: String(email.subject || '(No subject)').trim().slice(0, 160),
+    date: String(email.date || '').trim(),
+    snippet: boundedSnippet(email.snippet || email.body || email.text || '')
+  };
+}
+
+function isBroadEmailTriageRequest(message = '') {
+  return /\b(important|urgent|priority|need(?:s)? (?:my )?attention|actionable|what did i miss|catch me up|check my inbox|check my emails?|anything i need to respond to|need to reply|missed)\b/i
+    .test(String(message || ''));
+}
+
+function isJobContextRequest(message = '') {
+  return /\b(job|jobs|career|careers|application|applications|opportunit(?:y|ies)|interview|recruiter|role|roles|hiring)\b/i
+    .test(String(message || ''));
+}
+
+function emailTriageSignals(email = {}, message = '') {
+  const normalized = normalizeEmailForSynthesis(email);
+  const haystack = [
+    email.from,
+    email.sender,
+    email.senderName,
+    email.senderAddress,
+    normalized.subject,
+    normalized.snippet
+  ].filter(Boolean).join(' ').toLowerCase();
+  const subject = normalized.subject.toLowerCase();
+  const sender = String(email.from || email.sender || email.senderAddress || '').toLowerCase();
+  const jobContext = isJobContextRequest(message);
+  const signals = [];
+  const lowSignals = [];
+  let score = 0;
+
+  const add = (points, label) => { score += points; signals.push(label); };
+  const low = (points, label) => { score -= points; lowSignals.push(label); };
+
+  if (/\?|\b(can you|could you|please|let me know|reply|respond|confirm|approve|send me|need you to)\b/i.test(haystack)) add(3, 'asks for a response');
+  if (/\b(today|tomorrow|tonight|asap|urgent|deadline|due|expires?|by \d|before \d|appointment|meeting|interview)\b/i.test(haystack)) add(2, 'time-sensitive');
+  if (/\b(security|sign-?in|login|password|verification|suspicious|fraud|payment failed|failed payment|declined|overdue|disruption|cancelled|delayed|problem with your order|action required)\b/i.test(haystack)) add(4, 'needs attention');
+  if (/\b(school|teacher|university|work|manager|client|invoice|contract|doctor|dentist|gp|travel|flight|train|hotel)\b/i.test(haystack)) add(2, 'personal/work signal');
+
+  const automatedSender = /\b(no-?reply|noreply|donotreply|mailer-daemon|notification|notifications|alerts?|digest|newsletter|marketing)\b/i.test(sender);
+  if (automatedSender) low(2, 'automated sender');
+  if (/\b(newsletter|digest|roundup|recommended|recommendations|promotion|sale|offer|unsubscribe|manage preferences|marketing)\b/i.test(haystack)) low(3, 'bulk or promotional');
+  if (/\b(job alert|jobs? alert|new jobs?|recommended jobs?|vacanc(?:y|ies)|workcircle|indeed|findeveryjob|totaljobs|reed\.co\.uk)\b/i.test(haystack)) {
+    if (jobContext) add(2, 'job context match');
+    else low(4, 'generic job alert');
+  }
+  if (/^(re:|fwd:)/i.test(subject) && !automatedSender) add(1, 'conversation thread');
+
+  const category = lowSignals.some(s => /job alert/.test(s)) ? 'job alerts'
+    : lowSignals.some(s => /bulk|promotional|automated/.test(s)) ? 'bulk updates'
+      : score >= 3 ? 'actionable messages'
+        : 'other messages';
+
+  return {
+    ...normalized,
+    score,
+    category,
+    signals,
+    lowSignals,
+    isPrimary: score >= 3,
+    isLowValue: score <= -2
+  };
+}
+
+function triageEmailsForRequest(emails = [], message = '') {
+  const triaged = (Array.isArray(emails) ? emails : [])
+    .map((email, index) => ({ ...emailTriageSignals(email, message), index }))
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const broad = isBroadEmailTriageRequest(message);
+  const primary = (broad ? triaged.filter(item => item.isPrimary) : triaged)
+    .slice(0, broad ? 3 : 4);
+  const groupCounts = new Map();
+  for (const item of triaged) {
+    if (!primary.includes(item) && (item.isLowValue || broad)) {
+      groupCounts.set(item.category, (groupCounts.get(item.category) || 0) + 1);
+    }
+  }
+  const groups = [...groupCounts.entries()]
+    .filter(([, count]) => count > 0)
+    .map(([category, count]) => ({ category, count }));
+  return {
+    total: triaged.length,
+    broad,
+    primary,
+    groups,
+    lowValueCount: triaged.filter(item => item.isLowValue).length
+  };
+}
+
+function emailTriageContextText(triage) {
+  const lines = [`Email triage: reviewed ${triage.total} candidate email${triage.total === 1 ? '' : 's'}.`];
+  if (triage.primary.length) {
+    lines.push('Primary items:');
+    for (const email of triage.primary) {
+      const reason = email.signals.slice(0, 2).join(', ');
+      lines.push(`- ${[email.sender, email.subject].filter(Boolean).join(' — ')}${reason ? ` (${reason})` : ''}${email.snippet ? `: ${email.snippet}` : ''}`);
+    }
+  } else if (triage.broad) {
+    lines.push('Primary items: none clearly urgent or reply-worthy.');
+  } else {
+    lines.push('Primary items: none found.');
+  }
+  if (triage.groups.length) {
+    lines.push(`Grouped low-priority material: ${triage.groups.map(group => `${group.count} ${group.category}`).join(', ')}.`);
+  }
+  return lines.join('\n');
+}
+
+function parseCalendarDate(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function londonDayBounds(when = '') {
+  const today = formatLondonYMD();
+  const ymd = /\btomorrow\b/i.test(String(when || '')) ? addDaysToYMD(today, 1)
+    : /\btoday\b/i.test(String(when || '')) ? today
+      : null;
+  if (!ymd) return null;
+  return { ymd };
+}
+
+function eventFallsWithinBounds(event = {}, bounds = null) {
+  if (!bounds) return true;
+  const start = parseCalendarDate(event.start);
+  if (!start) return false;
+  return formatLondonYMD(start) === bounds.ymd;
+}
+
+function formatNaturalEventTime(start, end) {
+  const startDate = parseCalendarDate(start);
+  if (!startDate) return '';
+  const timeFmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    hour: 'numeric',
+    minute: '2-digit'
+  });
+  const dateFmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: TIMEZONE,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short'
+  });
+  const endDate = parseCalendarDate(end);
+  const day = dateFmt.format(startDate);
+  const startTime = timeFmt.format(startDate);
+  if (!endDate) return `${day}, ${startTime}`;
+  return `${day}, ${startTime}-${timeFmt.format(endDate)}`;
+}
+
+function normalizeCalendarEventForSynthesis(event = {}) {
+  return {
+    title: String(event.title || event.summary || 'Untitled').trim().slice(0, 160),
+    time: formatNaturalEventTime(event.start, event.end)
+  };
+}
+
+function buildConciseDataAnswer(dataResults = []) {
+  const emailSets = dataResults.filter(entry => entry.action === 'get_emails' || entry.action === 'search_emails');
+  const calendarSets = dataResults.filter(entry => entry.action === 'get_calendar_events');
+  const lines = [];
+  const emailItems = emailSets.flatMap(entry => entry.items || []);
+  const calendarItems = calendarSets.flatMap(entry => entry.items || []);
+  const emailGroups = emailSets.flatMap(entry => entry.groups || []);
+  if (emailSets.length && !emailItems.length) {
+    const grouped = emailGroups.length
+      ? ` Most of what I found was ${emailGroups.map(group => `${group.count} ${group.category}`).join(', ')}.`
+      : '';
+    lines.push(`Nothing urgent needs your attention from email.${grouped}`);
+  } else if (emailItems.length) {
+    lines.push(`I found ${emailItems.length} email${emailItems.length === 1 ? '' : 's'} that may need attention.`);
+    for (const email of emailItems.slice(0, 3)) {
+      const bit = [email.sender, email.subject].filter(Boolean).join(' — ');
+      lines.push(`- ${bit}`);
+    }
+  } else if (emailSets.length) {
+    lines.push('I did not find matching emails for that filter.');
+  }
+  if (calendarItems.length) {
+    lines.push(`Tomorrow has ${calendarItems.length} calendar item${calendarItems.length === 1 ? '' : 's'}.`);
+    for (const event of calendarItems.slice(0, 5)) {
+      lines.push(`- ${event.title}${event.time ? `, ${event.time}` : ''}`);
+    }
+  } else if (calendarSets.length) {
+    lines.push('I did not find calendar events in the requested window.');
+  }
+  if (!emailItems.length && !calendarItems.length && emailSets.length && calendarSets.length) {
+    lines[0] = 'Nothing urgent needs your attention. I did not find actionable email or calendar commitments to prepare for.';
+  } else if (emailItems.length || calendarItems.length) {
+    lines.push('Start with the email items that need a response, then use the calendar items as your preparation list.');
+  }
+  return lines.join('\n');
+}
+
+function synthesisPromptForDataResults(message, dataResults = []) {
+  const context = dataResults.map(entry => entry.text).join('\n\n');
+  return [
+    'Use this compact tool context to answer the original request.',
+    'Lead with the conclusion in the first sentence.',
+    'Answer the user’s decision or preparation question before evidence.',
+    'Group repetitive or low-value email results; do not list every email by default.',
+    'Treat newsletters, marketing, generic alerts, and repeated digests as low priority unless the request asks for that category.',
+    'Do not quote or reconstruct raw tool payloads.',
+    'Do not include URLs, raw email addresses, JSON, HTML, or ISO timestamps.',
+    'Give one concise combined synthesis with preparation advice. Use at most one short evidence sentence unless there is a real action item.',
+    '',
+    `Original request: ${message}`,
+    '',
+    'Compact tool context:',
+    context
+  ].join('\n');
+}
+
+function spokenLooksLikeRawToolLeak(text = '') {
+  const value = String(text || '');
+  return /https?:\/\/\S+/i.test(value) ||
+    /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value) ||
+    /<[^>]+>/.test(value) ||
+    /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(value) ||
+    /\b(Email results:|Upcoming events:|Body:|threadId|payload|raw|unsubscribe|manage preferences)\b/i.test(value);
+}
+
+function guardVisibleDataResponse(spoken, dataResults = []) {
+  const cleaned = stripActionMarkupForDisplay(String(spoken || '')).trim();
+  if (!cleaned || spokenLooksLikeRawToolLeak(cleaned)) {
+    return buildConciseDataAnswer(dataResults);
+  }
+  return cleaned;
+}
+
+function buildStructuredDataSummary(entry, message = '') {
+  const result = entry?.result || {};
+  if (entry?.action === 'get_emails' || entry?.action === 'search_emails') {
+    if (!Array.isArray(result.emails) || result.emails.length === 0) return { text: result.text || 'No emails found.', items: [] };
+    const triage = triageEmailsForRequest(result.emails, message);
+    const items = triage.primary.map(({ sender, subject, date, snippet, score, category, signals }) => ({
+      sender,
+      subject,
+      date,
+      snippet,
+      score,
+      category,
+      signals
+    }));
+    return { text: emailTriageContextText(triage), items, groups: triage.groups };
+  }
+  if (entry?.action === 'get_calendar_events') {
+    if (!Array.isArray(result.events) || result.events.length === 0) return { text: result.text || 'No upcoming events found.', items: [] };
+    const bounds = londonDayBounds(entry?.input?.when || entry?.result?.when || '');
+    const items = result.events
+      .filter(event => eventFallsWithinBounds(event, bounds))
+      .slice(0, 8)
+      .map(normalizeCalendarEventForSynthesis);
+    if (!items.length) return { text: 'No calendar events found in the requested window.', items: [] };
+    const label = bounds?.ymd ? `Calendar events for ${bounds.ymd}` : 'Calendar events';
+    const text = `${label} (${items.length}):\n${items.map((event, index) =>
+      `${index + 1}. ${event.title}${event.time ? ` at ${event.time}` : ''}`
+    ).join('\n')}`;
+    return { text, items };
+  }
+  if (entry?.action === 'get_telegram_contacts') {
+    if (!Array.isArray(result.contacts) || result.contacts.length === 0) return { text: result.text || 'No contacts found.', items: [] };
+    const contacts = result.contacts.map((contact, index) => `${index + 1}. ${contact.name || contact.username || 'Unnamed contact'}`);
+    return { text: `Telegram contacts:\n${contacts.join('\n')}`, items: contacts };
+  }
+  return { text: result.text || '', items: [] };
+}
+
+function getStructuredDataResults(actionResults, message = '') {
   return actionResults
     .filter(entry => DATA_ACTIONS.has(entry.action) && entry.result?.success)
-    .map(entry => ({ action: entry.action, text: buildStructuredDataSummary(entry) }))
+    .map(entry => {
+      const summary = buildStructuredDataSummary(entry, message);
+      return { action: entry.action, text: summary.text, items: summary.items || [], groups: summary.groups || [] };
+    })
     .filter(entry => entry.text);
 }
 
@@ -5242,8 +5521,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             success: result?.success !== false
           })
         });
-        actionResults = normalizeActionResultsForClient(actionResults);
-        const spoken = summarizeReadOnlyActionResults(actionResults) ||
+        const rawActionResults = actionResults;
+        actionResults = normalizeActionResultsForClient(rawActionResults);
+        const spoken = summarizeReadOnlyActionResults(rawActionResults, message) ||
           summarizeFinishedActionsForUser(actionResults) ||
           deterministicAction.spoken;
         sse({ type: 'actions', results: actionResults });
@@ -5273,8 +5553,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         trace,
         sequential: deterministicAction.actions.length > 1
       }, trace);
-      actionResults = normalizeActionResultsForClient(actionResults);
-      const spoken = summarizeReadOnlyActionResults(actionResults) ||
+      const rawActionResults = actionResults;
+      actionResults = normalizeActionResultsForClient(rawActionResults);
+      const spoken = summarizeReadOnlyActionResults(rawActionResults, message) ||
         summarizeFinishedActionsForUser(actionResults) ||
         deterministicAction.spoken;
       saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
@@ -5497,6 +5778,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
         // Execute actions in parallel
         let actionResults = [];
+        let dataResults = [];
         if (actions.length > 0) {
           if (hasStreamedText) {
             sse({ type: 'replace', text: '' });
@@ -5509,20 +5791,19 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               success: result?.success !== false
             })
           });
+          dataResults = getStructuredDataResults(actionResults, message);
           actionResults = normalizeActionResultsForClient(actionResults);
           sse({ type: 'actions', results: actionResults });
           trace.log('actions.complete');
         }
 
         // For data-fetching actions, stream a follow-up summary
-        const dataResults = getStructuredDataResults(actionResults);
         if (canUseDirectActionSummary(actionResults)) {
           spoken = summarizeActionResults(actionResults);
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         } else if (dataResults.length > 0) {
           sse({ type: 'replace', text: '' });
-          const context = dataResults.map(a => a.text).join('\n\n');
           const followUpRequest = buildModernGenerateRequest({
             dynamicSystemPrompt,
             useSearch,
@@ -5532,7 +5813,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           });
           followUpRequest.contents.push(
             { role: 'model', parts: [{ text: spoken || '…' }] },
-            { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+            { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
           );
           const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
             model: chatModel,
@@ -5547,13 +5828,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             const text = chunk.text || '';
             if (text) {
               spoken += text;
-              emitSafeDisplayText(text);
-              if (ttsStreamer) ttsStreamer.ingest(spoken);
             }
           }
-          flushSafeDisplayText();
-          spoken = stripActionMarkupForDisplay(parseActions(spoken).spoken || spoken || context).trim();
-          if (!hasStreamedText) sse({ type: 'replace', text: spoken });
+          spoken = guardVisibleDataResponse(parseActions(spoken).spoken || spoken, dataResults);
+          sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
         const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
@@ -5565,7 +5843,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
         if (!spoken) {
           spoken = actionResults.length
-            ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
+            ? (dataResults.length ? buildConciseDataAnswer(dataResults) : (actionResults.map(a => a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.'))
             : "I couldn't get a clean answer for that. Ask me again and I'll re-check it.";
           sse({ type: 'text', chunk: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
@@ -5628,17 +5906,17 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     // Execute actions in parallel instead of sequentially
     let actionResults = [];
+    let dataResults = [];
     if (actions.length > 0) {
       actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace);
+      dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
 
     // For data-fetching actions, re-prompt Gemini with results
-    const dataResults = getStructuredDataResults(actionResults);
     if (canUseDirectActionSummary(actionResults)) {
       spoken = summarizeActionResults(actionResults);
     } else if (dataResults.length > 0) {
-      const context = dataResults.map(a => a.text).join('\n\n');
       const followUpRequest = buildModernGenerateRequest({
         dynamicSystemPrompt,
         useSearch,
@@ -5648,21 +5926,21 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '…' }] },
-        { role: 'user', parts: [{ text: `Here are the results:\n\n${context}\n\nSpeak these back naturally and conversationally. Be concise. Only use the results shown here. Do not add unstated facts.` }] }
+        { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
       );
       const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
         model: chatModel,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       }));
-      spoken = parseActions(followUp.text || '').spoken || context;
+      spoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken, dataResults);
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) spoken = actionConfirmation;
 
     if (!spoken) {
       spoken = actionResults.length
-        ? (actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.')
+        ? (dataResults.length ? buildConciseDataAnswer(dataResults) : (actionResults.map(a => a.result?.error).filter(Boolean).join(' ') || 'I could not complete that action.'))
         : "I couldn't get a clean answer for that. Ask me again and I'll re-check it.";
     }
 
@@ -5931,7 +6209,7 @@ function legalPage(title, body) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} · Oxy</title>
+  <title>${escapeHtml(title)} · Milgrain</title>
   <style>
     body{margin:0;background:#0b0b0c;color:#f4f0ec;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
     main{max-width:760px;margin:0 auto;padding:48px 20px 72px}
@@ -5952,7 +6230,7 @@ app.get('/privacy', (_req, res) => {
     <h1>Privacy Policy</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <h2>Data Controller</h2>
-    <p>Oxy is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
+    <p>Milgrain is operated by Chizi Gamonye-Wuchi. Contact: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
     <h2>What We Collect</h2>
     <ul>
       <li>Chat messages and conversation history</li>
@@ -5963,7 +6241,7 @@ app.get('/privacy', (_req, res) => {
       <li>Calendar and reminder data (when calendar permission is granted)</li>
       <li>Email content (when Gmail connector is connected)</li>
       <li>OAuth tokens for connected services</li>
-      <li>Memories you ask Oxy to keep, plus stable facts inferred from conversations</li>
+      <li>Memories you ask Milgrain to keep, plus stable facts inferred from conversations</li>
     </ul>
     <h2>How We Use It</h2>
     <ul>
@@ -5987,7 +6265,7 @@ app.get('/privacy', (_req, res) => {
     <h2>Your Rights</h2>
     <p>You have the right to access, rectification, erasure, portability, restriction, and objection. To exercise these rights, email <a href="mailto:support@oxy.app">support@oxy.app</a>.</p>
     <h2>Security Incidents</h2>
-    <p>If a data breach affects your account, Oxy will notify you within 72 hours of confirming the incident where legally required.</p>
+    <p>If a data breach affects your account, Milgrain will notify you within 72 hours of confirming the incident where legally required.</p>
     <h2>Contact</h2>
     <p>Email: <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   `));
@@ -5999,19 +6277,19 @@ app.get('/terms', (_req, res) => {
     <h1>Terms of Service</h1>
     <p class="meta">Last updated ${escapeHtml(getLocalDateKey())}.</p>
     <h2>The Service</h2>
-    <p>Oxy is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
+    <p>Milgrain is an AI assistant that connects to your apps and services to help you get things done. It can read and send messages, manage calendar events, search the web, and more — based on your instructions.</p>
     <h2>Acceptable Use</h2>
     <ul>
-      <li>No illegal activity using Oxy or connected services</li>
+      <li>No illegal activity using Milgrain or connected services</li>
       <li>No abuse of connected services (e.g. sending spam)</li>
       <li>No attempts to circumvent safety measures or extract training data</li>
     </ul>
     <h2>Subscription</h2>
-    <p>Oxy costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
+    <p>Milgrain costs £14.99/month or £129/year, billed in advance. You can cancel anytime from Settings.</p>
     <h2>Refund Policy</h2>
     <p>You have a 14-day cooling-off period for new subscriptions under the UK Consumer Contracts Regulations 2013. Contact <a href="mailto:support@oxy.app">support@oxy.app</a> to request a refund within this period.</p>
     <h2>Limitation of Liability</h2>
-    <p>Oxy is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Oxy's responses. Always verify important information independently.</p>
+    <p>Milgrain is provided as-is. We are not liable for actions taken by connectors or for decisions made based on Milgrain's responses. Always verify important information independently.</p>
     <h2>Governing Law</h2>
     <p>These terms are governed by the laws of England and Wales.</p>
     <h2>Contact</h2>
@@ -6021,16 +6299,16 @@ app.get('/terms', (_req, res) => {
 
 app.get('/support', (_req, res) => {
   res.setHeader('Content-Type', 'text/html');
-  res.send(`<!DOCTYPE html><html><head><title>Oxy Support</title>
+  res.send(`<!DOCTYPE html><html><head><title>Milgrain Support</title>
   <style>body{font-family:sans-serif;max-width:680px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.6}h1{font-size:28px}h2{font-size:20px;margin-top:32px}a{color:#2563eb}.faq{background:#f9f9f9;padding:16px;border-radius:8px;margin:12px 0}</style>
   </head><body>
-  <h1>Oxy Support</h1>
+  <h1>Milgrain Support</h1>
   <p><strong>Email:</strong> <a href="mailto:support@oxy.app">support@oxy.app</a></p>
   <p>We aim to respond within 48 hours. For security issues: <a href="mailto:security@oxy.app">security@oxy.app</a></p>
 
   <h2>Delete Your Data</h2>
   <ol>
-    <li>Open Oxy and go to Settings</li>
+    <li>Open Milgrain and go to Settings</li>
     <li>Scroll to "Danger Zone" at the bottom</li>
     <li>Tap "Delete Account" and follow the confirmation steps</li>
     <li>All your data (messages, memories, connected accounts) will be permanently deleted</li>
@@ -6038,8 +6316,8 @@ app.get('/support', (_req, res) => {
   <p>Alternatively, email <a href="mailto:support@oxy.app">support@oxy.app</a> with the subject "Delete my account" from your registered email address.</p>
 
   <h2>Frequently Asked Questions</h2>
-  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Oxy only accesses your email when you ask it to.</div>
-  <div class="faq"><strong>What does Oxy remember?</strong><br>Oxy extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
+  <div class="faq"><strong>How do I connect Gmail?</strong><br>Go to Connectors tab &rarr; tap Google &rarr; sign in with your Google account. Milgrain only accesses your email when you ask it to.</div>
+  <div class="faq"><strong>What does Milgrain remember?</strong><br>Milgrain extracts key facts from conversations (like your preferences or context). You can view and delete all memories in the Memory tab.</div>
   <div class="faq"><strong>Can I cancel my subscription?</strong><br>Yes, anytime. Cancel from Settings &rarr; Subscription or via your App Store/payment provider. You have 14 days from first purchase for a full refund (UK consumer law).</div>
   <div class="faq"><strong>Is my data secure?</strong><br>Your data is stored in encrypted databases. Connector tokens are encrypted at rest. We never sell your data. See our <a href="/privacy">Privacy Policy</a>.</div>
   <div class="faq"><strong>How do I report a bug?</strong><br>Email <a href="mailto:support@oxy.app">support@oxy.app</a> with your device, app version (visible in Settings), and what happened.</div>
@@ -6213,4 +6491,9 @@ module.exports.decidePaymentByCap = decidePaymentByCap;
 module.exports.runAgentLoop = runLegacyActionLoop;
 module.exports.inferCompoundReadOnlyTurn = inferCompoundReadOnlyTurn;
 module.exports.summarizeReadOnlyActionResults = summarizeReadOnlyActionResults;
+module.exports.getStructuredDataResults = getStructuredDataResults;
+module.exports.guardVisibleDataResponse = guardVisibleDataResponse;
+module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
+module.exports.triageEmailsForRequest = triageEmailsForRequest;
+module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;

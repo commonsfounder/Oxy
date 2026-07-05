@@ -29,6 +29,7 @@ const {
   extractMessageBody,
   messageToEmail,
   normalizeLabelFilter,
+  calendarWindow,
   formatThreadText,
   buildMime
 } = google._private;
@@ -87,6 +88,14 @@ test('Gmail label filters default to INBOX and accept label arrays', () => {
   assert.deepEqual(normalizeLabelFilter({}), ['INBOX']);
   assert.deepEqual(normalizeLabelFilter({ label: 'unread' }), ['UNREAD']);
   assert.deepEqual(normalizeLabelFilter({ labels: ['inbox', 'important'] }), ['INBOX', 'IMPORTANT']);
+});
+
+test('Calendar tomorrow queries are bounded at the API request boundary', () => {
+  const window = calendarWindow({ when: 'tomorrow' });
+  assert.match(window.timeMin, /^\d{4}-\d{2}-\d{2}T00:00:00Z$/);
+  assert.match(window.timeMax, /^\d{4}-\d{2}-\d{2}T23:59:59Z$/);
+  assert.ok(window.ymd);
+  assert.notEqual(window.timeMin.slice(0, 10), window.ymd);
 });
 
 test('Gmail replies include threading headers in raw MIME', () => {

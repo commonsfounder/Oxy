@@ -328,6 +328,43 @@ function summarizeCalendarEvents(events = [], emptyText = 'No upcoming events fo
   return `Upcoming events:\n${lines.join('\n')}`;
 }
 
+function formatYMD(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date).reduce((acc, part) => {
+    if (part.type !== 'literal') acc[part.type] = part.value;
+    return acc;
+  }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function addDaysYMD(ymd, days) {
+  const [year, month, day] = String(ymd).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days, 12, 0, 0));
+  return formatYMD(date);
+}
+
+function calendarWindow(params = {}) {
+  const when = String(params.when || '').toLowerCase();
+  const today = formatYMD();
+  const ymd = when === 'tomorrow' ? addDaysYMD(today, 1)
+    : when === 'today' ? today
+      : null;
+  if (!ymd) return { timeMin: new Date().toISOString(), timeMax: null, ymd: null };
+  return {
+    // Query a small UTC buffer around the London day, then the backend applies
+    // an exact London-calendar-day filter before synthesis. This avoids missing
+    // just-after-midnight BST events while still preventing open-ended future
+    // results from leaking into "tomorrow".
+    timeMin: `${addDaysYMD(ymd, -1)}T00:00:00Z`,
+    timeMax: `${addDaysYMD(ymd, 1)}T23:59:59Z`,
+    ymd
+  };
+}
+
 function extractDocText(document = {}) {
   const content = document.body?.content || [];
   const lines = [];
@@ -462,15 +499,24 @@ async function execute(userId, action, params) {
 
       case 'get_calendar_events': {
         const { max_results = 5 } = params;
+        const window = calendarWindow(params);
+        const calendarParams = {
+          maxResults: max_results,
+          orderBy: 'startTime',
+          singleEvents: true,
+          timeMin: window.timeMin
+        };
+        if (window.timeMax) calendarParams.timeMax = window.timeMax;
+        if (window.ymd) calendarParams.timeZone = 'Europe/London';
         const resp = await axios.get('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
           headers,
-          params: { maxResults: max_results, orderBy: 'startTime', singleEvents: true, timeMin: new Date().toISOString() },
+          params: calendarParams,
           timeout: 15000
         });
         const events = (resp.data.items || []).map(e => ({
           id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
         }));
-        return { success: true, events, text: summarizeCalendarEvents(events) };
+        return { success: true, events, when: params.when || null, text: summarizeCalendarEvents(events) };
       }
 
       case 'create_google_doc': {
@@ -578,6 +624,7 @@ module.exports = {
     extractMessageBody,
     messageToEmail,
     normalizeLabelFilter,
+    calendarWindow,
     formatThreadText,
     buildMime
   }

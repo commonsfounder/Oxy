@@ -116,6 +116,56 @@ test('explicit nearby place lookup uses distance-ranked Nearby Search before tex
   }
 });
 
+test('named landmark search trusts Google relevance order over raw distance to the user', async () => {
+  // Regression: "King's Cross" real-device QA resolved to a "Harry Potter Shop" a
+  // 128-minute drive away instead of the actual station. Root cause — the plain
+  // text-search branch re-sorted every candidate that merely mentioned "king's cross"
+  // in its name/address by *distance to the user's phone*, discarding Google's own
+  // text-relevance order (which correctly ranks the landmark itself first). A shop on
+  // "King's Cross Road" happening to sit closer to the user than the actual station
+  // then won the tie-break. Named-place lookups must preserve Google's ranking.
+  const oldPlaces = process.env.GOOGLE_PLACES_API_KEY;
+  const oldPost = mockAxios.post;
+
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    mockAxios.post = async (url, body) => {
+      assert.equal(url, 'https://places.googleapis.com/v1/places:searchText');
+      return {
+        data: {
+          places: [
+            {
+              displayName: { text: "King's Cross Station" },
+              formattedAddress: "King's Cross, London N1 9AL",
+              location: { latitude: 51.5308, longitude: -0.1238 },
+              businessStatus: 'OPERATIONAL',
+              types: ['train_station']
+            },
+            {
+              displayName: { text: 'Some Shop' },
+              formattedAddress: "12 King's Cross Road, London",
+              // Far closer to the user's own location than the actual station.
+              location: { latitude: 51.4000, longitude: -0.1300 },
+              businessStatus: 'OPERATIONAL',
+              types: ['store']
+            }
+          ]
+        }
+      };
+    };
+
+    const result = await resolvePlaceDestination("Kings Cross", {
+      location: { latitude: 51.4010, longitude: -0.1310 }
+    });
+
+    assert.equal(result.name, "King's Cross Station");
+  } finally {
+    mockAxios.post = oldPost;
+    if (oldPlaces === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = oldPlaces;
+  }
+});
+
 test('named place with no nearby match never resolves to the nearest unrelated place', async () => {
   // Regression: "john lewis" with no John Lewis nearby used to confidently return the
   // closest unrelated shop (a Tesco) as if it were the answer. It must NOT do that — it

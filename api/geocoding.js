@@ -119,21 +119,33 @@ function placeMatchesQuery(place, query) {
   return tokens.every(token => haystack.includes(token));
 }
 
-function rankedGooglePlaceCandidates(places, location, query = '') {
+/**
+ * @param {boolean} sortByDistance - When true (category/"nearest X" searches), the
+ *   closest matching candidate to the user wins — that's the actual ask. When false
+ *   (a named-place lookup like "King's Cross" or "Selfridges"), Google's own text-search
+ *   relevance order is preserved instead: `placeMatchesQuery` is a loose "every token
+ *   appears somewhere in the name/address" substring test, so re-sorting matches by raw
+ *   distance-to-user can promote an unrelated business that merely shares an address
+ *   fragment (e.g. something on "King's Cross Road") over the actual landmark Google
+ *   already ranked first, producing a wrong — sometimes drastically distant — result.
+ */
+function rankedGooglePlaceCandidates(places, location, query = '', sortByDistance = true) {
   const normalizedLocation = normalizeLocation(location);
   const availablePlaces = places.filter(place => place.businessStatus !== 'CLOSED_PERMANENTLY');
   const candidates = (availablePlaces.length ? availablePlaces : places)
     .filter(place => place?.location)
-    .map(place => ({
+    .map((place, googleRank) => ({
       ...place,
       queryMatch: placeMatchesQuery(place, query),
+      googleRank,
       distanceMeters: normalizedLocation
         ? distanceMeters(normalizedLocation, { latitude: place.location.latitude, longitude: place.location.longitude })
         : Number.POSITIVE_INFINITY
     }))
     .sort((a, b) => {
       if (a.queryMatch !== b.queryMatch) return a.queryMatch ? -1 : 1;
-      return a.distanceMeters - b.distanceMeters;
+      if (sortByDistance) return a.distanceMeters - b.distanceMeters;
+      return a.googleRank - b.googleRank;
     });
   const matched = candidates.filter(place => place.queryMatch);
   // When the query carries a real name (meaningful tokens) and NOTHING matches it,
@@ -282,7 +294,9 @@ async function searchPlaceWithGoogle(query, location = null) {
     }
   );
 
-  const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query);
+  // Named-place lookup ("King's Cross", "Selfridges"), not a "nearest X" category
+  // search — trust Google's own text-relevance ranking over raw distance-to-user.
+  const candidates = rankedGooglePlaceCandidates(response.data?.places || [], normalizedLocation, query, false);
   const place = candidates[0];
   return googlePlaceResult(place, query);
 }
