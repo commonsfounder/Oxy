@@ -202,6 +202,9 @@ private struct ReceiptStep: Identifiable {
     var fragment: String {
         let compact = compactText
         if !action.success {
+            if action.action == "find_place" {
+                return "couldn't find nearby places"
+            }
             return "couldn't finish \(shortName)"
         }
         if isSoftMiss {
@@ -238,6 +241,9 @@ private struct ReceiptStep: Identifiable {
     var detail: String? {
         let compact = compactText
         guard !compact.isEmpty else { return nil }
+        if !action.success, action.action == "find_place" {
+            return "Location access is off. Enable location permissions, then retry."
+        }
         if isSoftMiss { return nil }
         // Counted reads are fully described by the fragment; a repeat is noise.
         if action.success, !isSoftMiss {

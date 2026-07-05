@@ -12,6 +12,7 @@ struct MessageBubble: View {
     var showsTimestamp: Bool = true
     var onActionCommand: ((String) -> Void)? = nil
     var onOpenAction: ((ActionResult) -> Void)? = nil
+    var onRetryFailedTurn: (() -> Void)? = nil
 
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
@@ -75,19 +76,14 @@ struct MessageBubble: View {
                             .background(bubbleShape.fill(Color.appUserBubble))
                     }
                 } else {
-                    Group {
-                        if message.isStreaming {
-                            StreamingWordText(
-                                text: message.content,
-                                fontSize: isCompact ? 15 : 15.5,
-                                lineSpacing: isCompact ? 4 : 5
-                            )
-                        } else {
-                            AssistantAnswerView(text: message.content, compact: isCompact)
-                        }
-                    }
+                    AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }
+
+            if let turnError = message.turnError {
+                FailedTurnView(message: turnError, onRetry: onRetryFailedTurn)
+                    .padding(.top, message.content.isEmpty ? 0 : 8)
             }
 
             // Streaming indicator
@@ -167,7 +163,8 @@ extension AttributedString {
     /// markers flattened to plain lines — full block parsing would collapse the
     /// newlines chat text relies on. Bare URLs are promoted to links first.
     static func chatMarkdown(_ text: String) -> AttributedString {
-        var source = text.normalizingChatBullets.replacingOccurrences(
+        var source = text.normalizingChatBullets
+            .replacingOccurrences(
             of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
         source = source.replacingOccurrences(
             of: #"(?<![("\[])(https?://[^\s<>()\[\]]+)"#,
@@ -189,8 +186,10 @@ extension String {
     var strippingMarkdown: String {
         self
             .normalizingChatBullets
+            .removingMarkdownTables
             .replacingOccurrences(of: #"(?m)^#{1,6}\s+"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"[*_`]{1,3}"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?m)^\s*---+\s*$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[*_`~]{1,3}"#, with: "", options: .regularExpression)
     }
 
     /// Turns a leading `*`/`-`/`+` list marker at the start of a line into a plain
@@ -206,53 +205,32 @@ extension String {
             options: .regularExpression
         )
     }
-}
 
-private struct StreamingWordText: View {
-    let text: String
-    let fontSize: CGFloat
-    let lineSpacing: CGFloat
-
-    private var words: [String] {
-        // Streaming renders raw text with no markdown parsing (word-by-word fades
-        // can't wait for a full AttributedString pass), so at minimum strip the
-        // literal bullet markers here too — otherwise every list leaks `*`/`-` for
-        // the entire duration of the stream, not just a brief flash.
-        text.strippingMarkdown.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-    }
-
-    var body: some View {
-        Text(attributedText)
-            .font(.appBody(fontSize))
-            .foregroundStyle(Color.appInk)
-            .lineSpacing(lineSpacing)
-            .animation(.appRelax, value: words.count)
-    }
-
-    private var attributedText: AttributedString {
-        var output = AttributedString()
-        for (index, word) in words.enumerated() {
-            var part = AttributedString(index == words.count - 1 ? word : "\(word) ")
-            let distanceFromEnd = words.count - index
-            // Five-step fade: trailing words glow up to 1.0, farthest recede to 0.55.
-            let opacity: Double = switch distanceFromEnd {
-            case 1:       1.00
-            case 2:       0.95
-            case 3:       0.85
-            case 4:       0.72
-            case 5:       0.62
-            default:      0.55
+    var removingMarkdownTables: String {
+        let lines = components(separatedBy: "\n")
+        var output: [String] = []
+        var index = 0
+        while index < lines.count {
+            if index + 1 < lines.count,
+               lines[index].isMarkdownTableRow,
+               lines[index + 1].isMarkdownTableDivider {
+                index += 2
+                while index < lines.count, lines[index].isMarkdownTableRow {
+                    index += 1
+                }
+                continue
             }
-            part.foregroundColor = Color.appInk.opacity(opacity)
-            output += part
+            output.append(lines[index])
+            index += 1
         }
-        return output
+        return output.joined(separator: "\n")
     }
 }
 
 private struct AssistantAnswerView: View {
     let text: String
     let compact: Bool
+    var isStreaming = false
 
     private var blocks: [AssistantTextBlock] {
         AssistantTextBlock.parse(text)
@@ -265,16 +243,16 @@ private struct AssistantAnswerView: View {
                 case .paragraph(let text):
                     Text(.chatMarkdown(text))
                         .font(.appBody(compact ? 14.5 : 15.5))
-                        .foregroundStyle(Color.appInk.opacity(0.96))
+                        .foregroundStyle(Color.appInk.opacity(isStreaming ? 0.9 : 0.96))
                         .lineSpacing(compact ? 4 : 5.5)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
 
                 case .heading(let text):
                     Text(text.strippingMarkdown)
-                        .font(.appBody(compact ? 14 : 15, weight: .semibold))
+                        .font(.appBody(compact ? 15 : 16, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                        .padding(.top, 2)
+                        .padding(.top, compact ? 5 : 8)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
 
@@ -283,9 +261,22 @@ private struct AssistantAnswerView: View {
 
                 case .numbered(let index, let text):
                     AssistantListRow(marker: "\(index)", text: text, compact: compact)
+
+                case .divider:
+                    Rectangle()
+                        .fill(Color.appHairline)
+                        .frame(height: 0.5)
+                        .padding(.vertical, compact ? 4 : 6)
+
+                case .codeBlock(let code):
+                    AssistantCodeBlock(code: code, compact: compact)
+
+                case .table(let table):
+                    AssistantTableView(table: table, compact: compact)
                 }
             }
         }
+        .animation(isStreaming ? nil : .appStandard, value: blocks.count)
     }
 }
 
@@ -315,13 +306,18 @@ private enum AssistantTextBlock {
     case paragraph(String)
     case bullet(String)
     case numbered(Int, String)
+    case divider
+    case codeBlock(String)
+    case table(MarkdownTable)
 
     static func parse(_ raw: String) -> [AssistantTextBlock] {
         let normalized = raw
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
+        let lines = normalized.components(separatedBy: "\n")
         var blocks: [AssistantTextBlock] = []
         var paragraph: [String] = []
+        var index = 0
 
         func flushParagraph() {
             let joined = paragraph
@@ -333,14 +329,42 @@ private enum AssistantTextBlock {
             paragraph.removeAll()
         }
 
-        for line in normalized.components(separatedBy: "\n") {
+        while index < lines.count {
+            let line = lines[index]
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
                 flushParagraph()
+                index += 1
                 continue
             }
 
-            if let match = trimmed.firstMatch(of: #"^#{1,4}\s+(.+)$"#) {
+            if trimmed.hasPrefix("```") {
+                flushParagraph()
+                var codeLines: [String] = []
+                index += 1
+                while index < lines.count, !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    codeLines.append(lines[index])
+                    index += 1
+                }
+                if index < lines.count { index += 1 }
+                blocks.append(.codeBlock(codeLines.joined(separator: "\n")))
+                continue
+            }
+
+            if index + 1 < lines.count,
+               lines[index].isMarkdownTableRow,
+               lines[index + 1].isMarkdownTableDivider,
+               let table = MarkdownTable.parse(from: lines, start: index) {
+                flushParagraph()
+                blocks.append(.table(table.value))
+                index = table.nextIndex
+                continue
+            }
+
+            if trimmed.range(of: #"^[-*_]{3,}$"#, options: .regularExpression) != nil {
+                flushParagraph()
+                blocks.append(.divider)
+            } else if let match = trimmed.firstMatch(of: #"^#{1,4}\s+(.+)$"#) {
                 flushParagraph()
                 blocks.append(.heading(match))
             } else if let match = trimmed.firstMatch(of: #"^[*+-]\s+(.+)$"#) {
@@ -352,9 +376,135 @@ private enum AssistantTextBlock {
             } else {
                 paragraph.append(trimmed)
             }
+            index += 1
         }
         flushParagraph()
         return blocks.isEmpty ? [.paragraph(raw)] : blocks
+    }
+}
+
+private struct MarkdownTable {
+    let headers: [String]
+    let rows: [[String]]
+
+    static func parse(from lines: [String], start: Int) -> (value: MarkdownTable, nextIndex: Int)? {
+        guard start + 1 < lines.count,
+              lines[start].isMarkdownTableRow,
+              lines[start + 1].isMarkdownTableDivider else { return nil }
+        let headers = cells(in: lines[start])
+        guard !headers.isEmpty else { return nil }
+        var rows: [[String]] = []
+        var index = start + 2
+        while index < lines.count, lines[index].isMarkdownTableRow {
+            let row = cells(in: lines[index])
+            if !row.isEmpty { rows.append(row) }
+            index += 1
+        }
+        return (MarkdownTable(headers: headers, rows: rows), index)
+    }
+
+    private static func cells(in line: String) -> [String] {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("|") { trimmed.removeFirst() }
+        if trimmed.hasSuffix("|") { trimmed.removeLast() }
+        return trimmed
+            .components(separatedBy: "|")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+}
+
+private struct AssistantTableView: View {
+    let table: MarkdownTable
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(table.rows.enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { column, value in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(header(for: column))
+                                .font(.appBody(compact ? 11.5 : 12, weight: .semibold))
+                                .foregroundStyle(Color.appMuted)
+                                .frame(width: compact ? 82 : 96, alignment: .leading)
+                            Text(.chatMarkdown(value))
+                                .font(.appBody(compact ? 13.5 : 14.5))
+                                .foregroundStyle(Color.appInk.opacity(0.95))
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Color.appSurface.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func header(for index: Int) -> String {
+        guard index < table.headers.count else { return "Column \(index + 1)" }
+        return table.headers[index].strippingMarkdown
+    }
+}
+
+private struct AssistantCodeBlock: View {
+    let code: String
+    let compact: Bool
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            Text(code)
+                .font(.appMono(compact ? 12 : 12.5))
+                .foregroundStyle(Color.appInk)
+                .textSelection(.enabled)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Color.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+        )
+    }
+}
+
+private struct FailedTurnView: View {
+    let message: String
+    var onRetry: (() -> Void)?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.appWarning)
+            Text(message)
+                .font(.appBody(13.5))
+                .foregroundStyle(Color.appInk.opacity(0.95))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if let onRetry {
+                Button("Retry", action: onRetry)
+                    .font(.appBody(13, weight: .semibold))
+                    .foregroundStyle(Color.appAccent)
+                    .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.appSurface.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+        )
     }
 }
 
@@ -381,6 +531,23 @@ private extension String {
             return nil
         }
         return (index, String(self[bodyRange]).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    var isMarkdownTableRow: Bool {
+        let trimmed = trimmingCharacters(in: .whitespaces)
+        return trimmed.contains("|") && trimmed.filter { $0 == "|" }.count >= 2
+    }
+
+    var isMarkdownTableDivider: Bool {
+        let trimmed = trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("|") else { return false }
+        let cells = trimmed
+            .trimmingCharacters(in: CharacterSet(charactersIn: "|"))
+            .components(separatedBy: "|")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        return !cells.isEmpty && cells.allSatisfy { cell in
+            cell.range(of: #"^:?-{3,}:?$"#, options: .regularExpression) != nil
+        }
     }
 }
 

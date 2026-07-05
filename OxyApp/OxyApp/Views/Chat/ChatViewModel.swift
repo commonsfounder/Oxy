@@ -333,15 +333,14 @@ final class ChatViewModel {
                     case .error(let error):
                         lastFailedText = text
                         lastFailedUserMessageID = userMessageID
-                        networkError = friendlyNetworkError(error)
                         HapticManager.shared.error()
-                        if fullText.isEmpty {
-                            removeMessage(id: assistantID)
-                            lastFailedAssistantMessageID = nil
-                        } else {
-                            _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
-                            lastFailedAssistantMessageID = assistantID
+                        let friendly = friendlyNetworkError(error)
+                        _ = updateAssistantMessage(id: assistantID) {
+                            $0.isStreaming = false
+                            $0.turnError = friendly
                         }
+                        lastFailedAssistantMessageID = assistantID
+                        networkError = nil
                         statusLabel = nil
                         isSending = false
                         currentSendTask = nil
@@ -612,9 +611,12 @@ final class ChatViewModel {
                 await MainActor.run {
                     lastFailedText = text
                     lastFailedUserMessageID = userMessage.id
-                    networkError = friendlyNetworkError(error.localizedDescription)
-                    removeMessage(id: assistantID)
-                    lastFailedAssistantMessageID = nil
+                    _ = updateAssistantMessage(id: assistantID) {
+                        $0.isStreaming = false
+                        $0.turnError = friendlyNetworkError(error.localizedDescription)
+                    }
+                    lastFailedAssistantMessageID = assistantID
+                    networkError = nil
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
@@ -783,12 +785,14 @@ final class ChatViewModel {
             currentSendTask = nil
             _ = updateAssistantMessage(id: assistantID) { message in
                 if message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    message.content = "I got stuck there. Try that again and I’ll keep it tighter."
+                    message.turnError = "That took too long. Try again."
+                } else {
+                    message.turnError = "The response stopped before it finished. Try again."
                 }
                 message.isStreaming = false
             }
             statusLabel = nil
-            networkError = "Got stuck waiting on the network. Try again."
+            networkError = nil
             lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
         }

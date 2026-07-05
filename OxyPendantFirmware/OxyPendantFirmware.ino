@@ -2,7 +2,7 @@
   Oxy Pendant Firmware for Seeed Studio XIAO nRF52840 Sense
 
   What this firmware does:
-  - Advertises as a Nordic UART Service BLE peripheral named "Oxy".
+  - Advertises as a Nordic UART Service BLE peripheral named "Milgrain".
   - Exposes the exact UUIDs used by OxyApp's PendantBLEManager:
       Service: 6E400001-B5A3-F393-E0A9-E50E24DCCA9E
       RX:      6E400002-B5A3-F393-E0A9-E50E24DCCA9E  (phone writes here)
@@ -342,7 +342,7 @@ void handleSoundWake() {
 void configureBLE() {
   Bluefruit.begin();
   Bluefruit.setTxPower(4);
-  Bluefruit.setName("Oxy");
+  Bluefruit.setName("Milgrain");
   Bluefruit.Periph.setConnectCallback(connectCallback);
   Bluefruit.Periph.setDisconnectCallback(disconnectCallback);
 
@@ -371,7 +371,7 @@ void configureBLE() {
   Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);
 
-  Serial.println("Advertising Nordic UART Service as Oxy");
+  Serial.println("Advertising Nordic UART Service as Milgrain");
 }
 
 void configurePDM() {

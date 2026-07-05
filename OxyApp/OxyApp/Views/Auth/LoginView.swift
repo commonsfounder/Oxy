@@ -7,6 +7,7 @@ struct LoginView: View {
     @State private var isRegistering = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var didAttemptAutoDemoLogin = false
 
     private let authService = AuthService()
 
@@ -21,9 +22,28 @@ struct LoginView: View {
                 isRegistering: $isRegistering,
                 isLoading: $isLoading,
                 errorMessage: $errorMessage,
-                onSubmit: submit
+                showDemoLogin: shouldShowDemoLogin,
+                onSubmit: submit,
+                onDemoLogin: demoLogin
             )
         }
+        .task {
+            guard shouldAutoDemoLogin, !didAttemptAutoDemoLogin else { return }
+            didAttemptAutoDemoLogin = true
+            demoLogin()
+        }
+    }
+
+    private var shouldShowDemoLogin: Bool {
+        #if DEBUG
+        return true
+        #else
+        return UserDefaults.standard.bool(forKey: "oxy_enable_local_dev_auth")
+        #endif
+    }
+
+    private var shouldAutoDemoLogin: Bool {
+        shouldShowDemoLogin && UserDefaults.standard.bool(forKey: "oxy_auto_demo_login")
     }
 
     private func submit() {
@@ -44,12 +64,42 @@ struct LoginView: View {
                     await MainActor.run {
                         // A warm success note as the door opens.
                         HapticManager.shared.success()
-                        appState.login(userId: returnedUserId, token: token)
+                        appState.login(userId: returnedUserId, token: token, isDemo: response.demo == true)
                     }
                 } else {
                     await MainActor.run {
                         HapticManager.shared.warning()
                         withAnimation { errorMessage = response.error ?? "Authentication failed" }
+                        isLoading = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    HapticManager.shared.warning()
+                    withAnimation { errorMessage = error.localizedDescription }
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    private func demoLogin() {
+        guard !isLoading else { return }
+        isLoading = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let response = try await authService.demoLogin()
+                if let token = response.token, let returnedUserId = response.userId {
+                    await MainActor.run {
+                        HapticManager.shared.success()
+                        appState.login(userId: returnedUserId, token: token, isDemo: true)
+                    }
+                } else {
+                    await MainActor.run {
+                        HapticManager.shared.warning()
+                        withAnimation { errorMessage = response.error ?? "Demo login is not available on this backend." }
                         isLoading = false
                     }
                 }
@@ -73,7 +123,9 @@ private struct LoginFormPage: View {
     @Binding var isRegistering: Bool
     @Binding var isLoading: Bool
     @Binding var errorMessage: String?
+    let showDemoLogin: Bool
     let onSubmit: () -> Void
+    let onDemoLogin: () -> Void
 
     @FocusState private var focusedField: Field?
     private enum Field { case userId, password }
@@ -128,6 +180,37 @@ private struct LoginFormPage: View {
                 .opacity(userId.isEmpty || password.isEmpty ? 0.4 : 1)
                 .animation(.appFast, value: userId.isEmpty || password.isEmpty)
                 .padding(.top, 36)
+
+                if showDemoLogin {
+                    Button(action: onDemoLogin) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "person.crop.circle.badge.checkmark")
+                                .font(.system(size: 15, weight: .medium))
+                            Text("Continue as Test User")
+                                .font(.system(size: 13, weight: .semibold))
+                                .tracking(1.1)
+                        }
+                        .foregroundStyle(Color.appInk)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.appFillSubtle)
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.appHairline, lineWidth: 0.5)
+                        )
+                    }
+                    .buttonStyle(.appScale)
+                    .disabled(isLoading)
+                    .opacity(isLoading ? 0.55 : 1)
+                    .padding(.top, 14)
+
+                    Text("Debug demo session")
+                        .font(.system(size: 11, weight: .light))
+                        .foregroundStyle(Color.appMuted)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.top, 8)
+                }
 
                 Button {
                     withAnimation(.appFast) { isRegistering.toggle() }

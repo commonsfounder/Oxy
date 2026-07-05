@@ -51,7 +51,7 @@ bool     isConnected  = false;
 uint16_t connHandle   = BLE_CONN_HANDLE_INVALID;
 
 // ── BLE device name ────────────────────────────────────────────
-static const char* DEVICE_NAME = "Oxy";
+static const char* DEVICE_NAME = "Milgrain";
 
 // ── Non-blocking LED blink state machine ──────────────────────
 struct LEDBlinker {
@@ -234,7 +234,7 @@ void setup() {
   Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);               // 0 = advertise forever
 
-  Serial.print("[Oxy] BLE advertising as ");
+  Serial.print("[Milgrain] BLE advertising as ");
   Serial.println(DEVICE_NAME);
 }
 

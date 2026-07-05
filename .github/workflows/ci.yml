@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Same gate as the local release:check script: syntax + smoke tests.
+      - run: node --check api/index.js && node --check api/services/context-brain.js
+      - run: node --test test/smoke/*.test.js
+        env:
+          CI: "true"
+
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild -project OxyApp/OxyApp.xcodeproj -scheme OxyApp -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build

@@ -6,6 +6,7 @@ final class AppState {
     var isAuthenticated = false
     var userId: String = ""
     var token: String = ""
+    var isDemoSession = false
     var isLoading = false
     var errorMessage: String?
 
@@ -38,38 +39,50 @@ final class AppState {
         }
         token = savedToken
         userId = savedUserId
+        isDemoSession = keychain.read(key: "demo_session") == "true"
         isAuthenticated = true
-        Task { @MainActor in
-            NativeIntegrationManager.shared.bootstrap(userId: savedUserId)
+        if !isDemoSession {
+            Task { @MainActor in
+                NativeIntegrationManager.shared.bootstrap(userId: savedUserId)
+            }
         }
     }
 
-    func login(userId: String, token: String) {
+    func login(userId: String, token: String, isDemo: Bool = false) {
         self.userId = userId
         self.token = token
+        self.isDemoSession = isDemo
         let savedToken = keychain.save(key: "session_token", value: token)
         let savedUserId = keychain.save(key: "user_id", value: userId)
-        guard savedToken, savedUserId else {
+        let savedDemoFlag = keychain.save(key: "demo_session", value: isDemo ? "true" : "false")
+        guard savedToken, savedUserId, savedDemoFlag else {
             keychain.delete(key: "session_token")
             keychain.delete(key: "user_id")
+            keychain.delete(key: "demo_session")
             self.token = ""
             self.userId = ""
+            isDemoSession = false
             isAuthenticated = false
             errorMessage = "Could not save your session securely. Please unlock your device and try again."
+            print("[Auth] baseURL=\(APIClient.shared.baseURL) bucket=callback_or_session_storage_failed environment=\(isDemo ? "DEMO" : "STANDARD") event=auth.login.failure provider=custom_session reason=keychain_save_failed")
             return
         }
         isAuthenticated = true
         errorMessage = nil
-        Task { @MainActor in
-            NativeIntegrationManager.shared.bootstrap(userId: userId)
+        if !isDemo {
+            Task { @MainActor in
+                NativeIntegrationManager.shared.bootstrap(userId: userId)
+            }
         }
     }
 
     func logout() {
         keychain.delete(key: "session_token")
         keychain.delete(key: "user_id")
+        keychain.delete(key: "demo_session")
         token = ""
         userId = ""
+        isDemoSession = false
         isAuthenticated = false
     }
 }

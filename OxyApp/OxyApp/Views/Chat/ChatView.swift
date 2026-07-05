@@ -34,6 +34,9 @@ struct ChatView: View {
     @State private var pendingIsImage = true
     @State private var isOffline = false
     @State private var voiceErrorMessage: String?
+    @State private var didSendAutoDemoMessage = false
+    @State private var scrollViewportHeight: CGFloat = 0
+    @State private var isScrollPinnedToBottom = true
     // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
@@ -149,6 +152,9 @@ struct ChatView: View {
                                         },
                                         onOpenAction: { action in
                                             handleActionOpen(action)
+                                        },
+                                        onRetryFailedTurn: {
+                                            viewModel.retryLastFailedMessage(userId: appState.userId)
                                         }
                                     )
                                     .id(message.id)
@@ -162,9 +168,34 @@ struct ChatView: View {
                                         .padding(.horizontal, AppSpacing.chatMargin)
                                         .padding(.top, 6)
                                 }
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("bottom")
+                                    .background(
+                                        GeometryReader { geo in
+                                            Color.clear.preference(
+                                                key: ChatBottomDistanceKey.self,
+                                                value: geo.frame(in: .named("chatScroll")).maxY
+                                            )
+                                        }
+                                    )
                             }
                             .padding(.vertical, 12)
                             .animation(.appSpring, value: viewModel.messages.count)
+                        }
+                        .coordinateSpace(name: "chatScroll")
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: ChatViewportHeightKey.self, value: geo.size.height)
+                            }
+                        )
+                        .onPreferenceChange(ChatViewportHeightKey.self) { height in
+                            scrollViewportHeight = height
+                        }
+                        .onPreferenceChange(ChatBottomDistanceKey.self) { bottomY in
+                            guard scrollViewportHeight > 0 else { return }
+                            isScrollPinnedToBottom = bottomY <= scrollViewportHeight + 96
                         }
                         .overlay {
                             if viewModel.messages.isEmpty && !viewModel.isSending {
@@ -200,22 +231,16 @@ struct ChatView: View {
                         .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
+                            guard isScrollPinnedToBottom else { return }
                             withAnimation(.appSpring) {
-                                if let lastId = viewModel.messages.last?.id {
-                                    proxy.scrollTo(lastId, anchor: .bottom)
-                                } else {
-                                    proxy.scrollTo("status", anchor: .bottom)
-                                }
+                                proxy.scrollTo("bottom", anchor: .bottom)
                             }
                         }
                         .onChange(of: viewModel.messages.last?.content) {
                             guard viewModel.scrollTargetMessageID == nil else { return }
+                            guard isScrollPinnedToBottom else { return }
                             withAnimation(.appSpring) {
-                                if let lastId = viewModel.messages.last?.id {
-                                    proxy.scrollTo(lastId, anchor: .bottom)
-                                } else {
-                                    proxy.scrollTo("status", anchor: .bottom)
-                                }
+                                proxy.scrollTo("bottom", anchor: .bottom)
                             }
                         }
                         .onChange(of: viewModel.scrollTargetMessageID) { _, targetID in
@@ -393,9 +418,21 @@ struct ChatView: View {
             if let pending = SiriRequestBus.shared.take() {
                 injectVoiceMessage(pending)
             }
+            if appState.isDemoSession,
+               !didSendAutoDemoMessage,
+               let autoDemoMessage = UserDefaults.standard.string(forKey: "oxy_auto_demo_message"),
+               !autoDemoMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               !UserDefaults.standard.bool(forKey: "oxy_auto_demo_message_sent") {
+                didSendAutoDemoMessage = true
+                UserDefaults.standard.set(true, forKey: "oxy_auto_demo_message_sent")
+                UserDefaults.standard.removeObject(forKey: "oxy_auto_demo_message")
+                injectVoiceMessage(autoDemoMessage)
+            }
         }
         .onAppear {
-            viewModel.requestLocationAccess()
+            if !appState.isDemoSession {
+                viewModel.requestLocationAccess()
+            }
             networkMonitor.pathUpdateHandler = { path in
                 DispatchQueue.main.async {
                     withAnimation(.easeInOut(duration: 0.3)) {
@@ -1035,6 +1072,20 @@ private struct WelcomeCard: View {
 // ScaleButtonStyle kept for local usage — delegates to AppScaleButtonStyle at 0.96
 private typealias ScaleButtonStyle = AppScaleButtonStyle
 
+private struct ChatViewportHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct ChatBottomDistanceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Chat Input Bar
 
 private struct ChatInputBar: View {
@@ -1110,6 +1161,22 @@ private struct ChatInputBar: View {
                 .padding(.top, 10)
             }
 
+            if isSending && !isVoiceActive {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(Color.appAccent.opacity(0.85))
+                        .frame(width: 5, height: 5)
+                    Text("Millie is replying. Send is paused until this turn finishes.")
+                        .font(.appBody(11.5))
+                        .foregroundStyle(Color.appMuted)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
                 // Attach
                 Button(action: onAttach) {
@@ -1179,6 +1246,8 @@ private struct ChatInputBar: View {
             .tint(Color.appMuted)
             .lineLimit(1...6)
             .focused(isFocused)
+            .disabled(isSending)
+            .opacity(isSending ? 0.72 : 1)
             .onSubmit { if canSend { onSend() } }
             .padding(.horizontal, 13)
             .padding(.vertical, 9)

@@ -8,6 +8,9 @@ struct Message: Identifiable, Equatable {
     let timestamp: Date
     var actions: [ActionResult]
     var isStreaming: Bool
+    /// Recoverable per-turn failure copy. Kept on the assistant turn so a failed
+    /// request has one inline retry surface instead of a global banner plus a row.
+    var turnError: String?
     /// Web sources behind a grounded answer, when the model searched for it.
     var sources: [MessageSource]
 
@@ -24,6 +27,7 @@ struct Message: Identifiable, Equatable {
         timestamp: Date = Date(),
         actions: [ActionResult] = [],
         isStreaming: Bool = false,
+        turnError: String? = nil,
         sources: [MessageSource] = []
     ) {
         self.id = id
@@ -33,6 +37,7 @@ struct Message: Identifiable, Equatable {
         self.timestamp = timestamp
         self.actions = actions
         self.isStreaming = isStreaming
+        self.turnError = turnError
         self.sources = sources
     }
 
@@ -40,6 +45,7 @@ struct Message: Identifiable, Equatable {
         lhs.id == rhs.id
             && lhs.content == rhs.content
             && lhs.isStreaming == rhs.isStreaming
+            && lhs.turnError == rhs.turnError
             && lhs.actions == rhs.actions
             && lhs.sources == rhs.sources
     }
@@ -259,6 +265,7 @@ struct AuthResponse: Codable {
     let token: String?
     let userId: String?
     let error: String?
+    let demo: Bool?
 }
 
 struct HistoryEntry: Codable, Identifiable {

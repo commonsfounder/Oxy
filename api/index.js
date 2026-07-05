@@ -123,8 +123,17 @@ function escapeIlikePattern(value) {
 
 const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 const MAX_PASSWORD_LENGTH = 1024;
+const DEV_DEMO_USER_ID = process.env.OXY_DEV_AUTH_USER_ID || 'demo-test-user';
 function isValidUserId(id) {
   return typeof id === 'string' && USER_ID_RE.test(id);
+}
+
+function isDevAuthEnabled() {
+  return process.env.NODE_ENV !== 'production' && process.env.OXY_ENABLE_DEV_AUTH === 'true';
+}
+
+function shouldSeedDevAuthUser() {
+  return process.env.OXY_DEV_AUTH_SEED_USER === 'true';
 }
 
 function requireValidUserIdValue(userId, res) {
@@ -212,6 +221,7 @@ app.use((req, res, next) => {
     '/auth/google/callback',
     '/auth/register',
     '/auth/login',
+    '/auth/dev/demo-login',
     '/auth/forgot-password',
     '/auth/reset-password'
   ]);
@@ -3154,6 +3164,13 @@ app.post('/auth/login', loginRateLimiter, async (req, res) => {
   try {
     const { userId, email, password } = req.body || {};
     if (typeof password !== 'string' || !password || password.length > MAX_PASSWORD_LENGTH) {
+      log('warn', 'auth.login.failed', {
+        provider: 'custom_session',
+        reason: 'invalid_password_shape',
+        bucket: 'credentials_rejected',
+        environment: process.env.NODE_ENV || 'development',
+        baseUrl: APP_URL || 'unset'
+      });
       return res.status(400).json({ error: 'Password is required and must be a reasonable length.' });
     }
 
@@ -3172,7 +3189,13 @@ app.post('/auth/login', loginRateLimiter, async (req, res) => {
     }
 
     if (!account || !verifyPassword(password, account.password_hash)) {
-      log('warn', 'auth.login.failed', { userId: resolvedUserId || 'unknown' });
+      log('warn', 'auth.login.failed', {
+        provider: 'custom_session',
+        reason: account ? 'password_mismatch' : 'account_not_found',
+        bucket: 'credentials_rejected',
+        environment: process.env.NODE_ENV || 'development',
+        baseUrl: APP_URL || 'unset'
+      });
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
@@ -3182,6 +3205,84 @@ app.post('/auth/login', loginRateLimiter, async (req, res) => {
   } catch (err) {
     log('error', 'auth.login.error', { error: err.message });
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/auth/dev/demo-login', async (req, res) => {
+  try {
+    if (!isDevAuthEnabled()) {
+      log('warn', 'auth.dev_demo.denied', {
+        provider: 'custom_session_dev',
+        reason: process.env.NODE_ENV === 'production' ? 'production_environment' : 'flag_disabled',
+        bucket: 'credentials_rejected',
+        environment: process.env.NODE_ENV || 'development',
+        baseUrl: APP_URL || 'unset'
+      });
+      return res.status(404).json({ error: 'Demo auth is not enabled.' });
+    }
+
+    if (!isValidUserId(DEV_DEMO_USER_ID)) {
+      log('error', 'auth.dev_demo.invalid_user_id', {
+        provider: 'custom_session_dev',
+        reason: 'invalid_configured_user_id',
+        bucket: 'callback_or_session_storage_failed',
+        environment: process.env.NODE_ENV || 'development',
+        baseUrl: APP_URL || 'unset'
+      });
+      return res.status(500).json({ error: 'Demo auth is not configured.' });
+    }
+
+    let seededUser = false;
+    if (shouldSeedDevAuthUser()) {
+      try {
+        const account = await getUserAccount(DEV_DEMO_USER_ID);
+        if (!account) {
+          const now = new Date().toISOString();
+          const { error } = await supabase.from('users').insert({
+            user_id: DEV_DEMO_USER_ID,
+            password_hash: hashPassword(`dev-demo-disabled-${DEV_DEMO_USER_ID}`),
+            token_version: 1,
+            created_at: now,
+            updated_at: now
+          });
+          if (error) throw error;
+          seededUser = true;
+        }
+      } catch (err) {
+        log('warn', 'auth.dev_demo.seed_skipped', {
+          provider: 'custom_session_dev',
+          reason: 'supabase_seed_failed',
+          bucket: 'callback_or_session_storage_failed',
+          error: err.message,
+          environment: process.env.NODE_ENV || 'development',
+          baseUrl: APP_URL || 'unset'
+        });
+      }
+    }
+
+    log('info', 'auth.dev_demo.login', {
+      provider: 'custom_session_dev',
+      userId: DEV_DEMO_USER_ID,
+      seededUser,
+      environment: process.env.NODE_ENV || 'development',
+      baseUrl: APP_URL || 'unset'
+    });
+    res.json({
+      success: true,
+      token: createSessionToken(DEV_DEMO_USER_ID),
+      userId: DEV_DEMO_USER_ID,
+      demo: true
+    });
+  } catch (err) {
+    log('error', 'auth.dev_demo.error', {
+      provider: 'custom_session_dev',
+      reason: 'session_issue_failed',
+      bucket: 'callback_or_session_storage_failed',
+      error: err.message,
+      environment: process.env.NODE_ENV || 'development',
+      baseUrl: APP_URL || 'unset'
+    });
+    res.status(500).json({ error: 'Demo auth failed.' });
   }
 });
 

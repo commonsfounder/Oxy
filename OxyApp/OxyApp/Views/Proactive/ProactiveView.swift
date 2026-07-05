@@ -83,11 +83,12 @@ struct ProactiveView: View {
             }
         }
         .task {
+            guard !appState.isDemoSession else { return }
             await native.prepareTodayAccess()
             await loadDashboard()
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active, !appState.isDemoSession else { return }
             Task { await loadDashboard() }
         }
     }

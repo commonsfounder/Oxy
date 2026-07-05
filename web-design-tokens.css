@@ -1,0 +1,87 @@
+/* Oxy Web PWA Design Tokens - Aligned to iOS AppTheme (warm, clear, capable)
+   Use these in the served index.html / React styles.
+   Match the native system for consistency across the whole app.
+*/
+
+:root {
+  /* Backgrounds */
+  --app-background: #0f0f12; /* rich dark */
+  --app-surface: #1f1f21;
+  --app-surface-2: #29292b;
+
+  /* Accent - teal for energy and CTAs */
+  --app-accent: #00b5a1;
+  --app-on-accent: #000000;
+
+  /* Text */
+  --app-ink: #f2f2f0;
+  --app-muted: #8c8c8a;
+
+  /* Hairline */
+  --app-hairline: rgba(255, 255, 255, 0.08);
+
+  /* Semantics */
+  --app-success: #4dbf7f;
+  --app-live: #33d98c;
+  --app-warning: #f2b340;
+  --app-danger: #eb7666;
+
+  /* Typography (approximate for web) */
+  --app-display: "Didot", "Times New Roman", serif;
+  --app-body: "Inter", system-ui, -apple-system, sans-serif;
+  --app-mono: ui-monospace, monospace;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-bubble: 18px;
+  --radius-card: 10px;
+
+  /* Motion */
+  --motion-fast: 0.15s ease-in-out;
+  --motion-standard: 0.22s ease-in-out;
+  --motion-relax: 0.4s ease-in-out;
+}
+
+/* Light mode overrides if needed */
+@media (prefers-color-scheme: light) {
+  :root {
+    --app-background: #f5f4f0;
+    --app-surface: #ffffff;
+    --app-surface-2: #f0efeb;
+    --app-ink: #1a1a1a;
+    --app-muted: #6b6b69;
+    --app-hairline: rgba(0, 0, 0, 0.1);
+    /* adjust others as per TodayPalette light */
+  }
+}
+
+/* Example usage for chat etc. */
+.chat-bubble-user {
+  background: var(--app-accent);
+  color: var(--app-on-accent);
+}
+
+.chat-bubble-assistant {
+  background: var(--app-surface);
+  color: var(--app-ink);
+  border: 0.5px solid var(--app-hairline);
+}
+
+.action-card {
+  background: var(--app-surface);
+  border: 0.5px solid var(--app-hairline);
+  border-radius: var(--radius-card);
+}
+
+.primary-button {
+  background: var(--app-ink);
+  color: var(--app-background);
+  border-radius: 999px;
+}
+
+.toggle {
+  /* custom capsule toggle styles */
+}

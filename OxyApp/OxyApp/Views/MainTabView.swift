@@ -59,7 +59,7 @@ struct MainTabView: View {
         .id(accentColor)
         .onAppear {
             HapticManager.shared.prepare()
-            if SiriRequestBus.shared.pendingQuery != nil {
+            if appState.isDemoSession || SiriRequestBus.shared.pendingQuery != nil {
                 selectedTab = .chat
             }
         }
@@ -169,6 +169,14 @@ struct MoreView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .padding(.top, 6)
+                }
+
+                if appState.isDemoSession {
+                    Text("Demo/Test session")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(Color.appAccent)
+                        .padding(.top, 10)
                 }
 
                 // Hairline rule separating identity from navigation
