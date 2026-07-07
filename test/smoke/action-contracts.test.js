@@ -125,7 +125,7 @@ test('nearby place failures return one-tap recovery metadata', () => {
     { type: 'find_place', input: { query: "nearest McDonald's" } },
     { success: false, error: 'I need your current location to find a nearby McDonald’s.' }
   );
-  assert.equal(recovery.cardText, 'Enable location and try again.');
+  assert.equal(recovery.cardText, "Turn location on and I'll try again.");
   assert.equal(recovery.retryable, true);
   assert.equal(recovery.retryAction.type, 'find_place');
 });

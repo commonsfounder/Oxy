@@ -348,7 +348,7 @@ async function resolvePlaceDestination(destination, options = {}) {
   // how "jerk chicken" and "Selfridges" resolved to London from Birmingham.
   if (location || looksLikeNearbyPlaceQuery(query)) {
     if (!location && explicitNearby) {
-      throw new Error(`I need your current location to find a nearby ${cleanPlaceSearchQuery(query)}.`);
+      throw new Error(`Tiny snag - I need location access to find a nearby ${cleanPlaceSearchQuery(query)}.`);
     }
     try {
       return await searchPlaceWithGoogle(query, location);
@@ -360,7 +360,7 @@ async function resolvePlaceDestination(destination, options = {}) {
       } else if (/Places API has not been used|API has not been enabled|API_KEY_INVALID|REQUEST_DENIED|PERMISSION_DENIED|billing/i.test(err.response?.data?.error?.message || err.message)) {
         throw new Error('Google Places key is being rejected by the server. Check the Cloud Run API key, billing, and Places API (New) access.');
       } else if (explicitNearby) {
-        throw new Error(`I couldn't find a nearby ${cleanPlaceSearchQuery(query)} from your current location. Try a different place name or enable location.`);
+        throw new Error(`I couldn't find a nearby ${cleanPlaceSearchQuery(query)} from your current location. Try a different place name or turn location on.`);
       } else {
         console.warn('[places] Google Places failed, falling back to geocoding:', err.message);
       }

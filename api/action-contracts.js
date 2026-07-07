@@ -429,7 +429,7 @@ function buildActionRecovery(action, result) {
 
   if ((type === 'find_place' || type === 'book_uber') && /need your current location|enable location/i.test(error)) {
     return {
-      cardText: 'Enable location and try again.',
+      cardText: "Turn location on and I'll try again.",
       retryable: true,
       retryAction: { type, input: action?.input || {} }
     };

@@ -127,7 +127,7 @@ test('action runner adds recovery metadata to failed direct actions', async () =
     { type: 'find_place', input: { query: 'closest gym near me' } }
   ]);
 
-  assert.equal(result[0].result.cardText, 'Enable location and try again.');
+  assert.equal(result[0].result.cardText, "Turn location on and I'll try again.");
   assert.equal(result[0].result.retryable, true);
 });
 
