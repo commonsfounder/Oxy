@@ -3860,6 +3860,25 @@ app.delete('/memory/:userId/items/:id', async (req, res) => {
   }
 });
 
+app.put('/memory/:userId/items/:id', async (req, res) => {
+  if (!requireMatchingUser(req, res, req.params.userId)) return;
+  try {
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
+    const { data, error } = await supabase
+      .from('memories')
+      .update({ content: content.trim() })
+      .eq('user_id', req.params.userId)
+      .eq('id', req.params.id)
+      .select('id');
+    if (error) throw error;
+    if (!data?.length) return res.status(404).json({ error: 'Memory not found.' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.delete('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {

@@ -10,6 +10,7 @@ struct MemoryView: View {
     @State private var saveMessage: String?
     @State private var showClearAllConfirm = false
     @State private var pendingDeleteItem: MemoryItem?
+    @State private var editingItem: MemoryItem?
     @State private var search = ""
     // The composer stays collapsed to a single line so saved memories lead the screen —
     // you read memories far more often than you add one.
@@ -87,7 +88,7 @@ struct MemoryView: View {
                             MilgrainSectionHeader(title: "Saved Memories")
                             Spacer()
                             if !items.isEmpty {
-                                Text("\(items.count)")
+                                Text(items.count == 1 ? "1 memory" : "\(items.count) memories")
                                     .font(.appBody(13))
                                     .foregroundStyle(Color.mgSecondary)
                                     .contentTransition(.numericText())
@@ -97,7 +98,7 @@ struct MemoryView: View {
                         .padding(.bottom, 12)
 
                         if !isLoading && !items.isEmpty {
-                            AppLineField(placeholder: "Search memories…", text: $search)
+                            MemorySearchField(text: $search)
                                 .padding(.bottom, 20)
                         }
 
@@ -133,7 +134,7 @@ struct MemoryView: View {
                             .listRowBackground(Color.clear)
 
                         ForEach(group.items) { item in
-                            MemoryRow(item: item)
+                            MemoryRow(item: item, onTap: { editingItem = item })
                                 .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 0))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
@@ -195,6 +196,16 @@ struct MemoryView: View {
             Button("Cancel", role: .cancel) {}
         } message: { item in
             Text(item.content)
+        }
+        .sheet(item: $editingItem) { item in
+            MemoryEditSheet(
+                item: item,
+                onSave: { newContent in
+                    editingItem = nil
+                    Task { await editItem(item, content: newContent) }
+                },
+                onCancel: { editingItem = nil }
+            )
         }
     }
 
@@ -269,6 +280,27 @@ struct MemoryView: View {
         }
     }
 
+    private func editItem(_ item: MemoryItem, content: String) async {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != item.content else { return }
+        HapticManager.shared.impact(.light)
+        // Optimistic update so the row reflects the edit instantly.
+        await MainActor.run {
+            if let index = items.firstIndex(where: { $0.id == item.id }) {
+                items[index] = MemoryItem(id: item.id, content: trimmed, source: item.source, createdAt: item.createdAt)
+            }
+        }
+        do {
+            _ = try await APIClient.shared.request(
+                path: "/memory/\(appState.userId)/items/\(item.id)",
+                method: "PUT",
+                body: ["content": trimmed]
+            )
+        } catch {
+            await loadMemory() // restore on failure
+        }
+    }
+
     private func clearAll() async {
         await MainActor.run { items = [] }
         do {
@@ -285,14 +317,125 @@ struct MemoryView: View {
 
 private struct MemoryRow: View {
     let item: MemoryItem
+    let onTap: () -> Void
 
     var body: some View {
-        Text(item.content)
-            .font(.appBody(15, weight: .light))
-            .foregroundStyle(Color.mgHeading)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.content)
+                        .font(.appBody(15, weight: .light))
+                        .foregroundStyle(Color.mgHeading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Quiet provenance cue — "Saved" (typed by hand) vs "Learned"
+                    // (picked up from conversation) — never shouted.
+                    Text(item.sourceLabel)
+                        .font(.appBody(11))
+                        .foregroundStyle(Color.mgSecondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.mgSecondary.opacity(0.5))
+                    .padding(.top, 2)
+                    .padding(.trailing, 24)
+            }
             .padding(.vertical, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.appScale(0.99))
+    }
+}
+
+/// A small self-contained search field that reads as active and tappable —
+/// leading glyph, legible placeholder, trailing clear button — rather than
+/// the too-dim `AppLineField` this screen used before.
+private struct MemorySearchField: View {
+    @Binding var text: String
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.mgSecondary)
+            TextField("Search memories…", text: $text)
+                .font(.appBody(14))
+                .foregroundStyle(Color.mgHeading)
+                .tint(Color.mgSecondary)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .focused($isFocused)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.mgSecondary)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.appScale)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(Color.appSurface)
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+    }
+}
+
+/// Edit sheet opened by tapping a memory row — a simple multi-line editor
+/// pre-filled with the current content, plus Save/Cancel.
+private struct MemoryEditSheet: View {
+    let item: MemoryItem
+    let onSave: (String) -> Void
+    let onCancel: () -> Void
+    @State private var content: String
+
+    init(item: MemoryItem, onSave: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+        self.item = item
+        self.onSave = onSave
+        self.onCancel = onCancel
+        _content = State(initialValue: item.content)
+    }
+
+    private var canSave: Bool {
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+                VStack(alignment: .leading, spacing: 18) {
+                    AppLineField(
+                        placeholder: "Remember that…",
+                        text: $content,
+                        axis: .vertical,
+                        lineLimit: 3...10
+                    )
+                    Spacer()
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel)
+                        .foregroundStyle(Color.mgSecondary)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { onSave(content) }
+                        .foregroundStyle(canSave ? Color.mgHeading : Color.mgSecondary)
+                        .disabled(!canSave)
+                }
+            }
+            .navigationTitle("Edit Memory")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 
