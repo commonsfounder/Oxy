@@ -5437,10 +5437,7 @@ function postResponseTasks(userId, message, extra = {}) {
       savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
     }
   }
-  // Episodic agent memory
-  if (extra && (extra.agentTraceId || extra.agentic || extra.taskId)) {
-    saveMemory(userId, `Agent handled goal ~ "${String(message).slice(0, 90)}" (trace ${extra.agentTraceId || extra.taskId || 'inline'})`, 'agent_episodic').catch(() => {});
-  }
+  // (agent trace episodes are no longer written to user memories — see Memory trust plan)
 }
 
 async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
