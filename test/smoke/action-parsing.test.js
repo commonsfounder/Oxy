@@ -18,6 +18,9 @@ const {
   summarizeReadOnlyActionResults,
   getStructuredDataResults,
   guardVisibleDataResponse,
+  isPureContentGenerationTurn,
+  shouldUseAgenticLoopForMessage,
+  shouldIgnoreModelAuthoredActions,
   triageEmailsForRequest,
   normalizeActionResultsForClient,
   validatePendantTranscriptionUpload
@@ -43,6 +46,62 @@ test('parseActions extracts a single action block and strips it from spoken text
   assert.equal(parseError, false);
   assert.equal(actions.length, 1);
   assert.equal(actions[0].type, 'create_reminder');
+});
+
+test('long prose explanation prompts bypass agent loop so SSE can stream incrementally', () => {
+  const prompt = 'write me a really long detailed explanation of the 2008 financial crisis';
+  assert.equal(isPureContentGenerationTurn(prompt), true);
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: prompt,
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: null
+  }), false);
+});
+
+test('real-world action prompts remain eligible for the agent loop', () => {
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: 'find the cheapest decent medium pepperoni pizza near me and order it',
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: null
+  }), true);
+});
+
+test('direct tool prompts route away from the fast streaming path', () => {
+  for (const message of [
+    'send an email to Sam',
+    'schedule lunch tomorrow',
+    'book me a table',
+    'open directions to Kings Langley'
+  ]) {
+    assert.equal(shouldUseAgenticLoopForMessage({
+      message,
+      quickTurn: false,
+      autonomyLevel: 'Active',
+      pendingAction: null
+    }), true, message);
+  }
+});
+
+test('plain factual search prompts stay on the fast streaming path', () => {
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: "what's the weather in London this weekend",
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: null
+  }), false);
+  assert.equal(shouldUseAgenticLoopForMessage({
+    message: 'what does this message mean',
+    quickTurn: false,
+    autonomyLevel: 'Active',
+    pendingAction: null
+  }), false);
+});
+
+test('flash-lite model authored actions are ignored', () => {
+  assert.equal(shouldIgnoreModelAuthoredActions('gemini-3.1-flash-lite'), true);
+  assert.equal(shouldIgnoreModelAuthoredActions('gemini-3-flash-preview'), false);
 });
 
 test('parseActions captures multiple action blocks, not just the first', () => {

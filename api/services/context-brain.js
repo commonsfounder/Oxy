@@ -233,10 +233,51 @@ function buildResolvedContext(history = [], recentActions = []) {
   };
 }
 
+function resolveContextualTurn({ message = '', history = [], recentActions = [], settings = {} } = {}) {
+  const text = normalizeText(message);
+  const lower = text.toLowerCase();
+  const resolvedContext = buildResolvedContext(history, recentActions);
+  if (!resolvedContext || resolvedContext.kind === 'unknown') return null;
+
+  if (resolvedContext.kind === 'media' && /\b(play|play that|play it|again)\b/i.test(lower)) {
+    return {
+      reason: 'context_media_play',
+      resolvedContext,
+      spoken: `Playing ${resolvedContext.label}.`,
+      actions: [{ type: 'play_music', input: { query: resolvedContext.label } }]
+    };
+  }
+
+  if (resolvedContext.kind === 'place' && /\b(open|directions|navigate|get me there|take me there)\b/i.test(lower)) {
+    const destination = resolvedContext.input?.destination || resolvedContext.input?.query || resolvedContext.label;
+    if (!destination) return null;
+    return {
+      reason: 'context_place_directions',
+      resolvedContext,
+      spoken: "I'll open directions.",
+      actions: [{ type: 'get_directions', input: { destination, mode: settings?.preferredTransportMode || 'driving' } }]
+    };
+  }
+
+  if (resolvedContext.kind === 'route' && /\b(open|directions|view|map|maps)\b/i.test(lower)) {
+    const input = resolvedContext.input || resolvedContext.routeContext || {};
+    if (!input.destination) return null;
+    return {
+      reason: 'context_route_reopen',
+      resolvedContext,
+      spoken: "I'll open that route.",
+      actions: [{ type: 'get_directions', input }]
+    };
+  }
+
+  return null;
+}
+
 module.exports = {
   buildResolvedContext,
   extractAssistantContexts,
   extractActionContexts,
   extractSongFromText,
-  isContextualReference
+  isContextualReference,
+  resolveContextualTurn
 };

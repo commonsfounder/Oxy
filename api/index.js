@@ -360,14 +360,11 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-// Chat/agentic reasoning needs the capable model: the lite helper model fabricates
-// required tool params (e.g. get_directions with a made-up destination) instead of
-// asking, which makes every vague/multi-step turn misfire. d426ae2 defaulted this to
-// flash-lite "everywhere" for cost and silently downgraded the whole agent loop in prod
-// (no OXY_REASONING_MODEL override was set). Keep chat on flash-preview; helpers stay lite.
+// Agentic reasoning keeps the capable model; ordinary streaming chat uses the fast
+// model so text starts in under a second instead of waiting on the planner-grade path.
 const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
-const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
+const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || FAST_MODEL;
 if ([PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL].some(m => m.includes('3.5'))) {
   throw new Error(`[models] BANNED: a model config contains "3.5". Remove it.`);
 }
@@ -1257,7 +1254,20 @@ function isPureContentGenerationTurn(message = '') {
 function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, autonomyLevel = 'Active', pendingAction = null } = {}) {
   if (quickTurn || pendingAction || autonomyLevel === 'Quiet') return false;
   if (isPureContentGenerationTurn(message)) return false;
-  return true;
+  const text = String(message || '').toLowerCase();
+  const explicitAutonomousGoal =
+    /\b(make money|earn cash|side hustle|moneti[sz]e|profit|financial freedom)\b/.test(text) ||
+    /\b(handle|monitor|track|arrange|organize|coordinate|keep working|work on this|take care of|sort this out)\b/.test(text) ||
+    /\b(research|find|compare)\b.+\b(and|then)\b.+\b(book|buy|order|send|schedule|create|open|message|email)\b/.test(text);
+  const directToolIntent =
+    /\b(book|order|buy|purchase|send|call|email|create|add|schedule|remind|reserve|open|navigate|directions)\b/.test(text) ||
+    /^(please\s+|can you\s+|could you\s+)?(text|message)\s+(me|him|her|them|[a-z][a-z'-]{1,})\b/.test(text);
+  const personalDataIntent = /\b(my|in my|from my|on my)\b.+\b(email|calendar|inbox|messages|reminders|contacts|playlist|music)\b/.test(text);
+  return explicitAutonomousGoal || directToolIntent || personalDataIntent;
+}
+
+function shouldIgnoreModelAuthoredActions(modelName = '') {
+  return String(modelName || '') === FAST_MODEL;
 }
 
 function formatLondonYMD(date = new Date()) {
@@ -3546,7 +3556,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       useSearch,
       cachedContentName,
       baseHistory,
-      userContent: { role: 'user', parts: [{ text: userText }] }
+      userContent: { role: 'user', parts: [{ text: userText }] },
+      useAgentTools: false
     });
 
     const stream = await modernGenAI.models.generateContentStream({
@@ -3563,6 +3574,10 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     let { spoken, actions, parseError } = parseActions(fullText);
     if (parseError) console.warn('[process-audio] one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, userText);
+    if (shouldIgnoreModelAuthoredActions(STREAMING_CHAT_MODEL) && actions.length) {
+      console.warn(`[process-audio] ignored ${actions.length} fast-model authored action(s)`);
+      actions = [];
+    }
 
     let actionResults = [];
     let audioBase64 = null;
@@ -5775,7 +5790,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       useSearch,
       cachedContentName,
       baseHistory,
-      userContent: { role: 'user', parts: [{ text: message }] }
+      userContent: { role: 'user', parts: [{ text: message }] },
+      useAgentTools: false
     });
 
     // === AGENTIC UPGRADE: Use ReAct loop for non-deterministic turns (fixes loop, orchestration, planning foundation) ===
@@ -5956,6 +5972,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         let { spoken, actions, parseError } = parseActions(fullText);
         if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
         actions = guardCalendarActionsForUserMessage(actions, message);
+        if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
+          trace.log('fast_model.actions_ignored', `count=${actions.length}`);
+          actions = [];
+        }
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
@@ -5964,6 +5984,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             ({ spoken, actions, parseError } = parseActions(fullText));
             if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
             actions = guardCalendarActionsForUserMessage(actions, message);
+            if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
+              trace.log('fast_model.actions_ignored', `count=${actions.length}`);
+              actions = [];
+            }
             spoken = stripActionMarkupForDisplay(spoken).trim();
             trace.log('gemini.blank_spoken_recovery_success');
           }
@@ -6006,7 +6030,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             useSearch,
             cachedContentName,
             baseHistory,
-            userContent: { role: 'user', parts: [{ text: message }] }
+            userContent: { role: 'user', parts: [{ text: message }] },
+            useAgentTools: false
           });
           followUpRequest.contents.push(
             { role: 'model', parts: [{ text: spoken || '…' }] },
@@ -6099,12 +6124,20 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     let { spoken, actions, parseError } = parseActions(rawText);
     if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
+    if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
+      trace.log('fast_model.actions_ignored', `count=${actions.length}`);
+      actions = [];
+    }
     if (!rawText.trim() || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions, parseError } = parseActions(recovered));
         if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
         actions = guardCalendarActionsForUserMessage(actions, message);
+        if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
+          trace.log('fast_model.actions_ignored', `count=${actions.length}`);
+          actions = [];
+        }
       }
     }
 
@@ -6129,7 +6162,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         useSearch,
         cachedContentName,
         baseHistory,
-        userContent: { role: 'user', parts: [{ text: message }] }
+        userContent: { role: 'user', parts: [{ text: message }] },
+        useAgentTools: false
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '…' }] },
@@ -6709,6 +6743,7 @@ module.exports.getStructuredDataResults = getStructuredDataResults;
 module.exports.guardVisibleDataResponse = guardVisibleDataResponse;
 module.exports.isPureContentGenerationTurn = isPureContentGenerationTurn;
 module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
+module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActions;
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;

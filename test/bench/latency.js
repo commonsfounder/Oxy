@@ -96,6 +96,7 @@ async function oneRequest(userId, message) {
   const decoder = new TextDecoder();
   let buf = '';
   let firstText = null;
+  let firstVisible = null;
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -108,11 +109,17 @@ async function oneRequest(userId, message) {
       if (!line) continue;
       try {
         const obj = JSON.parse(line.slice(6));
-        if (obj.type === 'text' && firstText === null) firstText = Date.now() - t0;
+        const now = Date.now() - t0;
+        if (firstVisible === null && ['text', 'replace', 'status', 'actions'].includes(obj.type)) {
+          firstVisible = now;
+        }
+        if ((obj.type === 'text' || (obj.type === 'replace' && obj.text)) && firstText === null) {
+          firstText = now;
+        }
       } catch { /* ignore non-JSON frames */ }
     }
   }
-  return { client_ttft_ms: firstText, client_total_ms: Date.now() - t0 };
+  return { client_visible_ms: firstVisible, client_ttft_ms: firstText, client_total_ms: Date.now() - t0 };
 }
 
 // Pull the server-side trace marks for a given userId out of captured stdout.
@@ -159,6 +166,7 @@ async function main() {
         rows.push({ tag: msg.tag, run, ...client, ...marks });
         console.log(
           `  ${msg.tag.padEnd(9)} run${run}  ` +
+          `visible=${String(client.client_visible_ms).padStart(5)}ms  ` +
           `client_ttft=${String(client.client_ttft_ms).padStart(5)}ms  ` +
           `preamble=${String(marks.preamble_ms).padStart(4)}ms  ` +
           `context=${String(marks.context_ms).padStart(4)}ms  ` +
@@ -176,6 +184,7 @@ async function main() {
         preamble_ms: median(g.map((r) => r.preamble_ms)),
         context_ms: median(g.map((r) => r.context_ms)),
         model_ttft_ms: median(g.map((r) => r.model_ttft_ms)),
+        client_visible_ms: median(g.map((r) => r.client_visible_ms)),
         client_ttft_ms: median(g.map((r) => r.client_ttft_ms)),
       };
       const s = summary[msg.tag];
@@ -183,6 +192,7 @@ async function main() {
         `  ${msg.tag.padEnd(9)}  preamble=${String(s.preamble_ms).padStart(4)}ms  ` +
         `context=${String(s.context_ms).padStart(4)}ms  ` +
         `model_ttft=${String(s.model_ttft_ms).padStart(5)}ms  ` +
+        `visible=${String(s.client_visible_ms).padStart(5)}ms  ` +
         `client_ttft=${String(s.client_ttft_ms).padStart(5)}ms`,
       );
     }
