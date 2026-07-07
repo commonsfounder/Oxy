@@ -529,6 +529,12 @@ struct MemoryItem: Codable, Identifiable, Equatable {
     // so the order matters (a "partner" who "lives in X" reads as People, not Places).
     var category: String {
         if content.count > 180 { return "Notes" }
+        // Guard against garbage/degenerate strings ("huh", "" ) getting confidently
+        // mis-filed into a keyword bucket. Upstream extraction quality (making sure
+        // low-signal content isn't saved as a memory at all) is a separate backend
+        // follow-up — this is just the client-side display guard.
+        let meaningfulChars = content.filter { $0.isLetter }.count
+        if meaningfulChars < 3 { return "Notes" }
         let t = " \(content.lowercased()) "
         func has(_ keys: [String]) -> Bool { keys.contains { t.contains($0) } }
         if has(["partner", "wife", "husband", "girlfriend", "boyfriend", "friend", "mum", "mom", "dad", "mother", "father", "brother", "sister", "boss", "loved one", "pookie", "name is", "named", "son", "daughter"]) { return "People" }
