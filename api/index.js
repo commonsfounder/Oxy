@@ -2569,6 +2569,9 @@ async function getMemory(userId, trace = null, query = '') {
   return [manualProfile, ...factStrings].filter(Boolean).join('\n');
 }
 
+const INTERNAL_MEMORY_SOURCES = ['agent_episodic'];
+function isUserFacingMemory(row) { return !INTERNAL_MEMORY_SOURCES.includes(row?.source); }
+
 async function saveMemory(userId, content, source = 'fact') {
   if (source === 'manual_profile') {
     const { data: inserted } = await supabase
@@ -3831,10 +3834,11 @@ app.get('/memory/:userId/items', async (req, res) => {
       .from('memories')
       .select('id, content, source, created_at')
       .eq('user_id', req.params.userId)
+      .neq('source', 'agent_episodic')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
-    res.json({ items: data || [] });
+    res.json({ items: (data || []).filter(isUserFacingMemory) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -6745,3 +6749,4 @@ module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;
+module.exports.isUserFacingMemory = isUserFacingMemory;
