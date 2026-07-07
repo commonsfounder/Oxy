@@ -92,7 +92,11 @@ final class ChatViewModel {
         "place", "maps", "mcdonald", "john lewis", "gym", "restaurant", "cafe", "coffee",
         "shop", "supermarket", "store", "pharmacy", "station", "cinema",
         "bank", "atm", "directions", "navigate", "route", "bus", "buses", "transit",
-        "public transport", "walk", "walking", "drive", "driving"
+        "public transport", "walk", "walking", "drive", "driving",
+        // Rail journeys are route planning too — they need an origin, so the activity
+        // must fetch location. Dropped during the "Improve chat activity" pass, which
+        // broke the DEBUG runChatUXRuleCheck contract (train query → one location step).
+        "train", "rail"
     ]
 
     func prepareChat(userId: String) async {
