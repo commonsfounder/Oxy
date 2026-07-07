@@ -64,16 +64,24 @@ struct MessageBubble: View {
             // Message content
             if !message.content.isEmpty && uberAction == nil {
                 if isUser {
-                    HStack(alignment: .bottom, spacing: 0) {
-                        Spacer(minLength: 48)
-                        Text(AttributedString(message.content))
-                            .font(.appBody(isCompact ? 15 : 16))
-                            .foregroundStyle(Color.appInk)
-                            .lineSpacing(isCompact ? 4 : 5)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(bubbleShape.fill(Color.appUserBubble))
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HStack(alignment: .bottom, spacing: 0) {
+                            Spacer(minLength: 48)
+                            Text(AttributedString(message.content))
+                                .font(.appBody(isCompact ? 15 : 16))
+                                .foregroundStyle(Color.appInk)
+                                .lineSpacing(isCompact ? 4 : 5)
+                                .textSelection(.enabled)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(bubbleShape.fill(Color.appUserBubble))
+                        }
+                        if message.queuedForActiveTask {
+                            Text("Queued for this task")
+                                .font(.appBody(11.5, weight: .medium))
+                                .foregroundStyle(Color.appMuted)
+                                .padding(.trailing, 2)
+                        }
                     }
                 } else {
                     AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
@@ -84,15 +92,6 @@ struct MessageBubble: View {
             if let turnError = message.turnError {
                 FailedTurnView(message: turnError, onRetry: onRetryFailedTurn)
                     .padding(.top, message.content.isEmpty ? 0 : 8)
-            }
-
-            // Streaming indicator
-            if message.isStreaming && message.content.isEmpty && showsTypingIndicator {
-                HStack {
-                    OxyThinkingIndicator(label: "Millie is working")
-                        .padding(.vertical, 6)
-                    Spacer(minLength: 64)
-                }
             }
 
             // Agent work: rich handoff cards keep their surface; everything else
@@ -111,7 +110,7 @@ struct MessageBubble: View {
                         } else if action.action == "save_trip" {
                             TravelResultCard(action: action, kind: .trip)
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
-                            DirectionsLink(action: action)
+                            DirectionsResultCard(action: action)
                         }
                     }
 
@@ -551,38 +550,190 @@ private extension String {
     }
 }
 
-// MARK: - Directions Link
+// MARK: - Directions Result
 
-/// A flat, minimal tap target that opens a route in Maps. Replaces the full
-/// ActionCard for directions/transit results — the text is already the answer.
-private struct DirectionsLink: View {
+private struct DirectionsResultCard: View {
     let action: ActionResult
 
+    private var legs: [TravelLeg] { action.itinerary ?? [] }
+    private var isDriving: Bool {
+        let mode = action.routeContext?.mode?.lowercased() ?? ""
+        return mode.contains("driv") || (!legs.contains { ($0.type ?? "").lowercased().contains("rail") || ($0.type ?? "").lowercased().contains("transit") } && (action.deepLink != nil || action.webLink != nil))
+    }
+    private var title: String {
+        if isDriving { return action.routeContext?.destination ?? destinationFromText ?? "Destination" }
+        return action.routeContext?.destination ?? "Journey"
+    }
+    private var duration: String? {
+        action.routeContext?.duration ?? firstMatch(#"(\d+\s*(?:h|hr|hrs|hour|hours|min|mins|minutes)(?:\s+\d+\s*(?:min|mins|minutes))?)"#, in: action.headline ?? action.cardText ?? action.text ?? "")
+    }
+    private var price: String? {
+        firstMatch(#"[£$€]\s?\d+(?:\.\d{1,2})?"#, in: action.cardText ?? action.text ?? "")
+    }
+    private var timeRange: String? {
+        if let departure = action.routeContext?.departure, let arrival = action.routeContext?.arrival {
+            return "\(departure)-\(arrival)"
+        }
+        return firstMatch(#"\b\d{1,2}:\d{2}\s?(?:am|pm)?\s*[-–]\s*\d{1,2}:\d{2}\s?(?:am|pm)?\b"#, in: action.headline ?? "")
+    }
+    private var destinationFromText: String? {
+        guard let text = action.text else { return nil }
+        return firstMatch(#"(?i)(?:directions to|to arrive by .*? to|by driving to)\s+([^\.]+)"#, in: text)
+    }
+    private var mapsUrl: String? { action.deepLink ?? action.webLink }
+    private var fareUrl: String? { action.bookingUrl ?? action.webLink }
+
     var body: some View {
-        Button(action: open) {
-            HStack(spacing: 6) {
-                Text("Open in Maps")
-                    .font(.appBody(13))
-                    .foregroundStyle(Color.appTitanium)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.appMuted)
+        VStack(alignment: .leading, spacing: 12) {
+            ToolHeader(
+                icon: isDriving ? "car" : "train.side.front.car",
+                eyebrow: isDriving ? "DIRECTIONS" : "JOURNEY",
+                state: action.success ? .success : .failure
+            )
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title)
+                    .font(.appBody(15, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                    .lineLimit(2)
+
+                HStack(spacing: 8) {
+                    if let duration {
+                        metric("Duration", duration)
+                    }
+                    if isDriving, let distance = action.distanceText ?? action.routeContext?.distance {
+                        metric("Distance", distance)
+                    }
+                    if !isDriving, let price {
+                        metric("Price", price)
+                    }
+                    if !isDriving, let timeRange {
+                        metric("Time", timeRange)
+                    }
+                }
             }
-            .padding(.vertical, 13)
-            .frame(maxWidth: .infinity)
-            .overlay(alignment: .top) {
-                Rectangle().fill(Color.appHairline).frame(height: 0.5)
+
+            if !isDriving, !legs.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(legs.prefix(5)) { leg in
+                        JourneyLegRow(leg: leg)
+                    }
+                }
+                .padding(.top, 2)
+            } else if let summary = action.cardText?.strippingMarkdown, !summary.isEmpty {
+                Text(summary)
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.appMuted)
+                    .lineLimit(3)
+            }
+
+            HStack(spacing: 8) {
+                if mapsUrl != nil {
+                    directionButton("Open in Maps", systemImage: "map", urlString: mapsUrl)
+                }
+                if !isDriving, !legs.isEmpty {
+                    directionButton("View journey", systemImage: "list.bullet", urlString: mapsUrl ?? fareUrl)
+                }
+                if !isDriving, fareUrl != nil {
+                    directionButton(price == nil ? "Check fares" : "Buy ticket", systemImage: "ticket", urlString: fareUrl)
+                }
             }
         }
-        .buttonStyle(.appScale(0.98))
-        .contentShape(Rectangle())
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.5))
     }
 
-    private func open() {
-        let urlString = action.deepLink ?? action.webLink
-        guard let urlString, let url = URL(string: urlString) else { return }
-        UIApplication.shared.open(url)
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .appEyebrow()
+                .foregroundStyle(Color.appMuted.opacity(0.8))
+            Text(value)
+                .font(.appBody(12.5, weight: .medium))
+                .foregroundStyle(Color.appInk.opacity(0.94))
+                .lineLimit(1)
+        }
+    }
+
+    private func directionButton(_ label: String, systemImage: String, urlString: String?) -> some View {
+        Button {
+            guard let urlString, let url = URL(string: urlString) else { return }
+            UIApplication.shared.open(url)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(label)
+                    .font(.appBody(12.5, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(Color.appTitanium)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.appScale(0.98))
+        .disabled(urlString == nil)
+    }
+
+    private func firstMatch(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range) else { return nil }
+        let target = match.numberOfRanges > 1 && match.range(at: 1).location != NSNotFound
+            ? match.range(at: 1) : match.range
+        guard let r = Range(target, in: text) else { return nil }
+        return String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct JourneyLegRow: View {
+    let leg: TravelLeg
+
+    private var fromTo: String {
+        [leg.from, leg.to].compactMap { value -> String? in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.joined(separator: " → ")
+    }
+
+    private var detail: String {
+        let service = leg.service ?? leg.line ?? transportLabel
+        let duration = leg.duration
+        return [service, duration].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var transportLabel: String {
+        let type = (leg.type ?? "").lowercased()
+        if type.contains("rail") { return "Train" }
+        if type.contains("bus") { return "Bus" }
+        return "Transit"
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Circle()
+                .fill(Color.appMuted.opacity(0.55))
+                .frame(width: 5, height: 5)
+                .padding(.top, 7)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fromTo.isEmpty ? transportLabel : fromTo)
+                    .font(.appBody(13.5, weight: .medium))
+                    .foregroundStyle(Color.appInk.opacity(0.95))
+                    .lineLimit(2)
+                Text(detail)
+                    .font(.appBody(12.5))
+                    .foregroundStyle(Color.appMuted)
+                    .lineLimit(1)
+            }
+        }
     }
 }
 

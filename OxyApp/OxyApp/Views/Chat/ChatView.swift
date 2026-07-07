@@ -138,7 +138,7 @@ struct ChatView: View {
                                     let previousMessage = idx > 0 ? msgs[idx - 1] : nil
                                     MessageBubble(
                                         message: message,
-                                        showsTypingIndicator: viewModel.statusLabel == nil,
+                                        showsTypingIndicator: false,
                                         isGroupStart: isGroupStart,
                                         isGroupEnd: isGroupEnd,
                                         showsTimestamp: shouldShowTimestamp(
@@ -160,13 +160,15 @@ struct ChatView: View {
                                     .id(message.id)
                                     .padding(.top, isGroupStart && idx > 0 ? 12 : 2)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
-                                }
 
-                                if let status = viewModel.statusLabel {
-                                    TurnActivityView(label: progressLabel(for: status))
-                                        .id("status")
-                                        .padding(.horizontal, AppSpacing.chatMargin)
-                                        .padding(.top, 6)
+                                    if message.id == viewModel.activeTurnUserMessageID,
+                                       !viewModel.activitySteps.isEmpty {
+                                        ActivityCard(steps: viewModel.activitySteps)
+                                            .id("activity-\(message.id)")
+                                            .padding(.horizontal, AppSpacing.chatMargin)
+                                            .padding(.top, 6)
+                                            .transition(.opacity.combined(with: .move(edge: .top)))
+                                    }
                                 }
 
                                 Color.clear
@@ -266,7 +268,7 @@ struct ChatView: View {
                     // Input bar
                     ChatInputBar(
                         text: $viewModel.inputText,
-                        isSending: viewModel.isSending || isOffline,
+                        isSending: isOffline,
                         isRecording: voiceInput.isRecording,
                         isPreparingVoice: voiceInput.isTranscribing,
                         voiceTranscript: voiceInput.transcript,
@@ -310,6 +312,21 @@ struct ChatView: View {
             // A soft tick when Millie's reply settles; a warning buzz when a request fails.
             // Lives in its own modifier so this (large) body still type-checks in time.
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
+            .onChange(of: assistantReplySettled) { _, settled in
+                guard settled else { return }
+                #if DEBUG
+                let payload: [String: Any] = [
+                    "area": "chat_ui",
+                    "event": "ui_render_completion",
+                    "t": Date().oxyISO8601String,
+                    "messageCount": viewModel.messages.count
+                ]
+                if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+                   let text = String(data: data, encoding: .utf8) {
+                    print("[dev-timing] \(text)")
+                }
+                #endif
+            }
             .sheet(item: $pendingReviewAction) { action in
                 ActionReviewSheet(
                     action: action,
@@ -400,6 +417,9 @@ struct ChatView: View {
                 viewModel.inputText = text
             }
         .task {
+            #if DEBUG
+            ChatInputBar.runComposerRuleCheck()
+            #endif
             if let session = initialSession {
                 await viewModel.loadHistoryAround(
                     userId: appState.userId,
@@ -443,20 +463,6 @@ struct ChatView: View {
             networkMonitor.start(queue: DispatchQueue(label: "oxy.networkMonitor"))
         }
         }
-    }
-
-    private func progressLabel(for raw: String) -> String {
-        let lower = raw.lowercased()
-        if lower.contains("email") { return "Checking your inbox..." }
-        if lower.contains("calendar") || lower.contains("schedule") { return "Checking tomorrow's calendar..." }
-        if lower.contains("location") { return "Finding your location..." }
-        if lower.contains("image") { return "Looking at image..." }
-        if lower.contains("file") || lower.contains("reading") { return "Reading file..." }
-        if lower.contains("order") { return "Checking the order..." }
-        if lower.contains("summary") { return "Putting it together..." }
-        if lower.contains("message sent") { return "Message sent" }
-        if lower.contains("message failed") { return "Message failed" }
-        return raw.hasSuffix("...") ? raw : "\(raw)..."
     }
 
     // MARK: - Attachment sheet (custom, flat obsidian)
@@ -1161,22 +1167,6 @@ private struct ChatInputBar: View {
                 .padding(.top, 10)
             }
 
-            if isSending && !isVoiceActive {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(Color.appAccent.opacity(0.85))
-                        .frame(width: 5, height: 5)
-                    Text("Millie is replying. Send is paused until this turn finishes.")
-                        .font(.appBody(11.5))
-                        .foregroundStyle(Color.appMuted)
-                        .lineLimit(2)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-
             HStack(alignment: .bottom, spacing: 8) {
                 // Attach
                 Button(action: onAttach) {
@@ -1307,7 +1297,7 @@ private struct ChatInputBar: View {
     }
 
     private var canSend: Bool {
-        !isSending && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentLabel != nil)
+        Self.canSendDraft(text: text, attachmentLabel: attachmentLabel, isOffline: isSending)
     }
 
     private var isVoiceActive: Bool {
@@ -1329,41 +1319,110 @@ private struct ChatInputBar: View {
     private var canAct: Bool {
         !isSending && !isPreparingVoice
     }
+
+    static func canSendDraft(text: String, attachmentLabel: String?, isOffline: Bool) -> Bool {
+        !isOffline && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || attachmentLabel != nil)
+    }
+
+    #if DEBUG
+    static func runComposerRuleCheck() {
+        assert(canSendDraft(text: "I'm taking a train", attachmentLabel: nil, isOffline: false), "composer should allow corrections while assistant work is active")
+        assert(!canSendDraft(text: "I'm taking a train", attachmentLabel: nil, isOffline: true), "composer should still respect offline state")
+        assert(canSendDraft(text: "", attachmentLabel: "Photo", isOffline: false), "attachments should be sendable when online")
+    }
+    #endif
 }
 
-// MARK: - Turn Activity
+// MARK: - Activity Card
 
-private struct TurnActivityView: View {
-    let label: String
+private struct ActivityCard: View {
+    let steps: [ActivityStep]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulse = false
 
+    private var visibleSteps: [ActivityStep] {
+        guard !steps.isEmpty else { return [] }
+        let activeIndex = steps.firstIndex { $0.state == .active || $0.state == .failed }
+            ?? steps.firstIndex { $0.state == .pending }
+            ?? steps.indices.last
+        guard let activeIndex else { return [] }
+        var indices = Set<Int>()
+        if activeIndex > 0 { indices.insert(activeIndex - 1) }
+        indices.insert(activeIndex)
+        if activeIndex + 1 < steps.count { indices.insert(activeIndex + 1) }
+        return indices.sorted().map { steps[$0] }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(visibleSteps) { step in
+                ActivityStepRow(step: step, pulse: pulse && !reduceMotion)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.appSurface.opacity(0.62))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .animation(.appStandard, value: steps)
+        .onAppear { pulse = true }
+    }
+
+    private var accessibilityLabel: String {
+        visibleSteps.map { "\($0.title), \($0.state.rawValue)" }.joined(separator: ". ")
+    }
+}
+
+private struct ActivityStepRow: View {
+    let step: ActivityStep
+    let pulse: Bool
+
+    private var isDimmed: Bool {
+        step.state == .complete || step.state == .pending
+    }
+
     var body: some View {
         HStack(spacing: 9) {
-            Circle()
-                .fill(Color.appAccent.opacity(reduceMotion ? 0.7 : 0.86))
-                .frame(width: 7, height: 7)
-                .scaleEffect(!reduceMotion && pulse ? 1.16 : 0.9)
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 1.2).repeatForever(autoreverses: true),
-                    value: pulse
-                )
-                .accessibilityHidden(true)
-
-            Text(label)
-                .font(.appBody(13))
-                .foregroundStyle(Color.appMuted)
+            glyph
+                .frame(width: 14, height: 16)
+            Text(step.title)
+                .font(.appBody(step.state == .active ? 13 : 12.5, weight: step.state == .active ? .medium : .regular))
+                .foregroundStyle(Color.appMuted.opacity(isDimmed ? 0.62 : 0.96))
                 .lineLimit(1)
                 .contentTransition(.opacity)
-                .animation(.appStandard, value: label)
-
-            Spacer(minLength: 60)
+            Spacer(minLength: 24)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: 28, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(label)
-        .onAppear { pulse = true }
+        .opacity(step.state == .pending ? 0.58 : 1)
+    }
+
+    @ViewBuilder
+    private var glyph: some View {
+        switch step.state {
+        case .pending:
+            Circle()
+                .strokeBorder(Color.appMuted.opacity(0.4), lineWidth: 1)
+                .frame(width: 7, height: 7)
+        case .active:
+            Circle()
+                .fill(Color.appAccent.opacity(0.86))
+                .frame(width: 7, height: 7)
+                .scaleEffect(pulse ? 1.18 : 0.9)
+                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
+        case .complete:
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.appMuted.opacity(0.7))
+        case .failed:
+            Image(systemName: "exclamationmark")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.appDanger)
+        }
     }
 }
 

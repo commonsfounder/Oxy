@@ -4,6 +4,33 @@ const { getGoogleDirectionsKey } = require('../api/services/maps-config');
 
 const SUPPORTED_ACTIONS = ['find_place', 'get_directions', 'plan_trip'];
 
+function devTimingEnabled() {
+  return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
+}
+
+function devTiming(event, fields = {}) {
+  if (!devTimingEnabled()) return;
+  console.log('[dev-timing]', JSON.stringify({
+    area: 'directions',
+    event,
+    t: new Date().toISOString(),
+    ...fields
+  }));
+}
+
+async function timed(event, fields, fn) {
+  const start = Date.now();
+  devTiming(`${event}.start`, fields);
+  try {
+    const result = await fn();
+    devTiming(`${event}.end`, { ...fields, durationMs: Date.now() - start, success: true });
+    return result;
+  } catch (err) {
+    devTiming(`${event}.end`, { ...fields, durationMs: Date.now() - start, success: false, error: err.message });
+    throw err;
+  }
+}
+
 function shortAddress(address) {
   return String(address || '')
     .split(',')
@@ -189,6 +216,7 @@ function formatTransitStep(step) {
     arrivalValue: transit.arrival_time?.value,
     stops,
     platform,
+    duration: step.duration?.text,
     text: [line, from && `from ${from}`, platformText, to && `to ${to}`].filter(Boolean).join(' ')
   };
 }
@@ -322,6 +350,7 @@ function summarizeTripRoute(route, destination, params = {}, usedRailFirst = fal
     departure: step.departure,
     arrival: step.arrival,
     platform: step.platform || null,
+    duration: step.duration || null,
     stops: Number.isFinite(Number(step.stops)) ? Number(step.stops) : null
   }));
   const cardBits = [
@@ -352,9 +381,16 @@ function summarizeTripRoute(route, destination, params = {}, usedRailFirst = fal
 }
 
 async function planTrip(destination, params = {}) {
+  const planStarted = Date.now();
   const cleanedDestination = cleanPlaceSearchQuery(destination);
   const fallbackLink = `https://maps.apple.com/?${params.origin ? `saddr=${encodeURIComponent(params.origin)}&` : ''}daddr=${encodeURIComponent(cleanedDestination)}&dirflg=r`;
   const bookingUrl = trainlineLink(params.origin || '', cleanedDestination, params);
+  devTiming('fare_lookup.end', {
+    action: 'plan_trip',
+    supported: false,
+    ticketLinkPrepared: Boolean(bookingUrl),
+    durationMs: 0
+  });
   if (!getGoogleDirectionsKey()) {
     return {
       success: true,
@@ -377,20 +413,30 @@ async function planTrip(destination, params = {}) {
   // Places isn't configured or finds nothing.
   let routeDestination = cleanedDestination;
   try {
-    const place = await resolvePlaceDestination(destination, { location: params.location });
+    const place = await timed('destination_geocode', { action: 'plan_trip', destination: cleanedDestination }, () =>
+      resolvePlaceDestination(destination, { location: params.location })
+    );
     if (place?.formattedAddress) routeDestination = place.formattedAddress;
   } catch (err) {
     console.warn('[maps] plan_trip destination resolve failed, using raw text:', err.message);
   }
   const busPreferred = /^bus$/i.test(String(params.mode || ''));
-  const railRoutes = busPreferred ? null : await fetchTransitRoutes(routeDestination, params, true).catch(err => {
-    console.warn('[maps] Rail-first Directions failed:', err.message);
-    return null;
-  });
-  const allRoutes = railRoutes || await fetchTransitRoutes(routeDestination, params, false).catch(err => {
+  const railRoutesPromise = busPreferred
+    ? Promise.resolve(null)
+    : timed('route_fetch', { action: 'plan_trip', mode: 'rail_first' }, () =>
+      fetchTransitRoutes(routeDestination, params, true)
+    ).catch(err => {
+      console.warn('[maps] Rail-first Directions failed:', err.message);
+      return null;
+    });
+  const transitRoutesPromise = timed('route_fetch', { action: 'plan_trip', mode: busPreferred ? 'bus' : 'transit' }, () =>
+    fetchTransitRoutes(routeDestination, params, false)
+  ).catch(err => {
     console.warn('[maps] Transit Directions failed:', err.message);
     return null;
   });
+  const [railRoutes, transitRoutes] = await Promise.all([railRoutesPromise, transitRoutesPromise]);
+  const allRoutes = railRoutes || transitRoutes;
   const best = chooseBestTripRoute(allRoutes || [], params.preference);
   if (!best) {
     return {
@@ -419,7 +465,8 @@ async function planTrip(destination, params = {}) {
     routeContext: summary.routeContext,
     bookingUrl,
     deepLink: fallbackLink,
-    webLink: bookingUrl
+    webLink: bookingUrl,
+    latencyMs: Date.now() - planStarted
   };
 }
 
@@ -457,7 +504,8 @@ function summarizeDirectionsRoute(route, modeLabel, arrivalSeconds = null) {
       headline,
       detail,
       text: durationText ? `It's about ${durationText} by ${modeLabel}.` : undefined,
-      routeContext: { mode: modeLabel, duration: durationText }
+      distanceText: leg.distance?.text,
+      routeContext: { mode: modeLabel, duration: durationText, distance: leg.distance?.text }
     };
   }
 
@@ -491,6 +539,7 @@ function summarizeDirectionsRoute(route, modeLabel, arrivalSeconds = null) {
     departure: step.departure,
     arrival: step.arrival,
     platform: step.platform || null,
+    duration: step.duration || null,
     stops: Number.isFinite(Number(step.stops)) ? Number(step.stops) : null
   }));
   return {
@@ -541,10 +590,10 @@ async function getGoogleDirections(destination, place, params = {}) {
     requestParams.departure_time = departure || arrival || 'now';
   }
 
-  const response = await axios.get('https://maps.googleapis.com/maps/api/directions/json', {
+  const response = await timed('route_fetch', { action: 'get_directions', mode }, () => axios.get('https://maps.googleapis.com/maps/api/directions/json', {
     params: requestParams,
     timeout: 10000
-  });
+  }));
   if (response.data?.status !== 'OK' || !response.data.routes?.length) return null;
   return summarizeDirectionsRoute(response.data.routes[0], mode, arrival);
 }
@@ -554,6 +603,8 @@ function isPlacesSetupError(err) {
 }
 
 async function execute(userId, action, params) {
+  const executeStarted = Date.now();
+  devTiming('request_received', { action, hasLocation: Boolean(params?.location), mode: params?.mode || null });
   try {
     if (action === 'plan_trip') {
       const destination = String(params?.destination || params?.query || '').trim();
@@ -577,7 +628,9 @@ async function execute(userId, action, params) {
       }
       let place = null;
       try {
-        place = await resolvePlaceDestination(destination, { location: params.location });
+        place = await timed('destination_geocode', { action: 'get_directions', destination }, () =>
+          resolvePlaceDestination(destination, { location: params.location })
+        );
       } catch (err) {
         if (isPlacesSetupError(err)) return mapsDirectionsFallback(destination, params);
         return mapsDirectionsFallback(destination, params);
@@ -602,13 +655,16 @@ async function execute(userId, action, params) {
         webLink: route ? link : (flag === 'r' ? undefined : link),
         actionSummary: route || flag !== 'r' ? 'Directions ready' : 'Route unavailable',
         cardText: route?.detail || (flag === 'r' ? 'No transit route summary available' : `Open ${modeLabel} directions in Maps`),
+        headline: route?.headline,
+        distanceText: route?.distanceText,
         itinerary: route?.itinerary,
         routeContext: route?.routeContext || {
           origin: params.origin || 'current location',
           destination: label,
           mode: modeLabel,
           reason: 'route_summary_unavailable'
-        }
+        },
+        latencyMs: Date.now() - executeStarted
       };
     }
 

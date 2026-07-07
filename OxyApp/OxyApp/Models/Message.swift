@@ -8,6 +8,9 @@ struct Message: Identifiable, Equatable {
     let timestamp: Date
     var actions: [ActionResult]
     var isStreaming: Bool
+    /// User turns sent while another request is still running. They stay visible
+    /// immediately, then the view model sends them after the active task settles.
+    var queuedForActiveTask: Bool
     /// Recoverable per-turn failure copy. Kept on the assistant turn so a failed
     /// request has one inline retry surface instead of a global banner plus a row.
     var turnError: String?
@@ -27,6 +30,7 @@ struct Message: Identifiable, Equatable {
         timestamp: Date = Date(),
         actions: [ActionResult] = [],
         isStreaming: Bool = false,
+        queuedForActiveTask: Bool = false,
         turnError: String? = nil,
         sources: [MessageSource] = []
     ) {
@@ -37,6 +41,7 @@ struct Message: Identifiable, Equatable {
         self.timestamp = timestamp
         self.actions = actions
         self.isStreaming = isStreaming
+        self.queuedForActiveTask = queuedForActiveTask
         self.turnError = turnError
         self.sources = sources
     }
@@ -45,6 +50,7 @@ struct Message: Identifiable, Equatable {
         lhs.id == rhs.id
             && lhs.content == rhs.content
             && lhs.isStreaming == rhs.isStreaming
+            && lhs.queuedForActiveTask == rhs.queuedForActiveTask
             && lhs.turnError == rhs.turnError
             && lhs.actions == rhs.actions
             && lhs.sources == rhs.sources
@@ -117,9 +123,15 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let pending: Bool
     let connectorId: String?
     let healthStatus: String?
+    let headline: String?
+    let itinerary: [TravelLeg]?
+    let routeContext: RouteContext?
+    let bookingUrl: String?
+    let distanceText: String?
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
+        case headline, itinerary, routeContext, bookingUrl, distanceText
     }
 
     init(
@@ -136,6 +148,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
         pending: Bool = false,
         connectorId: String? = nil,
         healthStatus: String? = nil,
+        headline: String? = nil,
+        itinerary: [TravelLeg]? = nil,
+        routeContext: RouteContext? = nil,
+        bookingUrl: String? = nil,
+        distanceText: String? = nil,
     ) {
         self.action = action
         self.success = success
@@ -150,6 +167,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.pending = pending
         self.connectorId = connectorId
         self.healthStatus = healthStatus
+        self.headline = headline
+        self.itinerary = itinerary
+        self.routeContext = routeContext
+        self.bookingUrl = bookingUrl
+        self.distanceText = distanceText
     }
 
     init(native result: NativeLocalActionResult) {
@@ -184,6 +206,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
             pending = try result.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try result.decodeIfPresent(String.self, forKey: .connectorId)
             healthStatus = try result.decodeIfPresent(String.self, forKey: .healthStatus)
+            headline = try result.decodeIfPresent(String.self, forKey: .headline)
+            itinerary = try result.decodeIfPresent([TravelLeg].self, forKey: .itinerary)
+            routeContext = try result.decodeIfPresent(RouteContext.self, forKey: .routeContext)
+            bookingUrl = try result.decodeIfPresent(String.self, forKey: .bookingUrl)
+            distanceText = try result.decodeIfPresent(String.self, forKey: .distanceText)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -197,6 +224,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
             pending = try container.decodeIfPresent(Bool.self, forKey: .pending) ?? false
             connectorId = try container.decodeIfPresent(String.self, forKey: .connectorId)
             healthStatus = try container.decodeIfPresent(String.self, forKey: .healthStatus)
+            headline = try container.decodeIfPresent(String.self, forKey: .headline)
+            itinerary = try container.decodeIfPresent([TravelLeg].self, forKey: .itinerary)
+            routeContext = try container.decodeIfPresent(RouteContext.self, forKey: .routeContext)
+            bookingUrl = try container.decodeIfPresent(String.self, forKey: .bookingUrl)
+            distanceText = try container.decodeIfPresent(String.self, forKey: .distanceText)
         }
     }
 
@@ -215,7 +247,41 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encode(pending, forKey: .pending)
         try container.encodeIfPresent(connectorId, forKey: .connectorId)
         try container.encodeIfPresent(healthStatus, forKey: .healthStatus)
+        try container.encodeIfPresent(headline, forKey: .headline)
+        try container.encodeIfPresent(itinerary, forKey: .itinerary)
+        try container.encodeIfPresent(routeContext, forKey: .routeContext)
+        try container.encodeIfPresent(bookingUrl, forKey: .bookingUrl)
+        try container.encodeIfPresent(distanceText, forKey: .distanceText)
     }
+}
+
+struct TravelLeg: Codable, Equatable, Identifiable {
+    var id: String {
+        [from, to, service, line, departure, arrival].compactMap { $0 }.joined(separator: "|")
+    }
+
+    let type: String?
+    let service: String?
+    let line: String?
+    let from: String?
+    let to: String?
+    let departure: String?
+    let arrival: String?
+    let platform: String?
+    let stops: Int?
+    let duration: String?
+}
+
+struct RouteContext: Codable, Equatable {
+    let origin: String?
+    let destination: String?
+    let mode: String?
+    let departure: String?
+    let arrival: String?
+    let duration: String?
+    let distance: String?
+    let leaveBy: String?
+    let reason: String?
 }
 
 extension Array where Element == ActionResult {

@@ -15,6 +15,25 @@ private final class NativeActionTimeoutBox: @unchecked Sendable {
     }
 }
 
+enum ActivityStepState: String, Equatable {
+    case pending
+    case active
+    case complete
+    case failed
+}
+
+struct ActivityStep: Identifiable, Equatable {
+    let id = UUID()
+    var title: String
+    var state: ActivityStepState
+}
+
+private struct QueuedTurn {
+    let text: String
+    let messageID: UUID
+    let userId: String
+}
+
 @Observable
 @MainActor
 final class ChatViewModel {
@@ -22,6 +41,8 @@ final class ChatViewModel {
     var inputText = ""
     var isSending = false
     var statusLabel: String?
+    var activeTurnUserMessageID: UUID?
+    var activitySteps: [ActivityStep] = []
     var scrollTargetMessageID: UUID?
     var isViewingHistorySnapshot = false
     var historySnapshotLabel: String?
@@ -39,6 +60,7 @@ final class ChatViewModel {
     @ObservationIgnored private var lastFailedText: String?
     @ObservationIgnored private var lastFailedUserMessageID: UUID?
     @ObservationIgnored private var lastFailedAssistantMessageID: UUID?
+    @ObservationIgnored private var queuedTurns: [QueuedTurn] = []
 
     // Sent instead of typed text to silently keep an in-progress browser/ordering task
     // moving — never shown as a chat bubble, must match BROWSER_TASK_CONTINUE in api/index.js.
@@ -76,6 +98,7 @@ final class ChatViewModel {
     func prepareChat(userId: String) async {
         #if DEBUG
         Self.runSessionRuleCheck()
+        Self.runChatUXRuleCheck()
         #endif
         activeChatStartedAt = chatStartedAt(for: userId)
         await loadHistory(userId: userId)
@@ -144,7 +167,11 @@ final class ChatViewModel {
 
     private func sendMessage(userId: String, retryingUserMessageID: UUID?) {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isSending else { return }
+        guard !text.isEmpty else { return }
+        if isSending, retryingUserMessageID == nil {
+            enqueueTurn(text, userId: userId)
+            return
+        }
         if isViewingHistorySnapshot {
             startNewChat(userId: userId)
         }
@@ -153,11 +180,16 @@ final class ChatViewModel {
         }
         markChatActivity(for: userId)
         let pendingDecision = localActionDecision(for: text)
+        devTiming("user_message_received", [
+            "messageLength": text.count,
+            "isRetry": retryingUserMessageID != nil
+        ])
 
         inputText = ""
         isSending = true
         statusLabel = nil
         networkError = nil
+        activitySteps = Self.activityTemplate(for: text)
 
         let userMessageID: UUID
         if let retryingUserMessageID,
@@ -168,6 +200,7 @@ final class ChatViewModel {
             messages.append(userMessage)
             userMessageID = userMessage.id
         }
+        activeTurnUserMessageID = userMessageID
         // Only drop the previous partial-failure bubble when this send is actually
         // retrying that same turn — an unrelated new message shouldn't erase a
         // still-visible (if incomplete) reply from an earlier failed turn.
@@ -209,6 +242,8 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    finishActivity()
+                    drainQueuedTurns()
                 }
                 if pendingDecision {
                     await chatService.logNativeLocalAction(
@@ -229,8 +264,14 @@ final class ChatViewModel {
             if needsFreshLocation {
                 await MainActor.run {
                     statusLabel = "Checking location"
+                    setActivity("Getting your location", state: .active)
+                    devTiming("location_lookup_start", ["hadCachedLocation": location != nil])
                 }
                 location = await locationManager.currentLocationForLocalRequest() ?? location
+                await MainActor.run {
+                    setActivity("Getting your location", state: location == nil ? .failed : .complete)
+                    devTiming("location_lookup_end", ["success": location != nil])
+                }
             }
 
             if let localResult = await executeLocalRequestWithTimeout(text) {
@@ -245,11 +286,13 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    finishActivity()
                     if holdForConfirmation {
                         pendingLocalAction = actionResult
                     } else if shouldAutoOpen(actionResult, settings: settings) {
                         openActionLink(actionResult)
                     }
+                    drainQueuedTurns()
                 }
                 await chatService.logNativeLocalAction(
                     userId: userId,
@@ -273,23 +316,35 @@ final class ChatViewModel {
             )
             await MainActor.run { HapticManager.shared.impact(.light) }
             var fullText = ""
+            var textEventCount = 0
             var needsBrowserContinue = false
 
             for await event in stream {
                 if Task.isCancelled { break }
-                await MainActor.run {
-                    switch event {
-                    case .text(let chunk):
-                        fullText += chunk
+                switch event {
+                case .text(let chunk):
+                    fullText += chunk
+                    textEventCount += 1
+                    await MainActor.run {
+                        print("[ChatStream] text_event=\(textEventCount) chunk_chars=\(chunk.count) total_chars=\(fullText.count)")
                         guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
+                        setActivity("Preparing result", state: .active)
                         statusLabel = nil
+                    }
+                    await Task.yield()
 
-                    case .replace(let replacement):
+                case .replace(let replacement):
+                    await MainActor.run {
+                        print("[ChatStream] replace chars=\(replacement.count) after_text_events=\(textEventCount)")
                         fullText = replacement
                         guard updateAssistantMessage(id: assistantID, { $0.content = fullText }) else { return }
+                        setActivity("Preparing result", state: .active)
+                    }
 
-                    case .actions(let results):
+                case .actions(let results):
+                    await MainActor.run {
                         guard updateAssistantMessage(id: assistantID, { $0.actions.merging(results) }) else { return }
+                        markActionsComplete(results)
                         openDeepLinks(results)
                         if results.contains(where: { $0.success }) {
                             HapticManager.shared.success()
@@ -305,21 +360,35 @@ final class ChatViewModel {
                         Task {
                             await playBackendMusicActions(results, assistantID: assistantID, userId: userId, originalMessage: text)
                         }
+                    }
 
-                    case .status(let status, let label):
+                case .status(let status, let label):
+                    await MainActor.run {
                         setStatus(status, label)
+                        updateActivity(status: status, label: label)
+                    }
 
-                    case .transcription:
-                        break
+                case .transcription:
+                    break
 
-                    case .transcriptionError(let error):
+                case .transcriptionError(let error):
+                    await MainActor.run {
                         guard updateAssistantMessage(id: assistantID, { $0.content = error }) else { return }
+                        failActiveActivity()
                         statusLabel = nil
+                    }
 
-                    case .sources(let sources):
+                case .sources(let sources):
+                    await MainActor.run {
                         guard updateAssistantMessage(id: assistantID, { $0.sources = sources }) else { return }
+                    }
 
-                    case .done:
+                case .done:
+                    await MainActor.run {
+                        if textEventCount > 0 {
+                            _ = updateAssistantMessage(id: assistantID, { $0.content = fullText })
+                        }
+                        print("[ChatStream] done text_events=\(textEventCount) total_chars=\(fullText.count)")
                         _ = updateAssistantMessage(id: assistantID, { $0.isStreaming = false })
                         statusLabel = nil
                         networkError = nil
@@ -328,9 +397,12 @@ final class ChatViewModel {
                         lastFailedAssistantMessageID = nil
                         isSending = false
                         currentSendTask = nil
+                        finishActivity()
                         HapticManager.shared.impact(.soft)
+                    }
 
-                    case .error(let error):
+                case .error(let error):
+                    await MainActor.run {
                         lastFailedText = text
                         lastFailedUserMessageID = userMessageID
                         HapticManager.shared.error()
@@ -344,6 +416,7 @@ final class ChatViewModel {
                         statusLabel = nil
                         isSending = false
                         currentSendTask = nil
+                        failActiveActivity()
                     }
                 }
             }
@@ -357,12 +430,13 @@ final class ChatViewModel {
                 isSending = false
                 statusLabel = nil
                 currentSendTask = nil
+                finishActivity()
+                drainQueuedTurns()
             }
         }
     }
 
     func sendCommand(_ command: String, userId: String) {
-        guard !isSending else { return }
         inputText = command
         sendMessage(userId: userId)
     }
@@ -477,6 +551,8 @@ final class ChatViewModel {
                 })
                 isSending = false
                 statusLabel = nil
+                activeTurnUserMessageID = nil
+                activitySteps = []
             }
             return
         }
@@ -562,11 +638,16 @@ final class ChatViewModel {
         inputText = ""
         isSending = true
         statusLabel = isImage ? "Looking at image" : "Reading file"
+        activitySteps = [
+            ActivityStep(title: isImage ? "Looking at image" : "Reading file", state: .active),
+            ActivityStep(title: "Preparing result", state: .pending)
+        ]
         networkError = nil
 
         let attachmentTag = isImage ? "[Image attached]" : "[File attached: \(fileName)]"
         let userMessage = Message(role: .user, content: "\(text)\n\(attachmentTag)")
         messages.append(userMessage)
+        activeTurnUserMessageID = userMessage.id
 
         let assistantMessage = Message(role: .assistant, content: "", isStreaming: true)
         messages.append(assistantMessage)
@@ -605,7 +686,9 @@ final class ChatViewModel {
                     lastFailedText = nil
                     isSending = false
                     currentSendTask = nil
+                    finishActivity()
                     HapticManager.shared.impact(.soft)
+                    drainQueuedTurns()
                 }
             } catch {
                 await MainActor.run {
@@ -620,7 +703,9 @@ final class ChatViewModel {
                     statusLabel = nil
                     isSending = false
                     currentSendTask = nil
+                    failActiveActivity()
                     HapticManager.shared.error()
+                    drainQueuedTurns()
                 }
             }
         }
@@ -639,6 +724,9 @@ final class ChatViewModel {
         inputText = ""
         isSending = false
         statusLabel = nil
+        activeTurnUserMessageID = nil
+        activitySteps = []
+        queuedTurns.removeAll()
         networkError = nil
         scrollTargetMessageID = nil
         isViewingHistorySnapshot = false
@@ -683,6 +771,38 @@ final class ChatViewModel {
         assert(!canReuseSession(lastActivity: now.addingTimeInterval(-46 * 60), now: now), "past window should start new")
         assert(!canReuseSession(lastActivity: now.addingTimeInterval(-13 * 60 * 60), now: now), "different day should start new")
     }
+
+    static func runChatUXRuleCheck() {
+        let trainSteps = activityTemplate(for: "How do I get to Kings Langley by train?")
+        assert(trainSteps.filter { $0.title == "Getting your location" }.count == 1, "activity should include one location step")
+        assert(trainSteps.contains { $0.title == "Finding routes" }, "train activity should find routes")
+        assert(trainSteps.contains { $0.title == "Checking train options" }, "train activity should check train options")
+        assert(trainSteps.last?.title == "Preparing result", "activity should end with result preparation")
+
+        let drivingSteps = activityTemplate(for: "Drive to Birmingham International")
+        assert(drivingSteps.contains { $0.title == "Finding routes" }, "driving activity should find routes")
+        assert(!drivingSteps.contains { $0.title == "Checking train options" }, "driving activity should not show train-only work")
+
+        let queued = Message(role: .user, content: "I'm taking a train", queuedForActiveTask: true)
+        assert(queued.queuedForActiveTask, "correction message should be visibly queueable")
+
+        let fixture = """
+        {
+          "action": "get_directions",
+          "success": true,
+          "headline": "1h 48m · 10:12-12:00",
+          "bookingUrl": "https://www.thetrainline.com/search",
+          "routeContext": { "origin": "Solihull", "destination": "Kings Langley", "mode": "rail", "departure": "10:12", "arrival": "12:00", "duration": "1h 48m" },
+          "itinerary": [
+            { "type": "transit", "service": "X1 bus", "from": "Solihull", "to": "Birmingham International", "duration": "24 min" },
+            { "type": "rail", "service": "Avanti West Coast", "from": "Birmingham International", "to": "Milton Keynes Central", "duration": "1h 8m" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let action = try? JSONDecoder().decode(ActionResult.self, from: fixture)
+        assert(action?.itinerary?.count == 2, "train route should decode structured legs for card rendering")
+        assert(action?.routeContext?.duration == "1h 48m", "route duration should decode for card rendering")
+    }
     #endif
 
     private func chatStartedAt(for userId: String) -> String {
@@ -705,6 +825,19 @@ final class ChatViewModel {
     /// tracks real activity rather than when the session first opened.
     private func markChatActivity(for userId: String) {
         UserDefaults.standard.set(Date().oxyISO8601String, forKey: lastActivityKey(userId))
+    }
+
+    private func devTiming(_ event: String, _ fields: [String: Any] = [:]) {
+        #if DEBUG
+        var payload = fields
+        payload["area"] = "chat_ui"
+        payload["event"] = event
+        payload["t"] = Date().oxyISO8601String
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            print("[dev-timing] \(text)")
+        }
+        #endif
     }
 
     private func chatStartedAtKey(_ userId: String) -> String {
@@ -743,15 +876,128 @@ final class ChatViewModel {
         messages.removeAll { $0.id == id }
     }
 
-    private func shouldFetchLocation(for text: String) -> Bool {
+    private func enqueueTurn(_ text: String, userId: String) {
+        inputText = ""
+        let queued = Message(role: .user, content: text, queuedForActiveTask: true)
+        messages.append(queued)
+        queuedTurns.append(QueuedTurn(text: text, messageID: queued.id, userId: userId))
+        markChatActivity(for: userId)
+    }
+
+    private func drainQueuedTurns() {
+        guard !isSending, let next = queuedTurns.first else { return }
+        queuedTurns.removeFirst()
+        if let index = messages.firstIndex(where: { $0.id == next.messageID }) {
+            messages[index].queuedForActiveTask = false
+        }
+        inputText = next.text
+        sendMessage(userId: next.userId, retryingUserMessageID: next.messageID)
+    }
+
+    private static func activityTemplate(for text: String) -> [ActivityStep] {
         let lower = text.lowercased()
+        var titles: [String] = []
+        let needsLocation = shouldFetchLocationText(lower)
+        if needsLocation {
+            titles.append("Getting your location")
+        }
+        if lower.contains("fare") || lower.contains("ticket") || lower.contains("trainline") {
+            titles.append("Checking fares")
+        }
+        if lower.contains("train") || lower.contains("rail") {
+            titles.append("Finding routes")
+            titles.append("Checking train options")
+        } else if lower.contains("bus") || lower.contains("transit") || lower.contains("public transport") || lower.contains("directions") || lower.contains("route") {
+            titles.append("Finding routes")
+        } else if lower.contains("drive") || lower.contains("driving") || lower.contains("navigate") {
+            titles.append("Finding routes")
+        }
+        titles.append("Preparing result")
+        var seen = Set<String>()
+        return titles
+            .filter { seen.insert($0).inserted }
+            .map { ActivityStep(title: $0, state: .pending) }
+    }
+
+    private static func shouldFetchLocationText(_ lower: String) -> Bool {
         if lower.hasPrefix("remember ") || lower.hasPrefix("save ") || lower.hasPrefix("note down ") {
             return false
         }
         if lower.contains("play ") || lower.contains("pause") || lower.contains("playlist") || lower.contains("song") {
             return false
         }
-        return Self.localRequestTerms.contains { lower.contains($0) }
+        return localRequestTerms.contains { lower.contains($0) }
+    }
+
+    private func setActivity(_ title: String, state: ActivityStepState) {
+        guard !activitySteps.isEmpty else { return }
+        if let index = activitySteps.firstIndex(where: { $0.title == title }) {
+            activitySteps[index].state = state
+        } else if state != .complete {
+            activitySteps.insert(ActivityStep(title: title, state: state), at: max(activitySteps.count - 1, 0))
+        }
+        if state == .active {
+            for index in activitySteps.indices where activitySteps[index].title != title && activitySteps[index].state == .active {
+                activitySteps[index].state = .complete
+            }
+        }
+    }
+
+    private func updateActivity(status: String, label: String) {
+        let combined = "\(status) \(label)".lowercased()
+        if combined.contains("location") {
+            setActivity("Getting your location", state: .active)
+        } else if combined.contains("train") {
+            setActivity("Finding routes", state: .complete)
+            setActivity("Checking train options", state: .active)
+        } else if combined.contains("fare") || combined.contains("ticket") {
+            setActivity("Checking fares", state: .active)
+        } else if combined.contains("direction") || combined.contains("trip") || combined.contains("route") {
+            setActivity("Finding routes", state: .active)
+        } else if combined.contains("summary") || combined.contains("speaking") {
+            setActivity("Preparing result", state: .active)
+        }
+    }
+
+    private func markActionsComplete(_ results: [ActionResult]) {
+        for result in results {
+            let state: ActivityStepState = result.success ? .complete : .failed
+            switch result.action {
+            case "get_directions", "plan_trip":
+                setActivity("Finding routes", state: state)
+                if result.itinerary?.contains(where: { ($0.type ?? "").lowercased().contains("rail") }) == true {
+                    setActivity("Checking train options", state: state)
+                }
+            case "search_trains":
+                setActivity("Finding routes", state: state)
+                setActivity("Checking train options", state: state)
+            default:
+                break
+            }
+        }
+        setActivity("Preparing result", state: .active)
+    }
+
+    private func finishActivity() {
+        for index in activitySteps.indices where activitySteps[index].state == .active || activitySteps[index].state == .pending {
+            activitySteps[index].state = .complete
+        }
+        activeTurnUserMessageID = nil
+        activitySteps = []
+    }
+
+    private func failActiveActivity() {
+        if let active = activitySteps.firstIndex(where: { $0.state == .active }) {
+            activitySteps[active].state = .failed
+        } else if !activitySteps.isEmpty {
+            activitySteps[activitySteps.count - 1].state = .failed
+        }
+        activeTurnUserMessageID = nil
+        activitySteps = []
+    }
+
+    private func shouldFetchLocation(for text: String) -> Bool {
+        Self.shouldFetchLocationText(text.lowercased())
     }
 
     private func setStatus(_ status: String, _ label: String) {
@@ -792,9 +1038,11 @@ final class ChatViewModel {
                 message.isStreaming = false
             }
             statusLabel = nil
+            failActiveActivity()
             networkError = nil
             lastFailedText = messages.reversed().first(where: { $0.role == .user })?.content
             isSending = false
+            drainQueuedTurns()
         }
     }
 

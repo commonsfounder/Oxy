@@ -82,6 +82,33 @@ const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
+function devTimingEnabled() {
+  return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
+}
+
+function devTiming(area, event, fields = {}) {
+  if (!devTimingEnabled()) return;
+  console.log('[dev-timing]', JSON.stringify({
+    area,
+    event,
+    t: new Date().toISOString(),
+    ...fields
+  }));
+}
+
+async function timedDev(area, event, fields, fn) {
+  const started = Date.now();
+  devTiming(area, `${event}.start`, fields);
+  try {
+    const result = await fn();
+    devTiming(area, `${event}.end`, { ...fields, durationMs: Date.now() - started, success: true });
+    return result;
+  } catch (err) {
+    devTiming(area, `${event}.end`, { ...fields, durationMs: Date.now() - started, success: false, error: err.message });
+    throw err;
+  }
+}
+
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 const APP_URL = process.env.APP_URL || '';
@@ -507,7 +534,7 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
   return data;
 }
 
-const { OXCY_SYSTEM_PROMPT } = require('./prompts');
+const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('./prompts');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -993,6 +1020,7 @@ Current date: ${dateStr}
 Current time for internal reasoning only: ${timeStr}
 
 RESPONSE RULES:
+- ${MILLIE_VOICE_PROMPT.split('\n').join('\n- ')}
 - The user leads the conversation. Follow their topic instead of steering into unrelated stored memory.
 - Treat stored memory as background context for understanding, not as content to surface by default.
 - Only mention stored memory when it is directly relevant to what the user just said, asked, or asked you to do.
@@ -1005,6 +1033,7 @@ RESPONSE RULES:
 - Search and tool results can be stale. Check any dates inside them against the current date above; a result saying "as of" an earlier year is outdated, not proof something never happened. When sources conflict with the current date, say the information may be out of date and offer to check again — never invent releases, cancellations, or history to reconcile the conflict.
 - If the user questions or challenges your previous factual answer, correct only the factual issue. Do not answer with meta/persona language.
 - If an action is completed successfully, stop after one confirmation sentence. No follow-up question, no summary, no check-in.
+- If an action hits a small blocker, say the snag plainly and give the next step in one short sentence. Example: "Tiny snag - I need location access to find pizza near you. Turn it on and I'll try again."
 
 ---
 ${userContext}`;
@@ -1170,6 +1199,8 @@ Use this to resolve vague follow-ups like "it", "that", "there", "same", "again"
 
 function buildQuickTurnContext(preferences, statedContext = []) {
   return `FAST TURN MODE:
+${MILLIE_VOICE_PROMPT}
+
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
 Make the first sentence a tiny acknowledgement of 1-3 words when possible.
 Keep the total reply under 10 words unless the user explicitly asks for more.
@@ -1207,6 +1238,26 @@ function getDeterministicQuickReply(message) {
   if (/^(ok|okay|kk|cool|nice|great)$/.test(normalized)) return 'Got it.';
   if (/^(nah|no)$/.test(normalized)) return 'Got you.';
   return '';
+}
+
+function isPureContentGenerationTurn(message = '') {
+  const text = String(message || '').toLowerCase();
+  if (!text.trim()) return false;
+
+  const asksForProse = /\b(write|explain|describe|summari[sz]e|compare|teach|outline|draft|list|define)\b/.test(text) ||
+    /\b(what is|what are|how does|how do|why did|why does|tell me about)\b/.test(text);
+  if (!asksForProse) return false;
+
+  // These imply real-world action, tool execution, or persistent planning. Keep
+  // them eligible for the agent loop instead of treating them as plain prose.
+  const actionOrGoal = /\b(book|order|buy|purchase|send|text|message|call|email|create|add|schedule|remind|reserve|open|navigate|directions|find|search|look up|research|arrange|organize|handle|monitor|track|make money|earn cash|side hustle|moneti[sz]e|profit)\b/.test(text);
+  return !actionOrGoal;
+}
+
+function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, autonomyLevel = 'Active', pendingAction = null } = {}) {
+  if (quickTurn || pendingAction || autonomyLevel === 'Quiet') return false;
+  if (isPureContentGenerationTurn(message)) return false;
+  return true;
 }
 
 function formatLondonYMD(date = new Date()) {
@@ -2953,11 +3004,11 @@ function buildAvailableActions(enabled) {
     return `${id} [${desc}]`;
   }).join(', ');
 
-  return `What I can do for you (easiest way first):
+  return `I can help with the stuff you'd normally bounce between apps for:
 ${detailed}
 
-I can also remember things, find places, play music, make visuals, and handle simple plans for you. For app opens, I pre-fill using what I know about you so you just tap. Keep it super simple.
-I have my own concierge account (virtual card/balance) to spend, receive, top up, and fund opportunities for tasks on your behalf – like a real concierge's company card. When real keys (STRIPE_SECRET_KEY etc.) are set, I can execute actual payments, bank syncs, and charges tied to the account balance.`;
+I can remember things, find places, play music, make visuals, plan, book, draft, compare, and open apps with the boring bits pre-filled. Give me the goal and I'll either handle it or ask for the one thing I need.
+I also have a dev concierge account for approved spends and money flows when real payment keys are wired in.`;
 }
 
 async function savePreference(userId, key, value) {
@@ -4979,16 +5030,16 @@ function userFacingActionFailure(entry) {
       return 'Nearby place ranking needs Google Places enabled on the server. Uber itself does not need an API key.';
     }
     if (/need your current location|enable location/i.test(rawError)) {
-      return 'I need your current location to find that nearby place. Enable location and try again.';
+      return "Tiny snag - I need location access to find that nearby place. Turn it on and I'll try again.";
     }
     if (/couldn't find a nearby|No place results found/i.test(rawError)) {
-      return 'I could not find that nearby place from your current location. Try a different place name or enable location.';
+      return "I couldn't find a good nearby match. Try a different place name or turn location on.";
     }
     if (/Geocoding error|No results found/i.test(rawError)) {
-      return 'I could not find that destination. Try a different place name.';
+      return "I couldn't find that destination. Try a different place name.";
     }
   }
-  return rawError || 'That action failed.';
+  return rawError || 'Tiny snag - that action failed.';
 }
 
 function toSingleSentence(text) {
@@ -5424,6 +5475,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
 
 app.post('/chat', chatRateLimiter, async (req, res) => {
   const streaming = req.query.stream === 'true';
+  const requestStarted = Date.now();
 
   try {
     const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null } = req.body;
@@ -5436,11 +5488,17 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     const trace = createRequestTrace(`chat:${userId}:${Date.now()}`);
     trace.log(`request.start stream=${streaming} tts=${wantsTTS} msg=${JSON.stringify((message || '').slice(0, 80))}`);
+    devTiming('chat', 'user_message_received', {
+      streaming,
+      tts: wantsTTS,
+      hasLocation: Boolean(location),
+      messageLength: String(message || '').length
+    });
 
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
 
-    const pendingAction = await getPendingAction(userId);
+    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => getPendingAction(userId));
     if (pendingAction && isPendingCancelMessage(message)) {
       await clearPendingAction(userId);
       await respondWithResult({
@@ -5579,9 +5637,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return res.json(result);
     }
 
-    const contextualTurn = await inferContextualDeterministicTurn(userId, message, settings, trace, {
+    const contextualTurn = await timedDev('chat', 'intent_classification.contextual', {}, () => inferContextualDeterministicTurn(userId, message, settings, trace, {
       since: chatStartedAt
-    });
+    }));
     if (contextualTurn?.spokenOnly) {
       trace.log(`context_router.match ${contextualTurn.reason}`);
       await respondWithResult({
@@ -5599,6 +5657,11 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     const deterministicAction = contextualTurn || inferDeterministicAction(message, { settings });
+    devTiming('chat', 'intent_classification.end', {
+      route: deterministicAction ? 'deterministic_action' : 'model',
+      reason: deterministicAction?.reason || null,
+      durationMs: Date.now() - requestStarted
+    });
     if (deterministicAction) {
       trace.log(`intent_router.match ${deterministicAction.reason}`);
 
@@ -5609,7 +5672,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         res.flushHeaders();
         const sse = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         const sendStatus = (status, label, extra = {}) => sse({ type: 'status', status, label, ...extra });
-        let actionResults = await executeActions(userId, deterministicAction.actions, {
+        let actionResults = await timedDev('chat', 'action_execution', {
+          actionCount: deterministicAction.actions.length,
+          actions: deterministicAction.actions.map(action => action.type)
+        }, () => executeActions(userId, deterministicAction.actions, {
           userMessage: message,
           location,
           nativeHints,
@@ -5621,12 +5687,18 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             action: action.type,
             success: result?.success !== false
           })
-        });
+        }));
         const rawActionResults = actionResults;
         actionResults = normalizeActionResultsForClient(rawActionResults);
+        const compositionStarted = Date.now();
         const spoken = summarizeReadOnlyActionResults(rawActionResults, message) ||
           summarizeFinishedActionsForUser(actionResults) ||
           deterministicAction.spoken;
+        devTiming('chat', 'assistant_response_composition.end', {
+          route: 'deterministic_action',
+          durationMs: Date.now() - compositionStarted,
+          textLength: String(spoken || '').length
+        });
         sse({ type: 'actions', results: actionResults });
         sse({ type: 'replace', text: spoken });
         if (wantsTTS) {
@@ -5647,18 +5719,27 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         return;
       }
 
-      let actionResults = await executeActions(userId, deterministicAction.actions, {
+      let actionResults = await timedDev('chat', 'action_execution', {
+        actionCount: deterministicAction.actions.length,
+        actions: deterministicAction.actions.map(action => action.type)
+      }, () => executeActions(userId, deterministicAction.actions, {
         userMessage: message,
         location,
         nativeHints,
         trace,
         sequential: deterministicAction.actions.length > 1
-      }, trace);
+      }, trace));
       const rawActionResults = actionResults;
       actionResults = normalizeActionResultsForClient(rawActionResults);
+      const compositionStarted = Date.now();
       const spoken = summarizeReadOnlyActionResults(rawActionResults, message) ||
         summarizeFinishedActionsForUser(actionResults) ||
         deterministicAction.spoken;
+      devTiming('chat', 'assistant_response_composition.end', {
+        route: 'deterministic_action',
+        durationMs: Date.now() - compositionStarted,
+        textLength: String(spoken || '').length
+      });
       saveMessage(userId, 'assistant', { text: spoken, actions: actionResults }, trace)
         .catch(err => trace.log('supabase.conversations.insert_assistant.intent_async_fail', err.message));
       const result = { text: spoken, actions: actionResults };
@@ -5700,7 +5781,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     // === AGENTIC UPGRADE: Use ReAct loop for non-deterministic turns (fixes loop, orchestration, planning foundation) ===
     // This enables multiple think-act-observe iterations using native function calling.
     const autonomyLevel = (settings && settings.autonomy) || 'Active';
-    const useAgentic = !quickTurn && autonomyLevel !== 'Quiet' && !pendingAction;
+    const useAgentic = shouldUseAgenticLoopForMessage({ message, quickTurn, autonomyLevel, pendingAction });
+    if (streaming) {
+      trace.log(useAgentic ? 'stream.route agentic_single_text' : 'stream.route classic_incremental');
+    }
 
     if (useAgentic) {
       const isBroadMoneyGoal = /make money|earn cash|side hustle|monetize|make income|financial freedom|profit/i.test(message);
@@ -5758,6 +5842,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             res.setHeader('Connection', 'keep-alive');
           } catch {}
           const sse = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+          trace.log(`stream.agentic.text_single len=${spoken.length}`);
           sse({ type: 'text', chunk: spoken });
           if (actionResults.length) sse({ type: 'actions', results: actionResults });
           sse({ type: 'done' });
@@ -5807,6 +5892,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         let fullText = '';
         let firstChunk = true;
         let hasStreamedText = false;
+        let emittedTextEvents = 0;
         let actionMarkupStarted = false;
         let heldDisplayText = '';
         const emitSafeDisplayText = text => {
@@ -5817,6 +5903,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             const visible = heldDisplayText.slice(0, actionIndex);
             if (visible) {
               hasStreamedText = true;
+              emittedTextEvents += 1;
+              trace.log(`stream.text_chunk.${emittedTextEvents} len=${visible.length} mode=before_action`);
               sse({ type: 'text', chunk: visible });
             }
             heldDisplayText = '';
@@ -5828,6 +5916,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             heldDisplayText = heldDisplayText.slice(-8);
             if (visible) {
               hasStreamedText = true;
+              emittedTextEvents += 1;
+              trace.log(`stream.text_chunk.${emittedTextEvents} len=${visible.length} mode=incremental`);
               sse({ type: 'text', chunk: visible });
             }
           }
@@ -5835,6 +5925,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         const flushSafeDisplayText = () => {
           if (actionMarkupStarted || !heldDisplayText) return;
           hasStreamedText = true;
+          emittedTextEvents += 1;
+          trace.log(`stream.text_chunk.${emittedTextEvents} len=${heldDisplayText.length} mode=flush`);
           sse({ type: 'text', chunk: heldDisplayText });
           heldDisplayText = '';
         };
@@ -5876,6 +5968,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             trace.log('gemini.blank_spoken_recovery_success');
           }
         }
+        trace.log(`stream.text_events total=${emittedTextEvents} final_len=${spoken.length}`);
 
         // Execute actions in parallel
         let actionResults = [];
@@ -5885,13 +5978,16 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             sse({ type: 'replace', text: '' });
             hasStreamedText = false;
           }
-          actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace, {
+          actionResults = await timedDev('chat', 'action_execution', {
+            actionCount: actions.length,
+            actions: actions.map(action => action.type)
+          }, () => executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
               action: action.type,
               success: result?.success !== false
             })
-          });
+          }));
           dataResults = getStructuredDataResults(actionResults, message);
           actionResults = normalizeActionResultsForClient(actionResults);
           sse({ type: 'actions', results: actionResults });
@@ -5916,6 +6012,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             { role: 'model', parts: [{ text: spoken || '…' }] },
             { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
           );
+          const compositionStarted = Date.now();
           const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
             model: chatModel,
             contents: followUpRequest.contents,
@@ -5932,6 +6029,11 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             }
           }
           spoken = guardVisibleDataResponse(parseActions(spoken).spoken || spoken, dataResults);
+          devTiming('chat', 'assistant_response_composition.end', {
+            route: 'data_followup',
+            durationMs: Date.now() - compositionStarted,
+            textLength: String(spoken || '').length
+          });
           sse({ type: 'replace', text: spoken });
           if (ttsStreamer) ttsStreamer.ingest(spoken);
         }
@@ -5969,6 +6071,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
 
         trace.log('request.total');
+        devTiming('chat', 'request_total.end', { durationMs: Date.now() - requestStarted });
         sse({ type: 'done' });
         res.end();
 
@@ -6009,7 +6112,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     let actionResults = [];
     let dataResults = [];
     if (actions.length > 0) {
-      actionResults = await executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace);
+      actionResults = await timedDev('chat', 'action_execution', {
+        actionCount: actions.length,
+        actions: actions.map(action => action.type)
+      }, () => executeActions(userId, actions, { userMessage: message, location, nativeHints, trace }, trace));
       dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
@@ -6029,12 +6135,18 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         { role: 'model', parts: [{ text: spoken || '…' }] },
         { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
       );
+      const compositionStarted = Date.now();
       const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
         model: chatModel,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       }));
       spoken = guardVisibleDataResponse(parseActions(followUp.text || '').spoken, dataResults);
+      devTiming('chat', 'assistant_response_composition.end', {
+        route: 'data_followup',
+        durationMs: Date.now() - compositionStarted,
+        textLength: String(spoken || '').length
+      });
     }
     const actionConfirmation = summarizeFinishedActionsForUser(actionResults);
     if (actionConfirmation) spoken = actionConfirmation;
@@ -6067,6 +6179,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     trace.log('request.total');
+    devTiming('chat', 'request_total.end', { durationMs: Date.now() - requestStarted });
     res.json(result);
     postResponseTasks(userId, message);
 
@@ -6594,6 +6707,8 @@ module.exports.inferCompoundReadOnlyTurn = inferCompoundReadOnlyTurn;
 module.exports.summarizeReadOnlyActionResults = summarizeReadOnlyActionResults;
 module.exports.getStructuredDataResults = getStructuredDataResults;
 module.exports.guardVisibleDataResponse = guardVisibleDataResponse;
+module.exports.isPureContentGenerationTurn = isPureContentGenerationTurn;
+module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
