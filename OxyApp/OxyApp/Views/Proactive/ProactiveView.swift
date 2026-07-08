@@ -133,13 +133,13 @@ struct ProactiveView: View {
 
             // Greeting.
             Text(greeting)
-                .font(.heroDisplay(30))
+                .font(.heroDisplay(26))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(3)
                 .minimumScaleFactor(0.6)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 28)
+                .padding(.top, 20)
 
             if let weather {
                 Text(weatherLine(weather))
@@ -455,11 +455,15 @@ struct ProactiveView: View {
             }
         } else {
             actionableBoardSection {
-                cardLabel("Wellbeing", icon: "heart.fill")
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("See your sleep, steps, and heart rate here every morning.")
-                        .font(.appBody(15))
-                        .foregroundStyle(Color.appMuted)
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        cardLabel("Wellbeing", icon: "heart.fill")
+                        Text("Sleep, steps, and heart rate when Health is connected.")
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.appMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
                     Button {
                         if native.healthPermissionRequested {
                             if let url = URL(string: "x-apple-health://") { UIApplication.shared.open(url) }

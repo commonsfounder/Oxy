@@ -2549,9 +2549,10 @@ async function getMemory(userId, trace = null, query = '') {
     : await fetchMemory();
 
   if (error || !data) return '';
-  const manualProfile = data.find(m => m.source === 'manual_profile')?.content?.trim();
+  const visibleRows = (data || []).filter(isUserFacingMemory);
+  const manualProfile = visibleRows.find(m => m.source === 'manual_profile')?.content?.trim();
 
-  let facts = data
+  let facts = visibleRows
     .filter(m => m.source !== 'manual_profile')
     .map(m => ({ content: m.content, ts: m.created_at }));
 
@@ -2570,7 +2571,31 @@ async function getMemory(userId, trace = null, query = '') {
 }
 
 const INTERNAL_MEMORY_SOURCES = ['agent_episodic'];
-function isUserFacingMemory(row) { return !INTERNAL_MEMORY_SOURCES.includes(row?.source); }
+function isUsefulMemoryContent(content) {
+  const text = String(content || '').trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (/trace\s+agent-[\w-]+/.test(lower)) return false;
+  if (/^agent\s+handled\s+goal\b/.test(lower)) return false;
+  if (/\b(?:run|task|trace|agent)-\d{6,}\b/.test(lower)) return false;
+
+  const letters = Array.from(text).filter(ch => /\p{L}/u.test(ch)).length;
+  if (letters < 4) return false;
+
+  const words = lower.match(/[\p{L}\p{N}']+/gu) || [];
+  const filler = new Set(['huh', 'uh', 'um', 'ok', 'okay', 'lol', 'yeah', 'yes', 'no', 'test']);
+  if (words.length <= 2 && words.every(w => filler.has(w))) return false;
+  if (/\b(?:is|are|am|was|were|be|being|been)\s+(?:huh|uh|um|ok|okay|lol|test)\b/.test(lower)) return false;
+
+  const quoteChars = (text.match(/["“”]/g) || []).length;
+  if (quoteChars % 2 === 1) return false;
+
+  return true;
+}
+
+function isUserFacingMemory(row) {
+  return !INTERNAL_MEMORY_SOURCES.includes(row?.source) && isUsefulMemoryContent(row?.content);
+}
 
 async function saveMemory(userId, content, source = 'fact') {
   if (source === 'manual_profile') {
@@ -2666,13 +2691,14 @@ async function getMemorySummary(userId) {
     return { total: 0, profile: false, learned: 0, lastUpdated: null };
   }
 
-  const manualProfile = data.find(m => m.source === 'manual_profile');
-  const learned = data.filter(m => m.source !== 'manual_profile');
+  const visibleRows = data.filter(isUserFacingMemory);
+  const manualProfile = visibleRows.find(m => m.source === 'manual_profile');
+  const learned = visibleRows.filter(m => m.source !== 'manual_profile');
   return {
-    total: data.length,
+    total: visibleRows.length,
     profile: !!manualProfile,
     learned: learned.length,
-    lastUpdated: data[0]?.created_at || null
+    lastUpdated: visibleRows[0]?.created_at || null
   };
 }
 
@@ -2683,7 +2709,7 @@ async function extractMemoryFact(userId, text) {
       `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
     );
     const fact = result.response.text().trim().replace(/^["']|["']$/g, '');
-    if (!fact) return null;
+    if (!isUsefulMemoryContent(fact)) return null;
 
     // Skip if we already know this
     const { data: existing } = await supabase
@@ -2700,6 +2726,7 @@ async function extractMemoryFact(userId, text) {
 
 function shouldSaveMemory(text) {
   if (isMemoryDeletionRequest(text)) return false;
+  if (!isUsefulMemoryContent(text)) return false;
   const triggers = [
     'remember', 'my ', "i'm ", 'i am ', 'i work', 'i live',
     'i hate', 'i love', 'i need', 'i want', "i've got", 'i have',
@@ -3809,7 +3836,8 @@ app.post('/memory', async (req, res) => {
     const { userId, content } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
-    await saveMemory(userId, content.trim(), 'manual_profile');
+    if (!isUsefulMemoryContent(content)) return res.status(400).json({ error: 'memory is too short or unclear.' });
+    await saveMemory(userId, content.trim(), 'manual');
 
     res.json({ success: true });
   } catch (err) {
@@ -6769,3 +6797,4 @@ module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;
 module.exports.isUserFacingMemory = isUserFacingMemory;
+module.exports.isUsefulMemoryContent = isUsefulMemoryContent;

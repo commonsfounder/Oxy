@@ -253,7 +253,7 @@ private struct BackendURLEditorSheet: View {
                     .keyboardType(.URL)
 
                     Text("Leave blank to use the default Cloud Run backend.")
-                        .font(.system(size: 12, weight: .light))
+                        .font(.appBody(12))
                         .foregroundStyle(Color.mgSecondary)
 
                     if !currentURL.isEmpty {
@@ -318,7 +318,7 @@ private struct InitiativeScroller: View {
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.mgHeading)
                 Text(description)
-                    .font(.system(size: 12, weight: .light))
+                    .font(.appBody(12))
                     .foregroundStyle(Color.mgSecondary)
             }
 

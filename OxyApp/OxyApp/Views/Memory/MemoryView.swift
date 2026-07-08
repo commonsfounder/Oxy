@@ -71,7 +71,7 @@ struct MemoryView: View {
                                             .font(.system(size: 13, weight: .medium))
                                             .foregroundStyle(Color.mgSecondary)
                                         Text("Remember something…")
-                                            .font(.appBody(15, weight: .light))
+                                            .font(.appBody(15))
                                             .foregroundStyle(Color.mgSecondary)
                                         Spacer(minLength: 0)
                                     }
@@ -109,12 +109,12 @@ struct MemoryView: View {
                             }
                         } else if items.isEmpty {
                             Text("Nothing remembered yet. Add something above, or just talk — it picks things up as you go.")
-                                .font(.system(size: 14, weight: .light))
+                                .font(.appBody(14))
                                 .foregroundStyle(Color.mgSecondary)
                                 .padding(.vertical, 20)
                         } else if groupedItems.isEmpty {
                             Text("No memories match \"\(search)\".")
-                                .font(.system(size: 14, weight: .light))
+                                .font(.appBody(14))
                                 .foregroundStyle(Color.mgSecondary)
                                 .padding(.vertical, 20)
                         }
@@ -324,7 +324,7 @@ private struct MemoryRow: View {
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.content)
-                        .font(.appBody(15, weight: .light))
+                        .font(.appBody(15))
                         .foregroundStyle(Color.mgHeading)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)

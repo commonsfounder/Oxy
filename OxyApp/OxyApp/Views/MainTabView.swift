@@ -154,7 +154,7 @@ struct MoreView: View {
 
                 if !accountEmail.isEmpty {
                     Text(accountEmail)
-                        .font(.appBody(12, weight: .light))
+                        .font(.appBody(12))
                         .foregroundStyle(Color.appMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
