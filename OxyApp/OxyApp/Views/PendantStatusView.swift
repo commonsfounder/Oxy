@@ -33,21 +33,24 @@ struct PendantStatusView: View {
                             PendantPairingSection(pendant: NativeIntegrationManager.shared.pendant)
 
                             // Live vitals — only meaningful once a device is linked.
-                            VStack(alignment: .leading, spacing: 4) {
-                                MilgrainSectionHeader(title: "Live")
-                                    .padding(.bottom, 12)
-                                if pendant.isConnected {
+                            // Collapses entirely while disconnected instead of showing
+                            // a dead "no data" placeholder.
+                            if pendant.isConnected {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    AppSectionHeader(title: "Live")
+                                        .padding(.bottom, 12)
                                     DeviceStatusCard(telemetry: telemetry)
-                                } else {
-                                    Text("No live data — pendant not connected.")
-                                        .font(.system(size: 13, weight: .regular))
-                                        .foregroundStyle(Color.mgSecondary)
-                                        .padding(.vertical, 11)
                                 }
                             }
 
-                            // Hardware behaviour.
-                            hardwareConfig
+                            // Hardware behaviour — only relevant once a pendant is paired.
+                            if pendant.isConnected {
+                                hardwareConfig
+                            } else {
+                                Text("Pair your pendant to configure it and see live status.")
+                                    .font(.rowSecondary)
+                                    .foregroundStyle(Color.appMuted)
+                            }
                         }
                         .padding(.horizontal, AppSpacing.margin)
                         .padding(.top, 12)
@@ -77,47 +80,22 @@ struct PendantStatusView: View {
     // MARK: - Hardware config
 
     private var hardwareConfig: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            MilgrainSectionHeader(title: "Hardware Config")
-                .padding(.bottom, 10)
-
-            VStack(spacing: 0) {
-                configRow(label: "WAKEWORD", options: ["CHIN TILT", "TAP"], selection: $wakeword)
-                MilgrainDivider()
-                configRow(label: "AUDIO OUTPUT", options: ["BLE BUDS", "WHISPER HAPTICS"], selection: $audioOutput)
-                MilgrainDivider()
-                configRow(label: "HAPTIC FORCE", options: ["LOW", "MID", "HIGH"], selection: $hapticForce)
-            }
+        VStack(alignment: .leading, spacing: 20) {
+            AppSectionHeader(title: "Pendant behaviour")
+            configControl(title: "Wake gesture",
+                          options: ["CHIN TILT", "TAP"], labels: ["Chin tilt", "Tap"], selection: $wakeword)
+            configControl(title: "Audio",
+                          options: ["BLE BUDS", "WHISPER HAPTICS"], labels: ["Earbuds", "Whisper"], selection: $audioOutput)
+            configControl(title: "Vibration",
+                          options: ["LOW", "MID", "HIGH"], labels: ["Light", "Medium", "Strong"], selection: $hapticForce)
         }
     }
 
-    // Raw label + right-aligned value (#555). No pill/segmented control — tapping
-    // the row cycles to the next option; a small up/down glyph signals that it cycles
-    // (otherwise the value reads as a static, non-interactive readout).
-    private func configRow(label: String, options: [String], selection: Binding<String>) -> some View {
-        Button {
-            let current = options.firstIndex(of: selection.wrappedValue) ?? 0
-            selection.wrappedValue = options[(current + 1) % options.count]
-        } label: {
-            HStack(alignment: .center, spacing: 16) {
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(1.0)
-                    .foregroundStyle(Color.mgSecondary)
-                Spacer()
-                Text(selection.wrappedValue)
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(Color.mgCaption)
-                    .multilineTextAlignment(.trailing)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color.mgSecondary)
-            }
-            .contentShape(Rectangle())
+    private func configControl(title: String, options: [String], labels: [String], selection: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.rowTitle).foregroundStyle(Color.appInk)
+            AppSegmented(options: options, labels: labels, selection: selection)
         }
-        .buttonStyle(.appScale(0.98))
-        .padding(.vertical, 14)
-        .accessibilityHint("Cycles options")
     }
 }
 
@@ -140,6 +118,12 @@ private struct PendantPairingSection: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.mgHeading)
                     Spacer()
+                    if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(Color.appMuted)
+                            .padding(.trailing, 6)
+                    }
                     // Static sans label — no status dot, no pulse (Milgrain spec).
                     Text(statusDescription)
                         .font(.appBody(15, weight: .semibold))
@@ -147,6 +131,14 @@ private struct PendantPairingSection: View {
                         .animation(.easeInOut(duration: 0.3), value: pendant.connectionState)
                 }
                 .padding(.vertical, 16)
+
+                if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
+                    Text("Hold the pendant close to your phone.")
+                        .font(.rowSecondary)
+                        .foregroundStyle(Color.appMuted)
+                        .padding(.bottom, 12)
+                        .transition(.opacity)
+                }
 
                 if let name = pendant.peripheralName, pendant.isConnected {
                     MilgrainDivider()
@@ -188,7 +180,7 @@ private struct PendantPairingSection: View {
                             pendant.stopScan()
                         }
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.mgSecondary)
+                        .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     } else {
                         Button("Scan for pendant") {
