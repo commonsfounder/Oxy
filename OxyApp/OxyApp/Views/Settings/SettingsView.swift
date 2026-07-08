@@ -103,7 +103,7 @@ struct SettingsView: View {
 
                         Spacer().frame(height: 32)
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 12)
                     }
                     }

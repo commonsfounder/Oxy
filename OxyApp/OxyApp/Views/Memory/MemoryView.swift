@@ -119,7 +119,7 @@ struct MemoryView: View {
                                 .padding(.vertical, 20)
                         }
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
 
@@ -129,13 +129,13 @@ struct MemoryView: View {
                             .foregroundStyle(Color.mgHeading)
                             .padding(.top, index == 0 ? 16 : 30)
                             .padding(.bottom, 4)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
 
                         ForEach(group.items) { item in
                             MemoryRow(item: item, onTap: { editingItem = item })
-                                .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 0))
+                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 0))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -150,7 +150,7 @@ struct MemoryView: View {
                                 }
 
                             MilgrainDivider()
-                                .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                                .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                                 .listRowSeparator(.hidden)
                                 .listRowBackground(Color.clear)
                         }
@@ -167,7 +167,7 @@ struct MemoryView: View {
                                 .padding(.vertical, 18)
                         }
                         .buttonStyle(.appScale(0.98))
-                        .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }

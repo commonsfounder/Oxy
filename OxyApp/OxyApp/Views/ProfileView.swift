@@ -118,7 +118,7 @@ struct ProfileView: View {
                                 }
                             }
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, AppSpacing.margin)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
                     }

@@ -28,12 +28,12 @@ struct ScreenHeaderView: View {
             }
 
             Text(title)
-                .font(.appBody(17, weight: .semibold))
+                .font(.screenTitle)
                 .foregroundStyle(Color.mgHeading)
 
             Spacer()
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, AppSpacing.margin)
         .padding(.vertical, 8)
         // Opaque, and extended up through the status-bar inset, so scrolled content
         // can never ghost above or behind the header at the very top of the screen.

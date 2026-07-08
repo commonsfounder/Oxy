@@ -109,7 +109,7 @@ struct MoreView: View {
                             .opacity(appeared ? 1 : 0)
                             .animation(.appSpring.delay(0.22), value: appeared)
                     }
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 32)
                     .padding(.bottom, 48)
                 }

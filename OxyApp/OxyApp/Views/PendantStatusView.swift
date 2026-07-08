@@ -49,7 +49,7 @@ struct PendantStatusView: View {
                             // Hardware behaviour.
                             hardwareConfig
                         }
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, AppSpacing.margin)
                         .padding(.top, 12)
                         .padding(.bottom, 40)
                         // Mechanical-switch pulse for each config change.
