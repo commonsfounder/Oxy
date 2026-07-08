@@ -28,7 +28,7 @@ struct SettingsView: View {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
                     ScrollView {
                     appGlassContainer(spacing: 24) {
-                    VStack(spacing: 36) {
+                    VStack(spacing: 28) {
                         settingsSection(title: "Appearance") {
                             // Theme picker removed: every app* token is hardcoded dark and the
                             // root pins .preferredColorScheme(.dark), so the control was a no-op
@@ -72,7 +72,7 @@ struct SettingsView: View {
 
                             MilgrainDivider()
 
-                            settingRow(label: "Confirm Sensitive Apps", description: "Ask before opening banking, health, or other private apps.") {
+                            settingRow(label: "Ask before sensitive actions", description: "Ask before opening banking, health, or other private apps.") {
                                 MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
@@ -331,10 +331,10 @@ private struct InitiativeScroller: View {
 
     private var description: String {
         switch OxySettings.normalizedAutonomy(selection) {
-        case "Quiet": return "Only speaks when asked."
-        case "Low": return "Light nudges, mostly reactive."
-        case "Active": return "Looks for useful openings."
-        case "Bold": return "More opinionated and proactive."
+        case "Reactive": return "Only acts when you ask."
+        case "Reserved": return "Light nudges, mostly reactive."
+        case "Proactive": return "Looks for useful openings."
+        case "Autonomous": return "Acts ahead for you, and tells you after."
         default: return "Helpful without being noisy."
         }
     }
@@ -425,7 +425,7 @@ struct OxySettings: Codable {
     static let designTemplates = ["compact", "glass", "dense"]
     static let designPalettes = ["stone", "mint", "blue", "violet"]
     static let designMotions = ["calm", "snappy", "none"]
-    static let autonomyLevels = ["Quiet", "Low", "Balanced", "Active", "Bold"]
+    static let autonomyLevels = ["Reactive", "Reserved", "Balanced", "Proactive", "Autonomous"]
     static func normalizedTheme(_ theme: String) -> String {
         switch theme {
         case "light", "system":
@@ -436,14 +436,16 @@ struct OxySettings: Codable {
     }
     static func normalizedAutonomy(_ autonomy: String) -> String {
         switch autonomy {
-        case "Quiet", "Low":
-            return autonomy
-        case "Medium", "Balanced":
+        case "Reactive", "Quiet":
+            return "Reactive"
+        case "Reserved", "Low":
+            return "Reserved"
+        case "Balanced", "Medium":
             return "Balanced"
-        case "Medium-High", "Active", "High":
-            return "Active"
-        case "Assertive", "Bold":
-            return "Bold"
+        case "Proactive", "Active", "Medium-High", "High":
+            return "Proactive"
+        case "Autonomous", "Bold", "Assertive":
+            return "Autonomous"
         default:
             return "Balanced"
         }
