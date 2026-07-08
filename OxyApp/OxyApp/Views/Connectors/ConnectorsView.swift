@@ -6,11 +6,11 @@ import UIKit
 struct ConnectorsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismiss) private var dismiss
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
     @State private var googleStatus: GoogleStatus = .idle
     @State private var errorMessage: String?
-    @State private var cardsVisible = false
 
     enum GoogleStatus: String {
         case idle, connecting, connected, needsReconnect, error
@@ -19,49 +19,51 @@ struct ConnectorsView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.oxyBg.ignoresSafeArea()
+                Color.appBackground.ignoresSafeArea()
 
-                if isLoading {
-                    VStack(spacing: 12) {
-                        OxySkeletonCard(height: 92)
-                        OxySkeletonCard(height: 148)
-                        OxySkeletonCard(height: 148)
-                    }
-                    .padding(16)
-                } else {
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            if let errorMessage {
-                                ErrorBanner(message: errorMessage)
-                            }
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Connections", onBack: { dismiss() })
 
-                            // Google section
-                            googleSection
-                                .opacity(cardsVisible ? 1 : 0)
-                                .offset(y: cardsVisible ? 0 : 18)
-                                .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(0.02), value: cardsVisible)
-
-                            // Consumer-friendly grouping: Real smarts vs Quick opens (easiest thing ever)
-                            let nonGoogle = connectors.filter { $0.id != "google" && $0.implemented }
-                            let realActions = nonGoogle.filter { $0.type == "api" || $0.type == nil }
-                            let quickOpens = nonGoogle.filter { $0.type == "handoff" || $0.type == "hybrid" }
-
-                            // Show "Oxy can do this for you" first (real actions), then "Quick opens" (super easy handoffs)
-                            if !realActions.isEmpty {
-                                connectorSection(title: "I can handle for you", connectors: realActions)
-                            }
-                            if !quickOpens.isEmpty {
-                                connectorSection(title: "Quick opens (I pre-fill everything)", connectors: quickOpens)
-                            }
+                    if isLoading {
+                        VStack(spacing: 12) {
+                            OxySkeletonCard(height: 92)
+                            OxySkeletonCard(height: 148)
+                            OxySkeletonCard(height: 148)
                         }
-                        .padding(16)
+                        .padding(.horizontal, AppSpacing.margin)
+                        .padding(.top, 16)
+                    } else {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 28) {
+                                if let errorMessage {
+                                    ErrorBanner(message: errorMessage)
+                                }
+
+                                let connectedRows = connectors.filter { $0.enabled }
+                                let availableRows = connectors.filter {
+                                    $0.implemented && !$0.enabled && ($0.type == "api" || $0.type == nil)
+                                }
+                                let quickActionRows = connectors.filter {
+                                    $0.implemented && !$0.enabled && ($0.type == "handoff" || $0.type == "hybrid")
+                                }
+
+                                if !connectedRows.isEmpty {
+                                    section(title: "Connected", connectors: connectedRows)
+                                }
+                                if !availableRows.isEmpty {
+                                    section(title: "Available", connectors: availableRows)
+                                }
+                                if !quickActionRows.isEmpty {
+                                    section(title: "Quick actions", connectors: quickActionRows)
+                                }
+                            }
+                            .padding(.horizontal, AppSpacing.margin)
+                            .padding(.vertical, 16)
+                        }
                     }
                 }
             }
-            .navigationTitle("Connectors")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color.oxySurface1, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 await loadConnectors()
             }
@@ -76,94 +78,125 @@ struct ConnectorsView: View {
         }
     }
 
-    // MARK: - Google Section
+    // MARK: - Sections
 
-    private var googleConnector: Connector? {
-        connectors.first(where: { $0.id == "google" })
-    }
+    private func section(title: String, connectors: [Connector]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            AppSectionHeader(title: title)
+                .padding(.bottom, 12)
 
-    private var googleSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Google")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-
-            HStack(spacing: 14) {
-                AppIconView(candidates: [googleConnector?.icon ?? "", "google"], fallbackSystemName: "envelope.fill")
-                    .frame(width: 44, height: 44)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Google")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.oxyText)
-
-                    Text(googleSubtitle)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Color.oxySub)
-                }
-
-                Spacer()
-
-                Button(action: handleGoogleAction) {
-                    ConnectorPill(
-                        label: googleButtonLabel,
-                        tint: googleStatus == .connected ? Color.oxySub : Color.oxyText,
-                        isBusy: googleStatus == .connecting
-                    )
-                }
-                .disabled(googleStatus == .connecting)
-            }
-            .padding(14)
-        }
-    }
-
-    private var googleButtonLabel: String {
-        switch googleStatus {
-        case .idle: return "Connect"
-        case .connecting: return "Connecting…"
-        case .connected: return "Disable"
-        case .needsReconnect: return "Reconnect"
-        case .error: return "Retry"
-        }
-    }
-
-    private var googleSubtitle: String {
-        switch googleStatus {
-        case .connected:
-            return "Gmail · Calendar · Connected"
-        case .needsReconnect:
-            return "Gmail · Calendar · Reconnect needed"
-        default:
-            return "Gmail · Calendar"
-        }
-    }
-
-    // MARK: - Connector Section
-
-    private func connectorSection(title: String, connectors: [Connector]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.oxySub)
-                .textCase(.uppercase)
-                .tracking(0.5)
-
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible())
-            ], spacing: 12) {
+            VStack(spacing: 0) {
                 ForEach(Array(connectors.enumerated()), id: \.element.id) { index, connector in
-                    ConnectorCard(
-                        connector: connector,
-                        onAction: { handleConnectorAction(connector) }
-                    )
-                    .opacity(cardsVisible ? 1 : 0)
-                    .offset(y: cardsVisible ? 0 : 22)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.8).delay(Double(index) * 0.08), value: cardsVisible)
+                    connectorRow(connector)
+                    if index < connectors.count - 1 {
+                        AppDivider()
+                    }
                 }
             }
+        }
+    }
+
+    // MARK: - Row
+
+    private func connectorRow(_ connector: Connector) -> some View {
+        HStack(spacing: 14) {
+            AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol(connector.id))
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(connector.name)
+                    .font(.rowTitle)
+                    .foregroundStyle(Color.appInk)
+
+                Text(capabilityCaption(connector))
+                    .font(.rowSecondary)
+                    .foregroundStyle(Color.appMuted)
+            }
+
+            Spacer(minLength: 8)
+
+            trailingControl(connector)
+        }
+        .padding(.vertical, 14)
+        .frame(minHeight: 44)
+        .opacity(connector.implemented ? 1.0 : 0.45)
+    }
+
+    private func capabilityCaption(_ connector: Connector) -> String {
+        if connector.id == "google" { return "Gmail · Calendar" }
+        return connector.category
+    }
+
+    @ViewBuilder
+    private func trailingControl(_ connector: Connector) -> some View {
+        if connector.id == "google" && googleStatus == .connecting {
+            ProgressView()
+                .scaleEffect(0.65)
+                .tint(Color.appMuted)
+        } else if connector.enabled {
+            Button {
+                handleConnectorAction(connector)
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.appAccent)
+                        .frame(width: 6, height: 6)
+                    Text("Connected")
+                        .font(.rowSecondary)
+                        .foregroundStyle(Color.appMuted)
+                }
+            }
+            .disabled(!connector.implemented)
+            .buttonStyle(.appScale(0.97))
+        } else if connector.connectionState == "needs_reconnect" {
+            Button {
+                if connector.id == "google" {
+                    connectGoogle()
+                } else {
+                    handleConnectorAction(connector)
+                }
+            } label: {
+                Text("Reconnect")
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appAccent)
+            }
+            .disabled(!connector.implemented)
+            .buttonStyle(.appScale(0.97))
+        } else {
+            Button {
+                handleConnectorAction(connector)
+            } label: {
+                Text("Connect")
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+            }
+            .disabled(!connector.implemented)
+            .buttonStyle(.appScale(0.97))
+        }
+    }
+
+    private func sfSymbol(_ id: String) -> String {
+        switch id {
+        case "google":    return "envelope.fill"
+        case "imessage":  return "message.fill"
+        case "whatsapp":  return "phone.fill"
+        case "spotify":   return "music.note"
+        case "reminders": return "checklist"
+        case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
+        case "uber":      return "car.fill"
+        case "telegram":  return "paperplane.fill"
+        case "monzo":     return "banknote.fill"
+        case "homekit":   return "house.fill"
+        case "trainline": return "tram.fill"
+        case "maps":      return "map.fill"
+        case "notion":    return "doc.text.fill"
+        case "betfair":   return "chart.line.uptrend.xyaxis"
+        case "netflix":   return "play.tv.fill"
+        default:          return "puzzlepiece.fill"
         }
     }
 
@@ -184,10 +217,6 @@ struct ConnectorsView: View {
                 }
                 errorMessage = nil
                 isLoading = false
-                cardsVisible = false
-                DispatchQueue.main.async {
-                    cardsVisible = true
-                }
             }
         } catch {
             await MainActor.run {
@@ -196,7 +225,6 @@ struct ConnectorsView: View {
                     googleStatus = .error
                 }
                 isLoading = false
-                cardsVisible = true
             }
         }
     }
@@ -232,7 +260,7 @@ struct ConnectorsView: View {
     }
 
     private func handleGoogleAction() {
-        guard let connector = googleConnector else {
+        guard let connector = connectors.first(where: { $0.id == "google" }) else {
             connectGoogle()
             return
         }
@@ -284,135 +312,7 @@ struct ConnectorsView: View {
     }
 }
 
-// MARK: - Connector Card
-
-private struct ConnectorCard: View {
-    let connector: Connector
-    let onAction: () -> Void
-
-    private var sfSymbol: String {
-        switch connector.id {
-        case "google":    return "envelope.fill"
-        case "imessage":  return "message.fill"
-        case "whatsapp":  return "phone.fill"
-        case "spotify":   return "music.note"
-        case "reminders": return "checklist"
-        case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
-        case "uber":      return "car.fill"
-        case "telegram":  return "paperplane.fill"
-        case "monzo":     return "banknote.fill"
-        case "homekit":   return "house.fill"
-        case "trainline": return "tram.fill"
-        case "maps":      return "map.fill"
-        case "notion":    return "doc.text.fill"
-        case "betfair":   return "chart.line.uptrend.xyaxis"
-        case "netflix":   return "play.tv.fill"
-        default:          return "puzzlepiece.fill"
-        }
-    }
-
-    var body: some View {
-        VStack(spacing: 12) {
-            AppIconView(candidates: [connector.icon, connector.id], fallbackSystemName: sfSymbol)
-                .frame(width: 44, height: 44)
-
-            VStack(spacing: 2) {
-                Text(connector.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.oxyText)
-                    .lineLimit(1)
-
-                Text(connector.statusText)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(connector.statusColor)
-            }
-
-            Button(action: onAction) {
-                ConnectorPill(label: connector.actionLabel, tint: connector.actionTint, isBusy: false)
-            }
-            .disabled(!connector.implemented)
-        }
-        .overlay(alignment: .topTrailing) {
-            if connector.enabled {
-                ConnectorCheckmark()
-                    .padding(10)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .overlay(alignment: .bottomLeading) {
-            if let t = connector.type, t != "api" {
-                Text(t == "handoff" ? "Opens app" : "Hybrid")
-                    .font(.system(size: 9, weight: .medium))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(Color.oxyStone.opacity(0.15))
-                    .foregroundStyle(Color.oxyStone)
-                    .clipShape(Capsule())
-                    .padding(.leading, 8)
-                    .padding(.bottom, 6)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .padding(.horizontal, 8)
-        .opacity(connector.implemented ? 1.0 : 0.45)
-    }
-}
-
-private struct ConnectorCheckmark: View {
-    @State private var isDrawn = false
-
-    var body: some View {
-        Circle()
-            .fill(Color.oxyGreen)
-            .frame(width: 18, height: 18)
-            .overlay {
-                CheckmarkShape()
-                    .trim(from: 0, to: isDrawn ? 1 : 0)
-                    .stroke(Color.oxyOnAccent, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .frame(width: 8, height: 7)
-            }
-            .scaleEffect(isDrawn ? 1 : 0.72)
-            .onAppear { isDrawn = true }
-            .animation(.easeOut(duration: 0.25), value: isDrawn)
-    }
-}
-
-private struct CheckmarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-        path.addLine(to: CGPoint(x: rect.midX * 0.82, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        return path
-    }
-}
-
-private struct ConnectorPill: View {
-    let label: String
-    let tint: Color
-    let isBusy: Bool
-
-    // No fill, no border, no pill shape — tracked-out uppercase type carries the
-    // affordance per the pure-black minimalist directive.
-    var body: some View {
-        HStack(spacing: 6) {
-            if isBusy {
-                ProgressView()
-                    .scaleEffect(0.65)
-                    .tint(tint)
-            }
-            Text(label)
-                .font(.system(size: 12, weight: .semibold))
-                .tracking(1.2)
-                .textCase(.uppercase)
-                .lineLimit(1)
-        }
-        .foregroundStyle(tint)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-    }
-}
+// MARK: - AppIconView
 
 private struct AppIconView: View {
     let candidates: [String]
@@ -529,27 +429,6 @@ struct Connector: Codable, Identifiable {
         connectionState = try c.decodeIfPresent(String.self, forKey: .connectionState) ?? (enabled ? "connected" : "available")
         statusText = try c.decodeIfPresent(String.self, forKey: .statusText) ?? (enabled ? "Connected" : "Available")
         type = try c.decodeIfPresent(String.self, forKey: .type)
-    }
-
-    var actionLabel: String {
-        if connectionState == "needs_reconnect" { return "Reconnect" }
-        if connectionState == "needs_setup" { return "Setup" }
-        if connectionState == "degraded" { return enabled ? "Enabled" : "Enable" }
-        return enabled ? "Disconnect" : "Connect"
-    }
-
-    var actionTint: Color {
-        if !implemented { return Color.oxyDim }
-        if connectionState == "needs_reconnect" || connectionState == "needs_setup" || connectionState == "degraded" { return Color.oxyStone }
-        return enabled ? Color.oxySub : Color.oxyText
-    }
-
-    var statusColor: Color {
-        switch connectionState {
-        case "connected": return Color.oxyGreen
-        case "needs_reconnect", "needs_setup", "degraded": return Color.oxyStone
-        default: return Color.oxySub
-        }
     }
 }
 
