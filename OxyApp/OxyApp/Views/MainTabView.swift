@@ -77,7 +77,6 @@ struct MainTabView: View {
 struct MoreView: View {
     @Environment(AppState.self) private var appState
     @State private var destination: MoreDestination?
-    @State private var showSignOutConfirm = false
     @State private var appeared = false
 
     private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
@@ -105,9 +104,6 @@ struct MoreView: View {
                             .opacity(appeared ? 1 : 0)
                             .offset(y: appeared ? 0 : 12)
                             .animation(.appSpring.delay(0.14), value: appeared)
-                        signOutButton
-                            .opacity(appeared ? 1 : 0)
-                            .animation(.appSpring.delay(0.22), value: appeared)
                     }
                     .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 32)
@@ -136,12 +132,6 @@ struct MoreView: View {
                 // fullScreenCover starts a fresh environment, so carry the finish into it.
                 .environment(\.colorScheme, lightMode ? .light : .dark)
             }
-            .alert("Sign Out", isPresented: $showSignOutConfirm) {
-                Button("Sign Out", role: .destructive) { appState.logout() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Are you sure you want to sign out?")
-            }
         }
     }
 
@@ -153,11 +143,11 @@ struct MoreView: View {
             destination = .profile
         } label: {
             VStack(alignment: .leading, spacing: 0) {
-                BrandWordmark()
+                BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
                     .padding(.bottom, 28)
 
                 Text(displayName)
-                    .font(.appDisplay(46, weight: .light))
+                    .font(.heroDisplay(28))
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -216,28 +206,31 @@ struct MoreView: View {
 
     private var pendantStatusText: String? {
         switch pendant.connectionState {
-        case .connected: return "Connected"
-        case .scanning, .connecting: return "Pairing…"
-        case .error: return "Error"
-        case .disconnected: return nil
+        case .connected:              return pendant.peripheralName ?? "Connected"
+        case .disconnected, .error:   return "Not connected"
+        case .scanning, .connecting:  return "Pairing"
         }
     }
 
-    // MARK: - Menu (no icons — typographic rows)
+    // MARK: - Menu (labelled rows with subtitles)
 
     private var menuSection: some View {
         VStack(spacing: 0) {
-            cleanRow("Memory") { destination = .memory }
+            AppRow(title: "Memory", subtitle: "What I remember about you") { destination = .memory }
             rowDivider
-            cleanRow("Apps") { destination = .connectors }
+            AppRow(title: "Connections", subtitle: "Apps and services I can use") { destination = .connectors }
             rowDivider
-            cleanRow("Settings") { destination = .settings }
+            AppRow(title: "Settings", subtitle: "Preferences and defaults") { destination = .settings }
             rowDivider
-            cleanRow(
-                "Pendant",
-                trailing: pendantStatusText,
-                trailingLive: pendant.isConnected
-            ) { destination = .pendant }
+            AppRow(title: "Pendant", subtitle: "Your device", onTap: { destination = .pendant }) {
+                if let s = pendantStatusText {
+                    Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
+                } else {
+                    EmptyView()
+                }
+            }
+            rowDivider
+            AppRow(title: "Account", subtitle: "Name, data, and sign out") { destination = .profile }
         }
         .padding(.top, 4)
     }
@@ -246,60 +239,6 @@ struct MoreView: View {
         Rectangle()
             .fill(Color.appHairline)
             .frame(height: 0.5)
-    }
-
-    private func cleanRow(
-        _ title: String,
-        trailing: String? = nil,
-        trailingLive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            action()
-        } label: {
-            HStack(spacing: 0) {
-                Text(title)
-                    .font(.appBody(17, weight: .regular))
-                    .foregroundStyle(Color.appInk)
-                Spacer()
-                if let trailing {
-                    HStack(spacing: 6) {
-                        if trailingLive {
-                            AppStatusDot(isLive: true, diameter: 5)
-                        }
-                        Text(trailing)
-                            .font(.appBody(12, weight: .regular))
-                            .foregroundStyle(trailingLive ? Color.appLive : Color.appMuted)
-                    }
-                    .padding(.trailing, 10)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(Color.appMuted.opacity(0.5))
-            }
-            .padding(.vertical, 20)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.appScale(0.98))
-    }
-
-    // MARK: - Sign out
-
-    private var signOutButton: some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            showSignOutConfirm = true
-        } label: {
-            Text("Sign Out")
-                .font(.appBody(13, weight: .regular))
-                .foregroundStyle(Color.appMuted)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.appScale(0.98))
-        .padding(.top, 16)
     }
 
 }
