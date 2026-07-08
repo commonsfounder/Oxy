@@ -68,6 +68,15 @@ enum AppSpacing {
     /// Chat's outer content margin — slightly wider than the old 16pt so text
     /// doesn't crowd the screen edges now that assistant replies sit flush.
     static let chatMargin: CGFloat = 20
+    /// Canonical outer content margin for non-chat screens (Settings/Memory/etc).
+    static let margin: CGFloat = 20
+}
+
+extension Font {
+    static var screenTitle: Font { .appBody(20, weight: .semibold) }
+    static var rowTitle: Font    { .appBody(16, weight: .regular) }
+    static var rowSecondary: Font { .appBody(13, weight: .regular) }
+    static func heroDisplay(_ size: CGFloat = 30) -> Font { .appDisplay(size, weight: .semibold) }
 }
 
 // MARK: - Radius (concentric friendly)
@@ -286,10 +295,8 @@ struct AppSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.system(size: 11, weight: .regular))
-            .tracking(1.5)
-            .textCase(.uppercase)
-            .foregroundStyle(Color.appMuted)
+            .font(.appBody(15, weight: .semibold))
+            .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -512,7 +519,7 @@ struct MilgrainSectionHeader: View {
     let title: String
     var body: some View {
         Text(title)
-            .font(.appDisplay(20))
+            .font(.appBody(15, weight: .semibold))
             .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -549,44 +556,40 @@ struct MilgrainToggle: View {
 /// vertical hairlines, the selected one in heading colour and the rest in secondary.
 /// No capsule track, no fill, no pill (per the modern spec: zero pill shapes).
 /// `options` holds the stored values; pass `labels` when the display text differs.
-struct MilgrainSegmentedControl: View {
+extension Collection { subscript(safe i: Index) -> Element? { indices.contains(i) ? self[i] : nil } }
+
+/// Mutually-exclusive selection with an unmistakable filled-capsule selected state.
+/// Selected = gold accent fill + on-accent text; unselected = muted on clear.
+struct AppSegmented: View {
     let options: [String]
     var labels: [String]? = nil
     @Binding var selection: String
-
-    private func label(_ index: Int) -> String {
-        if let labels, index < labels.count { return labels[index] }
-        return options[index]
-    }
-
+    private func label(_ i: Int) -> String { labels?[safe: i] ?? options[i] }
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(options.enumerated()), id: \.element) { index, option in
-                if index > 0 {
-                    Rectangle()
-                        .fill(Color.mgDivider)
-                        .frame(width: 0.5, height: 18)
-                }
-                let isSelected = selection == option
+        HStack(spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.element) { i, option in
+                let isSel = selection == option
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { selection = option }
+                    withAnimation(.appStandard) { selection = option }
                     HapticManager.shared.impact(.light)
                 } label: {
-                    Text(label(index))
-                        .font(.system(size: 14, weight: .light))
-                        .foregroundStyle(isSelected ? Color.mgHeading : Color.mgSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        // Visuals stay compact; the tap target meets the 44pt minimum.
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
+                    Text(label(i))
+                        .font(.appBody(14, weight: isSel ? .semibold : .regular))
+                        .foregroundStyle(isSel ? Color.appOnAccent : Color.appMuted)
+                        .frame(maxWidth: .infinity).frame(minHeight: 40)
+                        .background(Capsule().fill(isSel ? Color.appAccent : Color.clear))
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+                .accessibilityAddTraits(isSel ? [.isSelected, .isButton] : .isButton)
             }
         }
+        .padding(4)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
     }
 }
+
+typealias MilgrainSegmentedControl = AppSegmented
 
 // MARK: - Today tab: light/dark glass language
 //
@@ -900,11 +903,12 @@ struct AtmosphereSky: View {
 /// A Didot section title — the editorial counterpart to a small-caps header.
 struct AppSectionTitle: View {
     let text: String
+    // size retained for source compat; all section headers now share one canonical scale.
     var size: CGFloat = 22
     init(_ text: String, size: CGFloat = 22) { self.text = text; self.size = size }
     var body: some View {
         Text(text)
-            .font(.appDisplay(size))
+            .font(.appBody(15, weight: .semibold))
             .foregroundStyle(Color.appInk)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -966,5 +970,40 @@ struct DropCapText: View {
         Text(attributed)
             .lineSpacing(4)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The one row primitive for list-style screens (Memory/Settings/Connections/Pendant/Account/More).
+/// Title + optional subtitle on the left; an optional trailing view (chevron/status/toggle) on the right.
+struct AppRow<Trailing: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    var onTap: (() -> Void)? = nil
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        let content = HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.rowTitle).foregroundStyle(Color.appInk)
+                if let subtitle { Text(subtitle).font(.rowSecondary).foregroundStyle(Color.appMuted) }
+            }
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .padding(.vertical, 16)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+
+        if let onTap {
+            Button { HapticManager.shared.impact(.light); onTap() } label: { content }
+                .buttonStyle(.appScale(0.98))
+        } else {
+            content
+        }
+    }
+}
+extension AppRow where Trailing == EmptyView {
+    init(title: String, subtitle: String? = nil, onTap: (() -> Void)? = nil) {
+        self.init(title: title, subtitle: subtitle, onTap: onTap) { EmptyView() }
     }
 }
