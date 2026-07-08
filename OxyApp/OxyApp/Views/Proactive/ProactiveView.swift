@@ -30,6 +30,10 @@ struct ProactiveView: View {
             .sorted { (Date.oxyParse($0.createdAt) ?? .distantPast) > (Date.oxyParse($1.createdAt) ?? .distantPast) }
     }
 
+    private var agendaEmpty: Bool { events.isEmpty }
+    private var remindersEmpty: Bool { reminders.isEmpty }
+    private var eveningOpen: Bool { !events.contains { !$0.isAllDay && Calendar.current.component(.hour, from: $0.start) >= 17 } }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -47,17 +51,27 @@ struct ProactiveView: View {
                             loadingSkeleton.padding(.top, 16)
                         } else {
                             // Composable cards (user controls order/visibility).
-                            ForEach(Array(layout.visibleOrdered().enumerated()), id: \.element) { idx, kind in
-                                card(for: kind, index: idx)
+                            let visible = layout.visibleOrdered()
+                            let collapse = visible.contains(.agenda) && agendaEmpty && visible.contains(.reminders) && remindersEmpty
+                            ForEach(Array(visible.enumerated()), id: \.element) { idx, kind in
+                                if collapse && (kind == .agenda || kind == .reminders) {
+                                    EmptyView()
+                                } else {
+                                    card(for: kind, index: idx)
+                                }
+                            }
+                            if collapse {
+                                clearDaySummary
+                                    .padding(.top, 12)
                             }
                             eveningPlate
-                            editBoardLink
                         }
                     }
                     .padding(.horizontal, 22)
                     .padding(.top, 16)
                     .padding(.bottom, 44)
                 }
+                .scrollIndicators(.hidden)
                 .refreshable { await loadDashboard() }
                 .hidesTabBarOnScroll()
                 .sheet(isPresented: $editingBoard, onDismiss: { Task { await loadDashboard() } }) {
@@ -104,6 +118,11 @@ struct ProactiveView: View {
                     .textCase(.uppercase)
                     .foregroundStyle(Color.appMuted)
                 Spacer()
+                Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
+                    Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .regular)).foregroundStyle(Color.appMuted)
+                }
+                .buttonStyle(.appScale).accessibilityLabel("Customise Today")
+                .padding(.trailing, 14)
                 Button(action: { Task { await checkNow() } }) {
                     if isChecking { ProgressView().scaleEffect(0.6).tint(Color.appMuted) }
                     else { Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .light)).foregroundStyle(Color.appMuted) }
@@ -114,7 +133,7 @@ struct ProactiveView: View {
 
             // Greeting.
             Text(greeting)
-                .font(.appDisplay(36))
+                .font(.heroDisplay(30))
                 .foregroundStyle(Color.appInk)
                 .lineLimit(3)
                 .minimumScaleFactor(0.6)
@@ -179,6 +198,30 @@ struct ProactiveView: View {
     /// A board section is a real card now — lifted surface, rounded, scannable.
     @ViewBuilder private func boardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         TodayCard(padding: 18) { content() }
+    }
+
+    /// An actionable card — a subtle gold edge distinguishes it from passive info cards.
+    @ViewBuilder private func actionableBoardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        TodayCard(padding: 18) { content() }
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1))
+    }
+
+    /// The single combined empty state when both the agenda and reminders have nothing —
+    /// replaces what would otherwise be 2-3 separate near-empty cards.
+    private var clearDaySummary: some View {
+        boardSection {
+            cardLabel("A clear day", icon: "sparkles")
+            VStack(alignment: .leading, spacing: 10) {
+                summaryLine("Nothing scheduled.")
+                summaryLine("Nothing due.")
+                if eveningOpen { summaryLine("A quiet evening ahead.") }
+            }
+        }
+    }
+
+    private func summaryLine(_ text: String) -> some View {
+        Text(text).font(.appBody(15)).foregroundStyle(Color.appMuted)
     }
 
     private var agendaCard: some View {
@@ -275,23 +318,7 @@ struct ProactiveView: View {
            Date().timeIntervalSince(created) < 6 * 3600 {
             return narrative
         }
-        let openEvening = !events.contains { !$0.isAllDay && Calendar.current.component(.hour, from: $0.start) >= 17 }
-        return openEvening ? "Nothing after five — a rare quiet night ahead." : nil
-    }
-
-    /// A quiet, text-only way into the board editor — no boxed "add a card" affordance.
-    private var editBoardLink: some View {
-        VStack(spacing: 0) {
-            Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
-                Text("Edit board")
-                    .font(.appBody(13, weight: .light))
-                    .foregroundStyle(Color.appMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.appScale(0.99))
-        }
+        return nil
     }
 
     private var inboxEmails: [BriefingEmail] {
@@ -403,10 +430,10 @@ struct ProactiveView: View {
     /// Wellbeing — today's numbers as scannable figures, server prose beneath them
     /// when the briefing has something to say, and a real connect button when there's
     /// no health data yet.
-    private var healthCard: some View {
-        boardSection {
-            cardLabel("Wellbeing", icon: "heart.fill")
-            if hasHealthMetrics {
+    @ViewBuilder private var healthCard: some View {
+        if hasHealthMetrics {
+            boardSection {
+                cardLabel("Wellbeing", icon: "heart.fill")
                 HStack(spacing: 0) {
                     if let st = steps, st > 0 { healthMetric(st.formatted(), label: "steps") }
                     if let s = sleepMinutes, s > 0 { healthMetric(sleepText(s), label: "sleep") }
@@ -418,11 +445,17 @@ struct ProactiveView: View {
                         .foregroundStyle(Color.appMuted)
                         .padding(.top, 12)
                 }
-            } else if let prose = visibleBriefings.first?.wellbeing {
+            }
+        } else if let prose = visibleBriefings.first?.wellbeing {
+            boardSection {
+                cardLabel("Wellbeing", icon: "heart.fill")
                 Text(prose)
                     .font(.appBody(15))
                     .foregroundStyle(Color.appInk)
-            } else {
+            }
+        } else {
+            actionableBoardSection {
+                cardLabel("Wellbeing", icon: "heart.fill")
                 VStack(alignment: .leading, spacing: 12) {
                     Text("See your sleep, steps, and heart rate here every morning.")
                         .font(.appBody(15))
