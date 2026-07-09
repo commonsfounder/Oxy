@@ -1,40 +1,35 @@
 import SwiftUI
 import UIKit
 
-/// APP DESIGN SYSTEM (rebuilt July 2026 after on-device QA)
-/// The pure-black "editorial minimalism" language was scrapped: black-on-black
-/// surfaces, Didot prose, and light-weight dim text made the app unreadable and
-/// unfriendly on device. The rules now are boring on purpose:
-///   1. Surfaces are real — cards visibly lift off the canvas.
-///   2. Text is legible — regular weight, ≥72% white for secondary copy.
-///   3. One warm accent (brand gold) carries selection, CTAs, and the AI's voice.
-///   4. System type everywhere; the serif lives only in the brand wordmark.
+/// MILGRAIN DESIGN SYSTEM
+/// Warm black canvas, restrained surfaces, readable text, and a sparse metal
+/// accent. The interface should feel like the software side of an intimate object:
+/// useful first, tactile second, decorative last.
 
 extension Color {
-    /// Main canvas. Soft charcoal, not void black — surfaces need room below them.
-    static let appBackground = Color(red: 0.051, green: 0.055, blue: 0.071) // #0D0E12
+    /// Main canvas. Warm black, not pure void.
+    static let appBackground = Color(red: 0.047, green: 0.043, blue: 0.043) // #0C0B0B
 
-    /// Card surface — visibly lifted off the canvas.
-    static let appSurface = Color(red: 0.090, green: 0.098, blue: 0.122) // #17191F
+    /// Quiet raised surface.
+    static let appSurface = Color(red: 0.082, green: 0.078, blue: 0.075) // #151413
 
-    /// Raised surface (sheets, prominent cards).
-    static let appSurface2 = Color(red: 0.122, green: 0.133, blue: 0.165) // #1F222A
+    /// Raised surface (sheets, prominent rows).
+    static let appSurface2 = Color(red: 0.118, green: 0.110, blue: 0.102) // #1E1C1A
 
     /// Hairline / divider.
-    static let appHairline = Color.white.opacity(0.10)
+    static let appHairline = Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10)
 
     /// Primary text.
-    static let appInk = Color(red: 0.957, green: 0.961, blue: 0.969) // #F4F5F7
+    static let appInk = Color(red: 0.949, green: 0.933, blue: 0.906) // #F2EEE7
 
-    /// Secondary / captions. Keep ≥0.70 white — anything dimmer failed on-device QA.
-    static let appMuted = Color.white.opacity(0.72)
+    /// Secondary / captions.
+    static let appMuted = Color(red: 0.655, green: 0.631, blue: 0.604) // #A7A19A
 
-    /// Brand accent — the warm gold of the Milgrain monogram. Selection, CTAs,
-    /// and the assistant's presence.
-    static let appAccent = Color(red: 0.890, green: 0.702, blue: 0.357) // #E3B35B
+    /// Metal accent. Use sparingly: selected detail, status, progress, important moments.
+    static let appAccent = Color(red: 0.784, green: 0.663, blue: 0.420) // #C8A96B
 
     /// On accent (text/icons on the accent color).
-    static let appOnAccent = Color(red: 0.102, green: 0.078, blue: 0.031)
+    static let appOnAccent = Color.appBackground
 
     // MARK: - Semantic (for trust and safety)
     static let appSuccess = Color(red: 0.30, green: 0.75, blue: 0.50)
@@ -76,7 +71,7 @@ extension Font {
     static var screenTitle: Font { .appBody(20, weight: .semibold) }
     static var rowTitle: Font    { .appBody(16, weight: .regular) }
     static var rowSecondary: Font { .appBody(13, weight: .regular) }
-    static func heroDisplay(_ size: CGFloat = 30) -> Font { .appDisplay(size, weight: .semibold) }
+    static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
 }
 
 // MARK: - Radius (concentric friendly)
@@ -168,14 +163,17 @@ extension Font {
     // scales from there.
 
     static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        .system(size: size, weight: weight, design: .default)
     }
 
-    /// Display face — SF rounded, semibold. Headers and greetings. The Didot
-    /// editorial face is gone: at body sizes it aliased and read as decoration,
-    /// not information. The serif survives only in the brand wordmark image.
+    /// Display face — composed sans, not rounded. Functional headings use this.
     static func appDisplay(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        .system(size: size, weight: weight, design: .default)
+    }
+
+    /// Editorial face — Fraunces only for short identity and greeting moments.
+    static func appEditorial(_ size: CGFloat) -> Font {
+        .custom("Fraunces", size: size, relativeTo: .title)
     }
 
     /// Body / UI face — system SF at regular weight. The old Inter-light body was

@@ -358,7 +358,7 @@ final class ChatViewModel {
                         // "Browser task paused" just means the ordering loop is still
                         // working and hit its per-turn time budget — not a real question.
                         // Keep it moving ourselves instead of making the user say "keep going".
-                        if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                        if results.contains(where: { $0.actionSummary == "Browser task paused" || $0.recoveryAction?.autoContinue == true }) {
                             needsBrowserContinue = true
                         }
                         Task {
@@ -590,7 +590,7 @@ final class ChatViewModel {
                 case .replace(let replacement):
                     turnText = replacement
                 case .actions(let results):
-                    if results.contains(where: { $0.actionSummary == "Browser task paused" }) {
+                    if results.contains(where: { $0.actionSummary == "Browser task paused" || $0.recoveryAction?.autoContinue == true }) {
                         // Pure "still working" signal — keep continuing, but don't paint a
                         // "Paused" card on the live bubble. Only terminal turns get a card.
                         needsMore = true

@@ -968,31 +968,27 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
-/// Full-screen welcome. Quick actions.
-/// hairline-separated action rows in the lower portion. Silent luxury: generous
-/// space, no fills, nothing decorated.
+/// Full-screen welcome. Calm, personal, and ready for future dynamic suggestions.
 private struct WelcomeCard: View {
     var onAction: (String) -> Void
     @State private var appeared = false
-    @AppStorage("oxy_starter_actions") private var storedActions = "Summarise my inbox\nCheck my calendar\nFind something for me"
+    @AppStorage("oxy_starter_actions") private var storedActions = "What needs attention today?\nSummarise my inbox\nCheck my calendar"
 
     private static let pool: [(icon: String, label: String)] = [
+        ("sparkle.magnifyingglass", "What needs attention today?"),
         ("envelope", "Summarise my inbox"),
         ("calendar", "Check my calendar"),
         ("magnifyingglass", "Find something for me"),
         ("envelope", "Send an email"),
-        ("music.note", "Play some music"),
-        ("car", "Book a ride"),
         ("magnifyingglass", "Search the web"),
         ("calendar", "Add to my calendar"),
-        ("cloud.sun", "What's the weather"),
         ("message", "Send a message"),
-        ("map", "Get directions"),
         ("bell", "Set a reminder")
     ]
 
     private var actions: [String] {
-        let parts = storedActions.split(separator: "\n").map(String.init)
+        let allowed = Set(Self.pool.map(\.label))
+        let parts = storedActions.split(separator: "\n").map(String.init).filter { allowed.contains($0) }
         return parts.isEmpty ? Array(Self.pool.prefix(3).map(\.label)) : parts
     }
 
@@ -1011,27 +1007,42 @@ private struct WelcomeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                Text("What can I do for you?")
-                    .font(.appTitle(27, weight: .semibold))
+                BrandWordmark(height: 15, color: Color.appMuted)
+                    .padding(.bottom, 26)
+                    .opacity(appeared ? 1 : 0)
+                    .animation(.appSpring.delay(0.06), value: appeared)
+
+                Text(greeting)
+                    .font(.appEditorial(31))
                     .foregroundStyle(Color.appInk)
-                    .lineLimit(1)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : 18)
                     .animation(.appSpring.delay(0.1), value: appeared)
+
+                Text("Ask naturally. I’ll use your connected context only when it is available.")
+                    .font(.appBody(15))
+                    .foregroundStyle(Color.appMuted)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : 12)
+                    .animation(.appSpring.delay(0.14), value: appeared)
             }
             .padding(.horizontal, 24)
-            .padding(.top, 52)
+            .padding(.top, 58)
 
             Spacer()
 
-            // ── Action rows ─────────────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 0) {
-                Rectangle()
-                    .fill(Color.appHairline)
-                    .frame(height: 0.5)
-                    .opacity(appeared ? 1 : 0)
-                    .animation(.appSpring.delay(0.18), value: appeared)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Good starting points")
+                    .font(.appBody(11, weight: .medium))
+                    .tracking(1.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.horizontal, 24)
 
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
                     Button { onAction(label) } label: {
@@ -1049,7 +1060,7 @@ private struct WelcomeCard: View {
                                 .foregroundStyle(Color.appMuted.opacity(0.5))
                         }
                         .padding(.horizontal, 24)
-                        .padding(.vertical, 18)
+                        .padding(.vertical, 15)
                         .contentShape(Rectangle())
                         .overlay(alignment: .bottom) {
                             Rectangle().fill(Color.appHairline).frame(height: 0.5)
@@ -1068,10 +1079,18 @@ private struct WelcomeCard: View {
                     }
                 }
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, 18)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .onAppear { withAnimation { appeared = true } }
+    }
+
+    private var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: return "Good morning."
+        case 12..<17: return "Good afternoon."
+        default: return "Good evening."
+        }
     }
 }
 
@@ -1230,7 +1249,7 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(incognito ? "Shadow mode" : "Message", text: $text, axis: .vertical)
+        TextField(incognito ? "Shadow mode" : "Ask Milgrain", text: $text, axis: .vertical)
             .font(.system(size: 14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
@@ -1241,7 +1260,7 @@ private struct ChatInputBar: View {
             .onSubmit { if canSend { onSend() } }
             .padding(.horizontal, 13)
             .padding(.vertical, 9)
-            .background(Color.appSurface)
+            .background(Color.appSurface2.opacity(0.72))
             .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)

@@ -200,28 +200,23 @@ struct ProactiveView: View {
         TodayCard(padding: 18) { content() }
     }
 
-    /// An actionable card — a subtle gold edge distinguishes it from passive info cards.
+    /// Actionable sections stay quiet; the action itself carries affordance.
     @ViewBuilder private func actionableBoardSection<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         TodayCard(padding: 18) { content() }
-            .overlay(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(Color.appAccent.opacity(0.35), lineWidth: 1))
     }
 
     /// The single combined empty state when both the agenda and reminders have nothing —
     /// replaces what would otherwise be 2-3 separate near-empty cards.
     private var clearDaySummary: some View {
-        boardSection {
-            cardLabel("A clear day", icon: "sparkles")
-            VStack(alignment: .leading, spacing: 10) {
-                summaryLine("Nothing scheduled.")
-                summaryLine("Nothing due.")
-                if eveningOpen { summaryLine("A quiet evening ahead.") }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            AppRule()
+                .padding(.bottom, 4)
+            Text(eveningOpen ? "A clear day, with space this evening." : "A clear day.")
+                .font(.appBody(15))
+                .foregroundStyle(Color.appMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-    }
-
-    private func summaryLine(_ text: String) -> some View {
-        Text(text).font(.appBody(15)).foregroundStyle(Color.appMuted)
+        .padding(.horizontal, 2)
     }
 
     private var agendaCard: some View {
@@ -457,7 +452,14 @@ struct ProactiveView: View {
             actionableBoardSection {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        cardLabel("Wellbeing", icon: "heart.fill")
+                        HStack(spacing: 8) {
+                            Image(systemName: "heart")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Color.appMuted)
+                            Text("Wellbeing")
+                                .font(.appBody(14, weight: .medium))
+                                .foregroundStyle(Color.appInk)
+                        }
                         Text("Sleep, steps, and heart rate when Health is connected.")
                             .font(.appBody(14))
                             .foregroundStyle(Color.appMuted)
@@ -472,11 +474,12 @@ struct ProactiveView: View {
                         }
                     } label: {
                         Text("Connect Health")
-                            .font(.appBody(14, weight: .semibold))
-                            .foregroundStyle(Color.appOnAccent)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(Color.appAccent))
+                            .font(.appBody(13, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.appSurface2.opacity(0.8))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     .buttonStyle(.appScale)
                 }

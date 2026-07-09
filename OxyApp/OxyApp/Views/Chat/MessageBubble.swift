@@ -45,6 +45,13 @@ struct MessageBubble: View {
 
     private var richActions: [ActionResult] { completedActions.filter(Self.isRichAction) }
     private var receiptActions: [ActionResult] { completedActions.filter { !Self.isRichAction($0) } }
+    private var browserRecoveryAction: ActionResult? {
+        completedActions.first {
+            !$0.success &&
+            $0.recoveryAction?.type == "continue_browser_task" &&
+            $0.recoveryAction?.autoContinue != true
+        }
+    }
 
     /// A ride booking gets a dedicated native handoff card; suppress the
     /// assistant's "Opening Uber…" chat text so the card stands alone.
@@ -118,6 +125,31 @@ struct MessageBubble: View {
                         TurnReceiptRow(actions: receiptActions) { action in
                             onOpenAction?(action)
                         }
+                    }
+
+                    if let recovery = browserRecoveryAction,
+                       let command = recovery.recoveryAction?.message ?? recovery.recoveryAction?.label {
+                        Button {
+                            onActionCommand?(command)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(recovery.recoveryAction?.label ?? "Keep going")
+                                    .font(.appBody(13, weight: .semibold))
+                            }
+                            .foregroundStyle(Color.appAccent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.appSurface.opacity(0.84))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(recovery.recoveryAction?.label ?? "Keep going")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

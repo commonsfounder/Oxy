@@ -45,9 +45,15 @@ struct MainTabView: View {
                     .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
             }
             .tint(Color.appAccent)
+            .toolbar(.hidden, for: .tabBar)
             .environment(TabBarVisibility())
             .onChange(of: selectedTab) { _, _ in
                 HapticManager.shared.select()
+            }
+
+            if !keyboardUp {
+                MilgrainTabBar(selectedTab: $selectedTab)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -69,6 +75,58 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
             withAnimation { selectedTab = .more }
         }
+    }
+}
+
+private struct MilgrainTabBar: View {
+    @Binding var selectedTab: MainTabView.Tab
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack(spacing: 4) {
+                ForEach(MainTabView.Tab.allCases, id: \.self) { tab in
+                    let selected = selectedTab == tab
+                    Button {
+                        guard selectedTab != tab else { return }
+                        withAnimation(.appStandard) { selectedTab = tab }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 15, weight: selected ? .semibold : .regular))
+                                .symbolVariant(selected ? .fill : .none)
+                            Text(tab.label)
+                                .font(.appBody(10.5, weight: selected ? .semibold : .regular))
+                        }
+                        .foregroundStyle(selected ? Color.appInk : Color.appMuted)
+                        .frame(width: 68, height: 48)
+                        .overlay(alignment: .top) {
+                            Capsule()
+                                .fill(selected ? Color.appAccent : Color.clear)
+                                .frame(width: 18, height: 2)
+                                .offset(y: 1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.appScale(0.96))
+                    .accessibilityLabel(tab.label)
+                    .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.appSurface.opacity(0.96))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                    )
+            }
+            .padding(.bottom, 10)
+        }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 }
 
@@ -212,27 +270,55 @@ struct MoreView: View {
         }
     }
 
+    private var pendantDot: AppStatusDot.Kind {
+        switch pendant.connectionState {
+        case .connected: return .live
+        case .scanning, .connecting: return .degraded
+        case .disconnected: return .off
+        case .error: return .error
+        }
+    }
+
     // MARK: - Menu (labelled rows with subtitles)
 
     private var menuSection: some View {
-        VStack(spacing: 0) {
-            AppRow(title: "Memory", subtitle: "What I remember about you") { destination = .memory }
-            rowDivider
-            AppRow(title: "Connections", subtitle: "Apps and services I can use") { destination = .connectors }
-            rowDivider
-            AppRow(title: "Settings", subtitle: "Preferences and defaults") { destination = .settings }
-            rowDivider
-            AppRow(title: "Pendant", subtitle: "Your device", onTap: { destination = .pendant }) {
-                if let s = pendantStatusText {
-                    Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
-                } else {
-                    EmptyView()
-                }
+        VStack(alignment: .leading, spacing: 28) {
+            menuGroup("You") {
+                AppRow(title: "Memory", subtitle: "What I remember about you") { destination = .memory }
+                rowDivider
+                AppRow(title: "Account", subtitle: "Name, data, and sign out") { destination = .profile }
             }
-            rowDivider
-            AppRow(title: "Account", subtitle: "Name, data, and sign out") { destination = .profile }
+
+            menuGroup("Milgrain") {
+                AppRow(title: "Pendant", subtitle: "The piece you wear", onTap: { destination = .pendant }) {
+                    HStack(spacing: 8) {
+                        AppStatusDot(kind: pendantDot, diameter: 5)
+                        if let s = pendantStatusText {
+                            Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
+                        }
+                    }
+                }
+                rowDivider
+                AppRow(title: "Connections", subtitle: "Apps and services I can use") { destination = .connectors }
+            }
+
+            menuGroup("Preferences") {
+                AppRow(title: "Settings", subtitle: "Defaults, appearance, and diagnostics") { destination = .settings }
+            }
         }
-        .padding(.top, 4)
+        .padding(.top, 24)
+    }
+
+    private func menuGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.appBody(11, weight: .medium))
+                .tracking(1.6)
+                .textCase(.uppercase)
+                .foregroundStyle(Color.appMuted)
+                .padding(.bottom, 6)
+            content()
+        }
     }
 
     private var rowDivider: some View {

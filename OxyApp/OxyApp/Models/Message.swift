@@ -128,10 +128,12 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let routeContext: RouteContext?
     let bookingUrl: String?
     let distanceText: String?
+    let recoverable: Bool?
+    let recoveryAction: BrowserRecoveryAction?
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
-        case headline, itinerary, routeContext, bookingUrl, distanceText
+        case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
     }
 
     init(
@@ -153,6 +155,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         routeContext: RouteContext? = nil,
         bookingUrl: String? = nil,
         distanceText: String? = nil,
+        recoverable: Bool? = nil,
+        recoveryAction: BrowserRecoveryAction? = nil,
     ) {
         self.action = action
         self.success = success
@@ -172,6 +176,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.routeContext = routeContext
         self.bookingUrl = bookingUrl
         self.distanceText = distanceText
+        self.recoverable = recoverable
+        self.recoveryAction = recoveryAction
     }
 
     init(native result: NativeLocalActionResult) {
@@ -211,6 +217,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
             routeContext = try result.decodeIfPresent(RouteContext.self, forKey: .routeContext)
             bookingUrl = try result.decodeIfPresent(String.self, forKey: .bookingUrl)
             distanceText = try result.decodeIfPresent(String.self, forKey: .distanceText)
+            recoverable = try result.decodeIfPresent(Bool.self, forKey: .recoverable)
+            recoveryAction = try result.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -229,6 +237,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
             routeContext = try container.decodeIfPresent(RouteContext.self, forKey: .routeContext)
             bookingUrl = try container.decodeIfPresent(String.self, forKey: .bookingUrl)
             distanceText = try container.decodeIfPresent(String.self, forKey: .distanceText)
+            recoverable = try container.decodeIfPresent(Bool.self, forKey: .recoverable)
+            recoveryAction = try container.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
         }
     }
 
@@ -252,7 +262,18 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(routeContext, forKey: .routeContext)
         try container.encodeIfPresent(bookingUrl, forKey: .bookingUrl)
         try container.encodeIfPresent(distanceText, forKey: .distanceText)
+        try container.encodeIfPresent(recoverable, forKey: .recoverable)
+        try container.encodeIfPresent(recoveryAction, forKey: .recoveryAction)
     }
+}
+
+struct BrowserRecoveryAction: Codable, Equatable {
+    let type: String?
+    let message: String?
+    let label: String?
+    let autoContinue: Bool?
+    let code: String?
+    let reason: String?
 }
 
 struct TravelLeg: Codable, Equatable, Identifiable {
