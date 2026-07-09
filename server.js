@@ -24,6 +24,7 @@ if (require.main === module) {
       const bt = require('./api/services/browser-task');
       bt.primeWarmBrowser();
       bt.primeFastpaths();
+      bt.primeLearnedRecipes();
     } catch { /* non-fatal */ }
   });
 }

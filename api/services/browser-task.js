@@ -2,7 +2,8 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
-const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES } = require('./browser-recipes');
+const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION } = require('./browser-recipes');
+const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
 const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
@@ -120,6 +121,23 @@ const fastpathStore = createFastpathStore({
 
 // Load the learned fast-paths into memory (call on server boot, alongside primeWarmBrowser).
 async function primeFastpaths() { await fastpathStore.load(); }
+
+// Self-learning checkout recipes (the "add to basket" click only — see
+// browser-learned-recipes.js for why). Same best-effort persistence shape as fastpathStore.
+const learnedRecipeStore = createLearnedRecipeStore({
+  loadRows: async () => {
+    const { data } = await getSupabase().from('browser_learned_recipes').select('host,selector,learned_at');
+    return data || [];
+  },
+  saveRow: async (row) => {
+    await getSupabase().from('browser_learned_recipes').upsert(
+      { ...row, updated_at: new Date().toISOString() },
+      { onConflict: 'host' }
+    );
+  }
+});
+
+async function primeLearnedRecipes() { await learnedRecipeStore.load(); }
 
 // ponytail: site key keeps cookies/login isolated per domain per user. One row
 // per (user, site) — fine at personal-assistant scale, revisit if sites multiply.
@@ -3555,7 +3573,10 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
       }
       const searchPick = session.isOrder ? await tryOrderSearchPick(session.page, session) : null;
-      const recipe = RECIPES_ENABLED ? selectRecipeForHost(session.site) : null;
+      // A learned recipe only ever applies where there's no hand-authored one — never
+      // override a curated recipe with something the loop taught itself.
+      const learnedRecipe = RECIPES_ENABLED && !RECIPES[session.site] ? learnedRecipeStore.getLearnedRecipe(session.site) : null;
+      const recipe = RECIPES_ENABLED ? (learnedRecipe || selectRecipeForHost(session.site)) : null;
       let recipeMove = !searchPick && recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
 
       // Convention recipe: poll basket badge before re-firing add (Selfridges etc).
@@ -4242,6 +4263,16 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
         { selector: CLICKABLE_SELECTOR, idx: actionIndex }
       ).then((h) => h.asElement()).catch(() => null);
+      // Recipe self-learning (v1: the "add to basket" click only — see
+      // browser-learned-recipes.js). Only worth checking when there's no existing
+      // hand-authored or already-learned recipe for this host and the clicked text looks
+      // like a genuine add button; readCtx's basketCount read is skipped otherwise.
+      const shouldLearnAdd = !recipeStepName && session.isOrder && decision.action === 'click'
+        && !RECIPES[session.site] && !learnedRecipeStore.getLearnedRecipe(session.site)
+        && ADD_TEXT_PATTERN.test(String(target.text || ''));
+      const basketCountBeforeClick = shouldLearnAdd
+        ? (await readCtx(session.page, CONVENTION).catch(() => ({ basketCount: 0 }))).basketCount
+        : 0;
       try {
         if (!locator) throw new Error('element is no longer on the page');
         if (decision.action === 'click') {
@@ -4280,6 +4311,13 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
             if (!clicked) throw clickErr;
           }
           session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}clicked "${target.text}"`);
+          if (shouldLearnAdd) {
+            await settle(session.page, RECIPE_SETTLE_MS);
+            const basketCountAfterClick = (await readCtx(session.page, CONVENTION).catch(() => ({ basketCount: 0 }))).basketCount;
+            if (basketCountAfterClick > basketCountBeforeClick && learnedRecipeStore.learn(session.site, target.text)) {
+              session.history.push(`Step ${steps}: [learned] captured "${target.text}" as ${session.site}'s add-to-basket click`);
+            }
+          }
         } else if (decision.action === 'fill' && /search/i.test(String(target.text || '')) && session.addClicked && RECIPES[session.site]?.basketUrl) {
           const nav = await navigateToSiteBasket(session, session.page, steps, onProgress);
           if (nav) {
@@ -4482,7 +4520,9 @@ function cancelPayment(userId) {
 module.exports = {
   primeWarmBrowser,
   primeFastpaths,
+  primeLearnedRecipes,
   _fastpathStore: fastpathStore,
+  _learnedRecipeStore: learnedRecipeStore,
   getWarmBrowser,
   shouldUseRemoteForHost,
   usingRemoteBrowser,
