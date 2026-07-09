@@ -4,9 +4,16 @@ const test = require('node:test');
 const {
   matchesPaymentKeyword,
   isTechnicalAsk,
+  isCheckoutLoginWallUrl,
+  findDeliveryCollectionChoice,
+  parseDeliveryPreferenceFromText,
   isOrderGoal,
   buildDecisionPrompt,
   parseModelDecision,
+  scoreSearchResultText,
+  pickBestSearchResult,
+  scoreProductNameVsGoal,
+  pickFallbackCandidate,
   findElementByText
 } = require('../../api/services/browser-task');
 const { validateActionWithContract } = require('../../api/action-contracts');
@@ -227,6 +234,212 @@ test('touchSession refreshes lastActivityAt so the session is not evicted', () =
   assert.ok(result);
 });
 
+// Regression: a live John Lewis run searched "iPhone 17 256GB" and tryOrderSearchPick
+// blindly clicked the first product link on the results page, which happened to be
+// "iPhone 17 Pro" — a different, pricier product the user never asked for.
+test('scoreSearchResultText prefers the plain model over an unrequested Pro/Max/Plus variant', () => {
+  const term = 'iPhone 17 256GB';
+  const plain = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);
+  const pro = scoreSearchResultText('Apple iPhone 17 Pro, 256GB, Deep Blue', term);
+  const proMax = scoreSearchResultText('Apple iPhone 17 Pro Max, 256GB, Cosmic Orange', term);
+  assert.ok(plain > pro, 'plain iPhone 17 should outscore the Pro the goal never asked for');
+  assert.ok(plain > proMax, 'plain iPhone 17 should outscore the Pro Max the goal never asked for');
+});
+
+test('scoreSearchResultText prefers a requested Pro variant over the plain model', () => {
+  const term = 'iPhone 17 Pro 256GB';
+  const plain = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);
+  const pro = scoreSearchResultText('Apple iPhone 17 Pro, 256GB, Deep Blue', term);
+  assert.ok(pro > plain, 'goal asked for Pro, so Pro should outscore the plain model');
+});
+
+test('scoreSearchResultText penalizes a completely different model number', () => {
+  const term = 'iPhone 17 256GB';
+  const seventeen = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);
+  const sixteen = scoreSearchResultText('Apple iPhone 16, 128GB, Black', term);
+  assert.ok(seventeen > sixteen, 'the requested model number must outscore an unrelated one');
+});
+
+test('pickBestSearchResult returns the highest-scoring candidate, not the first in DOM order', () => {
+  const candidates = [
+    { locatorIndex: 3, text: 'Apple iPhone 17 Pro, 256GB, Deep Blue' },
+    { locatorIndex: 9, text: 'Apple iPhone 17, 256GB, Lavender' },
+  ];
+  const best = pickBestSearchResult(candidates, 'iPhone 17 256GB');
+  assert.equal(best.locatorIndex, 9, 'the plain iPhone 17 should win even though it is second in the DOM');
+});
+
+test('pickBestSearchResult falls back to the first candidate on a total tie', () => {
+  const candidates = [{ locatorIndex: 1, text: 'Widget' }, { locatorIndex: 2, text: 'Widget' }];
+  const best = pickBestSearchResult(candidates, 'widget');
+  assert.equal(best.locatorIndex, 1);
+});
+
+test('pickBestSearchResult returns null for an empty candidate list', () => {
+  assert.equal(pickBestSearchResult([], 'iPhone 17'), null);
+});
+
+// Regression: after backing out of a wrong page, the vision model free-typed a search
+// query and hallucinated "iPhone 16" instead of retrying the goal's actual "iPhone 17" —
+// the prompt had no rule against substituting a different model/generation.
+test('buildDecisionPrompt forbids substituting a different model, generation, or tier', () => {
+  const prompt = buildDecisionPrompt('order me an iPhone 17 256GB from John Lewis', [], []);
+  assert.match(prompt, /NEVER substitute a different model number, generation, or\ntier/);
+  assert.match(prompt, /EXACT product wording from\nthe goal/);
+});
+
+// Regression: a live John Lewis run for "order me an iPhone 17 256GB from John Lewis" got
+// zero "orderable" candidates back from resolveOrderOpenUrl's plain HTTP fetch (JL likely
+// serves a stripped/bot-walled response to a non-browser request) and the old fallback
+// blindly returned candidates[0] — the first link scraped off the page — with zero
+// relevance check. That landed on a Nintendo Switch 2 console, which the recipe then
+// added to basket. pickFallbackCandidate must never hand back a candidate that scored no
+// better than chance against the goal.
+test('pickFallbackCandidate prefers the best-scoring candidate over positional order', () => {
+  const checked = [
+    { productUrl: 'https://x/switch', name: 'Nintendo Switch 2, 256GB Console', score: 0 },
+    { productUrl: 'https://x/iphone17', name: 'Apple iPhone 17, 256GB, Lavender', score: 4 },
+  ];
+  const picked = pickFallbackCandidate(checked, 'https://x/search?q=iphone+17+256gb');
+  assert.equal(picked, 'https://x/iphone17');
+});
+
+test('pickFallbackCandidate falls back to the search URL when nothing scores positively', () => {
+  const checked = [
+    { productUrl: 'https://x/switch', name: 'Nintendo Switch 2, 256GB Console', score: 0 },
+    { productUrl: 'https://x/random', name: 'Garden Hose, 25m', score: -1 },
+  ];
+  const searchUrl = 'https://x/search?q=iphone+17+256gb';
+  assert.equal(pickFallbackCandidate(checked, searchUrl), searchUrl);
+});
+
+test('pickFallbackCandidate handles nulls from failed PDP fetches', () => {
+  const checked = [null, { productUrl: 'https://x/iphone17', name: 'Apple iPhone 17, 256GB', score: 2 }, null];
+  assert.equal(pickFallbackCandidate(checked, 'https://x/search'), 'https://x/iphone17');
+});
+
+test('scoreProductNameVsGoal rewards matching words and punishes an unrequested tier word', () => {
+  const goal = 'order me an iPhone 17 256GB from John Lewis';
+  const plain = scoreProductNameVsGoal('Apple iPhone 17, 256GB, Lavender', goal);
+  const pro = scoreProductNameVsGoal('Apple iPhone 17 Pro, 256GB, Deep Blue', goal);
+  const unrelated = scoreProductNameVsGoal('Nintendo Switch 2, 256GB Console', goal);
+  assert.ok(plain > pro, 'the plain model should outscore an unrequested Pro variant');
+  assert.ok(plain > unrelated, 'the actual product should outscore a completely unrelated one');
+  assert.ok(unrelated <= 0, 'an unrelated product must not score positively just by sharing "256GB"');
+});
+
+// Regression: a live run's fastpath landed on "iPhone 17e, 256GB, Soft Pink" (£599) for a
+// goal that said plain "iPhone 17 256GB" (the £799 model). "17e" never equals the token
+// "17", so it dodged both the match bonus and the Pro/Max differentiator check, and slipped
+// through with a positive score since nothing else out-ranked it in that run's candidates.
+test('scoreProductNameVsGoal punishes a suffixed model tier ("17e") the goal never asked for', () => {
+  const goal = 'order me an iPhone 17 256GB from John Lewis';
+  const plain = scoreProductNameVsGoal('Apple iPhone 17, 256GB, Lavender', goal);
+  const suffixed = scoreProductNameVsGoal('Apple iPhone 17e, 256GB, Soft Pink', goal);
+  assert.ok(plain > suffixed, 'the plain model should outscore the unrequested "17e" tier');
+  assert.ok(suffixed < 0, '"17e" must not score positively against a goal that said plain "17"');
+});
+
+test('scoreProductNameVsGoal does not punish "17e" when the goal actually asked for it', () => {
+  const goal = 'order me an iPhone 17e 256GB from John Lewis';
+  const suffixed = scoreProductNameVsGoal('Apple iPhone 17e, 256GB, Soft Pink', goal);
+  assert.ok(suffixed > 0, 'goal explicitly asked for "17e", so it should score positively');
+});
+
+test('scoreSearchResultText requires a whole-word match, not a substring ("17e" must not count as "17")', () => {
+  const term = 'iPhone 17 256GB';
+  const plain = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);
+  const suffixed = scoreSearchResultText('Apple iPhone 17e, 256GB, Soft Pink', term);
+  assert.ok(plain > suffixed, 'the plain model should outscore the unrequested "17e" tier');
+  assert.ok(suffixed < 0, '"17e" must not score positively — a plain .includes("17") check would wrongly match it');
+});
+
+// Regression: a live John Lewis run completed guest checkout and landed on Auth0's own
+// redirect — checkout.johnlewis.com/callback/login/guest?email=... — which the old check
+// misread as a login wall purely because "login" appears in that callback path. That's
+// backwards: a /callback/ URL is guest auth completing, not blocking.
+test('isCheckoutLoginWallUrl does not fire on an Auth0 guest-checkout callback', () => {
+  assert.equal(isCheckoutLoginWallUrl('https://checkout.johnlewis.com/callback/login/guest?email=a%40b.com'), false);
+});
+
+test('isCheckoutLoginWallUrl still fires on a real sign-in page', () => {
+  assert.equal(isCheckoutLoginWallUrl('https://checkout.johnlewis.com/login'), true);
+  assert.equal(isCheckoutLoginWallUrl('https://www.example.com/account/login?redirect=/checkout'), true);
+  assert.equal(isCheckoutLoginWallUrl('https://www.example.com/signin'), true);
+});
+
+test('isCheckoutLoginWallUrl returns false for an unrelated URL', () => {
+  assert.equal(isCheckoutLoginWallUrl('https://www.johnlewis.com/basket'), false);
+});
+
+// Regression: a live John Lewis run had a full home address on file, but the checkout page
+// defaulted to "Collection" (a random Royal Mail shop) and the loop never considered
+// switching to "Delivery" — it just silently accepted the retailer's default.
+test('findDeliveryCollectionChoice detects both options on a checkout page', () => {
+  const elements = [
+    { id: 0, text: 'Collection', locatorIndex: 0 },
+    { id: 1, text: 'Delivery', locatorIndex: 1 },
+    { id: 2, text: 'Continue to payment', locatorIndex: 2 },
+  ];
+  const choice = findDeliveryCollectionChoice(elements);
+  assert.ok(choice);
+  assert.equal(choice.collection.text, 'Collection');
+  assert.equal(choice.delivery.text, 'Delivery');
+});
+
+test('findDeliveryCollectionChoice recognizes Click & Collect phrasing', () => {
+  const elements = [
+    { id: 0, text: 'Click & Collect', locatorIndex: 0 },
+    { id: 1, text: 'Delivery', locatorIndex: 1 },
+  ];
+  assert.ok(findDeliveryCollectionChoice(elements));
+});
+
+test('findDeliveryCollectionChoice returns null when only one side is present', () => {
+  const elements = [{ id: 0, text: 'Delivery', locatorIndex: 0 }, { id: 1, text: 'Add to basket', locatorIndex: 1 }];
+  assert.equal(findDeliveryCollectionChoice(elements), null);
+});
+
+// Regression: two live runs never asked at all — John Lewis's toggle cards read
+// "Collection\nFree" / "Delivery\nFree", which collapses to "Collection Free" / "Delivery
+// Free" once the element extractor normalizes whitespace. The original ^delivery$/
+// ^collection$ anchors required an exact match and silently missed every real occurrence.
+test('findDeliveryCollectionChoice matches a toggle card with trailing price text ("Delivery Free")', () => {
+  const elements = [
+    { id: 0, text: 'Collection Free', locatorIndex: 0 },
+    { id: 1, text: 'Delivery Free', locatorIndex: 1 },
+    { id: 2, text: 'Continue to payment', locatorIndex: 2 },
+  ];
+  const choice = findDeliveryCollectionChoice(elements);
+  assert.ok(choice, 'must match even with trailing "Free" price text');
+  assert.equal(choice.collection.text, 'Collection Free');
+  assert.equal(choice.delivery.text, 'Delivery Free');
+});
+
+test('findDeliveryCollectionChoice does not match an unrelated sentence mentioning delivery', () => {
+  const elements = [
+    { id: 0, text: 'Delivery information can be found on our help page', locatorIndex: 0 },
+    { id: 1, text: 'Collection', locatorIndex: 1 },
+  ];
+  assert.equal(findDeliveryCollectionChoice(elements), null, 'a long sentence is not a toggle label');
+});
+
+test('parseDeliveryPreferenceFromText reads a clear delivery reply', () => {
+  assert.equal(parseDeliveryPreferenceFromText('deliver it to my address please'), 'delivery');
+  assert.equal(parseDeliveryPreferenceFromText('ship it'), 'delivery');
+});
+
+test('parseDeliveryPreferenceFromText reads a clear collection reply', () => {
+  assert.equal(parseDeliveryPreferenceFromText('collection is fine'), 'collection');
+  assert.equal(parseDeliveryPreferenceFromText("I'll pick it up from the store"), 'collection');
+  assert.equal(parseDeliveryPreferenceFromText('click and collect'), 'collection');
+});
+
+test('parseDeliveryPreferenceFromText returns null for an unrelated or ambiguous reply', () => {
+  assert.equal(parseDeliveryPreferenceFromText('sure, sounds good'), null);
+  assert.equal(parseDeliveryPreferenceFromText(''), null);
+});
+
 test('closeSession closes the browser and removes the session', async () => {
   const browser = fakeBrowser();
   createSession('user-d', { browser, context: {}, page: {}, goal: 'order pizza', history: [], pendingPaymentLabel: null });
@@ -234,3 +447,4 @@ test('closeSession closes the browser and removes the session', async () => {
   assert.equal(getSession('user-d'), null);
   assert.equal(browser.closed(), true);
 });
+

@@ -352,6 +352,71 @@ function isTechnicalAsk(question) {
   return TECHNICAL_ASK_PATTERN.test(String(question || ''));
 }
 
+// Regression: a live John Lewis run completed guest checkout successfully and landed on
+// Auth0's own redirect — checkout.johnlewis.com/callback/login/guest?email=... — which the
+// old check misread as "the site wants a login" purely because the word "login" appears in
+// that callback path. It's the OPPOSITE: a callback/redirect URL is guest auth completing,
+// not a wall blocking it. Exclude /callback/ paths so this only fires on an actual sign-in
+// page shown to the user.
+function isCheckoutLoginWallUrl(url) {
+  const u = String(url || '');
+  if (/\/callback\b/i.test(u)) return false;
+  return /\/(?:login|signin|sign-in|account\/login|users\/login)(?:\b|\/|\?)/i.test(u);
+}
+
+// Delivery vs Collection is a real preference, not something to silently accept from
+// whichever option the retailer defaults to. Regression: a live John Lewis run had a full
+// home address on file, yet the checkout page defaulted to "Collection" (Click & Collect
+// at a random Royal Mail shop) and the loop never considered switching to "Delivery" —
+// it just accepted the default. Detect the choice and ask once instead.
+// A toggle card's captured text is often more than the bare word — JL's cards read
+// "Delivery\nFree" / "Collection\nFree", which collapses to "Delivery Free" / "Collection
+// Free" once whitespace is normalized. Anchor to the start (so we don't match an unrelated
+// sentence that happens to mention delivery/collection) but allow trailing words, and cap
+// the length so a real toggle label ("Collection Free") is accepted while a paragraph
+// ("Collection information can be found...") is not.
+const DELIVERY_OPTION_PATTERN = /^delivery\b/i;
+const COLLECTION_OPTION_PATTERN = /^(collection|click\s*(?:&|and)\s*collect|store\s+collection|pickup|pick\s*up)\b/i;
+const TOGGLE_LABEL_MAX_LEN = 30;
+
+function findDeliveryCollectionChoice(elements) {
+  const isToggleLabel = (pattern) => (el) => {
+    const t = String(el.text || '').trim();
+    return t.length <= TOGGLE_LABEL_MAX_LEN && pattern.test(t);
+  };
+  const delivery = (elements || []).find(isToggleLabel(DELIVERY_OPTION_PATTERN));
+  const collection = (elements || []).find(isToggleLabel(COLLECTION_OPTION_PATTERN));
+  return (delivery && collection) ? { delivery, collection } : null;
+}
+
+// Parses a user's free-text reply to the delivery/collection ask (their next turn's goal).
+function parseDeliveryPreferenceFromText(text) {
+  const t = String(text || '').toLowerCase();
+  if (/\b(deliver(?:y)?|ship|post it|to my (?:address|home|house|door))\b/.test(t)) return 'delivery';
+  if (/\b(collect(?:ion)?|click\s*(?:&|and)\s*collect|pick\s*up|pickup|(?:from|at)\s+(?:a\s+|the\s+)?(?:store|shop))\b/.test(t)) return 'collection';
+  return null;
+}
+
+// Click whichever side of the choice matches the stored preference. Same click idiom as
+// tryGuestCheckoutClick: resolve the element by locatorIndex, scroll, force-click.
+async function tryApplyDeliveryPreference(page, session, steps, onProgress) {
+  const elements = await extractClickableElements(page).catch(() => []);
+  const choice = findDeliveryCollectionChoice(elements);
+  if (!choice) return false;
+  const target = session.deliveryPreference === 'delivery' ? choice.delivery : choice.collection;
+  const locator = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!locator) return false;
+  onProgress(`Selecting "${target.text}"…`);
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 10000, force: true }).catch(() => false);
+  session.history.push(`Step ${steps}: [delivery-preference] selected "${target.text}"`);
+  session.lastWasRecipe = true;
+  return true;
+}
+
 // Re-auth detection. A stored login (storageState) eventually expires — the merchant
 // invalidates the cookie (days/weeks, or on a new IP / 2FA challenge). When that happens
 // the agent lands on a sign-in wall and, blind to it, burns its whole step budget trying
@@ -786,6 +851,13 @@ options, then press its Add/confirm button — usually at the bottom of the dial
 inside the dialog if you can't see it. NEVER press Close/X on a dialog for an item you
 intend to order.
 
+The goal names a specific product — its model, generation, capacity, or size is a
+REQUIREMENT, not a suggestion. NEVER substitute a different model number, generation, or
+tier (don't search or pick "iPhone 16" when the goal said "iPhone 17"; don't pick a
+"Pro"/"Plus"/"Max"/"Mini" variant unless the goal explicitly asked for one). If a search or
+pick attempt failed or landed on the wrong page, retry using the EXACT product wording from
+the goal — never invent or "round to" a different product name.
+
 If you pressed Add and nothing changed, a REQUIRED option (size, colour, delivery method)
 is probably unselected — select it first, then press Add again. Elements marked
 "(unavailable)" are out of stock or disabled — clicking them does nothing. If the requested
@@ -1047,7 +1119,7 @@ const CONSENT_NAMES = [
   /^allow all cookies$/i, /^accept all cookies$/i, /^allow all$/i, /^accept all$/i,
   /^accept cookies$/i, /^i accept$/i, /^accept$/i, /^agree$/i, /^got it$/i, /^continue$/i
 ];
-async function dismissConsent(page) {
+async function dismissConsentOnce(page) {
   // Fast path: the common consent frameworks expose a stable id.
   for (const sel of CONSENT_SELECTORS) {
     const el = page.locator(sel).first();
@@ -1070,6 +1142,20 @@ async function dismissConsent(page) {
     }
   }
   return false;
+}
+
+// Regression: a live John Lewis run showed the consent banner ("Personalise your shopping
+// experience") still covering the page when the recipe's very first "Add to basket" click
+// fired — the button was there but visually disabled under the modal, and every add from
+// then on silently failed with JL's own "there was a problem with your request" error.
+// JL's consent manager injects the banner a beat after domcontentloaded, so a single
+// ~120ms-per-selector pass right after page load can lose that race. One retry after a
+// real wait catches it without slowing down the common case (banner absent → both passes
+// return fast; banner present on the first pass → no second pass needed at all).
+async function dismissConsent(page) {
+  if (await dismissConsentOnce(page)) return true;
+  await page.waitForTimeout(700).catch(() => {});
+  return dismissConsentOnce(page);
 }
 
 // Hard cap on a single model call. A transient Gemini "fetch failed" was hanging the SDK's
@@ -1426,17 +1512,62 @@ async function tryTier0PriceLookup(url, goal) {
 // Rewards goal words present in name; penalises differentiator words in name that aren't
 // in the goal (e.g. "Pro Max" in name but not goal → negative score).
 const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base)\b/i;
+// A bare number or number+unit (256gb, 128gb, 5g, 65in) is too generic to prove two
+// products are related — a Nintendo Switch and an iPhone can both be "256GB". Only an
+// alphabetic word match (a shared brand/product noun like "iphone") counts as proof the
+// candidate is actually the same kind of thing.
+const GENERIC_SPEC_WORD = /^\d+[a-z]*$/i;
+// A model number with a single-letter suffix (16e, 17e — Apple's cheaper tier, fused to
+// the digits so it never equals the plain "17" token) is a different variant, exactly like
+// "Pro"/"Max" being separate words. Regression: a live run's fastpath landed on "iPhone
+// 17e, 256GB" for a goal that said plain "iPhone 17 256GB" — since "17e" !== "17" as a
+// token, neither the match bonus nor PRODUCT_DIFFERENTIATORS caught it, so it slipped
+// through with a positive score and nothing to out-rank it.
+const SUFFIXED_MODEL_WORD = /^(\d{1,3})([a-z])$/i;
 function scoreProductNameVsGoal(name, goal) {
   if (!name || !goal) return 0;
   const words = (s) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 1));
   const goalWords = words(goal);
   const nameWords = words(name);
   let score = 0;
+  let hasCoreMatch = false;
+  let hasUnrequestedVariant = false;
   for (const w of nameWords) {
-    if (goalWords.has(w)) score += 2;
-    else if (PRODUCT_DIFFERENTIATORS.test(w)) score -= 3; // punish unmentioned tier words
+    if (goalWords.has(w)) {
+      score += 2;
+      if (!GENERIC_SPEC_WORD.test(w)) hasCoreMatch = true;
+      continue;
+    }
+    const suffixed = w.match(SUFFIXED_MODEL_WORD);
+    if (suffixed && goalWords.has(suffixed[1])) {
+      hasUnrequestedVariant = true; // goal asked for plain "17", this is the "17e" tier
+    } else if (PRODUCT_DIFFERENTIATORS.test(w)) {
+      hasUnrequestedVariant = true; // an unmentioned tier word (Pro/Max/Plus/...)
+    }
   }
+  // Regression: "Nintendo Switch 2, 256GB Console" scored positively against "iPhone 17
+  // 256GB" purely on the shared "256gb" token and got treated as a valid candidate.
+  // Without any non-generic word in common, this can't be the same product.
+  // Second regression: a candidate carrying an unrequested tier word ("Pro"/"Max"/"17e")
+  // can still rack up enough generic-word overlap (brand + capacity) to net positive even
+  // after a flat penalty, and — when it's the ONLY candidate fetched that run — nothing
+  // else was around to out-rank it. Either case must force the score below the
+  // pickFallbackCandidate/orderable relevance floor (score > 0), not just discourage it.
+  if (!hasCoreMatch || hasUnrequestedVariant) return Math.min(score, -1);
   return score;
+}
+
+// Pick the PDP to open when none of the fetched candidates looked "orderable" (a plain
+// HTTP fetch often gets a stripped/bot-walled response, so `orderable` can be false for
+// every candidate even on a normal search). Pure + unit-testable.
+// Regression: a live run for "iPhone 17 256GB" got zero orderable candidates from John
+// Lewis and fell back to `candidates[0]` unconditionally — the first link scraped off the
+// search-results page, with no relevance check at all — which was a Nintendo Switch 2
+// console. Require a positive name-vs-goal score before ever trusting a fallback pick;
+// otherwise let the live browser + vision loop choose from the real search-results page.
+function pickFallbackCandidate(checked, searchUrl) {
+  const scored = (checked || []).filter((c) => c && c.score > 0).sort((a, b) => b.score - a.score);
+  return scored.length ? scored[0].productUrl : searchUrl;
 }
 
 // Order open URL: search → best-matching orderable product PDP in one HTTP hop when
@@ -1457,12 +1588,12 @@ async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
     const score = scoreProductNameVsGoal(name, goal);
     return { productUrl, orderable, name, score };
   }));
-  const orderable = checked.filter((c) => c?.orderable);
+  const orderable = checked.filter((c) => c?.orderable && c.score > 0);
   if (orderable.length) {
     orderable.sort((a, b) => b.score - a.score);
     return orderable[0].productUrl;
   }
-  return candidates[0] || searchUrl;
+  return pickFallbackCandidate(checked, searchUrl);
 }
 
 async function loadUserLocation(userId) {
@@ -2264,11 +2395,67 @@ async function tryProactiveOrderSearch(page, session, steps, onProgress) {
   return true;
 }
 
+// Qualifier words that mark a *different* product tier than the base model (Pro/Max/Plus
+// etc). A search-result title carrying one of these that the goal never asked for is a
+// worse match than a plain hit — retailers often rank the pricier variant first.
+const SEARCH_PICK_QUALIFIER_WORDS = ['pro', 'plus', 'max', 'mini', 'ultra', 'se'];
+const SEARCH_PICK_STOP_WORDS = new Set(['the', 'a', 'an', 'for', 'and', 'me', 'my', 'order', 'buy', 'get']);
+
+// Score a search-result link's visible text against the goal's search term. Pure +
+// unit-testable: exported so tests can hit it directly without stubbing page.evaluate.
+// Regression: John Lewis search for "iPhone 17 256GB" ranked "iPhone 17 Pro" above the
+// plain "iPhone 17" — a blind first-link click grabbed the wrong, pricier variant every
+// time. This scores every candidate instead of trusting DOM order.
+function scoreSearchResultText(text, term) {
+  // Regression: plain substring .includes() let "iPhone 17e" falsely score as if it matched
+  // "17" (because "17e".includes("17") is true), and separately let it slip past the
+  // qualifier check ("e" isn't "pro"/"max"/etc). Tokenize the result text and require an
+  // exact word match, then apply the same suffixed-model penalty as scoreProductNameVsGoal.
+  const nameWords = String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+  const nameWordSet = new Set(nameWords);
+  const words = String(term || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+  const goalWordSet = new Set(words);
+  const qualifiersInGoal = SEARCH_PICK_QUALIFIER_WORDS.filter((w) => words.includes(w));
+  const significant = words.filter((w) => w.length > 1 && !SEARCH_PICK_STOP_WORDS.has(w));
+  let score = 0;
+  let hasUnrequestedVariant = false;
+  for (const w of significant) if (nameWordSet.has(w)) score += 1;
+  for (const w of SEARCH_PICK_QUALIFIER_WORDS) {
+    const has = nameWordSet.has(w);
+    const wanted = qualifiersInGoal.includes(w);
+    if (has && !wanted) hasUnrequestedVariant = true; // e.g. goal said "iPhone 17", this result is the Pro
+    if (!has && wanted) hasUnrequestedVariant = true; // e.g. goal said "iPhone 17 Pro", this result is the base
+  }
+  for (const w of nameWordSet) {
+    const suffixed = w.match(SUFFIXED_MODEL_WORD);
+    if (suffixed && goalWordSet.has(suffixed[1]) && !goalWordSet.has(w)) {
+      hasUnrequestedVariant = true; // e.g. goal said plain "17", this result is the "17e" tier
+    }
+  }
+  // A candidate carrying an unrequested tier word can still rack up enough generic overlap
+  // to net positive after a flat penalty — force it below any genuinely matching candidate
+  // regardless of how many other words it happens to share.
+  return hasUnrequestedVariant ? Math.min(score, -1) : score;
+}
+
+function pickBestSearchResult(candidates, term) {
+  if (!candidates || !candidates.length) return null;
+  let best = candidates[0];
+  let bestScore = -Infinity;
+  candidates.forEach((c, i) => {
+    const score = scoreSearchResultText(c.text, term) - i * 0.01; // tie-break: earlier result wins
+    if (score > bestScore) { bestScore = score; best = c; }
+  });
+  return best;
+}
+
 async function tryOrderSearchPick(page, session) {
   if (!session.isOrder || session.searchPickDone || !isSearchResultsUrl(page.url())) return null;
-  const hit = await page.evaluate((sel) => {
+  const term = deriveSearchTerm(session.goal, { names: [session.site?.split('.')[0] || ''] }) || session.goal || '';
+  const candidates = await page.evaluate((sel) => {
     const patterns = [/\/p\/[^/?#]+/i, /\/p\/\d+/i, /\/p\d+(?:\/|$)/i, /\/prd\//i, /\/product\//i, /\/dp\/[A-Z0-9]/i, /\/gp\/product\//i];
     const all = [...document.querySelectorAll(sel)];
+    const out = [];
     for (const a of document.querySelectorAll('a[href]')) {
       const href = a.getAttribute('href') || '';
       if (!patterns.some((p) => p.test(href))) continue;
@@ -2279,10 +2466,12 @@ async function tryOrderSearchPick(page, session) {
       if (idx === -1) continue;
       const text = (a.innerText || a.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
       if (text.length < 3) continue;
-      return { locatorIndex: idx, text };
+      out.push({ locatorIndex: idx, text });
+      if (out.length >= 24) break; // plenty to score from; cap DOM scan cost
     }
-    return null;
-  }, CLICKABLE_SELECTOR).catch(() => null);
+    return out;
+  }, CLICKABLE_SELECTOR).catch(() => []);
+  const hit = pickBestSearchResult(candidates, term);
   if (!hit) return null;
   session.searchPickDone = true;
   return { action: 'click', locatorIndex: hit.locatorIndex, text: hit.text, stepName: 'search-pick' };
@@ -2594,15 +2783,53 @@ async function completeCheckoutEmailFill(session, userId, page, steps, onProgres
 }
 
 // Generic checkout tail for non-Wickes sites: guest → email → details → advance → payment.
-async function tryPaymentReady(session, page) {
+// Regression: a live John Lewis Click & Collect run reached this exact page — pay button
+// visible, "Mobile number" input still empty — and got called ready_for_payment without
+// ever filling the phone (JL: "Royal Mail shops require a UK mobile number so you can be
+// texted when the order is ready"). The vision decision loop can spot a pay button and
+// never notice an unfilled field right above it, so make one best-effort autofill pass
+// here — the one place every ready_for_payment path funnels through — before declaring
+// the page ready, regardless of which call site noticed the pay button first.
+async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) {
   const elements = await extractClickableElements(page).catch(() => []);
   const payEl = elements.find((el) => matchesPaymentKeyword(el.text));
-  if (payEl) {
-    session.pendingPaymentLabel = payEl.text;
-    return { type: 'ready_for_payment', summary: 'Checkout — payment step', total: '' };
-  }
-  if (isCheckoutPaymentUrl(page.url())) {
-    session.pendingPaymentLabel = 'Pay';
+  const paymentUrl = !payEl && isCheckoutPaymentUrl(page.url());
+  if (payEl || paymentUrl) {
+    // Delivery vs Collection is a real preference — don't declare the order ready with an
+    // unaddressed choice sitting on the very same page (JL shows both radios right next to
+    // "Continue to payment"). This is a second, later check alongside the per-step one in
+    // runOrderingTurn: several callers reach tryPaymentReady and return its result directly
+    // mid-step, without ever cycling back to the top of the loop where that check lives —
+    // this is the guaranteed last stop before ready_for_payment ships.
+    if (session.isOrder) {
+      const deliveryChoice = findDeliveryCollectionChoice(elements);
+      if (deliveryChoice) {
+        if (!session.deliveryPreference && !session.deliveryChoiceAsked) {
+          session.deliveryChoiceAsked = true;
+          return {
+            type: 'ask',
+            question: 'This can be delivered to your address on file, or collected from a nearby store — which would you prefer?',
+          };
+        }
+        if (session.deliveryPreference && !session.deliveryPreferenceApplied) {
+          const applied = await tryApplyDeliveryPreference(page, session, steps, onProgress);
+          if (applied) {
+            // Regression: without this flag, the choice reappears on the very next page
+            // (JL keeps the same toggle visible on /delivery after switching to it) and
+            // got re-clicked every single pass forever — apply it once per session, not
+            // every time the toggle is visible.
+            session.deliveryPreferenceApplied = true;
+            await settle(page, RECIPE_SETTLE_MS);
+            return null; // page may have changed shape (e.g. a delivery form appeared) — re-evaluate fresh
+          }
+        }
+      }
+    }
+    const profile = session.checkoutProfile;
+    if (profile?.consent && (profile.phone || profile.name || profile.address)) {
+      await autoFillCheckoutDetails(session, profile, steps, onProgress).catch(() => {});
+    }
+    session.pendingPaymentLabel = payEl ? payEl.text : 'Pay';
     return { type: 'ready_for_payment', summary: 'Checkout — payment step', total: '' };
   }
   return null;
@@ -2619,7 +2846,7 @@ async function tryGenericCheckoutProgress(session, userId, page, steps, onProgre
 
   const profile = await getCheckoutProfileCached(session, userId);
   for (let pass = 0; pass < 4; pass++) {
-    const ready = await tryPaymentReady(session, page);
+    const ready = await tryPaymentReady(session, page, steps, onProgress);
     if (ready) return { ready, result: ready };
 
     if (session.guestCheckoutDone && profile.consent && !session.checkoutEmailSubmitted) {
@@ -2653,12 +2880,12 @@ async function tryGenericCheckoutProgress(session, userId, page, steps, onProgre
       if (advanced) return { advanced: true };
     }
 
-    const readyMid = await tryPaymentReady(session, page);
+    const readyMid = await tryPaymentReady(session, page, steps, onProgress);
     if (readyMid) return { ready: true, result: readyMid };
     if (pass < 3) await settle(page, 400);
   }
 
-  const readyAfter = await tryPaymentReady(session, page);
+  const readyAfter = await tryPaymentReady(session, page, steps, onProgress);
   if (readyAfter) return { ready: true, result: readyAfter };
   return null;
 }
@@ -2672,6 +2899,14 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
   await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(() => {});
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
+  const checkout = page.getByRole('button', { name: /checkout|secure checkout/i }).first()
+    .or(page.getByRole('link', { name: /checkout|secure checkout/i }).first());
+  const clickedCheckout = await checkout.click({ timeout: 3500 }).then(() => true).catch(() => false);
+  if (clickedCheckout) {
+    onProgress('Opening checkout…');
+    session.history.push(`Step ${steps}: [recipe] clicked John Lewis checkout`);
+    await settle(page, RECIPE_SETTLE_MS);
+  }
   return true;
 }
 
@@ -2784,6 +3019,11 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           }
           session.pendingCheckoutFill = { fields: parsed };
         }
+        // User replied to the delivery-vs-collection ask.
+        if (session.deliveryChoiceAsked && !session.deliveryPreference) {
+          const pref = parseDeliveryPreferenceFromText(goal);
+          if (pref) session.deliveryPreference = pref;
+        }
       }
     } else {
       session.autoContinueCount = (session.autoContinueCount || 0) + 1;
@@ -2825,11 +3065,54 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
   // can fix itself — instead of silently re-asking the identical prompt against the same
   // screenshot, which just reproduces the same bad id until the stuck-guard trips.
   let pendingCorrection = '';
-  // One calm line when we genuinely can't make progress — never a loop of asks, never a
-  // request for a URL/selector. Keeps the session open so "keep going" can retry.
-  const STUCK = { type: 'error', error: session.isOrder
-    ? 'I got stuck on this page and couldn\'t make progress. Want me to try a different site or platform?'
-    : 'I got stuck on this page and couldn\'t make progress. Want me to try a different site, or take another approach?' };
+  const recoverableBrowserError = (message, {
+    code = 'browser_stuck',
+    label = 'Keep going',
+    autoContinue = false,
+    reason = ''
+  } = {}) => ({
+    type: 'error',
+    error: message,
+    recoverable: true,
+    recoveryAction: {
+      type: 'continue_browser_task',
+      message: 'keep going',
+      label,
+      autoContinue,
+      code,
+      reason
+    }
+  });
+
+  const isTransientBrowserFailure = reason =>
+    /timed out|timeout|temporar|unavailable|socket|network|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|5\d\d|overloaded|rate limit/i
+      .test(String(reason || ''));
+
+  const transientRetryResult = reason => {
+    session.transientBrowserRetries = (session.transientBrowserRetries || 0) + 1;
+    if (session.transientBrowserRetries > 2) return null;
+    session.history.push(`Step ${steps}: transient browser failure (${reason}); retrying from the same page`);
+    return {
+      type: 'awaiting_more',
+      summary: 'The page hit a temporary snag, so I\'m retrying from the same spot.',
+      recoverable: true,
+      recoveryAction: {
+        type: 'continue_browser_task',
+        message: 'keep going',
+        label: 'Retrying',
+        autoContinue: true,
+        code: 'transient_browser_failure',
+        reason
+      }
+    };
+  };
+
+  // One calm line when we genuinely can't make progress. The session stays open and the
+  // app gets a structured recovery action, so this is no longer a dead-end failure card.
+  const STUCK = () => recoverableBrowserError(session.isOrder
+    ? 'I got stuck on this page and couldn\'t make progress. I can retry from here, or you can point me at a different site.'
+    : 'I got stuck on this page and couldn\'t make progress. I can retry from here, or take another approach.',
+    { code: 'browser_stuck', reason: 'progress_guard' });
 
   if (session.isOrder && !session.checkoutProfile) {
     session.checkoutProfile = await loadCheckoutProfile(getSupabase(), userId);
@@ -2928,7 +3211,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         session.stepsSinceProgress = 0;
         session.stepsSinceNewState = 0;
         session.stepsSinceCartProgress = 0;
-        return STUCK;
+        return STUCK();
       }
       if (assessed.verdict === 'nudge') {
         pendingCorrection = assessed.correction;
@@ -2976,6 +3259,42 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       // Cheap: URL pattern check is a string test; DOM read only when URL matches or has
       // a password field. Session stays open so "keep going" resumes the same order.
       const currentUrl = session.page.url();
+      if (session.isOrder && isCheckoutLoginWallUrl(currentUrl)
+        && session.history.some(h => /checkout|proceed to checkout|register \/ login/i.test(h))) {
+        return {
+          type: 'ask',
+          question: 'I added it to the cart and reached checkout, but the site wants a login or signup before I can continue. Want to sign in and then say "keep going"?',
+        };
+      }
+      // Delivery vs Collection: a real preference, not something to silently accept from
+      // whichever the retailer defaults to. Ask once; once answered, apply it whenever the
+      // choice reappears (some sites re-show it after a store/postcode change). If the
+      // reply didn't parse into a clear preference, don't ask again — accept the retailer's
+      // default rather than blocking the order forever on an unanswerable question.
+      if (session.isOrder) {
+        const deliveryChoice = findDeliveryCollectionChoice(elements);
+        if (deliveryChoice) {
+          if (!session.deliveryPreference && !session.deliveryChoiceAsked) {
+            session.deliveryChoiceAsked = true;
+            return {
+              type: 'ask',
+              question: 'This can be delivered to your address on file, or collected from a nearby store — which would you prefer?',
+            };
+          }
+          if (session.deliveryPreference && !session.deliveryPreferenceApplied) {
+            const applied = await tryApplyDeliveryPreference(session.page, session, steps, onProgress);
+            if (applied) {
+              session.deliveryPreferenceApplied = true; // apply once per session — see tryPaymentReady
+              await settle(session.page, RECIPE_SETTLE_MS);
+              consecutiveBadDecisions = 0;
+              consecutiveWaits = 0;
+              touchSession(userId);
+              await persistStorage(userId, session);
+              continue;
+            }
+          }
+        }
+      }
       // Guest fork: click before vision/email — extraction often misses the CTA on sparse pages.
       if (session.isOrder && !session.guestCheckoutDone
         && !(session.checkoutEmailFilled && !session.checkoutEmailSubmitted)
@@ -3347,7 +3666,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           stepsSinceProgress = 0;
           stepsSinceNewState = 0;
           await settle(session.page, RECIPE_SETTLE_MS);
-          const ready = await tryPaymentReady(session, session.page);
+          const ready = await tryPaymentReady(session, session.page, steps, onProgress);
           if (ready) {
             touchSession(userId);
             await persistStorage(userId, session);
@@ -3405,12 +3724,13 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
         decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
         pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
+        session.transientBrowserRetries = 0;
       }
 
       if (decision.action === 'invalid') {
         consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
-        if (consecutiveBadDecisions >= 3) return STUCK;
+        if (consecutiveBadDecisions >= 3) return STUCK();
         continue;
       }
 
@@ -3427,7 +3747,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
         if (consecutiveWaits >= 6) {
           consecutiveBadDecisions += 1;
-          if (consecutiveBadDecisions >= 3) return STUCK;
+          if (consecutiveBadDecisions >= 3) return STUCK();
         }
         continue;
       }
@@ -3494,7 +3814,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         if (isTechnicalAsk(decision.question)) {
           consecutiveBadDecisions += 1;
           session.history.push(`Step ${steps}: suppressed a technical question ("${String(decision.question).slice(0, 60)}")`);
-          if (consecutiveBadDecisions >= 3) return STUCK;
+          if (consecutiveBadDecisions >= 3) return STUCK();
           await session.page.waitForTimeout(1200);
           continue;
         }
@@ -3607,7 +3927,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           }
           consecutiveBadDecisions += 1;
           session.history.push(`Step ${steps}: ignored ready_for_payment on info lookup`);
-          if (consecutiveBadDecisions >= 3) return STUCK;
+          if (consecutiveBadDecisions >= 3) return STUCK();
           continue;
         }
         // Find the real pay button (the cart-summary text never matches a clickable
@@ -3688,7 +4008,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           consecutiveBadDecisions += 1;
           pendingCorrection = `Your last reply used elementId ${decision.elementId}, which is NOT on this page. Valid element ids are 0 to ${lastId}. Look at the numbered badges in the screenshot and choose one of those — do not use any other number.`;
           session.history.push(`Step ${steps}: model chose elementId ${decision.elementId}, which is not on the page (valid 0-${lastId}); asked it to pick a real one`);
-          if (consecutiveBadDecisions >= 3) return STUCK;
+          if (consecutiveBadDecisions >= 3) return STUCK();
           continue;
         }
       }
@@ -3799,7 +4119,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
             }
           }
         }
-        const ready = await tryPaymentReady(session, session.page);
+        const ready = await tryPaymentReady(session, session.page, steps, onProgress);
         if (ready) {
           touchSession(userId);
           await persistStorage(userId, session);
@@ -3856,7 +4176,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
         consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: suppressed fill of email into non-email field "${target.text}"`);
-        if (consecutiveBadDecisions >= 3) return STUCK;
+        if (consecutiveBadDecisions >= 3) return STUCK();
         continue;
       }
       const CHECKOUT_CTA = /^(continue|next|proceed|submit|checkout)(\s|$| to\b)/i;
@@ -3879,7 +4199,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         }
         session.history.push(`Step ${steps}: suppressed fill into checkout CTA "${target.text}"`);
         consecutiveBadDecisions += 1;
-        if (consecutiveBadDecisions >= 3) return STUCK;
+        if (consecutiveBadDecisions >= 3) return STUCK();
         continue;
       }
 
@@ -4016,7 +4336,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
           }
           if (repeatActionCount >= 4) {
             consecutiveBadDecisions += 1;
-            if (consecutiveBadDecisions >= 3) return STUCK;
+            if (consecutiveBadDecisions >= 3) return STUCK();
           }
         } else {
           lastActionSig = sig;
@@ -4095,7 +4415,7 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         consecutiveBadDecisions += 1;
         pendingCorrection = `Your previous ${decision.action} on "${target.text}" failed (${reason}). Pick a different element or try another way to reach the goal.`;
         session.history.push(`Step ${steps}: ${decision.action} on "${target.text}" failed (${reason})`);
-        if (consecutiveBadDecisions >= 3) return STUCK;
+        if (consecutiveBadDecisions >= 3) return STUCK();
         continue;
       }
     }
@@ -4105,7 +4425,12 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
     console.warn('[browser-task] step failed:', error.message);
     const reason = String(error.message || 'something went wrong').split('\n')[0].slice(0, 160);
     session.history.push(`Step ${steps}: action failed (${reason})`);
-    return { type: 'error', error: `Hit a snag on the page (${reason}). Say "keep going" and I'll pick up where I left off.` };
+    const retry = isTransientBrowserFailure(reason) ? transientRetryResult(reason) : null;
+    if (retry) return retry;
+    return recoverableBrowserError(
+      `Hit a snag on the page (${reason}). I can pick up where I left off.`,
+      { code: 'browser_step_failed', reason }
+    );
   }
 
   // No "want me to keep going?" — the client auto-continues, so asking a question we
@@ -4168,6 +4493,9 @@ module.exports = {
   tier0NameMatchesGoal,
   matchesPaymentKeyword,
   isTechnicalAsk,
+  isCheckoutLoginWallUrl,
+  findDeliveryCollectionChoice,
+  parseDeliveryPreferenceFromText,
   looksLikeLoginWall,
   findGuestCheckoutElement,
   classifyCheckoutAsk,
@@ -4184,6 +4512,10 @@ module.exports = {
   assessProgress,
   buildDecisionPrompt,
   parseModelDecision,
+  scoreSearchResultText,
+  pickBestSearchResult,
+  scoreProductNameVsGoal,
+  pickFallbackCandidate,
   findElementByText,
   createSession,
   getSession,

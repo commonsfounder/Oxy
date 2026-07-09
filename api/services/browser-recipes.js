@@ -1072,6 +1072,27 @@ async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   }
   if (!step) return null;
 
+  // Stall guard: a step can resolve to a move every turn (the selector keeps finding the
+  // button) while the site silently rejects the click — e.g. a retailer's own "technical
+  // problem, please refresh" banner swallows "Add to basket" and basketCount never moves.
+  // recordHit above only proves the selector matched, not that the click did anything, so
+  // that alone can loop forever. If we're about to hand back the exact same step on the
+  // exact same page state (same URL + basketCount) we already returned last time, treat it
+  // as a miss instead and let vision see the page and react.
+  const stallSignature = `${host}:${step.name}:${page.url()}:${ctx.basketCount}`;
+  if (session) {
+    if (session._recipeStallSig === stallSignature) {
+      session._recipeStallCount = (session._recipeStallCount || 0) + 1;
+    } else {
+      session._recipeStallSig = stallSignature;
+      session._recipeStallCount = 0;
+    }
+    if (session._recipeStallCount >= 2) {
+      health.recordMiss(host, step.name);
+      return null;
+    }
+  }
+
   if (step.resolve) {
     // Escape hatch: the step supplies its own move (may be an "ask", which is a real move,
     // not a miss). Only a null return — the step couldn't resolve — counts as a miss.

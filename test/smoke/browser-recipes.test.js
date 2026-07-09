@@ -190,6 +190,47 @@ test('nextRecipeMove returns a click for add-to-basket once size is satisfied', 
   assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
 });
 
+// Regression: a live JL run showed the retailer's own "Sorry, we've had a technical
+// problem" banner swallow every "Add to basket" click while the selector kept resolving —
+// recordHit only proves the button was found, not that the click did anything, so the
+// recipe looped on the identical click for 9+ turns without ever reaching basket/checkout.
+test('nextRecipeMove falls through to vision after repeatedly returning the same step with no site-side progress', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const page = fakePage('https://www.johnlewis.com/x/p6543210', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0 },
+    'resolve:jl-add': { locatorIndex: 17, text: 'Add to basket' },
+  });
+  const session = { goal: 'add the joggers to my basket', history: [] };
+  const health = createRecipeHealth(1); // 1 miss disables, so we can see the stall register as a miss
+
+  const first = await nextRecipeMove(page, session, jl, health);
+  assert.equal(first?.action, 'click', 'first attempt still clicks');
+  const second = await nextRecipeMove(page, session, jl, health);
+  assert.equal(second?.action, 'click', 'one retry is still allowed — could be transient');
+  const third = await nextRecipeMove(page, session, jl, health);
+  assert.equal(third, null, 'third identical repeat falls through to vision instead of clicking again');
+  assert.equal(health.isDisabled('johnlewis.com', 'add'), true, 'the stall also counts as a miss toward disabling the step');
+});
+
+test('nextRecipeMove does not stall when basketCount changes between calls (real progress)', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const session = { goal: 'add the joggers to my basket', history: [] };
+  const health = createRecipeHealth();
+
+  const beforeAdd = fakePage('https://www.johnlewis.com/x/p6543210', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0 },
+    'resolve:jl-add': { locatorIndex: 17, text: 'Add to basket' },
+  });
+  const first = await nextRecipeMove(beforeAdd, session, jl, health);
+  assert.equal(first?.action, 'click');
+
+  const afterAdd = fakePage('https://www.johnlewis.com/x/p6543210', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 1 },
+  });
+  const second = await nextRecipeMove(afterAdd, session, jl, health);
+  assert.equal(second, null, 'basket now has an item — the add step no longer matches, not a stall');
+});
+
 test('nextRecipeMove records a miss and returns null when the step resolves to nothing', async () => {
   const jl = RECIPES['johnlewis.com'];
   const health = createRecipeHealth(1);

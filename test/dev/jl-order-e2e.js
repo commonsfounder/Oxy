@@ -19,12 +19,17 @@ const GOAL = process.argv[2] || 'order me an iPhone 17 256GB from John Lewis';
 const MAX_TURNS = Number(process.argv[3] || 15);
 const USER = 'jl-e2e-guest';
 
-// Hardcoded checkout profile — change these freely
+// Checkout profile — override via env vars so real PII never lands in this tracked file.
+// JL_E2E_EMAIL / JL_E2E_NAME / JL_E2E_PHONE / JL_E2E_ADDR_LINE1 / JL_E2E_ADDR_CITY / JL_E2E_ADDR_POSTCODE
 const PROFILE = {
-  email: 'test@example.com',
-  name: 'Alex Smith',
-  phone: '07700900123',
-  address: { line1: '10 Downing Street', city: 'London', postcode: 'SW1A 2AA' },
+  email: process.env.JL_E2E_EMAIL || 'test@example.com',
+  name: process.env.JL_E2E_NAME || 'Alex Smith',
+  phone: process.env.JL_E2E_PHONE || '07700900123',
+  address: {
+    line1: process.env.JL_E2E_ADDR_LINE1 || '10 Downing Street',
+    city: process.env.JL_E2E_ADDR_CITY || 'London',
+    postcode: process.env.JL_E2E_ADDR_POSTCODE || 'SW1A 2AA',
+  },
   consent: true,
 };
 
@@ -105,6 +110,38 @@ async function snapshot(sess, turn) {
   } catch { /* non-fatal */ }
 }
 
+// Network instrumentation: log the actual basket/cart API calls so we can see whether
+// John Lewis's server genuinely rejects the add (bot detection, 4xx/5xx) or returns 200
+// while the UI silently fails to reflect it (client-side/hydration issue on our end).
+let networkWired = false;
+function wireNetworkLogging(page) {
+  if (networkWired || !page) return;
+  networkWired = true;
+  // Only John Lewis's own hosts, and only in the path (not query params) — third-party
+  // telemetry beacons (New Relic etc.) embed the page URL in a `ref=` param and false-match
+  // a naive substring check on the whole URL.
+  const isJLHost = (u) => /(^|\.)johnlewis\.com$/i.test(u.hostname);
+  const interestingPath = /basket|cart|bag/i;
+  page.on('request', (req) => {
+    const method = req.method();
+    if (method === 'GET') return; // only mutating calls matter here
+    let u; try { u = new URL(req.url()); } catch { return; }
+    if (!isJLHost(u) || !interestingPath.test(u.pathname)) return;
+    console.log(`  >> [net] ${method} ${u.href}`);
+    const body = req.postData();
+    if (body) console.log(`     body: ${body.slice(0, 300)}`);
+  });
+  page.on('response', async (res) => {
+    if (res.request().method() === 'GET') return;
+    let u; try { u = new URL(res.url()); } catch { return; }
+    if (!isJLHost(u) || !interestingPath.test(u.pathname)) return;
+    let bodySnippet = '';
+    try { bodySnippet = (await res.text()).slice(0, 400); } catch { /* non-text or consumed */ }
+    console.log(`  << [net] ${res.status()} ${u.href}`);
+    if (bodySnippet) console.log(`     resp: ${bodySnippet}`);
+  });
+}
+
 async function main() {
   console.log(`\nJL GUEST CHECKOUT E2E`);
   console.log(`GOAL: ${GOAL}`);
@@ -114,12 +151,14 @@ async function main() {
   console.log(`Screenshots: ${SHOTS_DIR}\n`);
 
   let outcome;
+  let pendingReply = ''; // auto-answer for the delivery/collection ask, see below
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
     const t0 = Date.now();
     const START_URL = process.argv[4] || 'https://www.johnlewis.com';
     const args = turn === 1
       ? { url: START_URL, goal: GOAL, onProgress }
-      : { url: null, goal: '', onProgress };
+      : { url: null, goal: pendingReply, onProgress };
+    pendingReply = '';
 
     try {
       outcome = await runOrderingTurn(USER, args);
@@ -128,6 +167,7 @@ async function main() {
       console.log(e.stack?.split('\n').slice(1, 4).join('\n'));
       break;
     }
+    wireNetworkLogging(getSession(USER)?.page);
 
     const ms = Date.now() - t0;
     const sess = getSession(USER);
@@ -145,7 +185,17 @@ async function main() {
 
     if (outcome.type === 'ready_for_payment') { console.log('\n✅  REACHED PAYMENT — stopping (not confirming)'); break; }
     if (outcome.type === 'done')              { console.log('\n✅  DONE'); break; }
-    if (outcome.type === 'ask')               { console.log(`\n⏸️   NEEDS INPUT: ${outcome.question}`); break; }
+    if (outcome.type === 'ask') {
+      // Auto-answer only the delivery-vs-collection ask so this script can verify the full
+      // flow end-to-end in one run; any other question still stops the script as before.
+      if (/delivered to your address on file|collected from a nearby store/i.test(outcome.question)) {
+        console.log(`\n⏸️  NEEDS INPUT (auto-answering "deliver it to my address"): ${outcome.question}`);
+        pendingReply = 'deliver it to my address';
+        continue;
+      }
+      console.log(`\n⏸️   NEEDS INPUT: ${outcome.question}`);
+      break;
+    }
     if (outcome.type === 'reauth')            { console.log(`\n🔐  REAUTH: ${outcome.site}`); break; }
     if (outcome.type === 'error')             { console.log(`\n❌  ERROR: ${outcome.error}`); break; }
   }
