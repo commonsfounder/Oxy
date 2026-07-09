@@ -4044,38 +4044,48 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
   res.json({ actions: ACTION_CONTRACTS });
 });
 
+// `kind` distinguishes a genuine external-account connection (OAuth or a personal token the
+// user authorizes — something to actually "connect") from a functionality (a capability that
+// works via a server-side API key, a deep-link handoff, or in-app plumbing, with no per-user
+// account to link). Confirmed per-item by grepping connectors/*.js for real oauth/access_token
+// handling. The Connections screen only lists `kind: 'connection'` items — a functionality
+// isn't something to browse/toggle, it just works when invoked from chat.
 const CONNECTORS = [
-  { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', implemented: true, type: 'api' },
-  { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', implemented: true, type: 'api' },
-  { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', implemented: true, type: 'api' },
-  { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', implemented: true, type: 'api' },
-  { id: 'github', name: 'GitHub', icon: 'github', category: 'Dev', implemented: true, type: 'api' },
-  { id: 'slack', name: 'Slack', icon: 'slack', category: 'Productivity', implemented: true, type: 'api' },
-  // Easy Apple stuff (no extra login needed on iPhone)
-  { id: 'reminders', name: 'Reminders', icon: 'reminders', category: 'Productivity', implemented: true, type: 'api' },
-  { id: 'imessage',  name: 'iMessage', icon: 'imessage', category: 'Messages', implemented: true, type: 'handoff' },
+  { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'github', name: 'GitHub', icon: 'github', category: 'Dev', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'slack', name: 'Slack', icon: 'slack', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  // Easy Apple stuff (no extra login needed on iPhone) — on-device permission, not a
+  // third-party account, so this is a functionality, not a connection.
+  { id: 'reminders', name: 'Reminders', icon: 'reminders', category: 'Productivity', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'imessage',  name: 'iMessage', icon: 'imessage', category: 'Messages', implemented: true, type: 'handoff', kind: 'functionality' },
   // Finance & Money (tied to concierge account for real spends/earns)
-  { id: 'concierge_account', name: 'Concierge Account (Virtual Card)', icon: 'card', category: 'Finance', implemented: true, type: 'api' },
-  { id: 'monzo', name: 'Monzo', icon: 'monzo', category: 'Finance', implemented: true, type: 'api' },
-  { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', implemented: true, type: 'api' },
-  { id: 'plaid', name: 'Plaid (Banking)', icon: 'plaid', category: 'Finance', implemented: true, type: 'api' },
-  // Handoffs — I open the app perfectly pre-filled (easiest for you)
-  { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', implemented: true, type: 'handoff' },
-  { id: 'lyft',      name: 'Lyft', icon: 'lyft', category: 'Transport', implemented: true, type: 'handoff' },
-  { id: 'spotify',   name: 'Spotify', icon: 'spotify', category: 'Entertainment', implemented: true, type: 'handoff' },
-  { id: 'trainline', name: 'Trains', icon: 'trainline', category: 'Transport', implemented: true, type: 'hybrid' },
-  // Travel deeper
-  { id: 'flights', name: 'Flights', icon: 'flight', category: 'Travel', implemented: true, type: 'api' },
-  { id: 'hotels', name: 'Hotels', icon: 'hotel', category: 'Travel', implemented: true, type: 'api' },
+  { id: 'concierge_account', name: 'Concierge Account (Virtual Card)', icon: 'card', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'monzo', name: 'Monzo', icon: 'monzo', category: 'Finance', implemented: true, type: 'api', kind: 'connection' },
+  // Stripe here is the app's OWN payment processor for concierge money movement, not a
+  // personal Stripe account the user links — a functionality, not a connection.
+  { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'plaid', name: 'Plaid (Banking)', icon: 'plaid', category: 'Finance', implemented: true, type: 'api', kind: 'connection' },
+  // Handoffs — I open the app perfectly pre-filled (easiest for you). No account is linked
+  // in any of these; they're functionalities, not connections.
+  { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
+  { id: 'lyft',      name: 'Lyft', icon: 'lyft', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
+  { id: 'spotify',   name: 'Spotify', icon: 'spotify', category: 'Entertainment', implemented: true, type: 'handoff', kind: 'functionality' },
+  { id: 'trainline', name: 'Trains', icon: 'trainline', category: 'Transport', implemented: true, type: 'hybrid', kind: 'functionality' },
+  // Travel deeper — search/link-generators only, no account, no real booking.
+  { id: 'flights', name: 'Flights', icon: 'flight', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'hotels', name: 'Hotels', icon: 'hotel', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
   // Shopping
-  { id: 'amazon', name: 'Amazon', icon: 'amazon', category: 'Shopping', implemented: true, type: 'handoff' },
+  { id: 'amazon', name: 'Amazon', icon: 'amazon', category: 'Shopping', implemented: true, type: 'handoff', kind: 'functionality' },
   // Health & Fitness
-  { id: 'strava', name: 'Strava', icon: 'strava', category: 'Health', implemented: true, type: 'api' },
-  { id: 'oura', name: 'Oura', icon: 'oura', category: 'Health', implemented: true, type: 'api' },
-  // Events & Info
-  { id: 'eventbrite', name: 'Eventbrite', icon: 'event', category: 'Events', implemented: true, type: 'api' },
-  { id: 'weather', name: 'Weather', icon: 'weather', category: 'Info', implemented: true, type: 'api' },
-  { id: 'stocks', name: 'Stocks & Markets', icon: 'stocks', category: 'Info', implemented: true, type: 'api' },
+  { id: 'strava', name: 'Strava', icon: 'strava', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'oura', name: 'Oura', icon: 'oura', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
+  // Events & Info — public/server-key APIs, no personal account.
+  { id: 'eventbrite', name: 'Eventbrite', icon: 'event', category: 'Events', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'weather', name: 'Weather', icon: 'weather', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'stocks', name: 'Stocks & Markets', icon: 'stocks', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
 ];
 
 // Mark concierge_account as always available (not connector dependent)
@@ -6836,3 +6846,4 @@ module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;
 module.exports.isUserFacingMemory = isUserFacingMemory;
 module.exports.isUsefulMemoryContent = isUsefulMemoryContent;
+module.exports.CONNECTORS = CONNECTORS;

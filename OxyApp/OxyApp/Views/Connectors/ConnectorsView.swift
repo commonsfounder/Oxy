@@ -39,22 +39,17 @@ struct ConnectorsView: View {
                                     ErrorBanner(message: errorMessage)
                                 }
 
+                                // Every remaining connector is a genuine account connection
+                                // (kind == "connection"), so there's just Connected/Available —
+                                // no handoff/hybrid items land on this screen anymore.
                                 let connectedRows = connectors.filter { $0.enabled }
-                                let availableRows = connectors.filter {
-                                    $0.implemented && !$0.enabled && ($0.type == "api" || $0.type == nil)
-                                }
-                                let quickActionRows = connectors.filter {
-                                    $0.implemented && !$0.enabled && ($0.type == "handoff" || $0.type == "hybrid")
-                                }
+                                let availableRows = connectors.filter { $0.implemented && !$0.enabled }
 
                                 if !connectedRows.isEmpty {
                                     section(title: "Connected", connectors: connectedRows)
                                 }
                                 if !availableRows.isEmpty {
                                     section(title: "Available", connectors: availableRows)
-                                }
-                                if !quickActionRows.isEmpty {
-                                    section(title: "Quick actions", connectors: quickActionRows)
                                 }
                             }
                             .padding(.horizontal, AppSpacing.margin)
@@ -209,7 +204,10 @@ struct ConnectorsView: View {
             )
             let response = try JSONDecoder().decode(ConnectorsResponse.self, from: data)
             await MainActor.run {
-                connectors = response.connectors
+                // Only genuine external-account connections belong here — a functionality
+                // (server-side API key, deep-link handoff, in-app plumbing) has no account to
+                // connect and just works when invoked from chat.
+                connectors = response.connectors.filter { $0.kind == "connection" }
                 if let google = connectors.first(where: { $0.id == "google" }) {
                     googleStatus = GoogleStatus(connector: google)
                 } else {
@@ -413,9 +411,10 @@ struct Connector: Codable, Identifiable {
     var connectionState: String
     var statusText: String
     let type: String?   // 'api' | 'handoff' | 'hybrid'
+    let kind: String?   // 'connection' | 'functionality' — only 'connection' belongs on this screen
 
     enum CodingKeys: String, CodingKey {
-        case id, name, icon, category, enabled, implemented, connectionState, statusText, type
+        case id, name, icon, category, enabled, implemented, connectionState, statusText, type, kind
     }
 
     init(from decoder: Decoder) throws {
@@ -429,6 +428,7 @@ struct Connector: Codable, Identifiable {
         connectionState = try c.decodeIfPresent(String.self, forKey: .connectionState) ?? (enabled ? "connected" : "available")
         statusText = try c.decodeIfPresent(String.self, forKey: .statusText) ?? (enabled ? "Connected" : "Available")
         type = try c.decodeIfPresent(String.self, forKey: .type)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind)
     }
 }
 
