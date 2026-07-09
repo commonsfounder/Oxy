@@ -20,7 +20,10 @@ async function execute(userId, action, params) {
     }
     return { success: false, error: 'Unknown Eventbrite action' };
   } catch (e) {
-    return { success: true, text: `Eventbrite for ${query}.`, webLink: `https://www.eventbrite.com` };
+    // Regression: this silently reported success even when the real Eventbrite API call threw
+    // (bad token, rate limit, network error) — the failure was invisible to both the agent and
+    // the user.
+    return { success: false, error: `Eventbrite error: ${e.response?.data?.error_description || e.message}`, webLink: `https://www.eventbrite.com` };
   }
 }
 

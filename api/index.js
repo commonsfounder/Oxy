@@ -2354,10 +2354,9 @@ async function executeAction(userId, action, params, context = {}) {
       const action = params?.action || 'status';
       return { success: true, text: `GitHub ${action} on ${repo}.`, webLink: `https://github.com/${repo}` };
     }
-    case 'track_flight': {
-      const flight = params?.flight || params?.query;
-      return { success: true, text: `Tracking flight ${flight}. Check status or check-in link.`, webLink: `https://www.google.com/search?q=flight+${encodeURIComponent(flight||'')}` };
-    }
+    // track_flight is handled by connectors/flights.js (dispatch fallthrough) — this used to
+    // duplicate it inline, making the connector's own branch permanently dead code for no
+    // reason (unlike stripe_charge, there's no cap/review logic that needs it inline).
     case 'edit_photo': {
       const brief = params?.brief || 'enhance';
       return { success: true, text: `Photo edit request: ${brief}. (Use image tools or Shortcuts.)`, nativeExecution: 'photo' };

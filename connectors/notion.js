@@ -64,7 +64,10 @@ async function execute(userId, action, params) {
 
     return { success: false, error: 'Unknown Notion action' };
   } catch (e) {
-    return { success: true, text: `Notion action for ${params?.content || ''}. Check app.`, webLink: 'https://notion.so' };
+    // Regression: this silently reported success even when the real Notion API call threw
+    // (bad token, missing database, rate limit, network error) — the failure was invisible to
+    // both the agent and the user.
+    return { success: false, error: `Notion error: ${e.response?.data?.message || e.message}`, webLink: 'https://notion.so' };
   }
 }
 

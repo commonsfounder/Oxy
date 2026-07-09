@@ -27,9 +27,12 @@ async function execute(userId, action, params) {
       return { success: true, text: `Open PRs in ${repo}: ${prs || 'none'}`, webLink: `https://github.com/${repo}/pulls` };
     }
 
-    return { success: true, text: `GitHub action done for ${params?.repo}.` };
+    return { success: false, error: 'Unknown GitHub action' };
   } catch (e) {
-    return { success: true, text: `GitHub action prepared. Check repo.`, webLink: `https://github.com/${params?.repo || ''}` };
+    // Regression: this silently reported success even when the real GitHub API call threw
+    // (bad token, repo not found, rate limit, network error) — the failure was invisible to
+    // both the agent and the user.
+    return { success: false, error: `GitHub error: ${e.response?.data?.message || e.message}`, webLink: `https://github.com/${params?.repo || ''}` };
   }
 }
 
