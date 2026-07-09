@@ -17,6 +17,7 @@ test('every money-moving action routes through human review (executionMode: revi
   const moneyActions = [
     'spend_from_concierge_account',
     'top_up_concierge_account',
+    'receive_to_concierge_account',
     'fund_opportunity',
     'stripe_charge',
     'stripe_payout_to_user',

@@ -28,7 +28,8 @@ const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const { createActionRunner } = require('./services/action-runner');
-const { checkSpendLimit } = require('./services/money-guard');
+const { resolveConciergeSpendOutcome } = require('./services/money-guard');
+const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -2397,21 +2398,23 @@ async function executeAction(userId, action, params, context = {}) {
       const spendGuard = await guardConciergeSpend(userId, amount);
       if (!spendGuard.ok) return { success: false, error: spendGuard.error };
       const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance'] || 0);
-      if (balance < amount) {
-        return { success: false, error: 'Insufficient balance', balance };
+      const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
+      if (balanceBeforeSpend < amount) {
+        return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
       }
-      balance -= amount;
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      await setPreferenceValue(userId, 'concierge_account.last_spend', JSON.stringify({ amount, description, merchant, ts: Date.now() }));
-      const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
 
-      // If real Stripe key is available, create a real PaymentIntent for actual charge
+      // Attempt the real Stripe charge (if configured) BEFORE touching the virtual balance —
+      // a failed real attempt must not silently vanish the user's spendable balance for
+      // nothing. See resolveConciergeSpendOutcome in money-guard.js for the decision logic.
       const stripeKey = process.env.STRIPE_SECRET_KEY;
-      let realChargeInfo = '';
+      let stripeAttempted = false;
+      let stripeSucceeded = false;
+      let stripeError = '';
+      let stripeClientSecret = '';
       if (stripeKey) {
+        stripeAttempted = true;
         try {
-          const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents', 
+          const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
             new URLSearchParams({
               amount: Math.round(amount * 100),
               currency: 'usd',
@@ -2420,13 +2423,23 @@ async function executeAction(userId, action, params, context = {}) {
             }).toString(),
             { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
           );
-          realChargeInfo = ` Real Stripe PaymentIntent created (client_secret: ${intent.data.client_secret}). Confirm in your app to complete actual charge.`;
+          stripeSucceeded = true;
+          stripeClientSecret = intent.data.client_secret;
         } catch (stripeErr) {
-          realChargeInfo = ` (Stripe charge attempt failed: ${stripeErr.message})`;
+          stripeError = stripeErr.message;
         }
       }
 
-      return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${balance.toFixed(2)}.${realChargeInfo}`, balance, card: cardRef };
+      const outcome = resolveConciergeSpendOutcome({
+        amount, balanceBeforeSpend, stripeAttempted, stripeSucceeded, stripeError, stripeClientSecret,
+      });
+      if (!outcome.success) return outcome;
+
+      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
+      await setPreferenceValue(userId, 'concierge_account.last_spend', JSON.stringify({ amount, description, merchant, ts: Date.now() }));
+      const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
+
+      return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${outcome.balance.toFixed(2)}.${outcome.realChargeInfo}`, balance: outcome.balance, card: cardRef };
     }
     case 'top_up_concierge_account': {
       const amount = Number(params?.amount || 0);
@@ -2465,18 +2478,54 @@ async function executeAction(userId, action, params, context = {}) {
     }
 
     case 'stripe_charge': {
+      // Regression: this used to fabricate "Charged via Stripe" text without ever calling
+      // Stripe's API — it only ever touched the virtual concierge balance. Kept inline
+      // (rather than dispatched to connectors/stripe.js) specifically so guardConciergeSpend's
+      // daily rolling cap still applies — connectors/stripe.js's own checkSpendLimit call only
+      // enforces the per-transaction cap, not the daily total.
       const amountCents = Number(params?.amount || 1000);
       const desc = params?.description || 'Concierge spend';
       const amount = amountCents / 100;
       const chargeGuard = await guardConciergeSpend(userId, amount);
       if (!chargeGuard.ok) return { success: false, error: chargeGuard.error };
       const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance'] || 0);
-      if (balance >= amount) {
-        balance -= amount;
-        await setPreferenceValue(userId, 'concierge_account.balance', balance);
+      const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
+
+      const stripeKey = process.env.STRIPE_SECRET_KEY;
+      if (!stripeKey) {
+        // Honest about what actually happened: no real charge was attempted, this is a
+        // virtual-only ledger entry, not a real Stripe transaction.
+        const balance = Math.max(0, Number((balanceBeforeSpend - amount).toFixed(2)));
+        if (balanceBeforeSpend >= amount) await setPreferenceValue(userId, 'concierge_account.balance', balance);
+        return { success: true, text: `No Stripe key configured, so this was a virtual concierge-balance entry only — no real charge was made for ${desc}. Balance: $${balance.toFixed(2)}.`, amount, balance };
       }
-      return { success: true, text: `Charged $${amount.toFixed(2)} via Stripe for ${desc}. (Tied to concierge account balance: $${balance.toFixed(2)})`, amount, balance };
+
+      let stripeSucceeded = false;
+      let stripeError = '';
+      let stripeClientSecret = '';
+      try {
+        const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
+          new URLSearchParams({
+            amount: amountCents,
+            currency: 'usd',
+            description: desc,
+            automatic_payment_methods: JSON.stringify({ enabled: true })
+          }).toString(),
+          { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        stripeSucceeded = true;
+        stripeClientSecret = intent.data.client_secret;
+      } catch (stripeErr) {
+        stripeError = stripeErr.message;
+      }
+
+      const outcome = resolveConciergeSpendOutcome({
+        amount, balanceBeforeSpend, stripeAttempted: true, stripeSucceeded, stripeError, stripeClientSecret,
+      });
+      if (!outcome.success) return outcome;
+
+      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
+      return { success: true, text: `Stripe PaymentIntent created for $${amount.toFixed(2)} (${desc}).${outcome.realChargeInfo} Balance: $${outcome.balance.toFixed(2)}.`, amount, balance: outcome.balance };
     }
 
     // Super easy consumer Reminders (uses your iPhone's built-in, no extra login)
@@ -2907,22 +2956,12 @@ async function getPreferenceMap(userId) {
 }
 
 // Deterministic spend cap for concierge money movements — enforced regardless of what the
-// model asked for. Reads the user's rolling-day spend tally, applies the per-txn + per-day
-// limits, and (when allowed) advances the tally. Returns { ok, error }. Callers MUST honour
-// a false `ok` and abort the spend before touching balance or any real payment API.
-// This is one of two independent layers (the other is the checkSpendLimit call in
-// connectors/stripe.js) — see money-guard.js for why both exist.
-async function guardConciergeSpend(userId, amount, prefsMap = null) {
-  const prefs = prefsMap || await getPreferenceMap(userId);
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
-  let tally = {};
-  try { tally = JSON.parse(prefs['concierge_account.spend_day'] || '{}'); } catch { tally = {}; }
-  const spentToday = tally.date === today ? Number(tally.total) || 0 : 0;
-  const verdict = checkSpendLimit({ amount, spentToday });
-  if (!verdict.ok) return verdict;
-  await setPreferenceValue(userId, 'concierge_account.spend_day',
-    JSON.stringify({ date: today, total: spentToday + Number(amount) }));
-  return { ok: true };
+// model asked for. Callers MUST honour a false `ok` and abort the spend before touching
+// balance or any real payment API. Shared with connectors/stripe.js (spend_from_concierge_via_stripe,
+// stripe_payout_to_user) via concierge-spend-guard.js so every money-out path gets the same
+// per-txn + rolling-daily cap, not just the ones originally written with it in mind.
+async function guardConciergeSpend(userId, amount) {
+  return sharedGuardConciergeSpend(supabase, userId, amount);
 }
 
 async function setPreferenceValue(userId, key, value) {

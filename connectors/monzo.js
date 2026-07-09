@@ -36,12 +36,6 @@ async function execute(userId, action, params) {
       const accountId = params.account_id || (await axios.get('https://api.monzo.com/accounts', { headers })).data.accounts[0]?.id;
       const res = await axios.get(`https://api.monzo.com/balance?account_id=${accountId}`, { headers });
       const bal = (res.data.balance / 100).toFixed(2);
-      // Sync to concierge virtual if positive
-      const prefs = await supabase.from('preferences').select('value').eq('user_id', userId).eq('key', 'concierge_account.balance').single();
-      let vBal = Number(prefs.data?.value || 0);
-      if (res.data.balance > 0) {
-        // optional: user can decide to sync
-      }
       return { success: true, text: `Monzo balance: £${bal}`, balance: res.data.balance / 100 };
     }
 
@@ -53,13 +47,25 @@ async function execute(userId, action, params) {
     }
 
     if (action === 'transfer_to_concierge_account') {
+      // Regression: this claimed "Transferred £X to concierge account (synced from Monzo)"
+      // without ever calling a real Monzo money-movement endpoint — Monzo has no API for
+      // transferring into a virtual/third-party account, so this only ever inflated the
+      // virtual concierge balance while implying real money had moved out of the user's real
+      // account. Fixed to (a) verify the real Monzo balance actually covers the amount, so the
+      // credit is at least grounded in a real, checked balance, and (b) say plainly that this
+      // is a tracked ledger entry, not a real transfer.
       const amount = Number(params.amount || 10);
-      // Monzo doesn't have direct "transfer to virtual" but we can log to concierge balance
+      const accountId = params.account_id || (await axios.get('https://api.monzo.com/accounts', { headers })).data.accounts[0]?.id;
+      const res = await axios.get(`https://api.monzo.com/balance?account_id=${accountId}`, { headers });
+      const monzoBalance = res.data.balance / 100;
+      if (monzoBalance < amount) {
+        return { success: false, error: `Your Monzo balance (£${monzoBalance.toFixed(2)}) is less than £${amount.toFixed(2)} — nothing was credited.` };
+      }
       const prefs = await supabase.from('preferences').select('value').eq('user_id', userId).eq('key', 'concierge_account.balance').single();
       let balance = Number(prefs.data?.value || 0);
       balance += amount;
       await supabase.from('preferences').upsert({ user_id: userId, key: 'concierge_account.balance', value: balance });
-      return { success: true, text: `Transferred £${amount} to concierge account (synced from Monzo). New virtual balance: £${balance.toFixed(2)}`, amount, balance };
+      return { success: true, text: `Noted £${amount.toFixed(2)} against your concierge balance — Monzo has no API for a real transfer into a virtual account, so no money actually moved out of your Monzo account. This only updates the tracked balance here (verified you had at least that much in Monzo: £${monzoBalance.toFixed(2)}). New virtual balance: £${balance.toFixed(2)}`, amount, balance };
     }
 
     return { success: false, error: 'Unknown Monzo action' };

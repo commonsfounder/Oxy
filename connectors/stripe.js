@@ -1,15 +1,21 @@
 const axios = require('axios');
 const { createSupabaseServiceClient } = require('../runtime');
 const { decryptTokens } = require('../api/services/token-crypto');
-const { checkSpendLimit } = require('../api/services/money-guard');
+const { guardConciergeSpend } = require('../api/services/concierge-spend-guard');
 
 const supabase = createSupabaseServiceClient();
 
-// Actions on this connector that move money OUT and must respect the hard per-transaction cap,
-// even when reached post-approval (bypassReview). Receiving money (payment links) is exempt.
-const SPEND_ACTIONS = new Set(['stripe_charge', 'spend_from_concierge_via_stripe', 'stripe_payout_to_user']);
+// Actions on this connector that move money OUT and must respect the hard per-transaction AND
+// rolling-daily caps, even when reached post-approval (bypassReview). Receiving money (payment
+// links) is exempt. Regression: this used to call checkSpendLimit directly with no spentToday,
+// so these enforced the per-transaction cap but silently skipped the daily one — a repeat spend
+// action here could blow straight past OXY_MAX_SPEND_PER_DAY. guardConciergeSpend (shared with
+// api/index.js) applies both.
+// stripe_charge is handled inline in api/index.js, ahead of dispatch — it never reaches this
+// file, so there is no branch for it here.
+const SPEND_ACTIONS = new Set(['spend_from_concierge_via_stripe', 'stripe_payout_to_user']);
 
-const SUPPORTED_ACTIONS = ['stripe_charge', 'stripe_payout_to_user', 'create_stripe_payment_link', 'spend_from_concierge_via_stripe'];
+const SUPPORTED_ACTIONS = ['stripe_payout_to_user', 'create_stripe_payment_link', 'spend_from_concierge_via_stripe'];
 
 async function getStripeKey(userId) {
   try {
@@ -46,14 +52,11 @@ async function stripeRequest(key, method, path, data = null) {
 }
 
 async function execute(userId, action, params) {
-  // Hard per-transaction ceiling before any real Stripe call — independent of the model and of
-  // whether the review gate was bypassed. `stripe_charge` passes the amount in cents; every other
-  // spend action here is in dollars. This is one of two independent layers (the other is
-  // guardConciergeSpend in api/index.js, which also tracks the rolling daily total) — see
-  // money-guard.js for why both exist.
+  // Hard per-transaction + rolling-daily ceiling before any real Stripe call — independent of
+  // the model and of whether the review gate was bypassed.
   if (SPEND_ACTIONS.has(action)) {
-    const dollars = action === 'stripe_charge' ? Number(params?.amount || 0) / 100 : Number(params?.amount || 0);
-    const verdict = checkSpendLimit({ amount: dollars });
+    const dollars = Number(params?.amount || 0);
+    const verdict = await guardConciergeSpend(supabase, userId, dollars);
     if (!verdict.ok) return { success: false, error: verdict.error };
   }
 
@@ -78,7 +81,7 @@ async function execute(userId, action, params) {
       return { success: true, text: `Real Stripe Payment Link created for $${(amount/100).toFixed(2)}. Share or use to receive into account.`, webLink: link.url };
     }
 
-    if (action === 'stripe_charge' || action === 'spend_from_concierge_via_stripe') {
+    if (action === 'spend_from_concierge_via_stripe') {
       const amount = Math.round((params.amount || 10) * 100);
       const desc = params.description || 'Concierge spend';
       // For real charge, create a PaymentIntent (requires client to confirm, or use test cards)

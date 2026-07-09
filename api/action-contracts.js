@@ -303,13 +303,17 @@ const ACTION_CONTRACTS = {
     confirmation: 'review'
   },
   receive_to_concierge_account: {
+    // Was 'none' — inconsistent with top_up_concierge_account (same effect: inflates the
+    // spendable virtual balance with no real-money verification) which already required
+    // review. An unreviewed action that credits spendable balance is exactly the shape of bug
+    // this pass is fixing elsewhere (fabricated/ungated money entering the ledger).
     risk: 'medium',
     required: ['amount', 'description'],
     optional: ['source'],
     inputExample: { amount: 50, description: 'payment for freelance gig', source: 'client' },
     successSummary: 'Received to account',
     failureSummary: 'Receive failed',
-    confirmation: 'none'
+    confirmation: 'review'
   },
   // For broad money-making: use account to fund opportunities
   fund_opportunity: {

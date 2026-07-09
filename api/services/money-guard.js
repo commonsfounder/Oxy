@@ -43,4 +43,27 @@ function checkSpendLimit({ amount, spentToday = 0, limits = spendLimits() } = {}
   return { ok: true };
 }
 
-module.exports = { checkSpendLimit, spendLimits, DEFAULT_PER_TXN_USD, DEFAULT_PER_DAY_USD };
+// Regression: spend_from_concierge_account deducted the virtual balance unconditionally,
+// then separately attempted a real Stripe PaymentIntent when a key was configured. If that
+// real attempt FAILED, the handler still returned success: true (just appending a failure
+// note to the text) — the virtual balance was already gone with no real charge to show for
+// it, and the caller had no way to distinguish "spent" from "failed but silently accepted."
+// Pure and unit-testable: decides the final outcome given whether a real Stripe attempt was
+// made and how it went. A failed real attempt must be reported as a failure, full stop — the
+// caller must not persist the balance deduction in that case.
+function resolveConciergeSpendOutcome({ amount, balanceBeforeSpend, stripeAttempted, stripeSucceeded, stripeError, stripeClientSecret }) {
+  if (stripeAttempted && !stripeSucceeded) {
+    return {
+      success: false,
+      error: `Stripe charge failed, so nothing was spent: ${stripeError || 'unknown error'}`,
+      balance: balanceBeforeSpend,
+    };
+  }
+  const balance = Number((balanceBeforeSpend - amount).toFixed(2));
+  const realChargeInfo = stripeAttempted
+    ? ` Real Stripe PaymentIntent created (client_secret: ${stripeClientSecret}). Confirm in your app to complete actual charge.`
+    : '';
+  return { success: true, balance, realChargeInfo };
+}
+
+module.exports = { checkSpendLimit, spendLimits, resolveConciergeSpendOutcome, DEFAULT_PER_TXN_USD, DEFAULT_PER_DAY_USD };
