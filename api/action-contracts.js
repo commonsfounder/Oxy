@@ -97,6 +97,53 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Email search failed',
     confirmation: 'none'
   },
+  // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
+  send_outlook_email: {
+    risk: 'high',
+    required: ['to', 'body'],
+    optional: ['subject'],
+    aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
+    inputExample: { to: 'email', subject: 'optional subject inferred from the body if omitted', body: 'polished complete email draft' },
+    successSummary: 'Email sent',
+    failureSummary: 'Email failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  get_outlook_emails: {
+    risk: 'low',
+    required: [],
+    optional: ['max'],
+    inputExample: { max: 10 },
+    successSummary: 'Emails checked',
+    failureSummary: 'Email check failed',
+    confirmation: 'none'
+  },
+  search_outlook_emails: {
+    risk: 'low',
+    required: ['query'],
+    inputExample: { query: 'search term' },
+    successSummary: 'Emails searched',
+    failureSummary: 'Email search failed',
+    confirmation: 'none'
+  },
+  create_outlook_event: {
+    risk: 'medium',
+    required: ['title', 'start_date', 'end_date'],
+    inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
+    successSummary: 'Calendar updated',
+    failureSummary: 'Calendar failed',
+    confirmation: 'review_required',
+    executionMode: 'review',
+    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me.'
+  },
+  get_outlook_events: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Calendar checked',
+    failureSummary: 'Calendar failed',
+    confirmation: 'none'
+  },
   book_uber: {
     risk: 'low',
     required: ['destination'],
@@ -254,6 +301,13 @@ const ACTION_CONTRACTS = {
   log_health: { risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, successSummary: 'Health logged', failureSummary: 'Log failed', confirmation: 'none' },
   control_smart_home: { risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Control failed', confirmation: 'none' },
   save_to_notion: { risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
+  // Google Docs — implemented in connectors/google.js but had no contract at all, so the
+  // agent's tool-calling interface could never reach them. Same low-risk/no-confirmation
+  // shape as save_to_notion: creating/appending a doc is non-destructive and easily undone.
+  create_google_doc: { risk: 'low', required: ['title'], optional: ['content'], inputExample: { title: 'doc title', content: 'optional initial text' }, successSummary: 'Doc created', failureSummary: 'Create failed', confirmation: 'none' },
+  search_google_docs: { risk: 'low', required: [], optional: ['query', 'max_results'], inputExample: { query: 'search term' }, successSummary: 'Docs found', failureSummary: 'Search failed', confirmation: 'none' },
+  append_google_doc: { risk: 'low', required: ['content'], optional: ['document_id', 'title'], inputExample: { title: 'doc title', content: 'text to add' }, successSummary: 'Doc updated', failureSummary: 'Append failed', confirmation: 'none' },
+  get_google_doc: { risk: 'low', required: [], optional: ['document_id', 'title'], inputExample: { title: 'doc title' }, successSummary: 'Doc fetched', failureSummary: 'Fetch failed', confirmation: 'none' },
   github_action: { risk: 'low', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'none' },
   track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none' },
   edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },

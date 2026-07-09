@@ -3047,6 +3047,7 @@ async function getEnabledConnectors(userId, trace = null) {
 function buildAvailableActions(enabled) {
   const actionMap = {
     google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'],
+    microsoft: ['send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events'],
     imessage: ['send_message'],
     whatsapp: ['send_message'],
     reminders: ['create_reminder'],
@@ -4053,6 +4054,7 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
 // isn't something to browse/toggle, it just works when invoked from chat.
 const CONNECTORS = [
   { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'microsoft', name: 'Outlook & Calendar', icon: 'microsoft', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
   { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', implemented: true, type: 'api', kind: 'connection' },
   { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
   { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
@@ -4121,8 +4123,9 @@ app.get('/connectors/:userId', async (req, res) => {
       const row = rowsById.get(c.id);
       const enabled = row?.enabled === true;
       const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session || row?.tokens?.encrypted);
-      const needsReconnect = c.id === 'google' && enabled && !hasRefreshToken;
-      const needsSetup = c.id === 'maps' && !(process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY);
+      const needsReconnect = (c.id === 'google' || c.id === 'microsoft') && enabled && !hasRefreshToken;
+      const needsSetup = (c.id === 'maps' && !(process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_API_KEY))
+        || (c.id === 'microsoft' && !(process.env.MS_CLIENT_ID && process.env.MS_CLIENT_SECRET));
       const degraded = c.id === 'trainline' && (!process.env.TRANSPORT_API_APP_ID || !process.env.TRANSPORT_API_APP_KEY);
       const connectionState = needsReconnect
         ? 'needs_reconnect'
@@ -6495,6 +6498,88 @@ app.get('/auth/google/callback', async (req, res) => {
         <p style="font-size:18px">✗ Connection failed</p>
         <p style="color:#888;font-size:13px">${errMsg}</p>
         <script>window.opener?.postMessage('google_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
+      </body></html>
+    `);
+  }
+});
+
+// ── Microsoft OAuth ───────────────────────────────────────────────────────────
+// connectors/microsoft.js already has real Graph API calls + token refresh (saveTokens/
+// getTokens) but no way to acquire the first token — there was no start/callback route at
+// all, so Outlook could never actually be connected despite the connector being fully built.
+
+const MS_SCOPES = [
+  'offline_access', 'Mail.Read', 'Mail.Send', 'Calendars.ReadWrite', 'User.Read'
+].join(' ');
+
+app.get('/auth/microsoft/start', (req, res) => {
+  const userId = req.query.userId;
+  if (!requireMatchingUser(req, res, userId)) return;
+  if (!process.env.MS_CLIENT_ID || !process.env.MS_CLIENT_SECRET) {
+    return res.status(500).json({ error: 'Microsoft OAuth is not configured on the server.' });
+  }
+  const tenant = process.env.MS_TENANT || 'common';
+  const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/microsoft/callback`;
+  const state = signOAuthState(userId);
+  const params = new URLSearchParams({
+    client_id: process.env.MS_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    response_mode: 'query',
+    scope: MS_SCOPES,
+    state
+  });
+  res.json({ url: `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?${params}` });
+});
+
+app.get('/auth/microsoft/callback', async (req, res) => {
+  const { code, state, error } = req.query;
+  const userId = verifyOAuthState(state);
+  const appOrigin = process.env.APP_URL || `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}`;
+
+  if (error) {
+    return res.send(`<script>window.opener?.postMessage('microsoft_auth_error',${JSON.stringify(appOrigin)});window.close();</script>`);
+  }
+  if (!userId) return res.status(400).send('Invalid OAuth state');
+  if (!code || typeof code !== 'string') return res.status(400).send('Missing OAuth code');
+
+  try {
+    const tenant = process.env.MS_TENANT || 'common';
+    const redirectUri = `${req.headers['x-forwarded-proto'] || req.protocol}://${req.get('host')}/auth/microsoft/callback`;
+    const resp = await axios.post(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      client_id: process.env.MS_CLIENT_ID,
+      client_secret: process.env.MS_CLIENT_SECRET,
+      redirect_uri: redirectUri
+    }).toString(), { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+
+    const tokens = {
+      access_token: resp.data.access_token,
+      refresh_token: resp.data.refresh_token,
+      expires_at: Date.now() + resp.data.expires_in * 1000
+    };
+    const { error: upsertError } = await supabase.from('connectors').upsert(
+      { user_id: userId, connector_id: 'microsoft', enabled: true, tokens: encryptTokens(tokens), updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,connector_id' }
+    );
+    if (upsertError) throw upsertError;
+
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✓ Outlook connected</p>
+        <p style="color:#888;font-size:13px">You can close this window</p>
+        <script>window.opener?.postMessage('microsoft_auth_success',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),1500);</script>
+      </body></html>
+    `);
+  } catch (err) {
+    console.error('/auth/microsoft/callback error:', err.response?.data || err.message);
+    const errMsg = escapeHtml(err.response?.data?.error_description || err.message);
+    res.send(`
+      <html><body style="font-family:sans-serif;text-align:center;padding:40px;background:#0d0d0d;color:#fff">
+        <p style="font-size:18px">✗ Connection failed</p>
+        <p style="color:#888;font-size:13px">${errMsg}</p>
+        <script>window.opener?.postMessage('microsoft_auth_error',${JSON.stringify(appOrigin)});setTimeout(()=>window.close(),3000);</script>
       </body></html>
     `);
   }

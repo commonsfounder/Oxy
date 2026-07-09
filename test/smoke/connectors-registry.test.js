@@ -6,7 +6,7 @@ const { CONNECTORS } = require('../../api/index');
 // Regression guard: `kind` distinguishes a genuine external-account connection (real OAuth or
 // personal token) from a functionality (server-key API, deep-link handoff, in-app plumbing).
 // The Connections screen filters on this — a wrong/missing kind silently mislabels an entry.
-const REAL_CONNECTIONS = new Set(['google', 'telegram', 'notion', 'github', 'slack', 'monzo', 'plaid', 'strava', 'oura']);
+const REAL_CONNECTIONS = new Set(['google', 'microsoft', 'telegram', 'notion', 'github', 'slack', 'monzo', 'plaid', 'strava', 'oura']);
 
 test('every CONNECTORS entry has a kind of connection or functionality', () => {
   for (const c of CONNECTORS) {

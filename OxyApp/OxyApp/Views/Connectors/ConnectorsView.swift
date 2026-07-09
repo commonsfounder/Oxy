@@ -9,10 +9,15 @@ struct ConnectorsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var connectors: [Connector] = []
     @State private var isLoading = true
-    @State private var googleStatus: GoogleStatus = .idle
+    // Keyed by connector id — both Google and Microsoft go through the same
+    // browser-redirect OAuth dance, so they share this rather than each getting their own
+    // single-value state var (which is how Google alone used to work here).
+    @State private var oauthStatus: [String: OAuthStatus] = [:]
     @State private var errorMessage: String?
 
-    enum GoogleStatus: String {
+    private let oauthProviders: Set<String> = ["google", "microsoft"]
+
+    enum OAuthStatus: String {
         case idle, connecting, connected, needsReconnect, error
     }
 
@@ -66,7 +71,7 @@ struct ConnectorsView: View {
                 await loadConnectors()
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active && googleStatus == .connecting {
+                if phase == .active && oauthProviders.contains(where: { oauthStatus[$0] == .connecting }) {
                     Task { await loadConnectors() }
                 }
             }
@@ -120,12 +125,13 @@ struct ConnectorsView: View {
 
     private func capabilityCaption(_ connector: Connector) -> String {
         if connector.id == "google" { return "Gmail · Calendar" }
+        if connector.id == "microsoft" { return "Outlook · Calendar" }
         return connector.category
     }
 
     @ViewBuilder
     private func trailingControl(_ connector: Connector) -> some View {
-        if connector.id == "google" && googleStatus == .connecting {
+        if oauthProviders.contains(connector.id) && oauthStatus[connector.id] == .connecting {
             ProgressView()
                 .scaleEffect(0.65)
                 .tint(Color.appMuted)
@@ -146,8 +152,8 @@ struct ConnectorsView: View {
             .buttonStyle(.appScale(0.97))
         } else if connector.connectionState == "needs_reconnect" {
             Button {
-                if connector.id == "google" {
-                    connectGoogle()
+                if oauthProviders.contains(connector.id) {
+                    connectOAuth(providerId: connector.id)
                 } else {
                     handleConnectorAction(connector)
                 }
@@ -177,6 +183,7 @@ struct ConnectorsView: View {
     private func sfSymbol(_ id: String) -> String {
         switch id {
         case "google":    return "envelope.fill"
+        case "microsoft": return "envelope.fill"
         case "imessage":  return "message.fill"
         case "whatsapp":  return "phone.fill"
         case "spotify":   return "music.note"
@@ -208,10 +215,12 @@ struct ConnectorsView: View {
                 // (server-side API key, deep-link handoff, in-app plumbing) has no account to
                 // connect and just works when invoked from chat.
                 connectors = response.connectors.filter { $0.kind == "connection" }
-                if let google = connectors.first(where: { $0.id == "google" }) {
-                    googleStatus = GoogleStatus(connector: google)
-                } else {
-                    googleStatus = .idle
+                for providerId in oauthProviders {
+                    if let provider = connectors.first(where: { $0.id == providerId }) {
+                        oauthStatus[providerId] = OAuthStatus(connector: provider)
+                    } else {
+                        oauthStatus[providerId] = .idle
+                    }
                 }
                 errorMessage = nil
                 isLoading = false
@@ -219,20 +228,24 @@ struct ConnectorsView: View {
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
-                if googleStatus == .connecting {
-                    googleStatus = .error
+                for providerId in oauthProviders where oauthStatus[providerId] == .connecting {
+                    oauthStatus[providerId] = .error
                 }
                 isLoading = false
             }
         }
     }
 
-    private func connectGoogle() {
-        googleStatus = .connecting
+    private func oauthStartPath(for providerId: String) -> String {
+        providerId == "microsoft" ? "/auth/microsoft/start" : "/auth/google/start"
+    }
+
+    private func connectOAuth(providerId: String) {
+        oauthStatus[providerId] = .connecting
         Task {
             do {
                 let data = try await APIClient.shared.request(
-                    path: "/auth/google/start",
+                    path: oauthStartPath(for: providerId),
                     queryItems: [URLQueryItem(name: "userId", value: appState.userId)]
                 )
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -244,35 +257,23 @@ struct ConnectorsView: View {
                     }
                 } else {
                     await MainActor.run {
-                        googleStatus = .error
-                        errorMessage = "Google connect failed."
+                        oauthStatus[providerId] = .error
+                        errorMessage = "Connect failed."
                     }
                 }
             } catch {
                 await MainActor.run {
-                    googleStatus = .error
+                    oauthStatus[providerId] = .error
                     errorMessage = error.localizedDescription
                 }
             }
         }
     }
 
-    private func handleGoogleAction() {
-        guard let connector = connectors.first(where: { $0.id == "google" }) else {
-            connectGoogle()
-            return
-        }
-        if connector.enabled && connector.connectionState == "connected" {
-            updateConnector(connector, enabled: false)
-        } else {
-            connectGoogle()
-        }
-    }
-
     private func handleConnectorAction(_ connector: Connector) {
         guard connector.implemented else { return }
-        if connector.id == "google" && (!connector.enabled || connector.connectionState == "needs_reconnect") {
-            connectGoogle()
+        if oauthProviders.contains(connector.id) && (!connector.enabled || connector.connectionState == "needs_reconnect") {
+            connectOAuth(providerId: connector.id)
             return
         }
         updateConnector(connector, enabled: !connector.enabled)
@@ -295,8 +296,8 @@ struct ConnectorsView: View {
                         connectors[idx].enabled = enabled
                         connectors[idx].connectionState = enabled ? "connected" : "available"
                         connectors[idx].statusText = enabled ? "Connected" : "Available"
-                        if connector.id == "google" {
-                            googleStatus = enabled ? .connected : .idle
+                        if oauthProviders.contains(connector.id) {
+                            oauthStatus[connector.id] = enabled ? .connected : .idle
                         }
                         errorMessage = nil
                     }
@@ -432,7 +433,7 @@ struct Connector: Codable, Identifiable {
     }
 }
 
-private extension ConnectorsView.GoogleStatus {
+private extension ConnectorsView.OAuthStatus {
     init(connector: Connector) {
         if connector.connectionState == "needs_reconnect" {
             self = .needsReconnect

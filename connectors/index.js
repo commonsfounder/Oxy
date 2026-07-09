@@ -1,4 +1,5 @@
 const google = require('./google');
+const microsoft = require('./microsoft');
 const uber = require('./uber');
 const telegram = require('./telegram');
 const trainline = require('./trainline');
@@ -25,6 +26,7 @@ const stocks = require('./stocks');
 const registry = {};
 
 for (const action of google.SUPPORTED_ACTIONS) registry[action] = google;
+for (const action of microsoft.SUPPORTED_ACTIONS) registry[action] = microsoft;
 for (const action of uber.SUPPORTED_ACTIONS) registry[action] = uber;
 for (const action of telegram.SUPPORTED_ACTIONS) registry[action] = telegram;
 for (const action of trainline.SUPPORTED_ACTIONS) registry[action] = trainline;
@@ -47,7 +49,7 @@ for (const action of hotels.SUPPORTED_ACTIONS) registry[action] = hotels;
 for (const action of stocks.SUPPORTED_ACTIONS) registry[action] = stocks;
 
 // Real API connectors (actual server actions)
-const REAL_API_CONNECTORS = new Set(['google', 'telegram', 'maps', 'notion', 'github', 'monzo', 'stripe', 'plaid', 'weather', 'slack', 'strava', 'oura', 'eventbrite', 'flights', 'hotels', 'stocks']);
+const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'monzo', 'stripe', 'plaid', 'weather', 'slack', 'strava', 'oura', 'eventbrite', 'flights', 'hotels', 'stocks']);
 
 // Handoff / convenience connectors (open apps with prefill - still useful for consumer)
 const HANDOFF_CONNECTORS = new Set(['uber', 'trainline', 'spotify', 'lyft', 'amazon']);
