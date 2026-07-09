@@ -23,6 +23,7 @@ const multer = require('multer');
 const axios = require('axios');
 const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
+const { extractIncoming } = require('./services/incoming');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
@@ -4644,6 +4645,25 @@ async function getLatestNativeContext(userId) {
   return data || null;
 }
 
+// Regression: the Today dashboard's Inbox/Incoming cards read metadata.emails/metadata.incoming
+// off the freshest briefing (OxyApp/Models/Message.swift), but a prior refactor
+// (commit 454d17b) never carried real email data into any briefing's metadata — those cards
+// were permanently empty for every user regardless of connection state. Shared here so both
+// the interval briefing (runs on a schedule, regardless of urgency) and the email-nudge check
+// (only fires when something looks urgent) populate the same real data the same way.
+async function gatherEmailContext(userId) {
+  try {
+    const enabled = await getEnabledConnectors(userId);
+    if (!enabled.includes('google')) return { emails: [], incoming: [] };
+    const result = await dispatch(userId, 'get_emails', { max_results: 10, label: 'INBOX' });
+    if (!result?.success || !Array.isArray(result.emails)) return { emails: [], incoming: [] };
+    const emails = result.emails.slice(0, 10);
+    return { emails, incoming: extractIncoming(emails) };
+  } catch (e) {
+    return { emails: [], incoming: [] };
+  }
+}
+
 async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
   const [memory, history, preferences] = await Promise.all([
     getMemory(userId, null, ''),
@@ -4696,14 +4716,23 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const prefs = await getPreferenceMap(userId);
   if (prefs[key] === 'sent') return null;
 
-  const text = await buildIntervalBriefing(userId, window, nativeContext, now);
+  const [text, emailContext] = await Promise.all([
+    buildIntervalBriefing(userId, window, nativeContext, now),
+    gatherEmailContext(userId)
+  ]);
   if (!text) return null;
   const briefing = await createBriefing(userId, {
     kind: `${window.id}_briefing`,
     title: window.label,
     body: text,
     source: 'schedule',
-    metadata: { window: window.id, date: todayKey }
+    metadata: {
+      window: window.id,
+      date: todayKey,
+      narrative: text,
+      emails: emailContext.emails,
+      incoming: emailContext.incoming
+    }
   });
   await setPreferenceValue(userId, key, 'sent');
   return { type: `${window.id}_briefing`, text: briefing.body };
@@ -4841,15 +4870,10 @@ async function maybeCreateEmailNudges(userId, now = new Date()) {
     const settings = parseJsonObject(nativeContext?.settings);
     if (['Quiet', 'Low'].includes(settings.autonomy)) return null;
 
-    // Check if Google connector enabled
-    const enabled = await getEnabledConnectors(userId);
-    if (!enabled.includes('google')) return null;
+    const emailContext = await gatherEmailContext(userId);
+    if (!emailContext.emails.length) return null;
 
-    // Fetch recent emails
-    const emailResult = await dispatch(userId, 'get_emails', { max_results: 10, label: 'INBOX' });
-    if (!emailResult?.success || !Array.isArray(emailResult.emails) || emailResult.emails.length === 0) return null;
-
-    const emailSummary = emailResult.emails.slice(0, 5).map(e => {
+    const emailSummary = emailContext.emails.slice(0, 5).map(e => {
       return `From: ${e.from || 'unknown'} | Subject: ${e.subject || '(no subject)'} | Snippet: ${(e.snippet || e.body || '').slice(0, 150)}`;
     }).join('\n');
 
@@ -4869,7 +4893,7 @@ async function maybeCreateEmailNudges(userId, now = new Date()) {
       title: 'Email actions',
       body: text,
       source: 'email',
-      metadata: { date: todayKey, count: 1 }
+      metadata: { date: todayKey, count: 1, emails: emailContext.emails, incoming: emailContext.incoming }
     });
     await setPreferenceValue(userId, key, 'sent');
     return { type: 'email_nudge', text: briefing.body, count: 1 };

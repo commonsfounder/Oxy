@@ -17,6 +17,9 @@ struct ProactiveView: View {
     @State private var errorMessage: String?
     // Throttle for the auto proactive run below.
     @AppStorage("oxy_last_auto_proactive") private var lastAutoProactive: Double = 0
+    // Whether Today itself has already asked for location — first tap requests, later taps
+    // (after a decline) send you to Settings instead, since iOS won't re-prompt.
+    @AppStorage("oxy_today_location_asked") private var locationPermissionRequested = false
     @State private var contentAppeared = false
     @State private var layout = TodayLayout()
     @State private var editingBoard = false
@@ -32,6 +35,12 @@ struct ProactiveView: View {
 
     private var agendaEmpty: Bool { events.isEmpty }
     private var remindersEmpty: Bool { reminders.isEmpty }
+    // "Empty" used to mean either "genuinely nothing today" or "permission was never granted"
+    // indistinguishably — a declined calendar/reminders prompt silently looked identical to a
+    // clear day. Only collapse into the reassuring "clear day" summary when both are actually
+    // authorized and empty; otherwise the individual cards show a "Connect" CTA instead.
+    private var calendarAuthorized: Bool { native.calendarAuthorized }
+    private var remindersAuthorized: Bool { native.remindersAuthorized }
     private var eveningOpen: Bool { !events.contains { !$0.isAllDay && Calendar.current.component(.hour, from: $0.start) >= 17 } }
 
     var body: some View {
@@ -52,7 +61,8 @@ struct ProactiveView: View {
                         } else {
                             // Composable cards (user controls order/visibility).
                             let visible = layout.visibleOrdered()
-                            let collapse = visible.contains(.agenda) && agendaEmpty && visible.contains(.reminders) && remindersEmpty
+                            let collapse = visible.contains(.agenda) && agendaEmpty && calendarAuthorized
+                                && visible.contains(.reminders) && remindersEmpty && remindersAuthorized
                             ForEach(Array(visible.enumerated()), id: \.element) { idx, kind in
                                 if collapse && (kind == .agenda || kind == .reminders) {
                                     EmptyView()
@@ -146,6 +156,25 @@ struct ProactiveView: View {
                     .font(.appBody(17))
                     .foregroundStyle(Color.appMuted)
                     .padding(.top, 16)
+            } else if !LocationManager.shared.isAuthorized {
+                // Regression: location was only ever requested once during onboarding — a
+                // decline there meant weather silently never appeared again, with no way to
+                // fix it short of finding Settings yourself.
+                Button {
+                    if locationPermissionRequested {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    } else {
+                        locationPermissionRequested = true
+                        LocationManager.shared.requestPermission()
+                    }
+                } label: {
+                    Text(locationPermissionRequested ? "Turn on location in Settings for weather" : "Turn on location for weather")
+                        .font(.appBody(15))
+                        .foregroundStyle(Color.appMuted)
+                        .underline()
+                }
+                .buttonStyle(.appScale)
+                .padding(.top, 16)
             }
         }
         .padding(.bottom, 10)
@@ -205,6 +234,46 @@ struct ProactiveView: View {
         TodayCard(padding: 18) { content() }
     }
 
+    /// Permission-not-granted row for a card — same shape as the Health card's "Connect
+    /// Health" CTA, factored out so Agenda/Reminders can be equally honest about the
+    /// difference between "nothing today" and "never asked/declined". `kind` picks which
+    /// native permission request to run — kept as an enum (not a passed-in closure) because
+    /// a `Task { await ... }` tail statement inside an `@escaping () -> Void` closure
+    /// parameter trips the Swift compiler's Task-initializer overload resolution.
+    private enum TodayPermissionKind { case calendar, reminders }
+
+    private func permissionRow(caption: String, buttonTitle: String, alreadyRequested: Bool, kind: TodayPermissionKind) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(caption)
+                .font(.appBody(14))
+                .foregroundStyle(Color.appMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                if alreadyRequested {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                } else {
+                    Task {
+                        switch kind {
+                        case .calendar: await native.requestCalendarAccess()
+                        case .reminders: await native.requestRemindersAccess()
+                        }
+                        await loadDashboard()
+                    }
+                }
+            } label: {
+                Text(alreadyRequested ? "Open Settings" : buttonTitle)
+                    .font(.appBody(13, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.appSurface2.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.appScale)
+        }
+    }
+
     /// The single combined empty state when both the agenda and reminders have nothing —
     /// replaces what would otherwise be 2-3 separate near-empty cards.
     private var clearDaySummary: some View {
@@ -222,7 +291,14 @@ struct ProactiveView: View {
     private var agendaCard: some View {
         boardSection {
             cardLabel("Your day", icon: "calendar")
-            if events.isEmpty {
+            if !calendarAuthorized {
+                permissionRow(
+                    caption: "See today's events once Calendar is connected.",
+                    buttonTitle: "Connect Calendar",
+                    alreadyRequested: native.calendarPermissionRequested,
+                    kind: .calendar
+                )
+            } else if events.isEmpty {
                 Text("Nothing scheduled — the day is yours.")
                     .font(.appBody(15))
                     .foregroundStyle(Color.appMuted)
@@ -382,7 +458,14 @@ struct ProactiveView: View {
     private var remindersCard: some View {
         boardSection {
             cardLabel("Reminders", icon: "checklist")
-            if reminders.isEmpty {
+            if !remindersAuthorized {
+                permissionRow(
+                    caption: "See what's due once Reminders is connected.",
+                    buttonTitle: "Connect Reminders",
+                    alreadyRequested: native.remindersPermissionRequested,
+                    kind: .reminders
+                )
+            } else if reminders.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle")
                         .font(.system(size: 14))

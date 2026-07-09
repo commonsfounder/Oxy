@@ -247,8 +247,25 @@ final class NativeIntegrationManager {
         UserDefaults.standard.bool(forKey: "oxy_today_health_asked")
     }
 
+    /// Lets the Today dashboard re-prompt for calendar/reminders access itself (previously
+    /// only asked once during onboarding — a decline there meant Agenda/Reminders stayed
+    /// silently empty forever, indistinguishable from "no events today").
+    func requestCalendarAccess() async {
+        await requestCalendarPermission()
+        UserDefaults.standard.set(true, forKey: "oxy_today_calendar_asked")
+    }
+
     func requestRemindersAccess() async {
         await requestReminderPermission()
+        UserDefaults.standard.set(true, forKey: "oxy_today_reminders_asked")
+    }
+
+    var calendarPermissionRequested: Bool {
+        UserDefaults.standard.bool(forKey: "oxy_today_calendar_asked")
+    }
+
+    var remindersPermissionRequested: Bool {
+        UserDefaults.standard.bool(forKey: "oxy_today_reminders_asked")
     }
 
     func requestMusicAccess() async {
@@ -2734,7 +2751,10 @@ final class NativeIntegrationManager {
         }
     }
 
-    private var remindersAuthorized: Bool {
+    // Not private: Today's Agenda/Reminders cards need to tell "genuinely empty" apart from
+    // "permission never granted" — todaysEvents()/todaysReminders() both silently return []
+    // for either case, which the dashboard used to have no way to distinguish.
+    var remindersAuthorized: Bool {
         let status = EKEventStore.authorizationStatus(for: .reminder)
         if #available(iOS 17.0, *) {
             return status == .fullAccess || status == .writeOnly
@@ -2742,7 +2762,7 @@ final class NativeIntegrationManager {
         return status == .authorized
     }
 
-    private var calendarAuthorized: Bool {
+    var calendarAuthorized: Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         if #available(iOS 17.0, *) {
             return status == .fullAccess || status == .writeOnly
