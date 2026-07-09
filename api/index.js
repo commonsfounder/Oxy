@@ -3961,7 +3961,7 @@ app.get('/user/:userId/export', async (req, res) => {
   if (!requireMatchingUser(req, res, userId)) return;
   try {
     const data = await buildUserExport(userId);
-    res.setHeader('Content-Disposition', 'attachment; filename="oxy-data-export.json"');
+    res.setHeader('Content-Disposition', 'attachment; filename="milgrain-data-export.json"');
     res.json(data);
   } catch (err) {
     console.error('/user/export error:', err.message);
@@ -6736,10 +6736,10 @@ app.post('/admin/cleanup-conversations', async (req, res) => {
 app.get('/install-shortcut', (_req, res) => {
   const fs = require('fs');
   const path = require('path');
-  const filePath = path.join(__dirname, '..', 'Oxy.shortcut');
+  const filePath = path.join(__dirname, '..', 'Milgrain.shortcut');
   if (fs.existsSync(filePath)) {
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="Oxy.shortcut"');
+    res.setHeader('Content-Disposition', 'attachment; filename="Milgrain.shortcut"');
     res.sendFile(filePath);
   } else {
     res.status(404).json({ error: 'Shortcut file not found' });

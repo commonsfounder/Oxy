@@ -292,7 +292,7 @@ Oxy/
 ├── supabase/migrations/supabase-migration.sql  # Database schema
 ├── mcp-server.js           # Standalone MCP tool server
 ├── create-shortcut.js      # Apple Shortcuts generator
-├── Oxy.shortcut            # Pre-built Apple Shortcut file
+├── Milgrain.shortcut       # Pre-built Apple Shortcut file
 ├── api/
 │   ├── index.js            # Main API (chat, audio, memory, connectors, auth)
 │   ├── proxy.js            # Action dispatch helper
