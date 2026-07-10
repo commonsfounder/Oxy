@@ -938,6 +938,20 @@ function stripActionMarkupForDisplay(text) {
     .replace(/<action>[\s\S]*$/g, '');
 }
 
+function stripMarkdownFormatting(text) {
+  if (!text) return '';
+  return text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/(?<!\*)\*(?!\*)(.*?)\*(?!\*)/g, '$1')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/\n{2,}/g, ' ')
+    .replace(/\n/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function splitCompleteSentences(text) {
   const cleaned = stripActionMarkupForDisplay(text || '');
   const matches = cleaned.match(/[^.!?]+[.!?]+(?:["')\]]+)?/g) || [];
@@ -4719,14 +4733,16 @@ Location: ${location.latitude && location.longitude ? `${location.latitude}, ${l
 Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
 Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 
-Keep it under 70 words. Include only useful items.`;
+Keep it under 70 words. Include only useful items.
+Write plain flowing prose only — no markdown, no headers (###), no bold (**), no bullet or numbered lists.`;
 
   const model = genAI.getGenerativeModel({
     model: PRIMARY_CHAT_MODEL,
     systemInstruction: systemPrompt
   });
   const geminiRes = await model.generateContent(`${window.label} now`);
-  return stripActionMarkupForDisplay(geminiRes.response.text() || '').trim();
+  const text = stripActionMarkupForDisplay(geminiRes.response.text() || '').trim();
+  return stripMarkdownFormatting(text);
 }
 
 async function maybeCreateIntervalBriefing(userId, now = new Date()) {
