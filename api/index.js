@@ -29,7 +29,6 @@ const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const { createActionRunner } = require('./services/action-runner');
-const { resolveConciergeSpendOutcome } = require('./services/money-guard');
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const {
   isPendingCancelMessage,
@@ -82,7 +81,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
-const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens } = require('./services/stripe-cards');
+const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired } = require('./services/stripe-cards');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
@@ -2424,47 +2423,47 @@ async function executeAction(userId, action, params, context = {}) {
       if (!spendGuard.ok) return { success: false, error: spendGuard.error };
       const prefs = await getPreferenceMap(userId);
       const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
-      if (balanceBeforeSpend < amount) {
-        return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
-      }
 
-      // Attempt the real Stripe charge (if configured) BEFORE touching the virtual balance —
-      // a failed real attempt must not silently vanish the user's spendable balance for
-      // nothing. See resolveConciergeSpendOutcome in money-guard.js for the decision logic.
-      const stripeKey = process.env.STRIPE_SECRET_KEY;
-      let stripeAttempted = false;
-      let stripeSucceeded = false;
-      let stripeError = '';
-      let stripeClientSecret = '';
-      if (stripeKey) {
-        stripeAttempted = true;
-        try {
-          const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
-            new URLSearchParams({
-              amount: Math.round(amount * 100),
-              currency: 'usd',
-              description: `${description} at ${merchant}`,
-              automatic_payment_methods: JSON.stringify({enabled: true})
-            }).toString(),
-            { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
-          );
-          stripeSucceeded = true;
-          stripeClientSecret = intent.data.client_secret;
-        } catch (stripeErr) {
-          stripeError = stripeErr.message;
+      if (!stripeClient) {
+        if (balanceBeforeSpend < amount) {
+          return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
         }
+        const balance = Number((balanceBeforeSpend - amount).toFixed(2));
+        await setPreferenceValue(userId, 'concierge_account.balance', balance);
+        const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
+        return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${balance.toFixed(2)}.`, balance, card: cardRef };
       }
 
-      const outcome = resolveConciergeSpendOutcome({
-        amount, balanceBeforeSpend, stripeAttempted, stripeSucceeded, stripeError, stripeClientSecret,
+      const idempotencyKey = crypto.randomUUID();
+      const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
+        amountCents: Math.round(amount * 100), currency: 'usd', description: `${description} at ${merchant}`, idempotencyKey
       });
-      if (!outcome.success) return outcome;
 
-      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
+      if (outcome.status === 'no_card') {
+        return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
+      }
+      if (outcome.status === 'failed') {
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+      }
+      if (outcome.status === 'requires_action') {
+        await setPaymentActionRequired(supabase, userId, {
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret,
+          amountCents: Math.round(amount * 100), description: `${description} at ${merchant}`
+        });
+        return {
+          success: true,
+          text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
+          requiresAction: true,
+          paymentIntentId: outcome.paymentIntentId
+        };
+      }
+
+      // outcome.status === 'succeeded'
+      let balance = balanceBeforeSpend;
+      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
+      await setPreferenceValue(userId, 'concierge_account.balance', balance);
       await setPreferenceValue(userId, 'concierge_account.last_spend', JSON.stringify({ amount, description, merchant, ts: Date.now() }));
-      const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
-
-      return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${outcome.balance.toFixed(2)}.${outcome.realChargeInfo}`, balance: outcome.balance, card: cardRef };
+      return { success: true, text: `Charged $${amount.toFixed(2)} on ${description} at ${merchant} to your linked card. New balance: $${balance.toFixed(2)}.`, balance, paymentIntentId: outcome.paymentIntentId };
     }
     case 'top_up_concierge_account': {
       const amount = Number(params?.amount || 0);
@@ -2503,11 +2502,6 @@ async function executeAction(userId, action, params, context = {}) {
     }
 
     case 'stripe_charge': {
-      // Regression: this used to fabricate "Charged via Stripe" text without ever calling
-      // Stripe's API — it only ever touched the virtual concierge balance. Kept inline
-      // (rather than dispatched to connectors/stripe.js) specifically so guardConciergeSpend's
-      // daily rolling cap still applies — connectors/stripe.js's own checkSpendLimit call only
-      // enforces the per-transaction cap, not the daily total.
       const amountCents = Number(params?.amount || 1000);
       const desc = params?.description || 'Concierge spend';
       const amount = amountCents / 100;
@@ -2516,8 +2510,7 @@ async function executeAction(userId, action, params, context = {}) {
       const prefs = await getPreferenceMap(userId);
       const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
 
-      const stripeKey = process.env.STRIPE_SECRET_KEY;
-      if (!stripeKey) {
+      if (!stripeClient) {
         // Honest about what actually happened: no real charge was attempted, this is a
         // virtual-only ledger entry, not a real Stripe transaction.
         const balance = Math.max(0, Number((balanceBeforeSpend - amount).toFixed(2)));
@@ -2525,32 +2518,34 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: true, text: `No Stripe key configured, so this was a virtual concierge-balance entry only — no real charge was made for ${desc}. Balance: $${balance.toFixed(2)}.`, amount, balance };
       }
 
-      let stripeSucceeded = false;
-      let stripeError = '';
-      let stripeClientSecret = '';
-      try {
-        const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
-          new URLSearchParams({
-            amount: amountCents,
-            currency: 'usd',
-            description: desc,
-            automatic_payment_methods: JSON.stringify({ enabled: true })
-          }).toString(),
-          { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
-        );
-        stripeSucceeded = true;
-        stripeClientSecret = intent.data.client_secret;
-      } catch (stripeErr) {
-        stripeError = stripeErr.message;
+      const idempotencyKey = crypto.randomUUID();
+      const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
+        amountCents, currency: 'usd', description: desc, idempotencyKey
+      });
+
+      if (outcome.status === 'no_card') {
+        return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
+      }
+      if (outcome.status === 'failed') {
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+      }
+      if (outcome.status === 'requires_action') {
+        await setPaymentActionRequired(supabase, userId, {
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc
+        });
+        return {
+          success: true,
+          text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
+          requiresAction: true,
+          paymentIntentId: outcome.paymentIntentId
+        };
       }
 
-      const outcome = resolveConciergeSpendOutcome({
-        amount, balanceBeforeSpend, stripeAttempted: true, stripeSucceeded, stripeError, stripeClientSecret,
-      });
-      if (!outcome.success) return outcome;
-
-      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
-      return { success: true, text: `Stripe PaymentIntent created for $${amount.toFixed(2)} (${desc}).${outcome.realChargeInfo} Balance: $${outcome.balance.toFixed(2)}.`, amount, balance: outcome.balance };
+      // outcome.status === 'succeeded'
+      let balance = balanceBeforeSpend;
+      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
+      await setPreferenceValue(userId, 'concierge_account.balance', balance);
+      return { success: true, text: `Stripe charged $${amount.toFixed(2)} (${desc}) to your linked card. Balance: $${balance.toFixed(2)}.`, amount, balance, paymentIntentId: outcome.paymentIntentId };
     }
 
     // Super easy consumer Reminders (uses your iPhone's built-in, no extra login)
