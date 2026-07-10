@@ -56,9 +56,8 @@ struct OxyThinkingIndicator: View {
 struct OxySkeletonCard: View {
     var height: CGFloat = 84
     var cornerRadius: CGFloat = 0
-    // Light-mode dashboards need a dark-on-light skeleton; default stays dark-on-dark.
-    var base: Color = .white.opacity(0.03)
-    var highlight: Color = .white.opacity(0.06)
+    var base: Color = .appAdaptive(dark: .white, light: .black).opacity(0.03)
+    var highlight: Color = .appAdaptive(dark: .white, light: .black).opacity(0.06)
 
     @State private var shimmer = false
 

@@ -47,7 +47,10 @@ struct AppHeaderView: View {
                                 .appGlass(Circle(), tint: isIncognito ? Color.appInk : nil, interactive: true)
                         }
                         .buttonStyle(.appScale)
-                        .accessibilityLabel(isIncognito ? "Shadow chat on" : "Shadow chat off")
+                        .accessibilityLabel(isIncognito ? "Private chat on" : "Private chat off")
+                        .accessibilityHint(isIncognito
+                            ? "Private mode is on. Turns are not saved. Double tap to turn off."
+                            : "Turn on private chat. Turns will not be saved.")
                     }
 
                     // New conversation — only once a chat is under way (an empty chat is already

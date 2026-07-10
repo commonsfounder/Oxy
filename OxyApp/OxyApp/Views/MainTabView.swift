@@ -5,7 +5,6 @@ struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
     @State private var selectedTab = Tab.today
-    @State private var keyboardUp = false
 
     enum Tab: String, CaseIterable {
         case chat, today, more
@@ -28,39 +27,25 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        ZStack {
-            Color.appBackground.ignoresSafeArea()
-
-            // Standard tab view — reliable muscle memory. No more fussy page swipe + tucked glass.
-            // Accent color now drives selection and life in the UI.
-            TabView(selection: $selectedTab) {
-                ChatHomeView()
-                    .tag(Tab.chat)
-                    .tabItem { Label(Tab.chat.label, systemImage: Tab.chat.icon) }
-                ProactiveView()
-                    .tag(Tab.today)
-                    .tabItem { Label(Tab.today.label, systemImage: Tab.today.icon) }
-                MoreView()
-                    .tag(Tab.more)
-                    .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
-            }
-            .tint(Color.appAccent)
-            .toolbar(.hidden, for: .tabBar)
-            .environment(TabBarVisibility())
-            .onChange(of: selectedTab) { _, _ in
-                HapticManager.shared.select()
-            }
-
-            if !keyboardUp {
-                MilgrainTabBar(selectedTab: $selectedTab)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+        // System TabView keeps iOS liquid-glass chrome. A second custom bar used to
+        // stack on top of it (double tab bar); do not reintroduce that overlay.
+        TabView(selection: $selectedTab) {
+            ChatHomeView()
+                .tag(Tab.chat)
+                .tabItem { Label(Tab.chat.label, systemImage: Tab.chat.icon) }
+            ProactiveView()
+                .tag(Tab.today)
+                .tabItem { Label(Tab.today.label, systemImage: Tab.today.icon) }
+            MoreView()
+                .tag(Tab.more)
+                .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-            keyboardUp = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardUp = false
+        .tint(Color.appAccent)
+        // Environment still provided so scroll helpers / previews that read it stay safe;
+        // we no longer drive a custom floating bar from it.
+        .environment(TabBarVisibility())
+        .onChange(of: selectedTab) { _, _ in
+            HapticManager.shared.select()
         }
         .id(accentColor)
         .onAppear {
@@ -75,58 +60,6 @@ struct MainTabView: View {
         .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
             withAnimation { selectedTab = .more }
         }
-    }
-}
-
-private struct MilgrainTabBar: View {
-    @Binding var selectedTab: MainTabView.Tab
-
-    var body: some View {
-        VStack {
-            Spacer()
-            HStack(spacing: 4) {
-                ForEach(MainTabView.Tab.allCases, id: \.self) { tab in
-                    let selected = selectedTab == tab
-                    Button {
-                        guard selectedTab != tab else { return }
-                        withAnimation(.appStandard) { selectedTab = tab }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 15, weight: selected ? .semibold : .regular))
-                                .symbolVariant(selected ? .fill : .none)
-                            Text(tab.label)
-                                .font(.appBody(10.5, weight: selected ? .semibold : .regular))
-                        }
-                        .foregroundStyle(selected ? Color.appInk : Color.appMuted)
-                        .frame(width: 68, height: 48)
-                        .overlay(alignment: .top) {
-                            Capsule()
-                                .fill(selected ? Color.appAccent : Color.clear)
-                                .frame(width: 18, height: 2)
-                                .offset(y: 1)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.appScale(0.96))
-                    .accessibilityLabel(tab.label)
-                    .accessibilityAddTraits(selected ? [.isSelected, .isButton] : .isButton)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-            .padding(.bottom, 8)
-            .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.appSurface.opacity(0.96))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Color.appHairline, lineWidth: 0.5)
-                    )
-            }
-            .padding(.bottom, 10)
-        }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 }
 
@@ -155,13 +88,9 @@ struct MoreView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         identityHeader
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 16)
-                            .animation(.appSpring.delay(0.04), value: appeared)
+                            .appEntrance(appeared, riseOffset: 16, delay: 0.04)
                         menuSection
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 12)
-                            .animation(.appSpring.delay(0.14), value: appeared)
+                            .appEntrance(appeared, riseOffset: 12, delay: 0.14)
                     }
                     .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 32)
@@ -207,6 +136,7 @@ struct MoreView: View {
 
                 Text(displayName)
                     .font(.heroDisplay(28))
+                    .appHeroTracking(28)
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)
@@ -306,7 +236,7 @@ struct MoreView: View {
             }
 
             menuGroup("Preferences") {
-                AppRow(title: "Settings", subtitle: "Defaults, appearance, and diagnostics") { destination = .settings }
+                AppRow(title: "Settings", subtitle: "Defaults and preferences") { destination = .settings }
             }
         }
         .padding(.top, 24)

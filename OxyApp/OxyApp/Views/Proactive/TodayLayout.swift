@@ -5,12 +5,13 @@ import SwiftUI
 enum TodayCardKind: String, CaseIterable, Codable, Identifiable {
     case agenda, health, reminders, incoming, inbox
     var id: String { rawValue }
+    /// Titles match the board UI (not internal kind ids).
     var title: String {
         switch self {
         case .incoming:  return "Incoming"
         case .inbox:     return "Inbox"
-        case .agenda:    return "Agenda"
-        case .health:    return "Health"
+        case .agenda:    return "Your day"
+        case .health:    return "Wellbeing"
         case .reminders: return "Reminders"
         }
     }

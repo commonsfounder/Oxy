@@ -48,6 +48,13 @@ struct ProactiveView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
 
+                // Painterly sky behind the greeting — fades to clear so it blends into
+                // the flat canvas beneath it. Was defined but never wired up.
+                AtmosphereSky(condition: weather?.symbolName)
+                    .frame(height: 380)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .allowsHitTesting(false)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if let errorMessage {
@@ -121,29 +128,48 @@ struct ProactiveView: View {
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Date kicker + a discreet refresh — the only control up here.
-            HStack(alignment: .firstTextBaseline) {
+            // Date kicker + discreet board controls (matched weight/size).
+            HStack(alignment: .center) {
                 Text(dateLine)
                     .font(.appBody(11, weight: .regular)).tracking(2)
                     .textCase(.uppercase)
                     .foregroundStyle(Color.appMuted)
                 Spacer()
-                Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
-                    Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .regular)).foregroundStyle(Color.appMuted)
+                HStack(spacing: 16) {
+                    Button { HapticManager.shared.impact(.light); editingBoard = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.appMuted)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.appScale)
+                    .accessibilityLabel("Customise Today")
+
+                    Button(action: { Task { await checkNow() } }) {
+                        Group {
+                            if isChecking {
+                                ProgressView().scaleEffect(0.65).tint(Color.appMuted)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(Color.appMuted)
+                            }
+                        }
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.appScale)
+                    .disabled(isChecking)
+                    .accessibilityLabel("Refresh")
                 }
-                .buttonStyle(.appScale).accessibilityLabel("Customise Today")
-                .padding(.trailing, 14)
-                Button(action: { Task { await checkNow() } }) {
-                    if isChecking { ProgressView().scaleEffect(0.6).tint(Color.appMuted) }
-                    else { Image(systemName: "arrow.clockwise").font(.system(size: 13, weight: .light)).foregroundStyle(Color.appMuted) }
-                }
-                .buttonStyle(.appScale).disabled(isChecking).accessibilityLabel("Refresh")
             }
             .padding(.top, 8)
 
             // Greeting.
             Text(greeting)
                 .font(.heroDisplay(26))
+                .appHeroTracking(26)
                 .foregroundStyle(Color.appInk)
                 .lineLimit(3)
                 .minimumScaleFactor(0.6)
@@ -290,7 +316,7 @@ struct ProactiveView: View {
 
     private var agendaCard: some View {
         boardSection {
-            cardLabel("Your day", icon: "calendar")
+            TodaySectionHeader(title: TodayCardKind.agenda.title, icon: TodayGlyph.section(.agenda))
             if !calendarAuthorized {
                 permissionRow(
                     caption: "See today's events once Calendar is connected.",
@@ -352,9 +378,7 @@ struct ProactiveView: View {
             }
         }
         .padding(.top, 12)
-        .opacity(contentAppeared ? 1 : 0)
-        .offset(y: contentAppeared ? 0 : 14)
-        .animation(.appSpring.delay(0.04 + Double(index) * 0.05), value: contentAppeared)
+        .appEntrance(contentAppeared, riseOffset: 14, delay: 0.04 + Double(index) * 0.05)
     }
 
     /// Incoming items off the freshest briefing's metadata (same source as inbox).
@@ -367,7 +391,7 @@ struct ProactiveView: View {
     @ViewBuilder private var eveningPlate: some View {
         if let line = eveningLine {
             TodayCard(padding: 18) {
-                cardLabel("Tonight", icon: "moon.stars")
+                TodaySectionHeader(title: "Tonight", icon: TodayGlyph.tonight)
                 Text(line)
                     .font(.appBody(16))
                     .foregroundStyle(Color.appInk)
@@ -411,27 +435,37 @@ struct ProactiveView: View {
         let emails = inboxEmails
         if !emails.isEmpty {
             boardSection {
-                cardLabel("Inbox", icon: "envelope")
+                TodaySectionHeader(title: TodayCardKind.inbox.title, icon: TodayGlyph.section(.inbox))
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(emails) { email in
                         Button {
                             HapticManager.shared.impact(.light)
                             openMail()
                         } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(email.cleanFrom)
-                                    .font(.appBody(14, weight: .regular))
-                                    .foregroundStyle(Color.appInk)
-                                    .lineLimit(1)
-                                Text(email.cleanSubject)
-                                    .font(.appBody(14))
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: "envelope")
+                                    .font(.system(size: 12, weight: .medium))
                                     .foregroundStyle(Color.appMuted)
-                                    .lineLimit(1)
+                                    .frame(width: 18, height: 18)
+                                    .padding(.top, 2)
+                                    .accessibilityHidden(true)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(email.displayFrom)
+                                        .font(.appBody(14, weight: .medium))
+                                        .foregroundStyle(Color.appInk)
+                                        .lineLimit(1)
+                                    Text(email.summary ?? email.cleanSubject)
+                                        .font(.appBody(14))
+                                        .foregroundStyle(Color.appMuted)
+                                        .lineLimit(2)
+                                }
+                                Spacer(minLength: 0)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.appScale(0.99))
+                        .accessibilityLabel("\(email.displayFrom), \(email.summary ?? email.cleanSubject)")
                     }
                 }
             }
@@ -457,7 +491,7 @@ struct ProactiveView: View {
 
     private var remindersCard: some View {
         boardSection {
-            cardLabel("Reminders", icon: "checklist")
+            TodaySectionHeader(title: TodayCardKind.reminders.title, icon: TodayGlyph.section(.reminders))
             if !remindersAuthorized {
                 permissionRow(
                     caption: "See what's due once Reminders is connected.",
@@ -466,15 +500,10 @@ struct ProactiveView: View {
                     kind: .reminders
                 )
             } else if reminders.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle")
-                        .font(.system(size: 14))
-                        .foregroundStyle(Color.appSuccess)
-                    Text("All clear — nothing due today.")
-                        .font(.appBody(15))
-                        .foregroundStyle(Color.appMuted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("All clear — nothing due today.")
+                    .font(.appBody(15))
+                    .foregroundStyle(Color.appMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     ForEach(reminders) { reminder in
@@ -482,23 +511,26 @@ struct ProactiveView: View {
                             complete(reminder)
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Circle()
-                                    .strokeBorder(Color.appMuted, lineWidth: 1)
-                                    .frame(width: 15, height: 15)
-                                    .offset(y: 2)
+                                Image(systemName: "circle")
+                                    .font(.system(size: 15, weight: .regular))
+                                    .foregroundStyle(reminder.overdue ? Color.appAttention : Color.appMuted)
+                                    .offset(y: 1)
                                 Text(reminder.title)
                                     .font(.appBody(16))
                                     .foregroundStyle(Color.appInk)
                                 Spacer(minLength: 8)
                                 if let due = reminder.due {
                                     Text(reminder.overdue ? "overdue" : timeString(due))
-                                        .font(.appBody(12))
+                                        .font(.appBody(12, weight: reminder.overdue ? .medium : .regular))
                                         .foregroundStyle(reminder.overdue ? Color.appAttention : Color.appMuted)
                                 }
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.appScale(0.99))
+                        .accessibilityLabel(reminder.overdue
+                            ? "\(reminder.title), overdue"
+                            : reminder.title)
                     }
                 }
             }
@@ -511,11 +543,20 @@ struct ProactiveView: View {
     @ViewBuilder private var healthCard: some View {
         if hasHealthMetrics {
             boardSection {
-                cardLabel("Wellbeing", icon: "heart.fill")
+                TodaySectionHeader(title: TodayCardKind.health.title, icon: TodayGlyph.section(.health))
                 HStack(spacing: 0) {
-                    if let st = steps, st > 0 { healthMetric(st.formatted(), label: "steps") }
-                    if let s = sleepMinutes, s > 0 { healthMetric(sleepText(s), label: "sleep") }
-                    if let hr = restingHR, hr > 0 { healthMetric("\(hr)", label: "resting HR") }
+                    if layout.isOptionEnabled(HealthMetric.steps.id, for: .health),
+                       let st = steps, st > 0 {
+                        healthMetric(st.formatted(), label: "steps", glyph: TodayGlyph.metric(.steps))
+                    }
+                    if layout.isOptionEnabled(HealthMetric.sleep.id, for: .health),
+                       let s = sleepMinutes, s > 0 {
+                        healthMetric(sleepText(s), label: "sleep", glyph: TodayGlyph.metric(.sleep))
+                    }
+                    if layout.isOptionEnabled(HealthMetric.restingHR.id, for: .health),
+                       let hr = restingHR, hr > 0 {
+                        healthMetric("\(hr)", label: "resting HR", glyph: TodayGlyph.metric(.restingHR))
+                    }
                 }
                 if let prose = visibleBriefings.first?.wellbeing {
                     Text(prose)
@@ -526,28 +567,19 @@ struct ProactiveView: View {
             }
         } else if let prose = visibleBriefings.first?.wellbeing {
             boardSection {
-                cardLabel("Wellbeing", icon: "heart.fill")
+                TodaySectionHeader(title: TodayCardKind.health.title, icon: TodayGlyph.section(.health))
                 Text(prose)
                     .font(.appBody(15))
                     .foregroundStyle(Color.appInk)
             }
         } else {
             actionableBoardSection {
+                TodaySectionHeader(title: TodayCardKind.health.title, icon: TodayGlyph.section(.health))
                 HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "heart")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(Color.appMuted)
-                            Text("Wellbeing")
-                                .font(.appBody(14, weight: .medium))
-                                .foregroundStyle(Color.appInk)
-                        }
-                        Text("Sleep, steps, and heart rate when Health is connected.")
-                            .font(.appBody(14))
-                            .foregroundStyle(Color.appMuted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    Text("Sleep, steps, and heart rate when Health is connected.")
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.appMuted)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Button {
                         if native.healthPermissionRequested {
@@ -571,7 +603,10 @@ struct ProactiveView: View {
     }
 
     private var hasHealthMetrics: Bool {
-        (steps ?? 0) > 0 || (sleepMinutes ?? 0) > 0 || (restingHR ?? 0) > 0
+        let showSteps = layout.isOptionEnabled(HealthMetric.steps.id, for: .health) && (steps ?? 0) > 0
+        let showSleep = layout.isOptionEnabled(HealthMetric.sleep.id, for: .health) && (sleepMinutes ?? 0) > 0
+        let showHR = layout.isOptionEnabled(HealthMetric.restingHR.id, for: .health) && (restingHR ?? 0) > 0
+        return showSteps || showSleep || showHR
     }
 
     private func sleepText(_ minutes: Int) -> String {
@@ -579,45 +614,36 @@ struct ProactiveView: View {
         return m > 0 ? "\(h)h \(m)m" : "\(h)h"
     }
 
-    private func healthMetric(_ value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+    private func healthMetric(_ value: String, label: String, glyph: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                TodayMetricGlyph(systemName: glyph)
+                Text(label)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+            }
             Text(value)
                 .font(.appDisplay(22))
                 .foregroundStyle(Color.appInk)
                 .monospacedDigit()
-            Text(label)
-                .font(.appBody(12))
-                .foregroundStyle(Color.appMuted)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label), \(value)")
     }
 
     /// Cold-start placeholder: the hero + two cards in skeleton form, shimmering.
     /// Mirrors the real layout so content settles in place instead of replacing a
     /// centered spinner — reads as a luxury app loading, not a web app waiting.
     private var loadingSkeleton: some View {
-        let base: Color = .white.opacity(0.04)
-        let highlight: Color = .white.opacity(0.08)
+        let base: Color = .appAdaptive(dark: .white, light: .black).opacity(0.04)
+        let highlight: Color = .appAdaptive(dark: .white, light: .black).opacity(0.08)
         return VStack(spacing: 16) {
             OxySkeletonCard(height: 264, cornerRadius: 26, base: base, highlight: highlight)
             OxySkeletonCard(height: 132, cornerRadius: AppRadius.md, base: base, highlight: highlight)
             OxySkeletonCard(height: 96, cornerRadius: AppRadius.md, base: base, highlight: highlight)
         }
         .accessibilityLabel("Loading your day")
-    }
-
-    private func cardLabel(_ text: String, icon: String? = nil) -> some View {
-        HStack(spacing: 8) {
-            if let icon {
-                Image(systemName: icon)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.appAccent)
-            }
-            Text(text)
-                .font(.appDisplay(16))
-                .foregroundStyle(Color.appInk)
-        }
-        .padding(.bottom, 12)
     }
 
     private func timeString(_ date: Date) -> String {
@@ -646,7 +672,7 @@ struct ProactiveView: View {
         restingHR = await restingHRResult
         isLoading = false
         contentAppeared = false
-        withAnimation(.appSpring.delay(0.04)) { contentAppeared = true }
+        contentAppeared = true
         await maybeAutoProactive()
     }
 
@@ -726,14 +752,24 @@ struct TodayBoardEditor: View {
         NavigationStack {
             List {
                 ForEach(layout.order) { kind in
-                    HStack {
+                    HStack(spacing: 12) {
+                        Image(systemName: TodayGlyph.section(kind))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color.appAccent)
+                            .frame(width: 22, alignment: .center)
+                            .accessibilityHidden(true)
                         Text(kind.title).font(.appBody(15)).foregroundStyle(Color.appInk)
                         Spacer()
                         if isConfigurable(kind) {
                             Button { configuringKind = kind } label: {
-                                Image(systemName: "gearshape").foregroundStyle(Color.appMuted)
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(Color.appMuted)
+                                    .frame(width: 28, height: 28)
+                                    .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Configure \(kind.title)")
                             .padding(.trailing, 4)
                         }
                         AppToggle(isOn: Binding(
@@ -742,6 +778,7 @@ struct TodayBoardEditor: View {
                         ))
                     }
                     .listRowBackground(Color.appBackground)
+                    .accessibilityElement(children: .combine)
                 }
                 .onMove { layout.move(from: $0, to: $1) }
             }
@@ -759,7 +796,6 @@ struct TodayBoardEditor: View {
                 TodayCardOptionsEditor(kind: kind, layout: layout, native: native)
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -805,7 +841,6 @@ private struct TodayCardOptionsEditor: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 

@@ -97,7 +97,7 @@ private struct AppCheckbox: View {
             .frame(width: 16, height: 16)
             .overlay(
                 Rectangle()
-                    .strokeBorder(isOn ? Color.clear : Color.white.opacity(0.3), lineWidth: 1)
+                    .strokeBorder(isOn ? Color.clear : Color.appAdaptive(dark: .white, light: .black).opacity(0.3), lineWidth: 1)
             )
             // A small overshoot as it fills — presence with a little life, not a hard flip.
             .scaleEffect(isOn ? 1.08 : 1.0)

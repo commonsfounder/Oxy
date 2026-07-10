@@ -16,16 +16,13 @@ extension Color {
                      dark: UIColor(red: 242/255, green: 242/255, blue: 242/255, alpha: 1))
     }
     static var oxySub: Color { .appMuted }
-    static var oxyDim: Color { Color.white.opacity(0.55) }
+    static var oxyDim: Color { Color.appAdaptive(dark: .white, light: .black).opacity(0.55) }
     static var oxyOnAccent: Color { .appOnAccent }
     static let oxyDefaultStone = Color(red: 242/255, green: 242/255, blue: 242/255)
     static var oxyStone: Color { .appAccent }
     static var oxyAccent: Color { .appAccent }
-    // App is dark-only — no light/system appearance. The `light:` arm is kept so
-    // callers don't have to change, but it's never used.
     static func dynamicColor(light: UIColor, dark: UIColor) -> Color {
-        _ = light
-        return Color(dark)
+        Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
     }
     /// Green — #4CAF82
     static let oxyGreen = Color(red: 76/255, green: 175/255, blue: 130/255)

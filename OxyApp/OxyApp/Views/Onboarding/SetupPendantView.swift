@@ -53,12 +53,12 @@ private struct PendantGlyph: View {
             Circle()
                 .strokeBorder(Color.appTitanium, lineWidth: 1)
                 .background(
-                    Circle().fill(Color.white.opacity(0.03))
+                    Circle().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.03))
                 )
                 .frame(width: 116, height: 116)
                 .overlay(
                     Circle()
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+                        .strokeBorder(Color.appAdaptive(dark: .white, light: .black).opacity(0.12), lineWidth: 0.5)
                         .padding(16)
                 )
                 .offset(y: -8)
