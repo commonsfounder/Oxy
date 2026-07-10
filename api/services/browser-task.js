@@ -3859,8 +3859,14 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
         // The model hit a bot/security wall (often a Cloudflare iframe detectBlockWall can't
         // read) and is asking the user what to do. Don't surface a confusing technical ask —
         // bail cleanly, same as a detected wall, so the user gets "try another site", not
-        // "there's a Cloudflare screen".
-        if (describesBlockWall(decision.question)) {
+        // "there's a Cloudflare screen". BUT the model's own wording is not sole authority —
+        // verified live (Nike, 2026-07-10) that a vision model can misread an ordinary EMPTY
+        // page (e.g. a cart that never got an item added, after a prior click failure) as a
+        // bot-wall and phrase its question using this exact vocabulary. Require the DOM-level
+        // probe (detectBlockWall — reads real page text/dialogs for actual challenge copy) to
+        // corroborate before bailing; a false claim falls through to isTechnicalAsk below,
+        // which retries instead of giving up.
+        if (describesBlockWall(decision.question) && await detectBlockWall(session.page)) {
           return blockedPageResult(session);
         }
         // Never surface a technical question. Treat it as a stuck step and retry instead.
