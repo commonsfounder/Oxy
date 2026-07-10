@@ -113,12 +113,19 @@ test('redelivered succeeded events for the same PaymentIntent only deduct once (
   };
 
   // Simulate Stripe redelivering the same event (or two near-simultaneous
-  // deliveries) by handling it twice in sequence, which is enough to prove
-  // the atomic claim wins exactly once even without true concurrency.
-  const [first, second] = [
-    await handleStripeWebhookEvent(supabase, event),
-    await handleStripeWebhookEvent(supabase, event)
-  ];
+  // deliveries) by firing both handler calls without awaiting the first
+  // before starting the second. Because handleStripeWebhookEvent has real
+  // await points between its read and its write, Promise.all here actually
+  // interleaves the two calls at the microtask level — both can complete
+  // their "read" step before either completes its "write" step, which is
+  // exactly the contention window a real concurrent claim must survive.
+  // A sequential await-then-await version would NOT exercise this: see the
+  // report for how this was verified against the pre-fix read-then-clear
+  // logic.
+  const [first, second] = await Promise.all([
+    handleStripeWebhookEvent(supabase, event),
+    handleStripeWebhookEvent(supabase, event)
+  ]);
 
   const deductedCount = [first, second].filter(r => r.deducted === true).length;
   assert.equal(deductedCount, 1, 'exactly one delivery should win the claim and deduct');
