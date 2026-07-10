@@ -62,12 +62,79 @@ async function createSetupIntentForUser(stripe, supabase, userId) {
   return { clientSecret: setupIntent.client_secret, customerId };
 }
 
+const PAYMENT_ACTION_REQUIRED_KEY = 'concierge_account.payment_action_required';
+
+function resolveOffSessionChargeOutcome(paymentIntent) {
+  if (paymentIntent.status === 'succeeded') return { status: 'succeeded' };
+  if (paymentIntent.status === 'requires_action') {
+    return { status: 'requires_action', clientSecret: paymentIntent.client_secret };
+  }
+  return {
+    status: 'failed',
+    error: paymentIntent.last_payment_error?.message || `Unexpected PaymentIntent status: ${paymentIntent.status}`
+  };
+}
+
+async function chargeLinkedCard(stripe, supabase, userId, { amountCents, currency = 'gbp', description, idempotencyKey } = {}) {
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    throw new TypeError('chargeLinkedCard requires a positive amountCents');
+  }
+  if (!idempotencyKey) throw new TypeError('chargeLinkedCard requires an idempotencyKey');
+
+  const card = await getLinkedCard(supabase, userId);
+  if (!card) return { status: 'no_card' };
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount: amountCents,
+    currency,
+    customer: card.customerId,
+    payment_method: card.paymentMethodId,
+    description,
+    off_session: true,
+    confirm: true,
+    metadata: { oxy_user_id: userId }
+  }, { idempotencyKey });
+
+  const outcome = resolveOffSessionChargeOutcome(paymentIntent);
+  return { ...outcome, paymentIntentId: paymentIntent.id };
+}
+
+async function setPaymentActionRequired(supabase, userId, { paymentIntentId, clientSecret, amountCents, description }) {
+  await supabase.from('preferences').upsert({
+    user_id: userId,
+    key: PAYMENT_ACTION_REQUIRED_KEY,
+    value: JSON.stringify({ paymentIntentId, clientSecret, amountCents, description, createdAt: new Date().toISOString() }),
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,key' });
+}
+
+async function getPaymentActionRequired(supabase, userId) {
+  const { data } = await supabase
+    .from('preferences')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', PAYMENT_ACTION_REQUIRED_KEY)
+    .maybeSingle();
+  if (!data?.value) return null;
+  try { return JSON.parse(data.value); } catch { return null; }
+}
+
+async function clearPaymentActionRequired(supabase, userId) {
+  await supabase.from('preferences').delete().eq('user_id', userId).eq('key', PAYMENT_ACTION_REQUIRED_KEY);
+}
+
 module.exports = {
   STRIPE_CONNECTOR_ID,
+  PAYMENT_ACTION_REQUIRED_KEY,
   readStripeTokens,
   writeStripeTokens,
   getLinkedCard,
   saveLinkedCard,
   getOrCreateStripeCustomer,
-  createSetupIntentForUser
+  createSetupIntentForUser,
+  resolveOffSessionChargeOutcome,
+  chargeLinkedCard,
+  setPaymentActionRequired,
+  getPaymentActionRequired,
+  clearPaymentActionRequired
 };
