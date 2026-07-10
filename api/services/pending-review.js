@@ -39,6 +39,22 @@ function isPendingRevisionMessage(message) {
     .test(String(message || '').trim());
 }
 
+const MONEY_ACTION_TYPES = new Set(['stripe_charge', 'spend_from_concierge_via_stripe', 'spend_from_concierge_account']);
+
+function conciergeMoneyReviewDetail(action, cardInfo) {
+  const input = action?.input || {};
+  const isCents = action.type === 'stripe_charge';
+  const rawAmount = Number(input.amount || 0);
+  const amountUsd = isCents ? rawAmount / 100 : rawAmount;
+  const amountStr = Number.isFinite(amountUsd) ? `$${amountUsd.toFixed(2)}` : 'this amount';
+  const description = input.description || input.merchant || 'this purchase';
+  if (cardInfo?.last4) {
+    const brand = cardInfo.brand ? `${cardInfo.brand} ` : '';
+    return `Charge your ${brand}card ending in ${cardInfo.last4} ${amountStr} for ${description}.`;
+  }
+  return `Spend ${amountStr} from your concierge balance for ${description}.`;
+}
+
 function reviewTitleForAction(action) {
   switch (action?.type) {
     case 'send_email': return 'Review email';
@@ -127,7 +143,7 @@ function reviewCalendarDetail(input = {}) {
   ].filter(Boolean).join('\n');
 }
 
-function reviewDetailForAction(action) {
+function reviewDetailForAction(action, cardInfo = null) {
   const input = action?.input || {};
   switch (action?.type) {
     case 'send_email':
@@ -150,12 +166,16 @@ function reviewDetailForAction(action) {
       return reviewCalendarDetail(input);
     case 'make_call':
       return input.contact ? `Contact: ${input.contact}` : '';
+    case 'stripe_charge':
+    case 'spend_from_concierge_via_stripe':
+    case 'spend_from_concierge_account':
+      return conciergeMoneyReviewDetail(action, cardInfo);
     default:
       return summarizeActionInput(input).replace(/^\s*\(|\)\s*$/g, '');
   }
 }
 
-function buildPendingReviewResult(action) {
+function buildPendingReviewResult(action, cardInfo = null) {
   const contract = getActionContract(action?.type) || {};
   const prompt = action?.type === 'send_message'
     ? 'Check this, then send when ready.'
@@ -166,7 +186,7 @@ function buildPendingReviewResult(action) {
     success: true,
     pending: true,
     text: prompt,
-    cardText: reviewDetailForAction(action) || 'Ready for review.',
+    cardText: reviewDetailForAction(action, cardInfo) || 'Ready for review.',
     actionSummary: reviewTitleForAction(action),
     risk: contract.risk || 'high',
     confirmation: 'review_required',
@@ -183,5 +203,6 @@ module.exports = {
   formatCalendarDate,
   formatCalendarTime,
   reviewDetailForAction,
-  reviewTitleForAction
+  reviewTitleForAction,
+  MONEY_ACTION_TYPES
 };

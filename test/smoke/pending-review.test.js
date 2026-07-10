@@ -9,7 +9,8 @@ const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
   isPendingRevisionMessage,
-  reviewDetailForAction
+  reviewDetailForAction,
+  MONEY_ACTION_TYPES
 } = require('../../api/services/pending-review');
 
 test('pending review accepts natural confirmation phrases', () => {
@@ -72,4 +73,39 @@ test('pending review result owns concise final wording for high-risk actions', (
   assert.equal(result.confirmation, 'review_required');
   assert.equal(result.cardText, 'Josh · Can we meet Friday?');
   assert.equal(result.text, 'Check this, then send when ready.');
+});
+
+test('MONEY_ACTION_TYPES covers every concierge-money action type', () => {
+  assert.equal(MONEY_ACTION_TYPES.has('stripe_charge'), true);
+  assert.equal(MONEY_ACTION_TYPES.has('spend_from_concierge_via_stripe'), true);
+  assert.equal(MONEY_ACTION_TYPES.has('spend_from_concierge_account'), true);
+});
+
+test('review detail for a concierge spend with no linked card still shows the virtual-balance framing', () => {
+  const detail = reviewDetailForAction({ type: 'spend_from_concierge_account', input: { amount: 25.5, description: 'dinner reservation' } });
+  assert.equal(detail, 'Spend $25.50 from your concierge balance for dinner reservation.');
+});
+
+test('review detail for a concierge spend with a linked card shows the real card', () => {
+  const detail = reviewDetailForAction(
+    { type: 'spend_from_concierge_account', input: { amount: 25.5, description: 'dinner reservation' } },
+    { brand: 'visa', last4: '4242' }
+  );
+  assert.equal(detail, 'Charge your visa card ending in 4242 $25.50 for dinner reservation.');
+});
+
+test('review detail for stripe_charge converts its amount from cents to dollars', () => {
+  const detail = reviewDetailForAction(
+    { type: 'stripe_charge', input: { amount: 2550, description: 'concierge spend' } },
+    { brand: 'mastercard', last4: '1881' }
+  );
+  assert.equal(detail, 'Charge your mastercard card ending in 1881 $25.50 for concierge spend.');
+});
+
+test('buildPendingReviewResult threads cardInfo into the card text', () => {
+  const result = buildPendingReviewResult(
+    { type: 'spend_from_concierge_via_stripe', input: { amount: 10, description: 'gift' } },
+    { brand: 'visa', last4: '4242' }
+  );
+  assert.equal(result.cardText, 'Charge your visa card ending in 4242 $10.00 for gift.');
 });

@@ -1,7 +1,9 @@
+const crypto = require('crypto');
 const axios = require('axios');
 const { createSupabaseServiceClient } = require('../runtime');
 const { decryptTokens } = require('../api/services/token-crypto');
 const { guardConciergeSpend } = require('../api/services/concierge-spend-guard');
+const { chargeLinkedCard, setPaymentActionRequired } = require('../api/services/stripe-cards');
 
 const supabase = createSupabaseServiceClient();
 
@@ -82,26 +84,60 @@ async function execute(userId, action, params) {
     }
 
     if (action === 'spend_from_concierge_via_stripe') {
-      const amount = Math.round((params.amount || 10) * 100);
+      const amountCents = Math.round((params.amount || 10) * 100);
       const desc = params.description || 'Concierge spend';
-      // For real charge, create a PaymentIntent (requires client to confirm, or use test cards)
-      // To make it "real" for concierge: Create PaymentIntent, return client_secret for frontend confirmation if needed.
-      // Here, since agentic, create and assume or link to virtual.
-      const intent = await stripeRequest(key, 'post', '/payment_intents', {
-        amount,
-        currency: 'usd',
-        description: desc,
-        automatic_payment_methods: { enabled: true }
+      // dispatch()/execute() (connectors/index.js:60) has no request-identity or
+      // pendingAction context to build a stable per-approval idempotency key from
+      // (unlike api/index.js's own pendingKey at line 5656) — threading that through
+      // would mean changing every connector's execute(userId, action, params)
+      // signature, out of scope here. A fresh random key per call is still correct:
+      // it only needs to keep this process's own Stripe calls from colliding (e.g.
+      // two separate $10 "coffee" spends on the same day must NOT reuse a key, or
+      // Stripe would silently replay the first charge's result for the second). The
+      // thing that actually prevents one *approval* from executing twice — including
+      // across two Cloud Run instances racing the same confirm request — is the
+      // atomic claimPendingAction compare-and-delete upstream (api/index.js:3021),
+      // which already guarantees at most one call reaches this function per approval.
+      const idempotencyKey = crypto.randomUUID();
+
+      const stripeSdk = require('stripe')(key);
+      const outcome = await chargeLinkedCard(stripeSdk, supabase, userId, {
+        amountCents, currency: 'usd', description: desc, idempotencyKey
       });
-      // Deduct from virtual concierge balance as well for tracking
-      const prefs = await (async () => {
-        const { data } = await supabase.from('preferences').select('*').eq('user_id', userId).eq('key', 'concierge_account.balance');
-        return data?.[0]?.value || 0;
-      })();
-      let balance = Number(prefs);
-      if (balance >= (amount / 100)) balance -= (amount / 100);
+
+      if (outcome.status === 'no_card') {
+        return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
+      }
+      if (outcome.status === 'failed') {
+        return { success: false, error: `Stripe charge failed: ${outcome.error}` };
+      }
+      if (outcome.status === 'requires_action') {
+        await setPaymentActionRequired(supabase, userId, {
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc
+        });
+        return {
+          success: true,
+          text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
+          requiresAction: true,
+          paymentIntentId: outcome.paymentIntentId
+        };
+      }
+
+      // outcome.status === 'succeeded': deduct the tracked balance immediately. The
+      // Stripe webhook (api/services/stripe-webhook.js) is a no-op for this same
+      // PaymentIntent since no payment_action_required record was ever written for it.
+      const { data } = await supabase.from('preferences').select('value').eq('user_id', userId).eq('key', 'concierge_account.balance');
+      let balance = Number(data?.[0]?.value || 0);
+      const amount = amountCents / 100;
+      if (balance >= amount) balance -= amount;
+      balance = Number(balance.toFixed(2));
       await supabase.from('preferences').upsert({ user_id: userId, key: 'concierge_account.balance', value: balance });
-      return { success: true, text: `Stripe PaymentIntent created for $${(amount/100).toFixed(2)} (${desc}). Client secret: ${intent.client_secret}. Balance updated to $${balance.toFixed(2)}. Use in app to confirm payment from your linked method or concierge funds.`, client_secret: intent.client_secret, balance };
+      return {
+        success: true,
+        text: `Charged $${amount.toFixed(2)} (${desc}) to your linked card. Balance updated to $${balance.toFixed(2)}.`,
+        paymentIntentId: outcome.paymentIntentId,
+        balance
+      };
     }
 
     if (action === 'stripe_payout_to_user') {

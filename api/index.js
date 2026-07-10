@@ -29,7 +29,6 @@ const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const { createActionRunner } = require('./services/action-runner');
-const { resolveConciergeSpendOutcome } = require('./services/money-guard');
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const {
   isPendingCancelMessage,
@@ -82,7 +81,11 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
+const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired } = require('./services/stripe-cards');
+const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
+
+const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
 function devTimingEnabled() {
   return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
@@ -208,6 +211,27 @@ app.use(cors({
   },
   credentials: true
 }));
+
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripeClient || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).json({ error: 'Stripe webhook is not configured on the server.' });
+  }
+  let event;
+  try {
+    event = stripeClient.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('/webhooks/stripe signature verification failed:', err.message);
+    return res.status(400).json({ error: 'Invalid signature' });
+  }
+  try {
+    const result = await handleStripeWebhookEvent(supabase, event);
+    res.json({ received: true, ...result });
+  } catch (err) {
+    console.error('/webhooks/stripe handling error:', err.message);
+    res.status(500).json({ error: 'Webhook handling failed' });
+  }
+});
+
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('X-Oxy-Commit', getRuntimeVersion().gitCommit);
@@ -2399,47 +2423,47 @@ async function executeAction(userId, action, params, context = {}) {
       if (!spendGuard.ok) return { success: false, error: spendGuard.error };
       const prefs = await getPreferenceMap(userId);
       const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
-      if (balanceBeforeSpend < amount) {
-        return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
-      }
 
-      // Attempt the real Stripe charge (if configured) BEFORE touching the virtual balance —
-      // a failed real attempt must not silently vanish the user's spendable balance for
-      // nothing. See resolveConciergeSpendOutcome in money-guard.js for the decision logic.
-      const stripeKey = process.env.STRIPE_SECRET_KEY;
-      let stripeAttempted = false;
-      let stripeSucceeded = false;
-      let stripeError = '';
-      let stripeClientSecret = '';
-      if (stripeKey) {
-        stripeAttempted = true;
-        try {
-          const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
-            new URLSearchParams({
-              amount: Math.round(amount * 100),
-              currency: 'usd',
-              description: `${description} at ${merchant}`,
-              automatic_payment_methods: JSON.stringify({enabled: true})
-            }).toString(),
-            { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
-          );
-          stripeSucceeded = true;
-          stripeClientSecret = intent.data.client_secret;
-        } catch (stripeErr) {
-          stripeError = stripeErr.message;
+      if (!stripeClient) {
+        if (balanceBeforeSpend < amount) {
+          return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
         }
+        const balance = Number((balanceBeforeSpend - amount).toFixed(2));
+        await setPreferenceValue(userId, 'concierge_account.balance', balance);
+        const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
+        return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${balance.toFixed(2)}.`, balance, card: cardRef };
       }
 
-      const outcome = resolveConciergeSpendOutcome({
-        amount, balanceBeforeSpend, stripeAttempted, stripeSucceeded, stripeError, stripeClientSecret,
+      const idempotencyKey = crypto.randomUUID();
+      const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
+        amountCents: Math.round(amount * 100), currency: 'usd', description: `${description} at ${merchant}`, idempotencyKey
       });
-      if (!outcome.success) return outcome;
 
-      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
+      if (outcome.status === 'no_card') {
+        return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
+      }
+      if (outcome.status === 'failed') {
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+      }
+      if (outcome.status === 'requires_action') {
+        await setPaymentActionRequired(supabase, userId, {
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret,
+          amountCents: Math.round(amount * 100), description: `${description} at ${merchant}`
+        });
+        return {
+          success: true,
+          text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
+          requiresAction: true,
+          paymentIntentId: outcome.paymentIntentId
+        };
+      }
+
+      // outcome.status === 'succeeded'
+      let balance = balanceBeforeSpend;
+      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
+      await setPreferenceValue(userId, 'concierge_account.balance', balance);
       await setPreferenceValue(userId, 'concierge_account.last_spend', JSON.stringify({ amount, description, merchant, ts: Date.now() }));
-      const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
-
-      return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${outcome.balance.toFixed(2)}.${outcome.realChargeInfo}`, balance: outcome.balance, card: cardRef };
+      return { success: true, text: `Charged $${amount.toFixed(2)} on ${description} at ${merchant} to your linked card. New balance: $${balance.toFixed(2)}.`, balance, paymentIntentId: outcome.paymentIntentId };
     }
     case 'top_up_concierge_account': {
       const amount = Number(params?.amount || 0);
@@ -2478,11 +2502,6 @@ async function executeAction(userId, action, params, context = {}) {
     }
 
     case 'stripe_charge': {
-      // Regression: this used to fabricate "Charged via Stripe" text without ever calling
-      // Stripe's API — it only ever touched the virtual concierge balance. Kept inline
-      // (rather than dispatched to connectors/stripe.js) specifically so guardConciergeSpend's
-      // daily rolling cap still applies — connectors/stripe.js's own checkSpendLimit call only
-      // enforces the per-transaction cap, not the daily total.
       const amountCents = Number(params?.amount || 1000);
       const desc = params?.description || 'Concierge spend';
       const amount = amountCents / 100;
@@ -2491,8 +2510,7 @@ async function executeAction(userId, action, params, context = {}) {
       const prefs = await getPreferenceMap(userId);
       const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
 
-      const stripeKey = process.env.STRIPE_SECRET_KEY;
-      if (!stripeKey) {
+      if (!stripeClient) {
         // Honest about what actually happened: no real charge was attempted, this is a
         // virtual-only ledger entry, not a real Stripe transaction.
         const balance = Math.max(0, Number((balanceBeforeSpend - amount).toFixed(2)));
@@ -2500,32 +2518,34 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: true, text: `No Stripe key configured, so this was a virtual concierge-balance entry only — no real charge was made for ${desc}. Balance: $${balance.toFixed(2)}.`, amount, balance };
       }
 
-      let stripeSucceeded = false;
-      let stripeError = '';
-      let stripeClientSecret = '';
-      try {
-        const intent = await require('axios').post('https://api.stripe.com/v1/payment_intents',
-          new URLSearchParams({
-            amount: amountCents,
-            currency: 'usd',
-            description: desc,
-            automatic_payment_methods: JSON.stringify({ enabled: true })
-          }).toString(),
-          { headers: { Authorization: `Bearer ${stripeKey}`, 'Content-Type': 'application/x-www-form-urlencoded' } }
-        );
-        stripeSucceeded = true;
-        stripeClientSecret = intent.data.client_secret;
-      } catch (stripeErr) {
-        stripeError = stripeErr.message;
+      const idempotencyKey = crypto.randomUUID();
+      const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
+        amountCents, currency: 'usd', description: desc, idempotencyKey
+      });
+
+      if (outcome.status === 'no_card') {
+        return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
+      }
+      if (outcome.status === 'failed') {
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+      }
+      if (outcome.status === 'requires_action') {
+        await setPaymentActionRequired(supabase, userId, {
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc
+        });
+        return {
+          success: true,
+          text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
+          requiresAction: true,
+          paymentIntentId: outcome.paymentIntentId
+        };
       }
 
-      const outcome = resolveConciergeSpendOutcome({
-        amount, balanceBeforeSpend, stripeAttempted: true, stripeSucceeded, stripeError, stripeClientSecret,
-      });
-      if (!outcome.success) return outcome;
-
-      await setPreferenceValue(userId, 'concierge_account.balance', outcome.balance);
-      return { success: true, text: `Stripe PaymentIntent created for $${amount.toFixed(2)} (${desc}).${outcome.realChargeInfo} Balance: $${outcome.balance.toFixed(2)}.`, amount, balance: outcome.balance };
+      // outcome.status === 'succeeded'
+      let balance = balanceBeforeSpend;
+      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
+      await setPreferenceValue(userId, 'concierge_account.balance', balance);
+      return { success: true, text: `Stripe charged $${amount.toFixed(2)} (${desc}) to your linked card. Balance: $${balance.toFixed(2)}.`, amount, balance, paymentIntentId: outcome.paymentIntentId };
     }
 
     // Super easy consumer Reminders (uses your iPhone's built-in, no extra login)
@@ -2577,6 +2597,7 @@ const executeActions = createActionRunner({
   invalidateUserContextCache,
   setPendingAction,
   validateAction: validateActionWithContract,
+  getLinkedCardInfo: (userId) => getLinkedCard(supabase, userId),
   logAction: (userId, action, result) => supabase.from('action_log').insert({
     user_id: userId,
     action: serializeLoggedAction(action, result),
@@ -6933,6 +6954,47 @@ app.post('/agent/recipes/:id/execute', requireSessionAuth, async (req, res) => {
     const result = await taskManager.executeRecipe(userId, req.params.id, req.body || {});
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/connectors/stripe/setup-intent', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!stripeClient) return res.status(500).json({ error: 'Stripe is not configured on the server.' });
+  try {
+    const { clientSecret, customerId } = await createSetupIntentForUser(stripeClient, supabase, userId);
+    res.json({ clientSecret, customerId, publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/connectors/stripe/confirm', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!stripeClient) return res.status(500).json({ error: 'Stripe is not configured on the server.' });
+  const { setupIntentId } = req.body || {};
+  if (!setupIntentId) return res.status(400).json({ error: 'setupIntentId required' });
+  try {
+    const setupIntent = await stripeClient.setupIntents.retrieve(setupIntentId, { expand: ['payment_method'] });
+    if (setupIntent.status !== 'succeeded') {
+      return res.status(400).json({ error: `SetupIntent is not confirmed yet (status: ${setupIntent.status})` });
+    }
+    const { tokens } = await readStripeTokens(supabase, userId);
+    if (!tokens.stripe_customer_id || setupIntent.customer !== tokens.stripe_customer_id) {
+      return res.status(403).json({ error: 'This SetupIntent does not belong to your account.' });
+    }
+    const pm = setupIntent.payment_method;
+    await saveLinkedCard(supabase, userId, {
+      customerId: setupIntent.customer,
+      paymentMethodId: pm.id,
+      brand: pm.card?.brand || '',
+      last4: pm.card?.last4 || ''
+    });
+    const card = await getLinkedCard(supabase, userId);
+    res.json({ linked: true, card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = app;
