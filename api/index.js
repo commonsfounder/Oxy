@@ -81,7 +81,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
-const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired } = require('./services/stripe-cards');
+const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
@@ -6995,6 +6995,51 @@ app.post('/connectors/stripe/confirm', requireSessionAuth, async (req, res) => {
     });
     const card = await getLinkedCard(supabase, userId);
     res.json({ linked: true, card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/connectors/stripe/card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const card = await getLinkedCard(supabase, userId);
+    res.json({ card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/connectors/stripe/card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    await unlinkCard(supabase, userId);
+    res.json({ linked: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/connectors/stripe/payment-action', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const action = await getPaymentActionRequired(supabase, userId);
+    res.json({ action });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const prefs = await getPreferenceMap(userId);
+    const balance = Number(prefs['concierge_account.balance'] || 0);
+    res.json({ balance });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
