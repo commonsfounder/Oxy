@@ -48,6 +48,13 @@ struct ProactiveView: View {
             ZStack {
                 Color.appBackground.ignoresSafeArea()
 
+                // Painterly sky behind the greeting — fades to clear so it blends into
+                // the flat canvas beneath it. Was defined but never wired up.
+                AtmosphereSky(condition: weather?.symbolName)
+                    .frame(height: 380)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .allowsHitTesting(false)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         if let errorMessage {
@@ -144,6 +151,7 @@ struct ProactiveView: View {
             // Greeting.
             Text(greeting)
                 .font(.heroDisplay(26))
+                .appHeroTracking(26)
                 .foregroundStyle(Color.appInk)
                 .lineLimit(3)
                 .minimumScaleFactor(0.6)
@@ -352,9 +360,7 @@ struct ProactiveView: View {
             }
         }
         .padding(.top, 12)
-        .opacity(contentAppeared ? 1 : 0)
-        .offset(y: contentAppeared ? 0 : 14)
-        .animation(.appSpring.delay(0.04 + Double(index) * 0.05), value: contentAppeared)
+        .appEntrance(contentAppeared, riseOffset: 14, delay: 0.04 + Double(index) * 0.05)
     }
 
     /// Incoming items off the freshest briefing's metadata (same source as inbox).
@@ -423,7 +429,7 @@ struct ProactiveView: View {
                                     .font(.appBody(14, weight: .regular))
                                     .foregroundStyle(Color.appInk)
                                     .lineLimit(1)
-                                Text(email.cleanSubject)
+                                Text(email.summary ?? email.cleanSubject)
                                     .font(.appBody(14))
                                     .foregroundStyle(Color.appMuted)
                                     .lineLimit(1)
@@ -596,8 +602,8 @@ struct ProactiveView: View {
     /// Mirrors the real layout so content settles in place instead of replacing a
     /// centered spinner — reads as a luxury app loading, not a web app waiting.
     private var loadingSkeleton: some View {
-        let base: Color = .white.opacity(0.04)
-        let highlight: Color = .white.opacity(0.08)
+        let base: Color = .appAdaptive(dark: .white, light: .black).opacity(0.04)
+        let highlight: Color = .appAdaptive(dark: .white, light: .black).opacity(0.08)
         return VStack(spacing: 16) {
             OxySkeletonCard(height: 264, cornerRadius: 26, base: base, highlight: highlight)
             OxySkeletonCard(height: 132, cornerRadius: AppRadius.md, base: base, highlight: highlight)
@@ -646,7 +652,7 @@ struct ProactiveView: View {
         restingHR = await restingHRResult
         isLoading = false
         contentAppeared = false
-        withAnimation(.appSpring.delay(0.04)) { contentAppeared = true }
+        contentAppeared = true
         await maybeAutoProactive()
     }
 
@@ -759,7 +765,6 @@ struct TodayBoardEditor: View {
                 TodayCardOptionsEditor(kind: kind, layout: layout, native: native)
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -805,7 +810,6 @@ private struct TodayCardOptionsEditor: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 

@@ -5,10 +5,9 @@ import UIKit
 struct OxyApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
-    // Every app* token is hardcoded to its dark value (the light-mode pivot was
-    // reverted), so system chrome must be pinned dark too: letting the scheme follow
-    // iOS light mode renders a light liquid-glass tab bar/keyboard over the pure-black
-    // canvas — glyphs become invisible and the bar reads as an empty pill.
+    // Every app* token is dynamic (UIColor trait-based, see AppTheme.swift), so native
+    // chrome (TabView, keyboard, sheets) and custom content always agree on which
+    // finish is active — no `.preferredColorScheme` pin needed; follows the system.
 
     init() {
         // Slider's unfilled track is near-invisible on pure black by default; give it a
@@ -21,7 +20,6 @@ struct OxyApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .preferredColorScheme(.dark)
                 .tint(Color.appAccent)
         }
     }

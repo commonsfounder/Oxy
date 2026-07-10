@@ -343,8 +343,6 @@ struct ChatView: View {
                 )
                 .presentationDetents([.height(340), .medium])
                 .presentationDragIndicator(.visible)
-                // Modal sheet stays dark in both finishes (its surface is fixed obsidian).
-                .preferredColorScheme(.dark)
             }
             .sheet(item: $messageDraft) { draft in
                 MessageComposeSheet(draft: draft) { result in
@@ -664,8 +662,10 @@ private struct ChatHaptics: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // Was .impact(flexibility: .soft, intensity: 0.7) — read as imperceptible on
+            // a real device. Medium weight at full intensity is a distinctly crisper tap.
             .sensoryFeedback(trigger: replySettled) { _, settled in
-                settled ? .impact(flexibility: .soft, intensity: 0.7) : nil
+                settled ? .impact(weight: .medium, intensity: 1.0) : nil
             }
             .sensoryFeedback(trigger: failed) { _, didFail in
                 didFail ? .warning : nil
@@ -1014,12 +1014,11 @@ private struct WelcomeCard: View {
 
                 Text(greeting)
                     .font(.appEditorial(31))
+                    .appHeroTracking(31)
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 18)
-                    .animation(.appSpring.delay(0.1), value: appeared)
+                    .appEntrance(appeared, riseOffset: 18, delay: 0.1)
 
                 Text("Ask naturally. I’ll use your connected context only when it is available.")
                     .font(.appBody(15))
@@ -1027,9 +1026,7 @@ private struct WelcomeCard: View {
                     .lineSpacing(3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 14)
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 12)
-                    .animation(.appSpring.delay(0.14), value: appeared)
+                    .appEntrance(appeared, riseOffset: 12, delay: 0.14)
             }
             .padding(.horizontal, 24)
             .padding(.top, 58)
@@ -1067,9 +1064,7 @@ private struct WelcomeCard: View {
                         }
                     }
                     .buttonStyle(.appScale(0.97))
-                    .opacity(appeared ? 1 : 0)
-                    .offset(y: appeared ? 0 : 10)
-                    .animation(.appSpring.delay(0.22 + Double(index) * 0.07), value: appeared)
+                    .appEntrance(appeared, riseOffset: 10, delay: 0.22 + Double(index) * 0.07)
                     .contextMenu {
                         ForEach(Self.pool.filter { !actions.contains($0.label) }, id: \.label) { option in
                             Button { replace(slot: index, with: option.label) } label: {
@@ -1193,8 +1188,7 @@ private struct ChatInputBar: View {
                         .font(.system(size: 18, weight: .regular))
                         .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
                         .frame(width: 34, height: 34)
-                        .background(Circle().fill(Color.appSurface))
-                        .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
+                        .appGlass(Circle(), interactive: true)
                 }
                 .buttonStyle(.appScale)
                 .disabled(isSending || isVoiceActive)

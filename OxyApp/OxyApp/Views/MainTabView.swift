@@ -155,13 +155,9 @@ struct MoreView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         identityHeader
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 16)
-                            .animation(.appSpring.delay(0.04), value: appeared)
+                            .appEntrance(appeared, riseOffset: 16, delay: 0.04)
                         menuSection
-                            .opacity(appeared ? 1 : 0)
-                            .offset(y: appeared ? 0 : 12)
-                            .animation(.appSpring.delay(0.14), value: appeared)
+                            .appEntrance(appeared, riseOffset: 12, delay: 0.14)
                     }
                     .padding(.horizontal, AppSpacing.margin)
                     .padding(.top, 32)
@@ -206,6 +202,7 @@ struct MoreView: View {
 
                 Text(displayName)
                     .font(.heroDisplay(28))
+                    .appHeroTracking(28)
                     .foregroundStyle(Color.appInk)
                     .lineLimit(2)
                     .minimumScaleFactor(0.7)

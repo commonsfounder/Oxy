@@ -6,50 +6,90 @@ import UIKit
 /// accent. The interface should feel like the software side of an intimate object:
 /// useful first, tactile second, decorative last.
 
+/// A color that resolves per the real trait collection (not a manually-threaded
+/// `colorScheme` bool) so native chrome (TabView, sheets, keyboard) and every custom
+/// token always agree on which finish is active — the prior "empty pill" tab bar bug
+/// was exactly this class of mismatch (content pinned dark, chrome following the OS).
+private func appDynamicColor(dark: Color, light: Color) -> Color {
+    Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
+}
+
 extension Color {
-    /// Main canvas. Warm black, not pure void.
-    static let appBackground = Color(red: 0.047, green: 0.043, blue: 0.043) // #0C0B0B
+    /// Main canvas. Warm black in dark mode, warm near-white in light.
+    static let appBackground = appDynamicColor(
+        dark: Color(red: 0.047, green: 0.043, blue: 0.043),   // #0C0B0B
+        light: Color(red: 0.980, green: 0.976, blue: 0.969)   // #FAF9F7
+    )
 
     /// Quiet raised surface.
-    static let appSurface = Color(red: 0.082, green: 0.078, blue: 0.075) // #151413
+    static let appSurface = appDynamicColor(
+        dark: Color(red: 0.082, green: 0.078, blue: 0.075),   // #151413
+        light: Color(red: 0.949, green: 0.937, blue: 0.914)   // #F2EFE9
+    )
 
     /// Raised surface (sheets, prominent rows).
-    static let appSurface2 = Color(red: 0.118, green: 0.110, blue: 0.102) // #1E1C1A
+    static let appSurface2 = appDynamicColor(
+        dark: Color(red: 0.118, green: 0.110, blue: 0.102),   // #1E1C1A
+        light: Color(red: 0.918, green: 0.898, blue: 0.859)   // #EAE5DB
+    )
 
     /// Hairline / divider.
-    static let appHairline = Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10)
+    static let appHairline = appDynamicColor(
+        dark: Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10),
+        light: Color.black.opacity(0.10)
+    )
 
     /// Primary text.
-    static let appInk = Color(red: 0.949, green: 0.933, blue: 0.906) // #F2EEE7
+    static let appInk = appDynamicColor(
+        dark: Color(red: 0.949, green: 0.933, blue: 0.906),   // #F2EEE7
+        light: Color(red: 0.129, green: 0.118, blue: 0.102)   // #211E1A
+    )
 
     /// Secondary / captions.
-    static let appMuted = Color(red: 0.655, green: 0.631, blue: 0.604) // #A7A19A
+    static let appMuted = appDynamicColor(
+        dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
+        light: Color(red: 0.431, green: 0.404, blue: 0.361)   // #6E675C
+    )
 
     /// Metal accent. Use sparingly: selected detail, status, progress, important moments.
-    static let appAccent = Color(red: 0.784, green: 0.663, blue: 0.420) // #C8A96B
+    /// Deepened in light mode — the pale dark-mode gold loses contrast on a white canvas.
+    static let appAccent = appDynamicColor(
+        dark: Color(red: 0.784, green: 0.663, blue: 0.420),   // #C8A96B
+        light: Color(red: 0.612, green: 0.471, blue: 0.188)   // #9C7830
+    )
 
-    /// On accent (text/icons on the accent color).
-    static let appOnAccent = Color.appBackground
+    /// On accent (text/icons on the accent fill). Accent is a mid-tone gold in both
+    /// finishes, so this stays a fixed dark ink rather than following appBackground.
+    static let appOnAccent = Color(red: 0.106, green: 0.098, blue: 0.086)
 
     // MARK: - Semantic (for trust and safety)
-    static let appSuccess = Color(red: 0.30, green: 0.75, blue: 0.50)
-    static let appWarning = Color(red: 0.95, green: 0.70, blue: 0.25)
+    static let appSuccess = appDynamicColor(
+        dark: Color(red: 0.30, green: 0.75, blue: 0.50),
+        light: Color(red: 0.11, green: 0.52, blue: 0.32)
+    )
+    static let appWarning = appDynamicColor(
+        dark: Color(red: 0.95, green: 0.70, blue: 0.25),
+        light: Color(red: 0.72, green: 0.48, blue: 0.05)
+    )
     static let appAttention = appWarning
-    static let appLive    = Color(red: 0.20, green: 0.85, blue: 0.55)
+    static let appLive = appDynamicColor(
+        dark: Color(red: 0.20, green: 0.85, blue: 0.55),
+        light: Color(red: 0.08, green: 0.58, blue: 0.36)
+    )
 
     // Legacy scrim etc for quick ports
     static let appScrim = Color.black.opacity(0.5)
-    static let appFillSubtle = Color.white.opacity(0.08)
+    static let appFillSubtle = appDynamicColor(dark: Color.white.opacity(0.08), light: Color.black.opacity(0.06))
     static let appFillScrim = appScrim
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
     /// User chat bubble fill — a flat neutral, not a translucent accent wash.
-    /// Alpha-blending `appAccent` at low opacity directly over the near-black
-    /// canvas desaturates warm gold into a muddy brown (basic alpha-compositing:
-    /// a warm color loses saturation against a near-black backdrop). `appSurface2`
-    /// is already a tested, legible flat tone, so the bubble reads as a clean
-    /// neutral chip instead — the accent stays reserved for the assistant's voice.
+    /// Alpha-blending `appAccent` at low opacity directly over the canvas desaturates
+    /// warm gold into a muddy tone in either finish (basic alpha-compositing over a
+    /// non-neutral backdrop). `appSurface2` is already a tested, legible flat tone, so
+    /// the bubble reads as a clean neutral chip instead — the accent stays reserved
+    /// for the assistant's voice.
     static let appUserBubble = appSurface2
 }
 
@@ -84,12 +124,18 @@ enum AppRadius {
     static let card: CGFloat = lg
 }
 
-// MARK: - Animation tokens (linear/ease-out only — no bounce, no ease-in-out)
+// MARK: - Animation tokens
+// Critically-damped springs (dampingFraction 1.0 = zero overshoot) rather than fixed-duration
+// eases: interruptible and velocity-aware on retrigger, but visually still "no bounce" —
+// the house style is unchanged, only the underlying curve is more physically honest.
+// appMomentum is the one deliberate exception, reserved for gesture-driven motion that
+// carries momentum (drag-to-dismiss, flicks) — nothing wires to it yet.
 extension Animation {
-    static let appFast     = Animation.easeOut(duration: 0.15)
-    static let appStandard = Animation.easeOut(duration: 0.22)
-    static let appRelax    = Animation.easeOut(duration: 0.4)
-    static let appSpring   = Animation.easeOut(duration: 0.28)
+    static let appFast     = Animation.spring(response: 0.15, dampingFraction: 1.0)
+    static let appStandard = Animation.spring(response: 0.22, dampingFraction: 1.0)
+    static let appRelax    = Animation.spring(response: 0.4,  dampingFraction: 1.0)
+    static let appSpring   = Animation.spring(response: 0.28, dampingFraction: 1.0)
+    static let appMomentum = Animation.spring(response: 0.3,  dampingFraction: 0.8)
 }
 
 // MARK: - Helpers (scale on press, glass where it still fits)
@@ -113,21 +159,64 @@ extension ButtonStyle where Self == AppScaleButtonStyle {
     static func appScale(_ amount: CGFloat) -> AppScaleButtonStyle { .init(amount: amount) }
 }
 
+/// Staggered fade+rise entrance for first-appearance content (cards, headers, list rows).
+/// Under Reduce Motion the rise drops out and only a plain cross-fade remains — reduced
+/// motion means gentler feedback, not none.
+private struct AppEntranceModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let appeared: Bool
+    let riseOffset: CGFloat
+    let delay: Double
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(appeared ? 1 : 0)
+            .offset(y: reduceMotion ? 0 : (appeared ? 0 : riseOffset))
+            .animation(
+                reduceMotion ? .easeInOut(duration: 0.2).delay(delay) : .appSpring.delay(delay),
+                value: appeared
+            )
+    }
+}
+
+extension View {
+    func appEntrance(_ appeared: Bool, riseOffset: CGFloat = 14, delay: Double = 0) -> some View {
+        modifier(AppEntranceModifier(appeared: appeared, riseOffset: riseOffset, delay: delay))
+    }
+
+    /// Large display/editorial headings (Fraunces, ~26–31pt) read too airy with system
+    /// tracking at that size — tighten proportionally. Body and eyebrow text are unaffected.
+    func appHeroTracking(_ size: CGFloat) -> some View {
+        tracking(-size * 0.02)
+    }
+}
+
 // Legacy shims removed during full app migration.
 // All code must use the primary app* tokens (appBackground, appSurface, appAccent, appInk, appMuted, AppRadius, appBody, appDisplay, etc.).
 // Remove any remaining nml*, NML*, ed* or Nameless references.
 
 extension View {
-    /// Glassmorphism eliminated per the pure-black minimalist directive. No-op,
-    /// kept only so existing call sites (nav icons, composer buttons) don't need touching.
-    func appGlass<S: Shape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
-        self
+    /// Light material chrome for small interactive chips (nav icons, composer buttons).
+    /// Thin blur + a warm tint keeps it a "small surface" per the materials weight rule —
+    /// TodayCard uses the heavier `.regularMaterial` for the same reason, being structural.
+    /// `interactive` elements get a brighter edge, as if catching light, since they invite touch.
+    func appGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        background {
+            shape.fill((tint ?? Color.appSurface2).opacity(0.35))
+        }
+        .background(.ultraThinMaterial, in: shape)
+        .overlay(shape.strokeBorder(
+            Color.appAdaptive(dark: .white, light: .black).opacity(interactive ? 0.16 : 0.08),
+            lineWidth: 0.5
+        ))
     }
 }
 
 extension Color {
-    /// App is dark-first (light-mode pivot was reverted); always resolves to the dark value.
-    static func appAdaptive(dark: Color, light: Color) -> Color { dark }
+    /// One-off adaptive value for call sites that need a color the shared tokens
+    /// don't cover. Most styling should use the `app*` tokens directly — they're
+    /// already dynamic — reach for this only for something genuinely local.
+    static func appAdaptive(dark: Color, light: Color) -> Color { appDynamicColor(dark: dark, light: light) }
 }
 
 // MARK: - Typography rule (serif vs sans)
@@ -309,7 +398,7 @@ struct AppToggle: View {
             withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
         } label: {
             Capsule()
-                .fill(isOn ? Color.appInk : Color.white.opacity(0.12))
+                .fill(isOn ? Color.appInk : Color.appAdaptive(dark: .white, light: .black).opacity(0.12))
                 .frame(width: 30, height: 16)
                 .overlay(
                     Circle()
@@ -354,7 +443,7 @@ struct AppLineField: View {
             .focused($isFocused)
 
             Rectangle()
-                .fill(isFocused ? Color.appInk.opacity(0.55) : Color.white.opacity(0.08))
+                .fill(isFocused ? Color.appInk.opacity(0.55) : Color.appAdaptive(dark: .white, light: .black).opacity(0.08))
                 .frame(height: isFocused ? 1 : 0.5)
                 .animation(.easeInOut(duration: 0.2), value: isFocused)
         }
@@ -491,8 +580,8 @@ extension Color {
     static let mgDivider = Color.appHairline
     static let mgHeading = Color.appInk
     static let mgSecondary = Color.appMuted
-    static let mgCaption = Color.white.opacity(0.55)
-    static let mgOff = Color.white.opacity(0.25)
+    static let mgCaption = Color.appMuted
+    static let mgOff = Color.appAdaptive(dark: .white, light: .black).opacity(0.25)
     /// Fixed both finishes — system red reads on black and white alike.
     static let mgDestructive = Color(red: 255 / 255, green: 59 / 255, blue: 48 / 255)          // #FF3B30
 }
@@ -583,7 +672,7 @@ struct AppSegmented: View {
             }
         }
         .padding(4)
-        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .background(Capsule().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.06)))
     }
 }
 
@@ -658,8 +747,12 @@ struct TodayCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            .background(shape.fill(Color.appSurface))
-            .overlay(shape.strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5))
+            // Structural surface — heavier material than the small appGlass() chips,
+            // per the materials weight rule (bigger surfaces read as thicker).
+            .background(shape.fill(Color.appSurface.opacity(0.55)))
+            .background(.regularMaterial, in: shape)
+            .overlay(shape.strokeBorder(Color.appAdaptive(dark: .white, light: .black).opacity(0.08), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
     }
 }
 

@@ -4699,9 +4699,38 @@ async function gatherEmailContext(userId) {
     const result = await dispatch(userId, 'get_emails', { max_results: 10, label: 'INBOX' });
     if (!result?.success || !Array.isArray(result.emails)) return { emails: [], incoming: [] };
     const emails = result.emails.slice(0, 10);
-    return { emails, incoming: extractIncoming(emails) };
+    return { emails: await summarizeEmails(emails), incoming: extractIncoming(emails) };
   } catch (e) {
     return { emails: [], incoming: [] };
+  }
+}
+
+// One-line "what this actually is" per email for the Today Inbox card, which previously
+// just dumped the raw subject line verbatim. Single batched call (not one per email) to
+// keep this cheap — runs on the FAST_MODEL helper tier, on a background schedule so the
+// extra latency doesn't block any user-facing request.
+async function summarizeEmails(emails) {
+  if (!emails.length) return emails;
+  try {
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const listing = emails.map((e, i) =>
+      `${i}. From: ${e.from}\nSubject: ${e.subject}\nSnippet: ${(e.snippet || '').slice(0, 300)}`
+    ).join('\n\n');
+    const prompt = `For each numbered email below, write ONE short plain-English line (under 12 words) describing what it actually is or wants from the user — not a restatement of the subject line. Plain prose, no markdown.
+
+${listing}
+
+Respond with ONLY a JSON array of strings, one per email, same order as input. Example: ["Your Amazon order shipped, arrives Thursday","Newsletter — nothing needed"]`;
+    const res = await model.generateContent(prompt);
+    const match = (res.response.text() || '').match(/\[[\s\S]*\]/);
+    if (!match) return emails;
+    const summaries = JSON.parse(match[0]);
+    return emails.map((e, i) => ({
+      ...e,
+      summary: typeof summaries[i] === 'string' ? summaries[i].trim() : undefined
+    }));
+  } catch (e) {
+    return emails;
   }
 }
 

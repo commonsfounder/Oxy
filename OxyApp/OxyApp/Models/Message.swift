@@ -464,6 +464,9 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     let subject: String
     let snippet: String?
     let date: String?
+    /// One-line "what this actually is" from a server-side model pass — nil for older
+    /// briefings created before summarization existed, or if that pass failed.
+    let summary: String?
 
     var id: String { from + "|" + subject }
 

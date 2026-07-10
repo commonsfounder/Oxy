@@ -23,3 +23,6 @@ OxyApp/*.xcworkspace/xcuserdata/
 
 # Latency benchmark output (captured baselines are throwaway)
 test/bench/baseline-*.json
+
+# Brainstorming visual companion mockups
+.superpowers/
