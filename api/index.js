@@ -82,8 +82,11 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
-const { getLinkedCard } = require('./services/stripe-cards');
+const { createSetupIntentForUser, getLinkedCard, saveLinkedCard } = require('./services/stripe-cards');
+const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
+
+const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
 function devTimingEnabled() {
   return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
@@ -209,6 +212,27 @@ app.use(cors({
   },
   credentials: true
 }));
+
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripeClient || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).json({ error: 'Stripe webhook is not configured on the server.' });
+  }
+  let event;
+  try {
+    event = stripeClient.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('/webhooks/stripe signature verification failed:', err.message);
+    return res.status(400).json({ error: 'Invalid signature' });
+  }
+  try {
+    const result = await handleStripeWebhookEvent(supabase, event);
+    res.json({ received: true, ...result });
+  } catch (err) {
+    console.error('/webhooks/stripe handling error:', err.message);
+    res.status(500).json({ error: 'Webhook handling failed' });
+  }
+});
+
 app.use(express.json());
 app.use((req, res, next) => {
   res.setHeader('X-Oxy-Commit', getRuntimeVersion().gitCommit);
@@ -6935,6 +6959,43 @@ app.post('/agent/recipes/:id/execute', requireSessionAuth, async (req, res) => {
     const result = await taskManager.executeRecipe(userId, req.params.id, req.body || {});
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/connectors/stripe/setup-intent', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!stripeClient) return res.status(500).json({ error: 'Stripe is not configured on the server.' });
+  try {
+    const { clientSecret, customerId } = await createSetupIntentForUser(stripeClient, supabase, userId);
+    res.json({ clientSecret, customerId, publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/connectors/stripe/confirm', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!stripeClient) return res.status(500).json({ error: 'Stripe is not configured on the server.' });
+  const { setupIntentId } = req.body || {};
+  if (!setupIntentId) return res.status(400).json({ error: 'setupIntentId required' });
+  try {
+    const setupIntent = await stripeClient.setupIntents.retrieve(setupIntentId, { expand: ['payment_method'] });
+    if (setupIntent.status !== 'succeeded') {
+      return res.status(400).json({ error: `SetupIntent is not confirmed yet (status: ${setupIntent.status})` });
+    }
+    const pm = setupIntent.payment_method;
+    await saveLinkedCard(supabase, userId, {
+      customerId: setupIntent.customer,
+      paymentMethodId: pm.id,
+      brand: pm.card?.brand || '',
+      last4: pm.card?.last4 || ''
+    });
+    const card = await getLinkedCard(supabase, userId);
+    res.json({ linked: true, card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = app;
