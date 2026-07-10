@@ -35,6 +35,18 @@ function fakeSupabase(initialRows = []) {
           const filters = {};
           const builder = {
             eq(col, val) { filters[col] = val; return builder; },
+            select(col) {
+              // Compare-and-delete: only rows matching every .eq() filter (including
+              // an exact `value` match, when supplied) are removed. Returns the
+              // removed rows' selected column so the caller can tell whether it
+              // actually won the delete (mirrors supabase .delete().select()).
+              const idx = rows.findIndex(r => r._table === table && matches(r, filters));
+              let removed = [];
+              if (idx >= 0) {
+                removed = rows.splice(idx, 1).map(r => ({ [col]: r[col] }));
+              }
+              return Promise.resolve({ data: removed, error: null });
+            },
             then(resolve) {
               const idx = rows.findIndex(r => r._table === table && matches(r, filters));
               if (idx >= 0) rows.splice(idx, 1);
@@ -87,6 +99,35 @@ test('succeeded event resolves a pending SCA charge exactly once: deducts balanc
   assert.equal(balanceRow.value, '75');
   const pendingRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.payment_action_required');
   assert.equal(pendingRow, undefined, 'the SCA-pending flag must be cleared once resolved');
+});
+
+test('redelivered succeeded events for the same PaymentIntent only deduct once (at-least-once webhook delivery)', async () => {
+  const supabase = fakeSupabase([
+    { _table: 'preferences', user_id: 'user-1', key: 'concierge_account.balance', value: '100' }
+  ]);
+  await setPaymentActionRequired(supabase, 'user-1', { paymentIntentId: 'pi_4', clientSecret: 'pi_4_secret', amountCents: 3000, description: 'concierge spend' });
+
+  const event = {
+    type: 'payment_intent.succeeded',
+    data: { object: { id: 'pi_4', amount: 3000, description: 'concierge spend', metadata: { oxy_user_id: 'user-1' } } }
+  };
+
+  // Simulate Stripe redelivering the same event (or two near-simultaneous
+  // deliveries) by handling it twice in sequence, which is enough to prove
+  // the atomic claim wins exactly once even without true concurrency.
+  const [first, second] = [
+    await handleStripeWebhookEvent(supabase, event),
+    await handleStripeWebhookEvent(supabase, event)
+  ];
+
+  const deductedCount = [first, second].filter(r => r.deducted === true).length;
+  assert.equal(deductedCount, 1, 'exactly one delivery should win the claim and deduct');
+
+  const balanceRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.balance');
+  assert.equal(balanceRow.value, '70', 'balance must only be deducted once (100 - 30 = 70), not twice');
+
+  const pendingRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.payment_action_required');
+  assert.equal(pendingRow, undefined);
 });
 
 test('failed event for a pending SCA charge clears the flag without touching balance', async () => {

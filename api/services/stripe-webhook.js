@@ -1,4 +1,4 @@
-const { getPaymentActionRequired, clearPaymentActionRequired } = require('./stripe-cards');
+const { getPaymentActionRequired, clearPaymentActionRequired, claimPaymentActionRequired } = require('./stripe-cards');
 
 async function getBalance(supabase, userId) {
   const { data } = await supabase
@@ -25,6 +25,14 @@ async function setBalance(supabase, userId, balance) {
 // i.e. when a payment_action_required record still points at this exact
 // PaymentIntent id. Any other 'succeeded' event for a PaymentIntent already handled
 // synchronously is an expected, harmless no-op here.
+//
+// Stripe delivers webhooks at-least-once, so the same payment_intent.succeeded
+// event can arrive twice (redelivery, slow 2xx, etc). claimPaymentActionRequired
+// does an atomic compare-and-delete on the pending record: only the delivery that
+// actually removes the row "wins" the claim and deducts the balance. A second,
+// racing delivery for the same PaymentIntent finds the row already gone and
+// reports deducted: false — indistinguishable here from "nothing was pending",
+// which is the correct behavior either way (don't deduct).
 async function handleStripeWebhookEvent(supabase, event) {
   const type = event?.type;
   const pi = event?.data?.object || {};
@@ -32,14 +40,13 @@ async function handleStripeWebhookEvent(supabase, event) {
   if (!userId) return { handled: false, reason: 'no oxy_user_id in PaymentIntent metadata' };
 
   if (type === 'payment_intent.succeeded') {
-    const pending = await getPaymentActionRequired(supabase, userId);
-    if (!pending || pending.paymentIntentId !== pi.id) {
+    const claimed = await claimPaymentActionRequired(supabase, userId, pi.id);
+    if (!claimed) {
       return { handled: true, userId, outcome: 'succeeded', deducted: false };
     }
     const amount = Number(pi.amount || 0) / 100;
     const balance = Math.max(0, Number((await getBalance(supabase, userId) - amount).toFixed(2)));
     await setBalance(supabase, userId, balance);
-    await clearPaymentActionRequired(supabase, userId);
     return { handled: true, userId, outcome: 'succeeded', deducted: true };
   }
 

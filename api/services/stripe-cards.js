@@ -123,6 +123,37 @@ async function clearPaymentActionRequired(supabase, userId) {
   await supabase.from('preferences').delete().eq('user_id', userId).eq('key', PAYMENT_ACTION_REQUIRED_KEY);
 }
 
+// Atomically claims a pending payment_action_required record for a given
+// PaymentIntent id, so a webhook event that is redelivered (Stripe uses
+// at-least-once delivery) cannot resolve the same SCA charge twice. Reads the
+// raw stored row, then deletes it only if the value column still matches
+// exactly what was read (compare-and-delete) — mirroring claimPendingAction
+// in api/index.js. Only the caller whose delete actually removed a row (i.e.
+// data.length > 0) "wins" the claim; a redelivered/concurrent event that
+// arrives after the row is already gone gets false and must not deduct.
+async function claimPaymentActionRequired(supabase, userId, paymentIntentId) {
+  const { data: row } = await supabase
+    .from('preferences')
+    .select('value')
+    .eq('user_id', userId)
+    .eq('key', PAYMENT_ACTION_REQUIRED_KEY)
+    .maybeSingle();
+  if (!row?.value) return false;
+  let parsed;
+  try { parsed = JSON.parse(row.value); } catch { return false; }
+  if (!parsed || parsed.paymentIntentId !== paymentIntentId) return false;
+
+  const { data, error } = await supabase
+    .from('preferences')
+    .delete()
+    .eq('user_id', userId)
+    .eq('key', PAYMENT_ACTION_REQUIRED_KEY)
+    .eq('value', row.value)
+    .select('value');
+  if (error) return false;
+  return Array.isArray(data) && data.length > 0;
+}
+
 module.exports = {
   STRIPE_CONNECTOR_ID,
   PAYMENT_ACTION_REQUIRED_KEY,
@@ -136,5 +167,6 @@ module.exports = {
   chargeLinkedCard,
   setPaymentActionRequired,
   getPaymentActionRequired,
-  clearPaymentActionRequired
+  clearPaymentActionRequired,
+  claimPaymentActionRequired
 };
