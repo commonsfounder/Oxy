@@ -102,7 +102,7 @@ async function execute(userId, action, params) {
 
       const stripeSdk = require('stripe')(key);
       const outcome = await chargeLinkedCard(stripeSdk, supabase, userId, {
-        amountCents, currency: 'gbp', description: desc, idempotencyKey
+        amountCents, currency: 'usd', description: desc, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {
