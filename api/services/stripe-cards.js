@@ -48,10 +48,26 @@ async function saveLinkedCard(supabase, userId, { customerId, paymentMethodId, b
   }, { enabled: true });
 }
 
+async function getOrCreateStripeCustomer(stripe, supabase, userId) {
+  const { tokens } = await readStripeTokens(supabase, userId);
+  if (tokens.stripe_customer_id) return tokens.stripe_customer_id;
+  const customer = await stripe.customers.create({ metadata: { oxy_user_id: userId } });
+  await writeStripeTokens(supabase, userId, { ...tokens, stripe_customer_id: customer.id }, { enabled: false });
+  return customer.id;
+}
+
+async function createSetupIntentForUser(stripe, supabase, userId) {
+  const customerId = await getOrCreateStripeCustomer(stripe, supabase, userId);
+  const setupIntent = await stripe.setupIntents.create({ customer: customerId, usage: 'off_session' });
+  return { clientSecret: setupIntent.client_secret, customerId };
+}
+
 module.exports = {
   STRIPE_CONNECTOR_ID,
   readStripeTokens,
   writeStripeTokens,
   getLinkedCard,
-  saveLinkedCard
+  saveLinkedCard,
+  getOrCreateStripeCustomer,
+  createSetupIntentForUser
 };
