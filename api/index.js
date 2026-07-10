@@ -82,6 +82,7 @@ const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired } = require('./services/stripe-cards');
+const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
@@ -2436,7 +2437,7 @@ async function executeAction(userId, action, params, context = {}) {
 
       const idempotencyKey = crypto.randomUUID();
       const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
-        amountCents: Math.round(amount * 100), currency: 'usd', description: `${description} at ${merchant}`, idempotencyKey
+        amountCents: Math.round(amount * 100), currency: resolveCurrencyForLocation(context.location), description: `${description} at ${merchant}`, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {
@@ -2520,7 +2521,7 @@ async function executeAction(userId, action, params, context = {}) {
 
       const idempotencyKey = crypto.randomUUID();
       const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
-        amountCents, currency: 'usd', description: desc, idempotencyKey
+        amountCents, currency: resolveCurrencyForLocation(context.location), description: desc, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {

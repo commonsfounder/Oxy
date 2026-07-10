@@ -4,6 +4,7 @@ const { createSupabaseServiceClient } = require('../runtime');
 const { decryptTokens } = require('../api/services/token-crypto');
 const { guardConciergeSpend } = require('../api/services/concierge-spend-guard');
 const { chargeLinkedCard, setPaymentActionRequired } = require('../api/services/stripe-cards');
+const { resolveCurrencyForLocation } = require('../api/services/currency-from-location');
 
 const supabase = createSupabaseServiceClient();
 
@@ -67,6 +68,8 @@ async function execute(userId, action, params) {
     return { success: true, text: `Stripe ${action} - add your STRIPE_SECRET_KEY for real payments. Falling back to concierge account simulation.`, webLink: 'https://stripe.com' };
   }
 
+  const currency = resolveCurrencyForLocation(params?.location);
+
   try {
     if (action === 'create_stripe_payment_link') {
       const amount = Math.round((params.amount || 10) * 100);
@@ -74,7 +77,7 @@ async function execute(userId, action, params) {
       const price = await stripeRequest(key, 'post', '/prices', {
         product: product.id,
         unit_amount: amount,
-        currency: 'usd'
+        currency
       });
       const link = await stripeRequest(key, 'post', '/payment_links', {
         line_items: [{ price: price.id, quantity: 1 }],
@@ -102,14 +105,14 @@ async function execute(userId, action, params) {
 
       const stripeSdk = require('stripe')(key);
       const outcome = await chargeLinkedCard(stripeSdk, supabase, userId, {
-        amountCents, currency: 'usd', description: desc, idempotencyKey
+        amountCents, currency, description: desc, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {
         return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
       }
       if (outcome.status === 'failed') {
-        return { success: false, error: `Stripe charge failed: ${outcome.error}` };
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}` };
       }
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
@@ -145,7 +148,7 @@ async function execute(userId, action, params) {
       // Payouts require Stripe Connect or balance. For demo: create a transfer if account set.
       const transfer = await stripeRequest(key, 'post', '/transfers', {
         amount,
-        currency: 'usd',
+        currency,
         destination: params.destination || 'acct_xxx', // needs connected account
         description: params.description || 'Payout from concierge'
       });
