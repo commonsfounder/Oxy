@@ -48,6 +48,16 @@ async function saveLinkedCard(supabase, userId, { customerId, paymentMethodId, b
   }, { enabled: true });
 }
 
+async function unlinkCard(supabase, userId) {
+  const { tokens } = await readStripeTokens(supabase, userId);
+  await writeStripeTokens(supabase, userId, {
+    ...tokens,
+    default_payment_method_id: '',
+    card_brand: '',
+    card_last4: ''
+  }, { enabled: false });
+}
+
 async function getOrCreateStripeCustomer(stripe, supabase, userId) {
   const { tokens } = await readStripeTokens(supabase, userId);
   if (tokens.stripe_customer_id) return tokens.stripe_customer_id;
@@ -161,6 +171,7 @@ module.exports = {
   writeStripeTokens,
   getLinkedCard,
   saveLinkedCard,
+  unlinkCard,
   getOrCreateStripeCustomer,
   createSetupIntentForUser,
   resolveOffSessionChargeOutcome,

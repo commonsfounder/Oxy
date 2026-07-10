@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { getLinkedCard, saveLinkedCard, STRIPE_CONNECTOR_ID, getOrCreateStripeCustomer, createSetupIntentForUser, resolveOffSessionChargeOutcome, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired, clearPaymentActionRequired } = require('../../api/services/stripe-cards');
+const { getLinkedCard, saveLinkedCard, unlinkCard, STRIPE_CONNECTOR_ID, getOrCreateStripeCustomer, createSetupIntentForUser, resolveOffSessionChargeOutcome, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired, clearPaymentActionRequired } = require('../../api/services/stripe-cards');
 
 function fakeSupabase(initialRows = []) {
   const rows = [...initialRows];
@@ -82,6 +82,26 @@ test('saveLinkedCard rejects missing customerId or paymentMethodId', async () =>
   const supabase = fakeSupabase();
   await assert.rejects(() => saveLinkedCard(supabase, 'user-1', { paymentMethodId: 'pm_1' }), TypeError);
   await assert.rejects(() => saveLinkedCard(supabase, 'user-1', { customerId: 'cus_1' }), TypeError);
+});
+
+test('unlinkCard clears the card fields and disables the connector, but keeps the Stripe customer id', async () => {
+  const supabase = fakeSupabase();
+  await saveLinkedCard(supabase, 'user-1', { customerId: 'cus_1', paymentMethodId: 'pm_1', brand: 'visa', last4: '4242' });
+  await unlinkCard(supabase, 'user-1');
+  const card = await getLinkedCard(supabase, 'user-1');
+  assert.equal(card, null, 'getLinkedCard must report no card once unlinked');
+  const row = supabase._rows.find(r => r._table === 'connectors' && r.user_id === 'user-1');
+  assert.equal(row.enabled, false);
+  assert.equal(row.tokens.stripe_customer_id, 'cus_1', 'customer id survives so a relink reuses it instead of creating a duplicate');
+  assert.equal(row.tokens.default_payment_method_id, '');
+  assert.equal(row.tokens.card_brand, '');
+  assert.equal(row.tokens.card_last4, '');
+});
+
+test('unlinkCard on a user with no connector row yet is a harmless no-op', async () => {
+  const supabase = fakeSupabase();
+  await assert.doesNotReject(() => unlinkCard(supabase, 'user-1'));
+  assert.equal(await getLinkedCard(supabase, 'user-1'), null);
 });
 
 function fakeStripeForCustomers({ nextCustomerId = 'cus_new', nextSetupIntent = { id: 'seti_1', client_secret: 'seti_1_secret' } } = {}) {
