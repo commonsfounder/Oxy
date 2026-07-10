@@ -82,6 +82,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
+const { getLinkedCard } = require('./services/stripe-cards');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 function devTimingEnabled() {
@@ -2577,6 +2578,7 @@ const executeActions = createActionRunner({
   invalidateUserContextCache,
   setPendingAction,
   validateAction: validateActionWithContract,
+  getLinkedCardInfo: (userId) => getLinkedCard(supabase, userId),
   logAction: (userId, action, result) => supabase.from('action_log').insert({
     user_id: userId,
     action: serializeLoggedAction(action, result),

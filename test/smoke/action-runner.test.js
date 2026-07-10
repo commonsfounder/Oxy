@@ -177,3 +177,39 @@ test('a later action throwing in a sequential batch does not discard earlier suc
   assert.equal(result[0].result.text, 'Sent.');
   assert.equal(result[1].result.success, false);
 });
+
+test('action runner looks up the linked card for money actions and passes it into the review card', async () => {
+  const pending = [];
+  const lookups = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => { throw new Error('should not execute before review'); },
+    setPendingAction: async (userId, action, context) => pending.push({ userId, action, context }),
+    getLinkedCardInfo: async (userId) => { lookups.push(userId); return { brand: 'visa', last4: '4242' }; },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'spend_from_concierge_account', input: { amount: 12, description: 'coffee' } }
+  ], { userMessage: 'spend $12 on coffee' });
+
+  assert.deepEqual(lookups, ['user-1']);
+  assert.equal(result[0].result.cardText, 'Charge your visa card ending in 4242 $12.00 for coffee.');
+});
+
+test('action runner does not look up a linked card for non-money review actions', async () => {
+  const lookups = [];
+  const executeActions = createActionRunner({
+    executeAction: async () => { throw new Error('should not execute before review'); },
+    setPendingAction: async () => {},
+    getLinkedCardInfo: async (userId) => { lookups.push(userId); return null; },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  await executeActions('user-1', [
+    { type: 'send_email', input: { to: 'josh@example.com', body: 'hi' } }
+  ], { userMessage: 'email josh' });
+
+  assert.deepEqual(lookups, []);
+});

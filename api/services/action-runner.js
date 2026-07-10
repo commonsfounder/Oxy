@@ -5,14 +5,15 @@ const {
   validateActionWithContract
 } = require('../action-contracts');
 const { diagnoseConnectorIssue } = require('./connector-health');
-const { buildPendingReviewResult } = require('./pending-review');
+const { buildPendingReviewResult, MONEY_ACTION_TYPES } = require('./pending-review');
 
 function createActionRunner({
   executeAction,
   invalidateUserContextCache = () => {},
   logAction = async () => {},
   setPendingAction,
-  validateAction = validateActionWithContract
+  validateAction = validateActionWithContract,
+  getLinkedCardInfo = async () => null
 }) {
   if (typeof executeAction !== 'function') {
     throw new TypeError('createActionRunner requires executeAction');
@@ -50,7 +51,8 @@ function createActionRunner({
           result = applyActionContractResultMetadata(action, validationError);
         } else if (contract?.executionMode === 'review' && !context.bypassReview) {
           await setPendingAction(userId, action, context);
-          result = buildPendingReviewResult(action);
+          const cardInfo = MONEY_ACTION_TYPES.has(action.type) ? await getLinkedCardInfo(userId) : null;
+          result = buildPendingReviewResult(action, cardInfo);
         } else {
           result = trace
             ? await trace.run(`action.${action.type}.execute`, () => executeAction(userId, action.type, action.input || {}, context))
@@ -85,7 +87,8 @@ function createActionRunner({
         result = applyActionContractResultMetadata(action, validationError);
       } else if (contract?.executionMode === 'review' && !context.bypassReview) {
         await setPendingAction(userId, action, context);
-        result = buildPendingReviewResult(action);
+        const cardInfo = MONEY_ACTION_TYPES.has(action.type) ? await getLinkedCardInfo(userId) : null;
+        result = buildPendingReviewResult(action, cardInfo);
       } else if (context.dryRun || context.simulate) {
         // Simulation / sandbox mode: do not execute for real. Great for agent preview.
         result = {
