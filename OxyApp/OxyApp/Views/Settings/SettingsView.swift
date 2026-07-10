@@ -29,50 +29,42 @@ struct SettingsView: View {
                     ScrollView {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 28) {
-                        settingsSection(title: "Appearance") {
-                            // Theme picker removed: every app* token is hardcoded dark and the
-                            // root pins .preferredColorScheme(.dark), so the control was a no-op
-                            // that could only break system chrome (light tab bar over black).
-                            segmentRow(
-                                "Bubbles",
-                                options: ["comfort", "compact"],
-                                labels: ["Comfort", "Compact"],
-                                selection: $settings.bubbleStyle
-                            )
-                        }
-
-                        // Autonomy
                         settingsSection(title: "Assistant") {
-                            InitiativeScroller(selection: $settings.autonomy, onChange: saveSettings)
+                            FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
 
                             MilgrainDivider()
 
-                            settingRow(label: "Briefings", description: "Proactive check-ins through the day.") {
+                            settingRow(label: "Briefings", description: "Check-ins through the day.") {
                                 MilgrainToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
                         }
 
                         settingsSection(title: "Action Defaults") {
-                            segmentRow(
-                                "Preferred Maps",
-                                options: ["apple", "google"],
-                                labels: ["Apple Maps", "Google Maps"],
+                            dropdownRow(
+                                label: "Maps",
+                                options: [
+                                    ("apple", "Apple Maps"),
+                                    ("google", "Google Maps")
+                                ],
                                 selection: $settings.preferredMapsApp
                             )
 
                             MilgrainDivider()
 
-                            segmentRow(
-                                "Transport",
-                                options: ["driving", "transit", "walking"],
-                                labels: ["Driving", "Transit", "Walking"],
+                            dropdownRow(
+                                label: "Getting around",
+                                options: [
+                                    ("driving", "Driving"),
+                                    ("transit", "Transit"),
+                                    ("walking", "Walking")
+                                ],
                                 selection: $settings.preferredTransportMode
                             )
 
                             MilgrainDivider()
 
-                            settingRow(label: "Ask before sensitive actions", description: "Ask before opening banking, health, or other private apps.") {
+                            settingRow(label: "Ask before private apps", description: "Banking, health, and similar.") {
                                 MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
@@ -136,19 +128,55 @@ struct SettingsView: View {
         }
     }
 
-    /// A label stacked above a full-width Milgrain segmented control — the in-language
-    /// replacement for the stock `.menu` pickers, persisting on every change.
-    private func segmentRow(
-        _ label: String,
-        options: [String],
-        labels: [String]? = nil,
+    /// Row with a liquid-glass menu dropdown for a small fixed set of choices.
+    private func dropdownRow(
+        label: String,
+        options: [(value: String, title: String)],
         selection: Binding<String>
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let selectedTitle = options.first(where: { $0.value == selection.wrappedValue })?.title
+            ?? options.first?.title
+            ?? selection.wrappedValue
+
+        return HStack(spacing: 12) {
             Text(label)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color.mgHeading)
-            MilgrainSegmentedControl(options: options, labels: labels, selection: selection)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(options, id: \.value) { option in
+                    Button {
+                        selection.wrappedValue = option.value
+                        saveSettings()
+                        HapticManager.shared.impact(.light)
+                    } label: {
+                        if option.value == selection.wrappedValue {
+                            Label(option.title, systemImage: "checkmark")
+                        } else {
+                            Text(option.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(selectedTitle)
+                        .font(.appBody(14, weight: .medium))
+                        .foregroundStyle(Color.appInk)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Color.appMuted)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background {
+                    Capsule()
+                        .fill(.clear)
+                        .glassDropdownChrome()
+                }
+            }
+            .accessibilityLabel(label)
+            .accessibilityValue(selectedTitle)
         }
         .padding(.vertical, 16)
         .onChange(of: selection.wrappedValue) { _, _ in saveSettings() }
@@ -292,49 +320,77 @@ private struct BackendURLEditorSheet: View {
     }
 }
 
-// MARK: - Initiative
+// MARK: - Glass chrome helpers
 
-private struct InitiativeScroller: View {
+private extension View {
+    /// Liquid glass capsule when available; material fallback so older OS still looks intentional.
+    @ViewBuilder
+    func glassDropdownChrome() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            self
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
+        }
+    }
+
+}
+
+// MARK: - Proactivity (autonomy slider)
+
+/// Discrete 5-step slider. Stored values stay Reactive…Autonomous for the API.
+private struct FreedomSlider: View {
     @Binding var selection: String
     let onChange: () -> Void
 
-    /// Bridges the (possibly legacy) stored value to one of the five canonical levels so
-    /// the control always has a valid selection without rewriting `selection` on appear.
-    private var level: Binding<String> {
+    private var levels: [String] { OxySettings.autonomyLevels }
+
+    private var index: Binding<Double> {
         Binding(
-            get: { OxySettings.normalizedAutonomy(selection) },
-            set: { next in
-                guard next != selection else { return }
+            get: {
+                let normalized = OxySettings.normalizedAutonomy(selection)
+                let i = levels.firstIndex(of: normalized) ?? 2
+                return Double(i)
+            },
+            set: { raw in
+                let i = min(max(Int(raw.rounded()), 0), levels.count - 1)
+                let next = levels[i]
+                guard next != OxySettings.normalizedAutonomy(selection) else { return }
                 selection = next
                 onChange()
+                HapticManager.shared.impact(.light)
             }
         )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Initiative")
+                Text("Proactivity")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.mgHeading)
-                Text(description)
+                Text(simpleLabel)
                     .font(.appBody(12))
                     .foregroundStyle(Color.mgSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            // One control, one set of labels — the segments ARE the levels, so the old
-            // 3-caption / 5-step mismatch under the slider is gone.
-            MilgrainSegmentedControl(options: OxySettings.autonomyLevels, selection: level)
+            // Plain system slider — no glass shell around the track.
+            Slider(value: index, in: 0...Double(levels.count - 1), step: 1)
+                .tint(Color.appAccent)
+                .accessibilityLabel("Proactivity")
+                .accessibilityValue(simpleLabel)
         }
         .padding(.vertical, 16)
     }
 
-    private var description: String {
+    private var simpleLabel: String {
         switch OxySettings.normalizedAutonomy(selection) {
         case "Reactive": return "Only acts when you ask."
-        case "Reserved": return "Light nudges, mostly reactive."
+        case "Reserved": return "Light nudges, mostly quiet."
         case "Proactive": return "Looks for useful openings."
-        case "Autonomous": return "Acts ahead for you, and tells you after."
+        case "Autonomous": return "Acts for you, then tells you."
         default: return "Helpful without being noisy."
         }
     }

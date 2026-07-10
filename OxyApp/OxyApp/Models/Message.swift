@@ -475,6 +475,21 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     var cleanSubject: String { subject.decodingHTMLEntities() }
     var cleanSnippet: String? { snippet?.decodingHTMLEntities() }
 
+    /// Prefer a human name over `Name <addr@…>` so Today Inbox stays glanceable.
+    var displayFrom: String {
+        let raw = cleanFrom.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let open = raw.firstIndex(of: "<"), open > raw.startIndex {
+            let name = raw[..<open].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        if let at = raw.firstIndex(of: "@"), raw.startIndex < at {
+            let local = raw[..<at]
+            // Bare addresses → local-part only when it looks like an email.
+            if raw.contains("."), local.count >= 2 { return String(local) }
+        }
+        return raw
+    }
+
     /// Marketing / bulk mail the dashboard shouldn't surface as something that needs you.
     /// ponytail: keyword heuristic; move to a server-side classifier if it misfires.
     var isLikelyPromotional: Bool {

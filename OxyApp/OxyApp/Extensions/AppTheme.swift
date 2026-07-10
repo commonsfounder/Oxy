@@ -663,6 +663,8 @@ struct AppSegmented: View {
                     Text(label(i))
                         .font(.appBody(14, weight: isSel ? .semibold : .regular))
                         .foregroundStyle(isSel ? Color.appOnAccent : Color.appMuted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.78)
                         .frame(maxWidth: .infinity).frame(minHeight: 40)
                         .background(Capsule().fill(isSel ? Color.appAccent : Color.clear))
                         .contentShape(Capsule())
@@ -820,38 +822,23 @@ struct TodayAuroraBackground: View {
     }()
 }
 
-// MARK: - Scroll-aware tab bar
+// MARK: - Scroll-aware tab bar (legacy no-op)
 //
-// Reddit/iOS-style: the floating tab bar tucks away while you scroll down into
-// content and slides back when you scroll up (or reach the top). A single shared
-// observable carries the hidden state; each scroll view reports its direction via
-// `hidesTabBarOnScroll()` and MainTabView reads `hidden` to offset the bar.
+// Previously drove a custom floating tab bar. The app now uses the system liquid-glass
+// TabView bar only. Keep the type + modifier so call sites and previews still compile;
+// they no longer hide anything.
 
 @Observable final class TabBarVisibility {
     var hidden = false
 }
 
 private struct HidesTabBarOnScroll: ViewModifier {
-    @Environment(TabBarVisibility.self) private var visibility
-
-    func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { oldY, newY in
-                // Ignore rubber-banding above the top and sub-pixel jitter.
-                guard newY > 0 else { withAnimation(.appStandard) { visibility.hidden = false }; return }
-                let delta = newY - oldY
-                guard abs(delta) > 6 else { return }
-                withAnimation(.appStandard) { visibility.hidden = delta > 0 && newY > 40 }
-            }
-        } else {
-            content // ponytail: pre-iOS-18 just keeps the bar pinned; not worth a manual offset reader.
-        }
-    }
+    func body(content: Content) -> some View { content }
 }
 
 extension View {
-    /// Hide the floating tab bar while scrolling down this scroll view, reveal it on
-    /// scroll-up or at the top. Attach to a `ScrollView` inside a tab.
+    /// No-op: system liquid-glass tab bar stays visible for reachability.
+    /// Kept so existing `.hidesTabBarOnScroll()` call sites remain valid.
     func hidesTabBarOnScroll() -> some View { modifier(HidesTabBarOnScroll()) }
 }
 

@@ -1243,7 +1243,7 @@ private struct ChatInputBar: View {
     }
 
     private var textField: some View {
-        TextField(incognito ? "Shadow mode" : "Ask Milgrain", text: $text, axis: .vertical)
+        TextField(incognito ? "Private — not saved" : "Ask Milgrain", text: $text, axis: .vertical)
             .font(.system(size: 14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
@@ -1259,13 +1259,17 @@ private struct ChatInputBar: View {
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.xl, style: .continuous)
                     .strokeBorder(
-                        isFocused.wrappedValue
-                            ? Color.appAccent.opacity(0.12)
-                            : Color.appHairline,
-                        lineWidth: isFocused.wrappedValue ? 0.75 : 0.5
+                        incognito
+                            ? Color.appAccent.opacity(0.28)
+                            : (isFocused.wrappedValue
+                                ? Color.appAccent.opacity(0.12)
+                                : Color.appHairline),
+                        lineWidth: (incognito || isFocused.wrappedValue) ? 0.75 : 0.5
                     )
                     .animation(.appFast, value: isFocused.wrappedValue)
+                    .animation(.appFast, value: incognito)
             )
+            .accessibilityHint(incognito ? "Private chat. This turn is not saved." : "")
     }
 
     private var voiceField: some View {

@@ -24,5 +24,11 @@ OxyApp/*.xcworkspace/xcuserdata/
 # Latency benchmark output (captured baselines are throwaway)
 test/bench/baseline-*.json
 
+# Dev e2e runs — screenshots/results can contain real checkout PII
+test/dev/e2e-run-*/
+test/dev/jl-e2e-shots/
+test/dev/milgrain-benchmark-*.json
+
 # Brainstorming visual companion mockups
 .superpowers/
+cad/
