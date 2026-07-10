@@ -1235,6 +1235,38 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     return parseModelDecision(j.choices?.[0]?.message?.content || '');
   }
 
+  // Anthropic Claude — same numbered-badge/elementId contract as the other providers (an
+  // A/B on model quality alone, not a switch to native computer-use coordinate clicking;
+  // that would need the elementId-keyed guard logic below reworked separately).
+  //   OXY_BROWSER_PROVIDER=claude
+  //   ANTHROPIC_API_KEY=...
+  //   OXY_BROWSER_MODEL=claude-opus-4-8   (or leave unset — falls back to a vision-capable default)
+  if (provider === 'claude' || provider === 'anthropic') {
+    const apiKey = process.env.OXY_BROWSER_API_KEY || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) throw new Error('ANTHROPIC_API_KEY (or OXY_BROWSER_API_KEY) required for browser Claude provider');
+    const model = (BROWSER_MODEL && BROWSER_MODEL.includes('claude')) ? BROWSER_MODEL : 'claude-opus-4-8';
+
+    const content = [{ type: 'text', text: promptText }];
+    if (screenshotB64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: screenshotB64 } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model,
+        max_tokens: 600,
+        temperature: 0.1,
+        messages: [{ role: 'user', content }]
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('claude timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`Claude ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const j = await res.json();
+    const text = (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    return parseModelDecision(text);
+  }
+
   if (provider === 'grok' || (BROWSER_MODEL || '').startsWith('grok')) {
     // Grok via xAI (OpenAI compat)
     const apiKey = process.env.XAI_API_KEY || process.env.GROK_API_KEY;
