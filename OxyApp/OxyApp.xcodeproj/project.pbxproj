@@ -27,6 +27,7 @@
 		A10000010000000000000017 /* MemoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000017 /* MemoryView.swift */; };
 		A10000010000000000000018 /* ConnectorsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000018 /* ConnectorsView.swift */; };
 		A10000010000000000000019 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000019 /* SettingsView.swift */; };
+		A10000010000000000000048 /* PaymentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000048 /* PaymentsView.swift */; };
 		A10000010000000000000020 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000020 /* Assets.xcassets */; };
 		A10000010000000000000F03 /* Fraunces.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F01 /* Fraunces.ttf */; };
 		A10000010000000000000F04 /* Inter.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F02 /* Inter.ttf */; };
@@ -75,6 +76,7 @@
 		A20000010000000000000015 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		A20000010000000000000017 /* MemoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryView.swift; sourceTree = "<group>"; };
 		A20000010000000000000018 /* ConnectorsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectorsView.swift; sourceTree = "<group>"; };
+		A20000010000000000000048 /* PaymentsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaymentsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000019 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A20000010000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A20000010000000000000F01 /* Fraunces.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = Fonts/Fraunces.ttf; sourceTree = "<group>"; };
@@ -186,6 +188,7 @@
 				A50000010000000000000014 /* Settings */,
 				A50000010000000000000016 /* Onboarding */,
 				A50000010000000000000008 /* Components */,
+				A50000010000000000000017 /* Payments */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -255,6 +258,14 @@
 				A20000010000000000000018 /* ConnectorsView.swift */,
 			);
 			path = Connectors;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000017 /* Payments */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000048 /* PaymentsView.swift */,
+			);
+			path = Payments;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000014 /* Settings */ = {
@@ -406,6 +417,7 @@
 				A10000010000000000000038 /* ProfileView.swift in Sources */,
 				A10000010000000000000039 /* PendantStatusView.swift in Sources */,
 				A10000010000000000000040 /* AppHeaderView.swift in Sources */,
+				A10000010000000000000048 /* PaymentsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

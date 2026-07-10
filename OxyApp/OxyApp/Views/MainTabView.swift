@@ -142,7 +142,7 @@ struct MoreView: View {
     private var lightMode: Bool { colorScheme == .light }
 
     enum MoreDestination: Identifiable {
-        case profile, pendant, connectors, memory, settings
+        case profile, pendant, connectors, memory, settings, payments
         var id: String { "\(self)" }
     }
 
@@ -184,6 +184,7 @@ struct MoreView: View {
                     case .connectors: ConnectorsView()
                     case .memory: MemoryView()
                     case .settings: SettingsView()
+                    case .payments: PaymentsView()
                     }
                 }
                 .swipeToDismiss()
@@ -300,6 +301,8 @@ struct MoreView: View {
                 }
                 rowDivider
                 AppRow(title: "Connections", subtitle: "Apps and services I can use") { destination = .connectors }
+                rowDivider
+                AppRow(title: "Payments", subtitle: "Your linked card and balance") { destination = .payments }
             }
 
             menuGroup("Preferences") {
