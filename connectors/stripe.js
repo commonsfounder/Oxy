@@ -116,7 +116,7 @@ async function execute(userId, action, params) {
       }
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
-          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc, currency
         });
         return {
           success: true,

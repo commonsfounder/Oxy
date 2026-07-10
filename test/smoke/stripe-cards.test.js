@@ -205,3 +205,12 @@ test('payment-action-required set/get/clear round-trips', async () => {
   await clearPaymentActionRequired(supabase, 'user-1');
   assert.equal(await getPaymentActionRequired(supabase, 'user-1'), null);
 });
+
+test('payment-action-required round-trips the currency the charge was attempted in', async () => {
+  const supabase = fakeSupabase();
+  await setPaymentActionRequired(supabase, 'user-1', {
+    paymentIntentId: 'pi_3', clientSecret: 'pi_3_secret', amountCents: 1200, description: 'y', currency: 'gbp'
+  });
+  const pending = await getPaymentActionRequired(supabase, 'user-1');
+  assert.equal(pending.currency, 'gbp');
+});

@@ -2436,8 +2436,9 @@ async function executeAction(userId, action, params, context = {}) {
       }
 
       const idempotencyKey = crypto.randomUUID();
+      const currency = resolveCurrencyForLocation(context.location);
       const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
-        amountCents: Math.round(amount * 100), currency: resolveCurrencyForLocation(context.location), description: `${description} at ${merchant}`, idempotencyKey
+        amountCents: Math.round(amount * 100), currency, description: `${description} at ${merchant}`, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {
@@ -2449,7 +2450,7 @@ async function executeAction(userId, action, params, context = {}) {
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
           paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret,
-          amountCents: Math.round(amount * 100), description: `${description} at ${merchant}`
+          amountCents: Math.round(amount * 100), description: `${description} at ${merchant}`, currency
         });
         return {
           success: true,
@@ -2520,8 +2521,9 @@ async function executeAction(userId, action, params, context = {}) {
       }
 
       const idempotencyKey = crypto.randomUUID();
+      const currency = resolveCurrencyForLocation(context.location);
       const outcome = await chargeLinkedCard(stripeClient, supabase, userId, {
-        amountCents, currency: resolveCurrencyForLocation(context.location), description: desc, idempotencyKey
+        amountCents, currency, description: desc, idempotencyKey
       });
 
       if (outcome.status === 'no_card') {
@@ -2532,7 +2534,7 @@ async function executeAction(userId, action, params, context = {}) {
       }
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
-          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc
+          paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc, currency
         });
         return {
           success: true,

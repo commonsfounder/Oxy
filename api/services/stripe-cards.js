@@ -99,11 +99,11 @@ async function chargeLinkedCard(stripe, supabase, userId, { amountCents, currenc
   return { ...outcome, paymentIntentId: paymentIntent.id };
 }
 
-async function setPaymentActionRequired(supabase, userId, { paymentIntentId, clientSecret, amountCents, description }) {
+async function setPaymentActionRequired(supabase, userId, { paymentIntentId, clientSecret, amountCents, description, currency }) {
   await supabase.from('preferences').upsert({
     user_id: userId,
     key: PAYMENT_ACTION_REQUIRED_KEY,
-    value: JSON.stringify({ paymentIntentId, clientSecret, amountCents, description, createdAt: new Date().toISOString() }),
+    value: JSON.stringify({ paymentIntentId, clientSecret, amountCents, description, currency, createdAt: new Date().toISOString() }),
     updated_at: new Date().toISOString()
   }, { onConflict: 'user_id,key' });
 }
