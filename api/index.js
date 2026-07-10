@@ -82,7 +82,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
-const { createSetupIntentForUser, getLinkedCard, saveLinkedCard } = require('./services/stripe-cards');
+const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, readStripeTokens } = require('./services/stripe-cards');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
@@ -6983,6 +6983,10 @@ app.post('/connectors/stripe/confirm', requireSessionAuth, async (req, res) => {
     const setupIntent = await stripeClient.setupIntents.retrieve(setupIntentId, { expand: ['payment_method'] });
     if (setupIntent.status !== 'succeeded') {
       return res.status(400).json({ error: `SetupIntent is not confirmed yet (status: ${setupIntent.status})` });
+    }
+    const { tokens } = await readStripeTokens(supabase, userId);
+    if (!tokens.stripe_customer_id || setupIntent.customer !== tokens.stripe_customer_id) {
+      return res.status(403).json({ error: 'This SetupIntent does not belong to your account.' });
     }
     const pm = setupIntent.payment_method;
     await saveLinkedCard(supabase, userId, {
