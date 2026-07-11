@@ -11,9 +11,12 @@ for (const line of fs.readFileSync(path.join(__dirname, '..', '..', '.env'), 'ut
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 }
 
-// Force local browser only
-delete process.env.BROWSERBASE_API_KEY;
-delete process.env.BROWSER_REMOTE_ENDPOINT;
+// Force local browser only, unless OXY_E2E_ALLOW_REMOTE=1 (opt-in, since Browserbase burns
+// paid session minutes — most dev runs should stay local/free).
+if (process.env.OXY_E2E_ALLOW_REMOTE !== '1') {
+  delete process.env.BROWSERBASE_API_KEY;
+  delete process.env.BROWSER_REMOTE_ENDPOINT;
+}
 
 const GOAL = process.argv[2] || 'order me an iPhone 17 256GB from John Lewis';
 const MAX_TURNS = Number(process.argv[3] || 15);
