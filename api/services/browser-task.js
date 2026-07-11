@@ -1755,12 +1755,20 @@ async function getCheckoutProfileCached(session, userId) {
 // extracted clickable labels ("Continue with email", etc.).
 async function fillEmailInputDirect(session, email, steps, onProgress) {
   // Exclude radio/checkbox — name*="email" otherwise matches marketing opt-in inputs
-  // (e.g. Selfridges' receiveEmailPreference). Exclude password inputs too.
+  // (e.g. Selfridges' receiveEmailPreference). Exclude password inputs too. Also exclude
+  // any input sitting inside a dialog/modal overlay — verified live (Rothy's, 2026-07-11)
+  // that a newsletter-signup popup's email field can be the only VISIBLE email input on a
+  // freshly-loaded cart/checkout page, and this fn would happily fill + submit that instead
+  // of waiting for the real checkout form, derailing the whole order (clicked "SUBSCRIBE",
+  // then wandered off into browsing collection pages with no idea the goal was checkout).
+  // A genuine checkout email field is a page-level form field, never inside a promo overlay.
   const NON_EMAIL_TYPES = /^(radio|checkbox|password|hidden|submit|button|reset)$/i;
   const isRealEmailInput = async (loc) => {
     try {
       const type = await loc.evaluate((el) => (el.getAttribute('type') || 'text').toLowerCase());
-      return !NON_EMAIL_TYPES.test(type);
+      if (NON_EMAIL_TYPES.test(type)) return false;
+      const inOverlay = await loc.evaluate((el) => Boolean(el.closest('[role="dialog"], [aria-modal="true"]')));
+      return !inOverlay;
     } catch { return false; }
   };
 
@@ -1831,6 +1839,7 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
       const s = window.getComputedStyle(input);
       const r = input.getBoundingClientRect();
       if (s.display === 'none' || s.visibility === 'hidden' || r.width === 0) continue;
+      if (input.closest('[role="dialog"], [aria-modal="true"]')) continue; // promo popup, not checkout
       const all = [...document.querySelectorAll('input')];
       return all.indexOf(input);
     }
@@ -2436,7 +2445,7 @@ async function tryPlatformCommerceAdd(session, steps, onProgress) {
 
   onProgress(`Adding "${result.product.title}" (${result.variant.title}) to cart via Shopify…`);
   session.history.push(`Step ${steps}: [platform:shopify] added "${result.product.title}" (${result.variant.title}) to cart via storefront API`);
-  await session.page.goto(result.cartUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  await session.page.goto(result.checkoutUrl || result.cartUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
   session.cartEverNonzero = true;
   session.proactiveSearchDone = true;
   return true;

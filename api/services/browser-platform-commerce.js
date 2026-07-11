@@ -111,7 +111,10 @@ async function resolveAndAddToCart(requestCtx, origin, goal, goalContext, scoreF
     ok: true,
     product: { title: product.title, handle: product.handle },
     variant: { id: variant.id, title: [variant.option1, variant.option2, variant.option3].filter(Boolean).join(' / ') },
-    cartUrl: `${origin}/cart`
+    // /checkout (not /cart) — one fewer page for a marketing popup to intercept the loop on,
+    // and Shopify honours the existing cart-session cookie there same as it does on /cart.
+    cartUrl: `${origin}/cart`,
+    checkoutUrl: `${origin}/checkout`
   };
 }
 
