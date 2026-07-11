@@ -16,6 +16,21 @@ const taskManager = require('./task-manager');
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
 
+// Extract function calls from ONE source, not both: resp.functionCalls (when the SDK
+// provides it) is a derived view over the same candidates[0].content.parts array, not an
+// independent signal. Reading both and pushing into the same list double-counted every real
+// call — confirmed live (2026-07-11): a single run_browser_task call came back as two
+// identical-args entries, which then executed twice sequentially, roughly doubling
+// wall-clock time on an already-slow action for no benefit. Pure/exported so this exact
+// regression is unit-testable without a real Gemini client.
+function extractToolCalls(resp) {
+  if (resp?.functionCalls?.length) {
+    return resp.functionCalls.map(fc => ({ name: fc.name, args: fc.args || {} }));
+  }
+  const parts = resp?.candidates?.[0]?.content?.parts || [];
+  return parts.filter(p => p.functionCall).map(p => ({ name: p.functionCall.name, args: p.functionCall.args || {} }));
+}
+
 function extractSpokenFromResponseSafe(resp) {
   if (!resp) return '';
   try {
@@ -141,17 +156,7 @@ async function runAgentLoop({
       }
     }
 
-    const toolCalls = [];
-    // Extract function calls robustly
-    const parts = resp?.candidates?.[0]?.content?.parts || [];
-    for (const p of parts) {
-      if (p.functionCall) {
-        toolCalls.push({ name: p.functionCall.name, args: p.functionCall.args || {} });
-      }
-    }
-    if (resp?.functionCalls) {
-      resp.functionCalls.forEach(fc => toolCalls.push({ name: fc.name, args: fc.args || {} }));
-    }
+    const toolCalls = extractToolCalls(resp);
 
     spoken = extractSpokenFromResponseSafe(resp) || spoken;
 
@@ -346,5 +351,6 @@ module.exports = {
   createAgentTrace,
   logAgentStep,
   executePlanWithBranching,
-  delegateToSpecialist
+  delegateToSpecialist,
+  extractToolCalls
 };
