@@ -157,6 +157,10 @@ async function runAgentLoop({
     }
 
     const toolCalls = extractToolCalls(resp);
+    // The raw response parts (text + functionCall parts together) are replayed verbatim as
+    // this iteration's "model" turn below — a SEPARATE use from toolCalls, which is why this
+    // wasn't folded into extractToolCalls itself.
+    const responseParts = resp?.candidates?.[0]?.content?.parts || [];
 
     spoken = extractSpokenFromResponseSafe(resp) || spoken;
 
@@ -202,7 +206,7 @@ async function runAgentLoop({
     });
 
     // Append model turn that led to tools + the function responses
-    contents.push({ role: 'model', parts: parts.length ? parts : [{ text: spoken || '...' }] });
+    contents.push({ role: 'model', parts: responseParts.length ? responseParts : [{ text: spoken || '...' }] });
     contents.push(...functionResponses);
 
     logAgentStep(agentTrace, { type: 'observe', results: results.map(r => r.action) });
