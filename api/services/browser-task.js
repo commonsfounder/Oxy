@@ -3,6 +3,7 @@ const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
 const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION } = require('./browser-recipes');
+const platformCommerce = require('./browser-platform-commerce');
 const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
 const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
@@ -2408,6 +2409,39 @@ async function tryDeliveryFoodSearch(page, session, steps, onProgress) {
   return true;
 }
 
+// Tier-1: platform-API commerce. Detects a known e-commerce platform (Shopify today) and
+// resolves + adds the item via its public storefront API instead of clicking through search
+// results and a PDP — zero screenshots, zero elementId guessing, zero exposure to whatever
+// anti-automation checks the platform's own web UI has. Runs the add via the session's own
+// Playwright request context (page.context().request), not a bare fetch, so the cart cookie
+// lands in the same cookie jar as the browser page — navigating to /cart afterward shows the
+// real, populated cart, and the existing recipe/vision loop takes over for checkout unchanged.
+async function tryPlatformCommerceAdd(session, steps, onProgress) {
+  if (!session.isOrder || session.platformCommerceTried || session.cartEverNonzero || session.addClicked) return false;
+  session.platformCommerceTried = true;
+  let origin;
+  try { origin = new URL(session.page.url()).origin; } catch { return false; }
+
+  const requestCtx = session.page.context().request;
+  const isShopify = await platformCommerce.detectShopify(requestCtx, origin);
+  if (!isShopify) return false;
+
+  const result = await platformCommerce.resolveAndAddToCart(
+    requestCtx, origin, session.goal, session.goalContext, scoreProductNameVsGoal
+  );
+  if (!result.ok) {
+    session.history.push(`Step ${steps}: [platform:shopify] ${result.reason}`);
+    return false; // falls through to the normal search/recipe/vision path unchanged
+  }
+
+  onProgress(`Adding "${result.product.title}" (${result.variant.title}) to cart via Shopify…`);
+  session.history.push(`Step ${steps}: [platform:shopify] added "${result.product.title}" (${result.variant.title}) to cart via storefront API`);
+  await session.page.goto(result.cartUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  session.cartEverNonzero = true;
+  session.proactiveSearchDone = true;
+  return true;
+}
+
 async function tryProactiveOrderSearch(page, session, steps, onProgress) {
   if (!session.isOrder || session.proactiveSearchDone || session.cartEverNonzero || session.addClicked) return false;
   if (isDeliveryHost(session.site)) return false;
@@ -3547,6 +3581,16 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       // hand-written selector move replaces the vision call. Cheap; falls through to the
       // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
       let decision, recipeStepName = null;
+      if (session.isOrder && !session.cartEverNonzero && !session.platformCommerceTried) {
+        const addedViaPlatform = await tryPlatformCommerceAdd(session, steps, onProgress);
+        if (addedViaPlatform) {
+          consecutiveBadDecisions = 0;
+          consecutiveWaits = 0;
+          touchSession(userId);
+          await persistStorage(userId, session);
+          continue;
+        }
+      }
       if (session.isOrder && !session.cartEverNonzero && !session.proactiveSearchDone) {
         const searched = await tryProactiveOrderSearch(session.page, session, steps, onProgress);
         if (searched) {
