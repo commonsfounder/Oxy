@@ -4,6 +4,7 @@ const { createSupabaseServiceClient, createGeminiServiceClient } = require('../.
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
 const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION } = require('./browser-recipes');
 const platformCommerce = require('./browser-platform-commerce');
+const wooCommerce = require('./browser-platform-woocommerce');
 const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
 const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
@@ -1562,7 +1563,15 @@ async function tryTier0PriceLookup(url, goal) {
 // Score a product name against the goal for candidate ranking.
 // Rewards goal words present in name; penalises differentiator words in name that aren't
 // in the goal (e.g. "Pro Max" in name but not goal → negative score).
-const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base)\b/i;
+// wholesale/bulk added after a live WooCommerce catch (2026-07-11): "Wholesale Issue 60" and
+// "Issue 60" share every goal word for "buy issue 60 magazine" (neither was in the original
+// gadget-tier list), so they tied and the bulk/trade listing won on list order — a shopper
+// asking for one issue never means a case. Kept to single words only: this function tests
+// each NAME WORD individually after splitting on \W+, so a phrase like "case of" could never
+// actually match here (each half is tested alone) — don't add multi-word phrases without
+// accounting for that, and avoid words too generic to safely penalize alone (e.g. "case",
+// "pack" are legitimate parts of many real product names).
+const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base|wholesale|bulk)\b/i;
 // A bare number or number+unit (256gb, 128gb, 5g, 65in) is too generic to prove two
 // products are related — a Nintendo Switch and an iPhone can both be "256GB". Only an
 // alphabetic word match (a shared brand/product noun like "iphone") counts as proof the
@@ -2425,6 +2434,15 @@ async function tryDeliveryFoodSearch(page, session, steps, onProgress) {
 // Playwright request context (page.context().request), not a bare fetch, so the cart cookie
 // lands in the same cookie jar as the browser page — navigating to /cart afterward shows the
 // real, populated cart, and the existing recipe/vision loop takes over for checkout unchanged.
+// Ordered by rough real-world independent-store share; first confirmed match wins. Each
+// entry's detect/resolve pair has the same shape by design (see browser-platform-commerce.js
+// and browser-platform-woocommerce.js) so adding a platform (WooCommerce/Magento/BigCommerce)
+// is one array entry, not a rewrite of this function.
+const PLATFORM_COMMERCE_TIERS = [
+  { name: 'shopify', detect: platformCommerce.detectShopify, resolve: platformCommerce.resolveAndAddToCart },
+  { name: 'woocommerce', detect: wooCommerce.detectWooCommerce, resolve: wooCommerce.resolveAndAddToCart }
+];
+
 async function tryPlatformCommerceAdd(session, steps, onProgress) {
   if (!session.isOrder || session.platformCommerceTried || session.cartEverNonzero || session.addClicked) return false;
   session.platformCommerceTried = true;
@@ -2432,23 +2450,24 @@ async function tryPlatformCommerceAdd(session, steps, onProgress) {
   try { origin = new URL(session.page.url()).origin; } catch { return false; }
 
   const requestCtx = session.page.context().request;
-  const isShopify = await platformCommerce.detectShopify(requestCtx, origin);
-  if (!isShopify) return false;
+  for (const tier of PLATFORM_COMMERCE_TIERS) {
+    const detected = await tier.detect(requestCtx, origin).catch(() => false);
+    if (!detected) continue;
 
-  const result = await platformCommerce.resolveAndAddToCart(
-    requestCtx, origin, session.goal, session.goalContext, scoreProductNameVsGoal
-  );
-  if (!result.ok) {
-    session.history.push(`Step ${steps}: [platform:shopify] ${result.reason}`);
-    return false; // falls through to the normal search/recipe/vision path unchanged
+    const result = await tier.resolve(requestCtx, origin, session.goal, session.goalContext, scoreProductNameVsGoal);
+    if (!result.ok) {
+      session.history.push(`Step ${steps}: [platform:${tier.name}] ${result.reason}`);
+      return false; // detected but couldn't resolve — falls through to search/recipe/vision unchanged, don't try a second platform on a false-positive detect
+    }
+
+    onProgress(`Adding "${result.product.title}" (${result.variant.title}) to cart via ${tier.name}…`);
+    session.history.push(`Step ${steps}: [platform:${tier.name}] added "${result.product.title}" (${result.variant.title}) to cart via storefront API`);
+    await session.page.goto(result.checkoutUrl || result.cartUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+    session.cartEverNonzero = true;
+    session.proactiveSearchDone = true;
+    return true;
   }
-
-  onProgress(`Adding "${result.product.title}" (${result.variant.title}) to cart via Shopify…`);
-  session.history.push(`Step ${steps}: [platform:shopify] added "${result.product.title}" (${result.variant.title}) to cart via storefront API`);
-  await session.page.goto(result.checkoutUrl || result.cartUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-  session.cartEverNonzero = true;
-  session.proactiveSearchDone = true;
-  return true;
+  return false;
 }
 
 async function tryProactiveOrderSearch(page, session, steps, onProgress) {
