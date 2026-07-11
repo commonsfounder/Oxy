@@ -6,6 +6,7 @@ const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnl
 const platformCommerce = require('./browser-platform-commerce');
 const wooCommerce = require('./browser-platform-woocommerce');
 const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
+const { logRecipeHit, logVisionStep, logSessionOutcome } = require('./session-events');
 const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
@@ -3044,7 +3045,7 @@ async function navigateToSiteBasket(session, page, steps, onProgress) {
   return true;
 }
 
-async function runOrderingTurn(userId, { url, goal, location = null, onProgress = () => {} }) {
+async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress = () => {} }) {
   // Started here, not after the session is open — a slow first-time browser launch +
   // page load must count against the same budget that bounds the step loop, or the
   // open alone can eat the mobile client's 45s watchdog before a single step runs.
@@ -3837,10 +3838,13 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
       if (searchPick) {
         decision = searchPick;
         recipeStepName = searchPick.stepName;
+        void logRecipeHit({ userId, site: session.site, stepName: recipeStepName });
       } else if (recipeMove) {
         decision = recipeMove;
         recipeStepName = recipeMove.stepName;
+        void logRecipeHit({ userId, site: session.site, stepName: recipeStepName });
       } else {
+        void logVisionStep({ userId, site: session.site });
         const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
         // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
         // at each step, to eyeball that badges land on real controls. No-op when unset.
@@ -4587,6 +4591,20 @@ async function runOrderingTurn(userId, { url, goal, location = null, onProgress 
   return { type: 'awaiting_more', summary: session.isOrder
     ? `Working on your order — ${n} step${n === 1 ? '' : 's'} in…`
     : `Working on it — ${n} step${n === 1 ? '' : 's'} in…` };
+}
+
+// Thin wrapper: logs one terminal session-trace event per turn (done/error/ask), without
+// scattering a log call across runOrderingTurnImpl's many return sites. Never affects the
+// returned outcome — logging is fire-and-forget and swallows its own errors.
+async function runOrderingTurn(userId, args) {
+  const startedAt = Date.now();
+  const outcome = await runOrderingTurnImpl(userId, args);
+  const site = getSession(userId)?.site || (args?.url ? siteKeyFromUrl(args.url) : 'unknown');
+  const traced = outcome?.type === 'done' || outcome?.type === 'error' || outcome?.type === 'ask';
+  if (traced) {
+    void logSessionOutcome({ userId, site, outcome: outcome.type, durationMs: Date.now() - startedAt });
+  }
+  return outcome;
 }
 
 async function confirmPayment(userId) {
