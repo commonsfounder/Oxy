@@ -246,6 +246,23 @@ test('scoreSearchResultText prefers the plain model over an unrequested Pro/Max/
   assert.ok(plain > proMax, 'plain iPhone 17 should outscore the Pro Max the goal never asked for');
 });
 
+// Regression: a live John Lewis run for "add a plain white bath towel to my basket" picked
+// "...Bath Mat" over "...Towels" — "towel" (singular, goal) never matched "towels" (plural,
+// name), while "Bath Mat" tied on the shared descriptor "bath". Cost 3 wasted turns (~2 min)
+// retrying the wrong product before the loop recovered onto the right one.
+test('scoreSearchResultText matches a plural product name against a singular goal word', () => {
+  const term = 'plain white bath towel';
+  const towels = scoreSearchResultText('John Lewis Egyptian Cotton Towels', term);
+  const mat = scoreSearchResultText('John Lewis Egyptian Cotton Bath Mat', term);
+  assert.ok(towels > mat, 'the actual towel listing should outscore an unrelated bath mat');
+});
+
+test('scoreProductNameVsGoal matches a plural product name against a singular goal word', () => {
+  const goal = 'add a plain white bath towel to my basket';
+  const towels = scoreProductNameVsGoal('John Lewis Egyptian Cotton Towels', goal);
+  assert.ok(towels > 0, 'the plural "Towels" name should score positively against singular "towel" in the goal');
+});
+
 test('scoreSearchResultText prefers a requested Pro variant over the plain model', () => {
   const term = 'iPhone 17 Pro 256GB';
   const plain = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);

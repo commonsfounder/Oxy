@@ -198,12 +198,52 @@ function shouldUseRemoteForHost(host, env = process.env) {
   return list.some((entry) => h === entry || h.endsWith('.' + entry));
 }
 
+// Direct child PIDs of `parentPid`. Best-effort, two strategies since this runs on both a
+// macOS dev machine and Linux (Cloud Run): pgrep first (present on macOS; `-P` exits 1 with
+// no output when nothing matches, which execFileSync surfaces as a throw — that's the normal
+// "no children yet" case, not a real error), then a pure-fs /proc scan as the Linux fallback
+// for containers that don't ship pgrep (this image's base, node:20-bookworm-slim, doesn't
+// install procps by default). Never throws — an empty set just means the caller's backstop
+// below becomes a no-op, same as if the child had already exited cleanly.
+function directChildPids(parentPid) {
+  try {
+    const out = require('child_process').execFileSync('pgrep', ['-P', String(parentPid)], { encoding: 'utf8' });
+    return new Set(out.split('\n').map((s) => s.trim()).filter(Boolean).map(Number));
+  } catch {
+    try {
+      const fs = require('fs');
+      const pids = new Set();
+      for (const entry of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        try {
+          const stat = fs.readFileSync(`/proc/${entry}/stat`, 'utf8');
+          const ppid = stat.slice(stat.lastIndexOf(')') + 2).trim().split(' ')[1];
+          if (Number(ppid) === parentPid) pids.add(Number(entry));
+        } catch { /* process gone between readdir and read, skip */ }
+      }
+      return pids;
+    } catch {
+      return new Set(); // no /proc (non-Linux, no pgrep) — backstop below becomes a no-op
+    }
+  }
+}
+
 // Always launches a LOCAL stealth Chromium (the warm pool + the non-remote path). Never
 // touches the managed endpoint — remote is a separate, per-host connect (connectRemoteBrowser).
 async function launchLocalBrowser() {
   // ponytail: headless:true in prod; BROWSER_HEADLESS=false lets a local debug run pop
   // a real window so you can watch the loop click around, instead of trusting logs.
-  return chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
+  const before = directChildPids(process.pid);
+  const browser = await chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
+  // Live repro: this Playwright build doesn't expose browser.process() on a locally launched
+  // browser (playwright-extra's wrapped Browser class has no such method at all — confirmed
+  // by inspecting its prototype), so closeSession can't ask the browser object for its own
+  // PID to force-kill on a close() that resolves without the OS process actually exiting.
+  // Stash the OS PID ourselves via the before/after child-PID diff above.
+  const after = directChildPids(process.pid);
+  const newPid = [...after].find((pid) => !before.has(pid));
+  if (newPid) browser._oxyChildPid = newPid;
+  return browser;
 }
 
 // Connect to the managed scraping browser over CDP. Bounded — a wrong/down endpoint must
@@ -314,11 +354,48 @@ function touchSession(userId) {
   if (session) session.lastActivityAt = Date.now();
 }
 
+const BROWSER_CLOSE_TIMEOUT_MS = 5000;
+
+// Hardening: browser.close() silently swallowing its own failure would let a chromium
+// process leak with zero visibility to ever notice. Race against a timeout — a hang would
+// never resolve OR reject, so a bare try/catch alone can't catch it — log any failure
+// instead of eating it, and force-kill the OS process via the PID stashed in
+// launchLocalBrowser (`_oxyChildPid` — this Playwright build doesn't expose browser.process()
+// on a locally launched browser, confirmed by inspecting its prototype) if it's somehow
+// still alive after close(). Only set for a locally launched browser, not a remote
+// Browserbase connection — a no-op there, since the remote side owns that lifecycle.
 async function closeSession(userId) {
   const session = liveSessions.get(userId);
   if (!session) return;
   liveSessions.delete(userId);
-  await session.browser.close().catch(() => {});
+  const pid = session.browser._oxyChildPid;
+  try {
+    await withTimeout(session.browser.close(), BROWSER_CLOSE_TIMEOUT_MS, 'browser.close()');
+  } catch (error) {
+    console.warn('[browser-task] browser.close() failed:', error.message);
+  }
+  if (pid) {
+    try {
+      process.kill(pid, 0); // existence check only — throws ESRCH if already gone
+      console.warn(`[browser-task] chromium pid ${pid} still alive after close(), force-killing`);
+      process.kill(pid, 'SIGKILL');
+    } catch { /* already exited — nothing to do */ }
+  }
+}
+
+// The actual cause of a one-shot script (any test/dev/*.js e2e runner) never exiting: the
+// warm pool (see getWarmBrowser below) deliberately keeps a second, already-launched browser
+// alive in the background so the *next* turn is instant — exactly right for the long-lived
+// server, which does eventually claim it, but a one-shot script has no "next turn" and its
+// Node process hangs open forever holding that live connection, until something kills it —
+// at which point the spare's chromium process is orphaned rather than closed, which is how
+// ~70 of them piled up across past dev sessions. Standalone scripts must call this after
+// their last closeSession() so the process can exit on its own.
+async function closeWarmPool() {
+  if (!warmSpare) return;
+  const spare = warmSpare;
+  warmSpare = null;
+  await spare.close().catch(() => {});
 }
 
 // Deterministic backstop: any element whose text matches this is treated as a
@@ -1585,9 +1662,17 @@ const GENERIC_SPEC_WORD = /^\d+[a-z]*$/i;
 // token, neither the match bonus nor PRODUCT_DIFFERENTIATORS caught it, so it slipped
 // through with a positive score and nothing to out-rank it.
 const SUFFIXED_MODEL_WORD = /^(\d{1,3})([a-z])$/i;
+// Regression: John Lewis search for "plain white bath towel" picked "...Bath Mat" over the
+// actual "...Towels" listing — "towel" (goal, singular) never matched "towels" (name, plural)
+// with a bare word-set comparison, while "mat" tied on the shared generic word "bath". Cheap
+// trailing-s stemming (not a real morphological analyzer) closes that gap; "ss" endings
+// (glass/class) are left alone so they don't get mangled into "glas"/"clas".
+function stemWord(w) {
+  return w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+}
 function scoreProductNameVsGoal(name, goal) {
   if (!name || !goal) return 0;
-  const words = (s) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 1));
+  const words = (s) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 1).map(stemWord));
   const goalWords = words(goal);
   const nameWords = words(name);
   let score = 0;
@@ -2525,14 +2610,24 @@ function scoreSearchResultText(text, term) {
   // qualifier check ("e" isn't "pro"/"max"/etc). Tokenize the result text and require an
   // exact word match, then apply the same suffixed-model penalty as scoreProductNameVsGoal.
   const nameWords = String(text || '').toLowerCase().match(/[a-z0-9]+/g) || [];
+  // Stemmed separately from the raw set: plural/singular ("towel"/"towels") must match for
+  // the significant-word score below, but the suffixed-model check further down (e.g. "17e"
+  // vs goal "17") needs the exact, unstemmed token.
+  const nameWordSetStemmed = new Set(nameWords.map(stemWord));
   const nameWordSet = new Set(nameWords);
   const words = String(term || '').toLowerCase().match(/[a-z0-9]+/g) || [];
   const goalWordSet = new Set(words);
   const qualifiersInGoal = SEARCH_PICK_QUALIFIER_WORDS.filter((w) => words.includes(w));
   const significant = words.filter((w) => w.length > 1 && !SEARCH_PICK_STOP_WORDS.has(w));
+  // The last significant word is usually the head noun ("bath towel" → "towel", "phone
+  // case" → "case") — the actual product type, as opposed to a descriptor like "bath" that
+  // plenty of unrelated products share. Weight it double so a name matching only the head
+  // noun beats one matching only a shared descriptor (regression: "...Bath Mat" out-scored
+  // "...Towels" on "bath" alone once stemming let "towel"/"towels" match equally).
+  const headNoun = significant[significant.length - 1];
   let score = 0;
   let hasUnrequestedVariant = false;
-  for (const w of significant) if (nameWordSet.has(w)) score += 1;
+  for (const w of significant) if (nameWordSetStemmed.has(stemWord(w))) score += (w === headNoun ? 2 : 1);
   for (const w of SEARCH_PICK_QUALIFIER_WORDS) {
     const has = nameWordSet.has(w);
     const wanted = qualifiersInGoal.includes(w);
@@ -4689,6 +4784,7 @@ module.exports = {
   getSession,
   touchSession,
   closeSession,
+  closeWarmPool,
   extractClickableElements,
   CLICKABLE_SELECTOR,
   runOrderingTurn,

@@ -72,7 +72,7 @@ const builder = {
 };
 runtime.createSupabaseServiceClient = () => builder;
 
-const { runOrderingTurn, getSession, closeSession } = require('../../api/services/browser-task');
+const { runOrderingTurn, getSession, closeSession, closeWarmPool } = require('../../api/services/browser-task');
 
 const SHOTS_DIR = path.join(__dirname, 'jl-e2e-shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
@@ -204,6 +204,11 @@ async function main() {
   }
 
   await closeSession(USER).catch(() => {});
+  // The warm pool (browser-task.js) keeps a second, already-launched browser alive in the
+  // background so the server's *next* turn is instant — right for a long-lived server, but
+  // this one-shot script has no next turn, so without this the process never exits on its
+  // own and the spare's chromium process gets orphaned by whatever kills the script.
+  await closeWarmPool().catch(() => {});
   console.log('\n─── done ───\n');
 }
 
