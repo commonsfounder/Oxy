@@ -37,6 +37,26 @@ test('getActionContract leaves non-review actions as direct execute', () => {
   assert.equal(getActionContract('nonexistent_action'), null);
 });
 
+test('run_browser_task and its payment follow-ups stay direct-execute despite risk:high', () => {
+  // These are the one deliberate exception to "high risk = review" (see the money-actions
+  // test above): run_browser_task MUST actually browse before it's known what there even is
+  // to review, so gating the whole call behind upfront review (like stripe_charge) would
+  // mean it never runs at all. The review happens INSIDE the api/index.js case handler, at
+  // the moment the loop reaches ready_for_payment — this test just locks in that none of the
+  // three accidentally fall into the fail-safe auto-review gate (getActionContract routes
+  // risk:'high' to executionMode:'review' UNLESS executionMode is already set explicitly).
+  for (const type of ['run_browser_task', 'confirm_browser_payment', 'cancel_browser_payment']) {
+    const contract = getActionContract(type);
+    assert.ok(contract, `${type} must have a contract`);
+    assert.equal(contract.executionMode, 'direct', `${type} must stay direct-execute`);
+  }
+});
+
+test('run_browser_task does not require goal (empty goal = continue an open order)', () => {
+  const contract = getActionContract('run_browser_task');
+  assert.deepEqual(contract.required, []);
+});
+
 test('Core actions (incl. new agentic) have contracts for reliability work', () => {
   const expected = [
     'find_place',

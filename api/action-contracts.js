@@ -394,7 +394,56 @@ const ACTION_CONTRACTS = {
   search_eventbrite: { risk: 'low', required: ['query'], inputExample: { query: 'concert' }, successSummary: 'Events found', failureSummary: 'Failed', confirmation: 'none' },
   search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none' },
   search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none' },
-  get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' }
+  get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' },
+  // Real browser ordering (api/services/browser-task.js) — was built across many sessions
+  // but never actually registered here, so it was unreachable from live chat. High risk
+  // (it can reach a real checkout), but deliberately executionMode: 'direct' — it MUST
+  // actually browse to find out what's being bought and for how much before a review makes
+  // sense; gating the whole call behind upfront review (like stripe_charge) would mean
+  // nothing ever runs. The review gate is applied inside executeAction's 'run_browser_task'
+  // case instead, at the moment the loop reaches ready_for_payment, using the same
+  // guardConciergeSpend cap check every other money action goes through. Never place an
+  // order without this making it to a `confirmation: 'review_required'` result first.
+  run_browser_task: {
+    risk: 'high',
+    // goal is OPTIONAL, not required: a continuation call for an already-open order
+    // legitimately passes an empty goal, and runOrderingTurn itself resolves that from
+    // the live session (or persisted resume context) — see the case handler in
+    // api/index.js. Putting 'goal' in `required` here would make the generic contract
+    // validator reject that empty-goal continuation before the handler ever runs,
+    // breaking auto-continue (regression test: browser-ordering-loop.test.js).
+    required: [],
+    optional: ['goal', 'url'],
+    inputExample: { goal: 'order a medium black t-shirt from Rothys', url: 'https://www.rothys.com' },
+    successSummary: 'Order progressed',
+    failureSummary: 'Order task failed',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result.'
+  },
+  // The second half of the two-phase flow above — only ever called on a turn AFTER the user
+  // has explicitly approved a review_required result from run_browser_task. executionMode:
+  // 'direct' is correct here too: the human review already happened, this is the user's own
+  // "yes" being carried out, not a fresh unreviewed spend.
+  confirm_browser_payment: {
+    risk: 'high',
+    required: [],
+    inputExample: {},
+    successSummary: 'Order placed',
+    failureSummary: 'Payment confirmation failed',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Only call this after the user has explicitly said yes to the price shown by run_browser_task on a prior turn.'
+  },
+  cancel_browser_payment: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Order cancelled',
+    failureSummary: 'Cancel failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  }
 };
 
 function getActionContract(type) {

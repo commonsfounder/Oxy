@@ -28,6 +28,7 @@ const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
+const browserTask = require('./services/browser-task');
 const { createActionRunner } = require('./services/action-runner');
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const {
@@ -2296,6 +2297,62 @@ async function executeAction(userId, action, params, context = {}) {
       return createDiagramArtifact(params || {}, context.imageFile || null);
     case 'create_presentation':
       return createPresentationArtifact(params || {}, context.imageFile || null);
+
+    // Real browser ordering (api/services/browser-task.js) — actually runs Playwright,
+    // recipes, the Shopify platform-API tier, and the vision-driven fallback loop. Was
+    // built across many sessions but never wired into a live action before this case
+    // existed — see [[browser-task-reliability]] memory. Never auto-confirms payment:
+    // stops at ready_for_payment and returns review_required, same contract every other
+    // money action honours (see action-contracts.js's run_browser_task entry for why this
+    // one is executionMode: 'direct' rather than 'review').
+    case 'run_browser_task': {
+      const goal = String(params?.goal || '').trim();
+      const url = String(params?.url || '').trim();
+      // No upfront "goal required" guard — an empty goal is a valid continuation call for
+      // an already-open order; runOrderingTurn resolves it from the live session or
+      // persisted resume context and returns its own honest error if there's truly
+      // nothing to continue.
+      let outcome;
+      try {
+        outcome = await browserTask.runOrderingTurn(userId, { url, goal, location: context.location });
+      } catch (e) {
+        return { success: false, error: `Browse task failed: ${e.message}` };
+      }
+      if (outcome.type === 'ready_for_payment') {
+        const total = parsePrice(outcome.total || '');
+        if (total) {
+          const guard = await guardConciergeSpend(userId, total);
+          if (!guard.ok) return { success: false, error: guard.error };
+        }
+        return {
+          success: true,
+          confirmation: 'review_required',
+          text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}. Say the word and I'll place the order.`,
+          total: outcome.total,
+          summary: outcome.summary,
+          actionSummary: 'Order ready for payment'
+        };
+      }
+      if (outcome.type === 'done') return { success: true, text: outcome.text };
+      if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true };
+      if (outcome.type === 'ask') return { success: true, text: outcome.question };
+      return { success: false, error: outcome.error || 'Browse task failed.' };
+    }
+
+    case 'confirm_browser_payment': {
+      try {
+        const result = await browserTask.confirmPayment(userId);
+        if (result.type === 'error') return { success: false, error: result.error };
+        return { success: true, text: result.text };
+      } catch (e) {
+        return { success: false, error: `Payment confirmation failed: ${e.message}` };
+      }
+    }
+
+    case 'cancel_browser_payment': {
+      browserTask.cancelPayment(userId);
+      return { success: true, text: 'Order cancelled — nothing was charged.' };
+    }
 
     // === NEW AGENTIC GENERAL TOOLS ===
     case 'web_browse': {
