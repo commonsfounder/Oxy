@@ -29,6 +29,9 @@ test/dev/e2e-run-*/
 test/dev/jl-e2e-shots/
 test/dev/milgrain-benchmark-*.json
 
+# Scratchpad — local prod drivers / throwaway harnesses (may read prod secrets)
+scratchpad/
+
 # Brainstorming visual companion mockups
 .superpowers/
 cad/

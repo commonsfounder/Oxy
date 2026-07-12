@@ -160,6 +160,27 @@ function siteKeyFromUrl(url) {
   catch { return 'unknown'; }
 }
 
+// Decide whether an incoming request must ABANDON the live in-memory session and open a
+// fresh one, vs. continue on the existing session. Continuing is right for auto-continue
+// (empty goal), a reply on the same task, and converting a lookup to "order it". Starting
+// fresh is right when the request is genuinely a NEW task — a different site, OR a brand-new
+// order on the SAME site (which must NOT inherit the previous run's cart: the same-site
+// session-bleed bug where a fresh "order socks from allbirds" resumed a stale Wool Runners
+// cart). A same-site order only counts as new when its goal actually differs from the live
+// session's goal — re-issuing the identical goal is a resume, not a fresh order.
+function shouldStartFreshSession(session, { url, goal } = {}) {
+  if (!session || !url) return false;
+  // A url pointing at a different site is unambiguously a new task.
+  if (siteKeyFromUrl(url) !== session.site) return true;
+  // Same site: only a non-empty NEW order goal on an already-ordering session, whose text
+  // differs from the live goal, is a fresh order. Empty goals (auto-continue), non-order
+  // replies (checkout details, delivery pref), and lookup→"order it" conversions all reuse.
+  const g = String(goal || '').trim();
+  if (!g || !session.isOrder || !isOrderGoal(g)) return false;
+  const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return norm(g) !== norm(session.goal);
+}
+
 // --- Browser provider ------------------------------------------------------------------
 // Local stealth Chromium ONLY. The managed-browser (Browserbase/Bright Data) tier was
 // removed deliberately: the product's ordering path is the platform-API commerce tier
@@ -3104,10 +3125,11 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
   const retailOptions = { location };
   let session = getSession(userId);
   // A live session left open by a finished lookup (see the 'done' keep-alive below) is a
-  // continuation ("order it") ONLY if it's the same site. If a new url points at a different
-  // site, it's a fresh task — close the stale session so we open the right site, not continue
-  // on the old product page.
-  if (session && url && siteKeyFromUrl(url) !== session.site) {
+  // continuation ("order it") ONLY when it's genuinely the same task. A url on a different
+  // site — OR a brand-new order goal on the SAME site (which would otherwise inherit the old
+  // cart, the same-site session-bleed bug) — is a fresh task: close the stale session so we
+  // start clean instead of continuing on the old product page or cart.
+  if (shouldStartFreshSession(session, { url, goal })) {
     await closeSession(userId);
     session = null;
   }
@@ -5009,6 +5031,7 @@ module.exports = {
   scoreProductNameVsGoal,
   pickFallbackCandidate,
   findElementByText,
+  shouldStartFreshSession,
   createSession,
   getSession,
   touchSession,

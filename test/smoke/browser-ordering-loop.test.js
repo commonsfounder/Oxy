@@ -14,7 +14,8 @@ const {
   pickBestSearchResult,
   scoreProductNameVsGoal,
   pickFallbackCandidate,
-  findElementByText
+  findElementByText,
+  shouldStartFreshSession
 } = require('../../api/services/browser-task');
 const { validateActionWithContract } = require('../../api/action-contracts');
 
@@ -463,5 +464,47 @@ test('closeSession closes the browser and removes the session', async () => {
   await closeSession('user-d');
   assert.equal(getSession('user-d'), null);
   assert.equal(browser.closed(), true);
+});
+
+// Regression: same-site session bleed. A live order session for a site, left alive after a
+// killed/finished run, must NOT be continued by a brand-new order for the SAME site — that
+// inherits the old cart. Only an actual continuation (auto-continue, a reply, or converting a
+// lookup to "order it") may reuse the session. See browser-task-reliability memory (2026-07-12).
+test('shouldStartFreshSession: a new same-site order goal starts fresh (no cart bleed)', () => {
+  const session = { site: 'allbirds.com', goal: 'order wool runners from allbirds', isOrder: true };
+  assert.equal(
+    shouldStartFreshSession(session, { url: 'https://www.allbirds.com', goal: 'order socks from allbirds' }),
+    true
+  );
+});
+
+test('shouldStartFreshSession: empty goal (auto-continue) reuses the session', () => {
+  const session = { site: 'allbirds.com', goal: 'order socks from allbirds', isOrder: true };
+  assert.equal(shouldStartFreshSession(session, { url: 'https://www.allbirds.com', goal: '' }), false);
+});
+
+test('shouldStartFreshSession: converting a lookup to "order it" reuses the session', () => {
+  const session = { site: 'allbirds.com', goal: 'how much are allbirds socks', isOrder: false };
+  assert.equal(shouldStartFreshSession(session, { url: 'https://www.allbirds.com', goal: 'order it' }), false);
+});
+
+test('shouldStartFreshSession: re-issuing the identical order goal reuses (resume, not bleed)', () => {
+  const session = { site: 'allbirds.com', goal: 'order socks from allbirds', isOrder: true };
+  assert.equal(
+    shouldStartFreshSession(session, { url: 'https://www.allbirds.com', goal: 'order socks from allbirds' }),
+    false
+  );
+});
+
+test('shouldStartFreshSession: no live session means nothing to reset', () => {
+  assert.equal(shouldStartFreshSession(null, { url: 'https://www.allbirds.com', goal: 'order socks' }), false);
+});
+
+test('shouldStartFreshSession: a url pointing at a different site starts fresh', () => {
+  const session = { site: 'allbirds.com', goal: 'order socks from allbirds', isOrder: true };
+  assert.equal(
+    shouldStartFreshSession(session, { url: 'https://www.johnlewis.com', goal: 'order a lamp' }),
+    true
+  );
 });
 
