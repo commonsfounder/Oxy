@@ -2,7 +2,7 @@ const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
 const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
-const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION } = require('./browser-recipes');
+const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION, SHOPIFY } = require('./browser-recipes');
 const platformCommerce = require('./browser-platform-commerce');
 const wooCommerce = require('./browser-platform-woocommerce');
 const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
@@ -544,7 +544,11 @@ async function detectBlockWall(page) {
 // clickable elements (same locatorIndex space the loop's own clicks use).
 const GUEST_CHECKOUT_PATTERN = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest|continue without (?:an )?account|shop as (?:a )?guest|guest order|order as (?:a )?guest|pay as (?:a )?guest|checkout without (?:signing in|an account)|continue without signing in|continue without logging in|shop without an account|skip sign[- ]?in|checkout without registering|order without (?:an )?account)\b/i;
 const GUEST_FORK_URL_PATTERN = /login-or-guest|guest[-_]checkout|checkout\/guest|\/ciam\/|checkout\/login|checkout\/signin/i;
-const CHECKOUTISH_URL_PATTERN = /\/(?:checkout|basket|cart|bag|trolley|order)(?:\/|$|\?)/i;
+// `checkouts?` (optional plural) so Shopify's /checkouts/cn/<token> checkout URL counts as
+// checkout-ish. Without it, the whole generic checkout pipeline (tryGenericCheckoutProgress:
+// guest → email → autofill → advance → payment-ready) was skipped on every Shopify store — the
+// same plural bug that hid the recipe checkout phase. See browser-recipes CONVENTION.checkout.
+const CHECKOUTISH_URL_PATTERN = /\/(?:checkouts?|basket|cart|bag|trolley|order)(?:\/|$|\?)/i;
 
 function isGuestCheckoutUrl(url) {
   const u = String(url || '');
@@ -2487,6 +2491,9 @@ async function tryPlatformCommerceAdd(session, steps, onProgress) {
   for (const tier of PLATFORM_COMMERCE_TIERS) {
     const detected = await tier.detect(requestCtx, origin).catch(() => false);
     if (!detected) continue;
+    // Remember the platform even if resolve fails below — the checkout tail is still Shopify's,
+    // so the capability-selected SHOPIFY recipe should drive it (see recipe selection in the loop).
+    if (tier.name === 'shopify') session.isShopify = true;
 
     const result = await tier.resolve(requestCtx, origin, session.goal, session.goalContext, scoreProductNameVsGoal);
     if (!result.ok) {
@@ -3724,7 +3731,12 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
       // A learned recipe only ever applies where there's no hand-authored one — never
       // override a curated recipe with something the loop taught itself.
       const learnedRecipe = RECIPES_ENABLED && !RECIPES[session.site] ? learnedRecipeStore.getLearnedRecipe(session.site) : null;
-      const recipe = RECIPES_ENABLED ? (learnedRecipe || selectRecipeForHost(session.site)) : null;
+      // Shopify checkout is capability-selected: once the platform tier detects Shopify, its
+      // standardized checkout is driven by the SHOPIFY recipe (see resolveShopifyCheckout) rather
+      // than the generic CONVENTION tail, whose selectors don't fit Shopify. A hand-authored
+      // host recipe still wins if one ever exists for a Shopify store.
+      const shopifyRecipe = RECIPES_ENABLED && session.isShopify && !RECIPES[session.site] ? SHOPIFY : null;
+      const recipe = RECIPES_ENABLED ? (learnedRecipe || shopifyRecipe || selectRecipeForHost(session.site)) : null;
       let recipeMove = !searchPick && recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
 
       // Convention recipe: poll basket badge before re-firing add (Selfridges etc).
@@ -4971,6 +4983,7 @@ module.exports = {
   tryTier0PriceLookup,
   tier0NameMatchesGoal,
   matchesPaymentKeyword,
+  isCheckoutishUrl,
   isTechnicalAsk,
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,

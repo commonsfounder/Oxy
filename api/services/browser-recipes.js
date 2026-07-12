@@ -283,6 +283,65 @@ const CONVENTION = {
   ],
 };
 
+// A visible "pay/place order" affordance means we've reached the payment step and must NOT
+// drive the checkout any further — the loop's tryPaymentReady stops there for explicit user
+// confirmation. Mirrors browser-task.js's PAYMENT_KEYWORD_PATTERN (kept as a local copy because
+// browser-task requires THIS module, so importing the other way would be circular). Over-matching
+// is the safe direction here: a false positive just hands off to tryPaymentReady one step early.
+const RECIPE_PAY_BUTTON_PATTERN = /\bpay\b|\bpay now\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)/i;
+
+// Shopify checkout driver. The platform-API tier (browser-platform-commerce.js) already
+// resolved the product and added it to the cart, so the ONLY work left is Shopify's checkout,
+// which is highly standardized across ~every Shopify store — one resolver covers all of them.
+// Selected by capability (session.isShopify), not by host. Safety is the whole design:
+//   1. Fill the guest email if it's on the page and not yet filled (resolveEmailFill).
+//   2. If ANY pay/place-order button is visible, return null — never advance on a page that
+//      has a pay affordance. This is what keeps us off Shopify's one-page "Pay now" button:
+//      we hand off to the loop's tryPaymentReady, which autofills remaining address fields and
+//      stops for confirmation instead of submitting payment.
+//   3. Otherwise (a contact / shipping-address / shipping-method page with no pay button yet),
+//      emit an 'advance' move. The loop's advance handler autofills the address from the saved
+//      checkout profile and clicks the real "Continue to shipping/payment" button. Because we
+//      only reach here when NO pay button is present, the advance handler's submit-button
+//      fallback can never be the pay button.
+async function resolveShopifyCheckout({ page, session, clickable }) {
+  const emailMove = await resolveEmailFill({ page, session, clickable });
+  if (emailMove) return emailMove;
+
+  const payButtonVisible = await page.evaluate(({ sel, patSource, patFlags }) => {
+    const pat = new RegExp(patSource, patFlags);
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    return [...document.querySelectorAll(sel)]
+      .some((el) => visible(el) && pat.test((el.innerText || el.value || el.getAttribute('aria-label') || '').trim()));
+  }, { sel: clickable, patSource: RECIPE_PAY_BUTTON_PATTERN.source, patFlags: RECIPE_PAY_BUTTON_PATTERN.flags }).catch(() => false);
+  if (payButtonVisible) return null; // reached payment — let tryPaymentReady fill + stop for confirmation
+
+  return { action: 'click', stepName: 'advance', text: 'Continue' };
+}
+
+// Capability-selected Shopify checkout recipe (see resolveShopifyCheckout). Checkout-only —
+// product resolve + add-to-cart is the platform-API tier's job, so there are no size/add steps.
+const SHOPIFY = {
+  isShopify: true,
+  phases: {
+    product:  (u) => /\/products\//i.test(u.pathname),
+    checkout: (u) => /\/checkouts?\b/i.test(u.pathname),
+    cart:     (u) => /\/cart\b/i.test(u.pathname),
+  },
+  size: {
+    container: [], chip: [], selected: [],
+    basketBadge: ['[data-testid*="cart" i]', 'a[aria-label*="cart" i]', 'a[href="/cart"]'],
+  },
+  steps: [
+    { phase: 'checkout', name: 'shopify-checkout', resolve: (a) => resolveShopifyCheckout(a) },
+  ],
+};
+
 // Delivery-site recipe: commit items from the item-options modal (Uber Eats / Deliveroo / Just Eat).
 const DELIVERY = {
   isDelivery: true,
@@ -1119,8 +1178,8 @@ function hostOfRecipe(recipe, fallback = 'unknown') {
 }
 
 module.exports = {
-  parseSizeFromGoal, matchSizeChip, johnLewisSizeQueryValue, GENERIC, CONVENTION, DELIVERY, RECIPES,
-  resolveNavigateBasket, resolveUpsellDismiss, resolveEmailFill,
+  parseSizeFromGoal, matchSizeChip, johnLewisSizeQueryValue, GENERIC, CONVENTION, DELIVERY, SHOPIFY, RECIPES,
+  resolveNavigateBasket, resolveUpsellDismiss, resolveEmailFill, resolveShopifyCheckout,
   UPSELL_DISMISS_PATTERN,
   phaseFromUrl, createRecipeHealth, selectStep, selectRecipeForHost,
   RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR,

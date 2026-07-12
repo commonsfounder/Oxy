@@ -45,7 +45,8 @@ test('matchSizeChip maps garment words to letter chips and back', () => {
   assert.equal(matchSizeChip('medium', ['Size S', 'Size M', 'Size L']), 1);
 });
 
-const { RECIPES, phaseFromUrl } = require('../../api/services/browser-recipes');
+const { RECIPES, phaseFromUrl, SHOPIFY, resolveShopifyCheckout } = require('../../api/services/browser-recipes');
+const { isCheckoutishUrl } = require('../../api/services/browser-task');
 
 test('John Lewis recipe is registered with the expected phases and steps', () => {
   const jl = RECIPES['johnlewis.com'];
@@ -81,6 +82,45 @@ test('CONVENTION classifies Shopify /checkouts/ (plural) checkout urls', () => {
   assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/checkouts/cn/abc123'), 'checkout');
   assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/checkouts/c/xyz/information'), 'checkout');
   assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/collections/mens'), null);
+});
+
+test('SHOPIFY recipe: capability recipe, checkout phase covers /checkouts/ (plural)', () => {
+  assert.equal(SHOPIFY.isShopify, true);
+  assert.deepEqual(SHOPIFY.steps.map((s) => s.name), ['shopify-checkout']);
+  assert.equal(phaseFromUrl(SHOPIFY, 'https://allbirds.com/products/wool-runner'), 'product');
+  assert.equal(phaseFromUrl(SHOPIFY, 'https://allbirds.com/checkout'), 'checkout');
+  assert.equal(phaseFromUrl(SHOPIFY, 'https://allbirds.com/checkouts/cn/abc'), 'checkout');
+});
+
+test('resolveShopifyCheckout: fills the guest email first when a profile email is present', async () => {
+  const page = { evaluate: async () => 5, url: () => 'https://s/checkouts/cn/1' };
+  const session = { checkoutProfile: { email: 'test@example.com' } };
+  const move = await resolveShopifyCheckout({ page, session, clickable: 'a,button' });
+  assert.equal(move.stepName, 'fill-email');
+  assert.equal(move.value, 'test@example.com');
+});
+
+test('resolveShopifyCheckout: emits advance when NO pay button is visible', async () => {
+  const page = { evaluate: async () => false, url: () => 'https://s/checkouts/cn/1' };
+  const move = await resolveShopifyCheckout({ page, session: {}, clickable: 'a,button' });
+  assert.equal(move.stepName, 'advance');
+});
+
+test('resolveShopifyCheckout: never advances once a pay button is visible (hands off to payment-ready)', async () => {
+  // Safety: on any page with a pay/place-order affordance (incl. Shopify one-page "Pay now")
+  // the resolver returns null so the loop's tryPaymentReady fills + stops for confirmation,
+  // instead of the advance handler's submit-fallback clicking the pay button.
+  const page = { evaluate: async () => true, url: () => 'https://s/checkouts/cn/1' };
+  const move = await resolveShopifyCheckout({ page, session: {}, clickable: 'a,button' });
+  assert.equal(move, null);
+});
+
+test('isCheckoutishUrl matches Shopify /checkouts/ (plural) so the generic checkout pipeline runs', () => {
+  assert.equal(isCheckoutishUrl('https://allbirds.com/checkouts/cn/abc'), true);
+  assert.equal(isCheckoutishUrl('https://allbirds.com/checkouts/c/xyz/information'), true);
+  assert.equal(isCheckoutishUrl('https://allbirds.com/checkout'), true);
+  assert.equal(isCheckoutishUrl('https://allbirds.com/cart'), true);
+  assert.equal(isCheckoutishUrl('https://allbirds.com/collections/mens'), false);
 });
 
 test('Wickes recipe is registered with the expected phases and steps', () => {
