@@ -70,6 +70,19 @@ test('phaseFromUrl classifies M&S product / basket / checkout urls', () => {
   assert.equal(phaseFromUrl(ms, 'https://www.marksandspencer.com/l/men/mens-tshirts'), null);
 });
 
+test('CONVENTION classifies Shopify /checkouts/ (plural) checkout urls', () => {
+  // Regression: the platform-API tier lands the loop on Shopify's /checkouts/cn/<token> page
+  // (/checkout 302-redirects there). `checkout\b` failed on the plural, so the whole Shopify
+  // checkout tail ran on vision instead of recipes — the main reason recipes never hit.
+  const conv = selectRecipeForHost('allbirds.com'); // unknown host → CONVENTION
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/products/mens-wool-runners'), 'product');
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/cart'), 'cart');
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/checkout'), 'checkout');
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/checkouts/cn/abc123'), 'checkout');
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/checkouts/c/xyz/information'), 'checkout');
+  assert.equal(phaseFromUrl(conv, 'https://www.allbirds.com/collections/mens'), null);
+});
+
 test('Wickes recipe is registered with the expected phases and steps', () => {
   const wk = RECIPES['wickes.co.uk'];
   assert.ok(wk, 'wickes.co.uk recipe exists');

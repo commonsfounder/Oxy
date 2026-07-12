@@ -209,7 +209,12 @@ const GENERIC = {
 const CONVENTION = {
   phases: {
     product:  (u) => /\/(?:p\/|product\/|products\/|item\/|sku\/|pd\/|dp\/|p\d+(?:\/|$))/i.test(u.pathname),
-    checkout: (u) => /\/(?:checkout|order|pay(?:ment)?|purchase)\b/i.test(u.pathname),
+    // `checkouts?` (optional plural) so Shopify's real checkout path — /checkouts/cn/<token>,
+    // where /checkout 302-redirects — classifies as 'checkout'. Without the plural, `checkout\b`
+    // fails on "checkouts" (no word boundary between "t" and "s"), so the ENTIRE Shopify
+    // checkout tail fell through to the vision loop — the dominant reason recipes never hit on
+    // the platform-API tier's primary target. Regression: browser-recipes.test.js.
+    checkout: (u) => /\/(?:checkouts?|order|pay(?:ment)?|purchase)\b/i.test(u.pathname),
     cart:     (u) => /\/(?:cart|basket|bag|trolley)\b/i.test(u.pathname),
   },
   size: {
