@@ -16,9 +16,14 @@ const STEP_EVENT_TYPES = ['recipe_hit', 'vision_step'];
 const TERMINAL_EVENT_TYPES = ['session_done', 'session_error', 'session_ask'];
 
 // Fire-and-forget: callers should not await this on the hot path.
+// A logging failure must never affect the ordering loop, so this swallows its own error —
+// but it surfaces the FIRST failure once to the logs. Silent-forever swallowing is how the
+// table sat at zero rows without anyone noticing whether inserts were broken or just never
+// reached; one breadcrumb tells the difference without spamming a per-step loop.
+let loggedInsertFailure = false;
 async function logEvent({ userId, site, eventType, stepName = null, phase = null, detail = null }) {
   try {
-    await getSupabase().from('browser_session_events').insert({
+    const { error } = await getSupabase().from('browser_session_events').insert({
       user_id: userId,
       site: site || 'unknown',
       event_type: eventType,
@@ -26,8 +31,12 @@ async function logEvent({ userId, site, eventType, stepName = null, phase = null
       phase,
       detail,
     });
-  } catch {
-    // logging is never allowed to affect the ordering loop
+    if (error) throw error;
+  } catch (err) {
+    if (!loggedInsertFailure) {
+      loggedInsertFailure = true;
+      console.warn('[session-events] insert failed (further failures suppressed):', err?.message || err);
+    }
   }
 }
 

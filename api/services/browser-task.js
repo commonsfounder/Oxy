@@ -160,44 +160,15 @@ function siteKeyFromUrl(url) {
   catch { return 'unknown'; }
 }
 
-// --- Local vs managed (remote) browser --------------------------------------------------
-// Local stealth Chromium is FREE but runs on this box's IP — a datacenter IP on Cloud Run,
-// which anti-bot walls (Cloudflare/PerimeterX/"Access Denied") block on ~a third of sites
-// (Next, H&M, Argos, Nike, Just Eat in the reliability benchmark). A managed scraping browser
-// (Bright Data, Browserbase, …) routes through residential IPs + real fingerprints and clears
-// those walls — but it's METERED ($/GB or $/browser-hour), so we do NOT want every task on it.
-//
-// Cost control originally routed only empirically bot-walled hosts through the managed
-// browser. The product direction is now stricter: if Browserbase/remote is configured,
-// browser-agent shopping should use the realistic browser by default. Local remains an
-// explicit debug escape hatch via BROWSER_REMOTE_DEFAULT=false or a narrowed host list.
-function usingRemoteBrowser() {
-  return Boolean(process.env.BROWSERBASE_API_KEY || process.env.BROWSER_REMOTE_ENDPOINT);
-}
-
-// Empirically bot-walled on a datacenter IP (from test/dev/reliability-benchmark.js — these
-// are the sites that returned Access-Denied/Cloudflare, NOT my a-priori guesses: Tesco and
-// Zara actually pass on datacenter IP, so they're deliberately absent). Bare hosts, no www.
-// Override wholesale with BROWSER_REMOTE_HOSTS; force everything remote with BROWSER_REMOTE_ALWAYS=true.
-// Set BROWSER_REMOTE_DEFAULT=false to restore allowlist-only routing for local/cost debugging.
-const DEFAULT_REMOTE_HOSTS = ['next.co.uk', 'hm.com', 'asos.com', 'nike.com', 'argos.co.uk', 'just-eat.co.uk', 'deliveroo.co.uk', 'sainsburys.co.uk', 'boots.com'];
-
-// Pure so it's unit-testable. Decide whether a given host should use the managed browser:
-//  - no endpoint configured                 → never (free local, today's behaviour)
-//  - BROWSER_REMOTE_ALWAYS=true              → always
-//  - BROWSER_REMOTE_HOSTS set                → only those hosts (comma list)
-//  - else                                    → the empirical bot-wall default set
-// Matches the host itself or any subdomain of it (h === entry || h endsWith '.'+entry).
-function shouldUseRemoteForHost(host, env = process.env) {
-  if (!env.BROWSERBASE_API_KEY && !env.BROWSER_REMOTE_ENDPOINT) return false;
-  if (String(env.BROWSER_REMOTE_ALWAYS).toLowerCase() === 'true') return true;
-  if (!env.BROWSER_REMOTE_HOSTS && String(env.BROWSER_REMOTE_DEFAULT).toLowerCase() !== 'false') return true;
-  const list = env.BROWSER_REMOTE_HOSTS
-    ? env.BROWSER_REMOTE_HOSTS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-    : DEFAULT_REMOTE_HOSTS;
-  const h = String(host || '').replace(/^www\./, '').toLowerCase();
-  return list.some((entry) => h === entry || h.endsWith('.' + entry));
-}
+// --- Browser provider ------------------------------------------------------------------
+// Local stealth Chromium ONLY. The managed-browser (Browserbase/Bright Data) tier was
+// removed deliberately: the product's ordering path is the platform-API commerce tier
+// (Shopify + WooCommerce — see browser-platform-commerce.js / browser-platform-woocommerce.js),
+// which resolves and adds to cart over each platform's public JSON API and never touches a
+// bot-wall, so the residential-IP proxy the managed browser paid for bought nothing the
+// real flow needed. Everything now runs on the free local warm pool. If a datacenter-IP
+// bot-wall does block a checkout page, detectBlockWall surfaces it honestly rather than
+// silently paying a metered proxy.
 
 // Direct child PIDs of `parentPid`. Best-effort, two strategies since this runs on both a
 // macOS dev machine and Linux (Cloud Run): pgrep first (present on macOS; `-P` exits 1 with
@@ -229,13 +200,31 @@ function directChildPids(parentPid) {
   }
 }
 
-// Always launches a LOCAL stealth Chromium (the warm pool + the non-remote path). Never
-// touches the managed endpoint — remote is a separate, per-host connect (connectRemoteBrowser).
+// Container-hardened Chromium launch args. On Cloud Run the process runs as root inside a
+// slim container, where the two classic headless-Chromium failure modes are:
+//   --no-sandbox           : the setuid sandbox can't initialise as root in this container,
+//                            so without this the launch hangs/aborts.
+//   --disable-dev-shm-usage: Cloud Run gives /dev/shm only ~64MB; Chromium defaults to it for
+//                            shared memory and stalls or crashes when it fills. Point it at
+//                            /tmp instead. This was the likeliest cause of the 180s launch
+//                            timeouts seen in prod (browserType.launch: Timeout 180000ms).
+// Harmless on the macOS dev box (both are no-ops there), so no env gating.
+const CHROMIUM_LAUNCH_ARGS = ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu'];
+// Bound the launch so a wedged Chromium fails fast and the caller can retry/relaunch, rather
+// than hanging a whole ordering turn on Playwright's very generous default.
+const BROWSER_LAUNCH_TIMEOUT_MS = envInt('OXY_BROWSER_LAUNCH_TIMEOUT_MS', 45000);
+
+// Always launches a LOCAL stealth Chromium (the warm pool and every session). The managed
+// remote tier was removed — see the Browser provider note above.
 async function launchLocalBrowser() {
   // ponytail: headless:true in prod; BROWSER_HEADLESS=false lets a local debug run pop
   // a real window so you can watch the loop click around, instead of trusting logs.
   const before = directChildPids(process.pid);
-  const browser = await chromium.launch({ headless: process.env.BROWSER_HEADLESS !== 'false' });
+  const browser = await chromium.launch({
+    headless: process.env.BROWSER_HEADLESS !== 'false',
+    args: CHROMIUM_LAUNCH_ARGS,
+    timeout: BROWSER_LAUNCH_TIMEOUT_MS,
+  });
   // Live repro: this Playwright build doesn't expose browser.process() on a locally launched
   // browser (playwright-extra's wrapped Browser class has no such method at all — confirmed
   // by inspecting its prototype), so closeSession can't ask the browser object for its own
@@ -247,46 +236,11 @@ async function launchLocalBrowser() {
   return browser;
 }
 
-// Connect to the managed scraping browser over CDP. Bounded — a wrong/down endpoint must
-// fail fast so acquireBrowser can fall back to local instead of hanging the whole turn.
-// BrowserBase (preferred): POST /sessions → get a per-session connectUrl → connectOverCDP.
-// BROWSER_REMOTE_ENDPOINT (fallback): static WSS endpoint, e.g. a self-hosted Bright Data proxy.
-const REMOTE_CONNECT_TIMEOUT_MS = envInt('OXY_BROWSER_REMOTE_CONNECT_TIMEOUT_MS', 15000);
-async function connectRemoteBrowser() {
-  if (process.env.BROWSERBASE_API_KEY) {
-    const res = await fetch('https://api.browserbase.com/v1/sessions', {
-      method: 'POST',
-      headers: {
-        'x-bb-api-key': process.env.BROWSERBASE_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) throw new Error(`BrowserBase session create failed: ${res.status} ${await res.text()}`);
-    const { connectUrl } = await res.json();
-    return withTimeout(chromium.connectOverCDP(connectUrl), REMOTE_CONNECT_TIMEOUT_MS, 'browserbase connect');
-  }
-  return withTimeout(
-    chromium.connectOverCDP(process.env.BROWSER_REMOTE_ENDPOINT),
-    REMOTE_CONNECT_TIMEOUT_MS,
-    'remote browser connect',
-  );
-}
-
-// Get a browser for a specific host: the managed one when the host needs residential (and an
-// endpoint is configured), otherwise the free local warm pool. A remote connect failure
-// degrades to local — a bot-walled host will then fail as it does today, which is strictly
-// better than hanging on a dead endpoint. Returns { browser, remote } so the caller knows
-// whether to expect a metered session (and skips the warm-pool return path for it).
-async function acquireBrowser(host) {
-  if (shouldUseRemoteForHost(host)) {
-    try {
-      return { browser: await connectRemoteBrowser(), remote: true };
-    } catch (err) {
-      console.warn(`[browser-task] managed browser connect failed for ${host}, falling back to local:`, err.message);
-    }
-  }
-  return { browser: await getWarmBrowser(), remote: false };
+// Get a browser for a session. Local warm pool only — the managed/remote tier was removed
+// (see the Browser provider note above). Kept as a one-line indirection so the single call
+// site in openNewSession stays unchanged and future provider swaps have one seam.
+async function acquireBrowser() {
+  return { browser: await getWarmBrowser() };
 }
 
 // Warm browser pool: launching Chromium cold is ~4s — paid on the FIRST step of a turn,
@@ -294,11 +248,8 @@ async function acquireBrowser(host) {
 // turn grabs it instantly, then relaunch a replacement in the background for next time.
 // One spare is enough at personal-assistant concurrency (one user, mostly one task at a
 // time); if a second turn lands while the spare is in use it just launches cold as before.
-// Keep the local warm pool alive even when a managed endpoint is configured — selective
-// routing still sends the ~two-thirds of (non-walled) hosts through local, so they still
-// benefit from the warm spare. Only BROWSER_REMOTE_ALWAYS (everything remote) disables it.
-const WARM_POOL_ENABLED = process.env.OXY_BROWSER_WARM_POOL !== 'false' &&
-  String(process.env.BROWSER_REMOTE_ALWAYS).toLowerCase() !== 'true';
+// Disable with OXY_BROWSER_WARM_POOL=false (e.g. a memory-constrained debug run).
+const WARM_POOL_ENABLED = process.env.OXY_BROWSER_WARM_POOL !== 'false';
 let warmSpare = null;      // a launched, idle Browser waiting to be claimed
 let warmingPromise = null; // in-flight launch, so we never start two at once
 
@@ -363,8 +314,7 @@ const BROWSER_CLOSE_TIMEOUT_MS = 5000;
 // instead of eating it, and force-kill the OS process via the PID stashed in
 // launchLocalBrowser (`_oxyChildPid` — this Playwright build doesn't expose browser.process()
 // on a locally launched browser, confirmed by inspecting its prototype) if it's somehow
-// still alive after close(). Only set for a locally launched browser, not a remote
-// Browserbase connection — a no-op there, since the remote side owns that lifecycle.
+// still alive after close().
 async function closeSession(userId) {
   const session = liveSessions.get(userId);
   if (!session) return;
@@ -1761,10 +1711,7 @@ async function loadUserLocation(userId) {
 async function openNewSession(userId, url, goal, retailOptions = {}) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
-  // Route bot-walled hosts through the managed (residential) browser, everything else
-  // through the free local warm pool. `remote` is carried on the session so close paths and
-  // logs know it was a metered session.
-  const { browser, remote } = await acquireBrowser(site);
+  const { browser } = await acquireBrowser();
   // A smaller viewport means a smaller screenshot — fewer bytes and fewer pixels for the
   // model to read each step (the dominant per-step cost). 1024×768 still shows enough of a
   // commercial page to find a search box / first result.
@@ -1795,7 +1742,7 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
   const goalContext = parseGoalContext(goal);
   const usedFastpath = (openUrl !== url) ? siteKeyFromUrl(url) : null;
-  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath, remote });
+  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -5018,8 +4965,6 @@ module.exports = {
   _fastpathStore: fastpathStore,
   _learnedRecipeStore: learnedRecipeStore,
   getWarmBrowser,
-  shouldUseRemoteForHost,
-  usingRemoteBrowser,
   deriveSearchTerm,
   directSearchUrl,
   parseGoalContext,
