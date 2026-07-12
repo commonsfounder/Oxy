@@ -83,6 +83,7 @@ const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
+const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
@@ -2324,10 +2325,16 @@ async function executeAction(userId, action, params, context = {}) {
           const guard = await guardConciergeSpend(userId, total);
           if (!guard.ok) return { success: false, error: guard.error };
         }
+        // Tell the user up front which card the checkout will be paid with — or that
+        // none is saved — so confirm never surprises them at the payment form.
+        const agentCard = await getAgentCardSummary(supabase, userId).catch(() => null);
+        const cardNote = agentCard
+          ? ` I'll pay with your ${agentCard.brand} ending ${agentCard.last4}.`
+          : ' (No payment card is saved — if this checkout asks for card details, add one on the Payments screen first.)';
         return {
           success: true,
           confirmation: 'review_required',
-          text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}. Say the word and I'll place the order.`,
+          text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}.${cardNote} Say the word and I'll place the order.`,
           total: outcome.total,
           summary: outcome.summary,
           actionSummary: 'Order ready for payment'
@@ -2772,7 +2779,8 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
     const { error } = await supabase.from('memories').delete().eq('user_id', userId);
     if (error) throw error;
     await clearCheckoutProfile(supabase, userId).catch(() => {});
-    return { success: true, text: 'I cleared what I had in memory, including any saved checkout details.' };
+    await deleteAgentCard(supabase, userId).catch(() => {});
+    return { success: true, text: 'I cleared what I had in memory, including any saved checkout details and payment card.' };
   }
 
   if (normalizedScope === 'recent') {
@@ -2791,10 +2799,17 @@ async function forgetMemory(userId, { scope = '', query = '' } = {}) {
 
   // Checkout-specific forget: "forget my checkout details / address / email" etc.
   const CHECKOUT_FORGET_PATTERN = /\b(checkout|delivery\s+details?|my\s+(?:email|address|phone|details?))\b/i;
-  if (normalizedQuery && CHECKOUT_FORGET_PATTERN.test(normalizedQuery)) {
-    const cleared = await clearCheckoutProfile(supabase, userId).catch(() => null);
-    if (cleared) {
-      return { success: true, text: `I've cleared your saved ${cleared}.` };
+  const CARD_FORGET_PATTERN = /\b(card|payment)\b/i;
+  if (normalizedQuery && (CHECKOUT_FORGET_PATTERN.test(normalizedQuery) || CARD_FORGET_PATTERN.test(normalizedQuery))) {
+    // "forget my card" clears only the card; "forget my checkout details" only the
+    // profile; a query matching both clears both.
+    const checkoutAsked = CHECKOUT_FORGET_PATTERN.test(normalizedQuery);
+    const cardAsked = CARD_FORGET_PATTERN.test(normalizedQuery);
+    const cleared = checkoutAsked ? await clearCheckoutProfile(supabase, userId).catch(() => null) : null;
+    if (cardAsked) await deleteAgentCard(supabase, userId).catch(() => {});
+    if (cleared || cardAsked) {
+      const parts = [cleared, cardAsked ? 'payment card' : null].filter(Boolean).join(' and ');
+      return { success: true, text: `I've cleared your saved ${parts}.` };
     }
     return { success: true, text: "You don't have any saved checkout details — nothing to clear." };
   }
@@ -7119,6 +7134,46 @@ app.delete('/connectors/stripe/card', requireSessionAuth, async (req, res) => {
   try {
     await unlinkCard(supabase, userId);
     res.json({ linked: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Agent payment card — the card browser checkout fills into merchant payment forms
+// after the user confirms a ready_for_payment gate (api/services/agent-card.js).
+// Stored encrypted; GET only ever returns the masked summary, never the number/CVC.
+// Card entry happens over these authed routes (iOS Payments screen / curl), NEVER via
+// chat — checkout-profile.js's PAYMENT_ASK_PATTERN keeps PANs out of transcripts.
+app.post('/connectors/agent-card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { name, number, expMonth, expYear, cvc } = req.body || {};
+    const result = await saveAgentCard(supabase, userId, { name, number, expMonth, expYear, cvc });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ saved: true, card: result.summary });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/connectors/agent-card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const card = await getAgentCardSummary(supabase, userId);
+    res.json({ card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/connectors/agent-card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    await deleteAgentCard(supabase, userId);
+    res.json({ saved: false });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

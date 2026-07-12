@@ -23,6 +23,7 @@ const {
   saveCheckoutProfile,
   saveCheckoutEmail,
 } = require('./checkout-profile');
+const { getAgentCard } = require('./agent-card');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
 const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
@@ -4702,35 +4703,305 @@ async function runOrderingTurn(userId, args) {
   return outcome;
 }
 
-async function confirmPayment(userId) {
+// ---------------- Payment card filling — post-confirmation only ----------------
+// The ONLY code path allowed to touch payment fields. Everything upstream (the
+// checkout-profile autofill, the vision loop, every recipe) hard-stops on
+// payment-adjacent fields by design (PAYMENT_ASK_PATTERN in checkout-profile.js);
+// this section runs exclusively inside confirmPayment, i.e. strictly after the user
+// has explicitly said yes to the summary + total shown at ready_for_payment, and the
+// card itself comes decrypted from the server-side store (agent-card.js) — it never
+// passes through a model prompt or a chat message.
+
+// Order matters: cvc first ("card verification number" would otherwise hit 'number'),
+// split expiry before combined, name before number ("name on card" contains "card").
+const PAYMENT_INPUT_CLASSIFIERS = [
+  { field: 'cvc', pattern: /\b(cvc|cvv|csc|cid)\b|security.?code|card.?verification|verification.?(?:code|value|number)/i },
+  { field: 'exp_month', pattern: /exp(?:iry|iration)?[-_\s]?month|\bcc-exp-month\b|month.{0,12}expir/i },
+  { field: 'exp_year', pattern: /exp(?:iry|iration)?[-_\s]?year|\bcc-exp-year\b|year.{0,12}expir/i },
+  { field: 'expiry', pattern: /\bcc-exp\b|expir|exp.?date|valid.?(?:thru|to|until)|\bmm\s*\/?\s*yy/i },
+  { field: 'name', pattern: /name.?on.?card|card.?holder|\bcc-name\b|holder.?name/i },
+  { field: 'number', pattern: /card.?number|\bcc-number\b|\bpan\b|(?:credit|debit).?card.?no|\bcardnumber\b|long.?(?:card.?)?number/i },
+  { field: 'postcode', pattern: /post.?code|postal.?code|\bzip\b/i },
+];
+
+function classifyPaymentInput(hintText) {
+  const h = String(hintText || '');
+  if (!h) return null;
+  for (const { field, pattern } of PAYMENT_INPUT_CLASSIFIERS) {
+    if (pattern.test(h)) return field;
+  }
+  return null;
+}
+
+function formatCardValue(field, card, profile) {
+  switch (field) {
+    case 'number': return card.number;
+    case 'name': return card.name;
+    case 'cvc': return card.cvc;
+    case 'expiry': return `${String(card.expMonth).padStart(2, '0')}/${String(card.expYear).slice(-2)}`;
+    case 'exp_month': return String(card.expMonth).padStart(2, '0');
+    case 'exp_year': return String(card.expYear);
+    // Billing postcode (AVS) sits inside most card forms — reuse the consented delivery
+    // address, never guess. Returning null just leaves the field for the merchant to flag.
+    case 'postcode': return profile?.consent ? (profile?.address?.postcode || null) : null;
+    default: return null;
+  }
+}
+
+// Enumerate fillable inputs/selects in ONE frame with enough surrounding text to
+// classify them. Runs per-frame because PSP card fields (Stripe Elements, Adyen,
+// Braintree, Checkout.com Frames) each live in their own cross-origin iframe — the
+// generic hint sources below (name/id/placeholder/aria-label/autocomplete/label) cover
+// all of them without any PSP-specific branches.
+async function enumeratePaymentInputs(frame) {
+  return frame.evaluate(() => {
+    const out = [];
+    document.querySelectorAll('input, select').forEach((el, idx) => {
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      if (['hidden', 'submit', 'button', 'checkbox', 'radio'].includes(type)) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return;
+      let labelText = '';
+      if (el.labels && el.labels.length) {
+        labelText = Array.from(el.labels).map((l) => l.innerText || '').join(' ');
+      } else if (el.id) {
+        const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+        if (lab) labelText = lab.innerText || '';
+      }
+      const hint = [
+        el.name, el.id, el.placeholder,
+        el.getAttribute('aria-label'), el.getAttribute('autocomplete'),
+        el.getAttribute('data-elements-stable-field-name'), labelText
+      ].filter(Boolean).join(' ');
+      out.push({
+        idx,
+        tag: el.tagName.toLowerCase(),
+        hint,
+        empty: !(el.value || '').trim() || el.tagName === 'SELECT' && el.selectedIndex <= 0
+      });
+    });
+    return out;
+  }).catch(() => []);
+}
+
+async function fillFrameTextInput(frame, idx, value) {
+  const handle = await frame.evaluateHandle(
+    (i) => document.querySelectorAll('input, select')[i] || null, idx
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!handle) return false;
+  try {
+    await handle.click({ timeout: 3000 });
+    // Type, don't set: card inputs are almost always masked/formatted by page JS
+    // (spaces every 4 digits, MM/YY slash insertion) that only fires on key events.
+    await handle.type(String(value), { delay: 25 });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await handle.dispose().catch(() => {});
+  }
+}
+
+async function fillFrameSelect(frame, idx, candidates) {
+  return frame.evaluate(({ i, wants }) => {
+    const el = document.querySelectorAll('input, select')[i];
+    if (!el || el.tagName !== 'SELECT') return false;
+    for (const want of wants) {
+      for (const opt of el.options) {
+        const text = (opt.text || '').trim();
+        if (opt.value === want || text === want || text.startsWith(`${want} `)) {
+          el.value = opt.value;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        }
+      }
+    }
+    return false;
+  }, { i: idx, wants: candidates }).catch(() => false);
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+
+function selectCandidatesFor(field, card) {
+  if (field === 'exp_month') {
+    const m = card.expMonth;
+    return [String(m).padStart(2, '0'), String(m), MONTH_NAMES[m - 1]];
+  }
+  if (field === 'exp_year') {
+    return [String(card.expYear), String(card.expYear).slice(-2)];
+  }
+  return null;
+}
+
+/** True when any frame currently shows an empty card-number field. */
+async function paymentCardFieldsPresent(page) {
+  for (const frame of page.frames()) {
+    const inputs = await enumeratePaymentInputs(frame);
+    if (inputs.some((inp) => inp.empty && classifyPaymentInput(inp.hint) === 'number')) return true;
+  }
+  return false;
+}
+
+/**
+ * Fill every empty, classifiable card field across all frames. Returns how many
+ * logical fields were filled. Each logical field is filled at most once — a page
+ * that renders two "card number" inputs (one per payment-method tab) gets only the
+ * first, which is the visible one since hidden inputs are filtered out upstream.
+ */
+async function fillPaymentCard(session, card, onProgress = () => {}) {
+  const page = session.page;
+  const profile = session.checkoutProfile;
+  const done = new Set();
+  for (const frame of page.frames()) {
+    const inputs = await enumeratePaymentInputs(frame);
+    for (const input of inputs) {
+      const field = classifyPaymentInput(input.hint);
+      if (!field || !input.empty || done.has(field)) continue;
+      // A combined MM/YY field and split month/year selects are alternatives —
+      // whichever appears first on the page wins, the other never matches anyway.
+      if (field === 'expiry' && (done.has('exp_month') || done.has('exp_year'))) continue;
+      if ((field === 'exp_month' || field === 'exp_year') && done.has('expiry')) continue;
+      const value = formatCardValue(field, card, profile);
+      if (!value) continue;
+      let ok = false;
+      if (input.tag === 'select') {
+        const candidates = selectCandidatesFor(field, card);
+        if (candidates) ok = await fillFrameSelect(frame, input.idx, candidates);
+      } else {
+        ok = await fillFrameTextInput(frame, input.idx, value);
+      }
+      if (ok) {
+        done.add(field);
+        onProgress(`Filled ${field === 'number' ? 'card number' : field.replace('_', ' ')}`);
+      }
+    }
+  }
+  return done.size;
+}
+
+// Post-click page classification. Checked in this order — a confirmation page can
+// mention "payment" freely, so confirmed wins; declined beats 3DS because decline
+// banners often sit on the same page as the (now dismissed) challenge.
+// Deliberately past-tense/definite phrasings only: checkout pages freely say things like
+// "we'll send you a confirmation email" or "order summary" BEFORE payment, and a false
+// "confirmed" here closes the session without paying (or skips the pay click entirely on
+// the re-confirm guard).
+const ORDER_CONFIRMED_PATTERN = /order\s+(?:number|reference)\s*[:#]|thank you for your (?:order|purchase|booking)|booking (?:confirmed|reference:|complete)|payment (?:successful|was successful|complete)|your (?:order|booking) (?:is|has been) (?:confirmed|placed|received)|we(?:'|’)?ve (?:got|received) your order|order (?:is )?confirmed/i;
+const PAYMENT_DECLINED_PATTERN = /\bdeclined\b|payment (?:failed|unsuccessful|was not successful|error)|invalid (?:card|security code|cv[cv])|check your card|could ?n(?:o|’|')t (?:be )?process|there was a problem (?:processing|with) your payment|card details (?:are|were) (?:incorrect|invalid)/i;
+const THREEDS_CHALLENGE_PATTERN = /3-?d\s*secure|verify (?:your )?(?:payment|identity)|authentication (?:required|needed)|approve (?:this|the) (?:payment|purchase)|one[- ]?time (?:pass)?code|confirm (?:it(?:'|’)?s|this is) you/i;
+
+async function classifyPaymentOutcome(page) {
+  const texts = [];
+  for (const frame of page.frames()) {
+    const body = await frame.evaluate(() => (document.body ? document.body.innerText : '') || '').catch(() => '');
+    if (body) texts.push(body.slice(0, 20000));
+  }
+  const combined = `${page.url()}\n${texts.join('\n')}`;
+  if (/order-?confirm(?:ed|ation)|booking-?confirm|thank-?you/i.test(page.url()) || ORDER_CONFIRMED_PATTERN.test(combined)) return 'confirmed';
+  if (PAYMENT_DECLINED_PATTERN.test(combined)) return 'declined';
+  if (THREEDS_CHALLENGE_PATTERN.test(combined)) return 'challenge';
+  return 'unknown';
+}
+
+const CONFIRM_WATCH_BUDGET_MS = envInt('OXY_BROWSER_CONFIRM_WATCH_MS', 45000);
+const MAX_PAY_CLICKS = 3;
+
+async function findAndClickPayButton(page, wantedLabel) {
+  const elements = await extractClickableElements(page);
+  // Exact match on the confirmed label first — never substring-fallback where a stored
+  // "Pay" could match "Apple Pay"/"PayPal". If the page moved on (multi-step payment),
+  // accept a fresh payment-keyword button as the new final control.
+  const wanted = String(wantedLabel || '').trim().toLowerCase();
+  const target = elements.find((el) => el.text.trim().toLowerCase() === wanted)
+    || elements.find((el) => matchesPaymentKeyword(el.text));
+  if (!target) return null;
+  // Same-index-space resolve as the main loop: locator().nth() counts shadow-DOM nodes
+  // that querySelectorAll (extraction) doesn't, and a mis-indexed click HERE is a wrong
+  // click on a payment page — the one place that must never happen.
+  const handle = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
+  ).then((h) => h.asElement());
+  if (!handle) return null;
+  await handle.click({ timeout: 10000 });
+  return target.text;
+}
+
+async function confirmPayment(userId, onProgress = () => {}) {
   const session = getSession(userId);
   if (!session || !session.pendingPaymentLabel) {
     return { type: 'error', error: 'No order is waiting for payment confirmation — it may have expired.' };
   }
   try {
-    const elements = await extractClickableElements(session.page);
-    // Exact match only — never substring-fallback at the payment step, where a
-    // stored "Pay" could otherwise match "Apple Pay"/"PayPal" and click the wrong control.
-    const wanted = session.pendingPaymentLabel.trim().toLowerCase();
-    const target = elements.find(el => el.text.trim().toLowerCase() === wanted);
-    if (!target) {
+    // A re-confirm after a 3DS approval (or a lost response) must not click pay again —
+    // if the order already landed, report that instead of risking a double submission.
+    if (await classifyPaymentOutcome(session.page) === 'confirmed') {
+      const text = `Done — the order went through (${session.pendingPaymentLabel}).`;
+      await persistStorage(userId, session);
+      await closeSession(userId);
+      return { type: 'done', text };
+    }
+
+    const card = await getAgentCard(getSupabase(), userId).catch(() => null);
+
+    // Fill card details up front when the confirmed page already shows the form.
+    if (await paymentCardFieldsPresent(session.page)) {
+      if (!card) {
+        touchSession(userId);
+        return { type: 'error', error: 'This checkout needs card details, but no payment card is saved — add one on the Payments screen first, then confirm again. The order is still open.' };
+      }
+      await fillPaymentCard(session, card, onProgress);
+      await settle(session.page, 800);
+    }
+
+    const clickedLabel = await findAndClickPayButton(session.page, session.pendingPaymentLabel);
+    if (!clickedLabel) {
       return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
     }
-    // Same-index-space resolve as the main loop: locator().nth() counts shadow-DOM nodes
-    // that querySelectorAll (extraction) doesn't, and a mis-indexed click HERE is a wrong
-    // click on a payment page — the one place that must never happen.
-    const handle = await session.page.evaluateHandle(
-      ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
-      { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
-    ).then((h) => h.asElement());
-    if (!handle) {
-      return { type: 'error', error: `Couldn't find the "${session.pendingPaymentLabel}" button anymore — the page may have changed.` };
+    let payClicks = 1;
+
+    // Watch the aftermath instead of declaring victory on the click: many checkouts
+    // (train sites especially) put the card form BEHIND the confirmed button, and a
+    // 3DS challenge or a decline can follow the real pay click. Loop: settle →
+    // classify → on a fresh empty card form, fill it and press the next pay button.
+    const deadline = Date.now() + CONFIRM_WATCH_BUDGET_MS;
+    let sawChallenge = false;
+    while (Date.now() < deadline) {
+      await settle(session.page, 1500);
+      const state = await classifyPaymentOutcome(session.page);
+      if (state === 'confirmed') {
+        const text = `Done — placed the order (${clickedLabel}).`;
+        await persistStorage(userId, session);
+        await closeSession(userId);
+        return { type: 'done', text };
+      }
+      if (state === 'declined') {
+        touchSession(userId);
+        return { type: 'error', error: 'The payment was declined by the card issuer or the site — nothing further was attempted. The checkout is still open if you want to try a different card.' };
+      }
+      if (state === 'challenge') {
+        // 3DS/OTP needs the human — keep polling within budget so an approval made
+        // in their banking app right now still lands as a confirmed order.
+        sawChallenge = true;
+        continue;
+      }
+      if (card && payClicks < MAX_PAY_CLICKS && await paymentCardFieldsPresent(session.page)) {
+        const filledCount = await fillPaymentCard(session, card, onProgress);
+        if (filledCount > 0) {
+          await settle(session.page, 800);
+          const next = await findAndClickPayButton(session.page, session.pendingPaymentLabel);
+          if (next) payClicks += 1;
+        }
+      }
     }
-    await handle.click({ timeout: 10000 });
-    const text = `Done — placed the order (${session.pendingPaymentLabel}).`;
-    await persistStorage(userId, session);
-    await closeSession(userId);
-    return { type: 'done', text };
+
+    touchSession(userId);
+    if (sawChallenge) {
+      return { type: 'error', error: 'The bank is asking for verification (3-D Secure). Approve the payment in your banking app, then ask me to confirm again — the checkout is still open.' };
+    }
+    return { type: 'error', error: `I pressed "${clickedLabel}" but couldn't see an order confirmation within ${Math.round(CONFIRM_WATCH_BUDGET_MS / 1000)}s. The checkout is still open — say "confirm" to try again, or check the site directly.` };
   } catch (error) {
     return { type: 'error', error: error.message };
   }
@@ -4789,5 +5060,15 @@ module.exports = {
   CLICKABLE_SELECTOR,
   runOrderingTurn,
   confirmPayment,
-  cancelPayment
+  cancelPayment,
+  classifyPaymentInput,
+  formatCardValue,
+  selectCandidatesFor,
+  fillPaymentCard,
+  paymentCardFieldsPresent,
+  classifyPaymentOutcome,
+  findAndClickPayButton,
+  ORDER_CONFIRMED_PATTERN,
+  PAYMENT_DECLINED_PATTERN,
+  THREEDS_CHALLENGE_PATTERN
 };
