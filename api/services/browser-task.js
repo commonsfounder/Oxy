@@ -3921,7 +3921,10 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
         recipeStepName = recipeMove.stepName;
         void logRecipeHit({ userId, site: session.site, stepName: recipeStepName });
       } else {
-        void logVisionStep({ userId, site: session.site });
+        // Snapshot the page path BEFORE the model call (the resulting action may navigate),
+        // so a vision step is labelled by the page it was spent on.
+        let visionPath = null;
+        try { visionPath = new URL(session.page.url()).pathname; } catch { /* keep null */ }
         const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
         // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
         // at each step, to eyeball that badges land on real controls. No-op when unset.
@@ -3931,6 +3934,16 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
         decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
         pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
         session.transientBrowserRetries = 0;
+        // Trace WHICH vision step this was: the page path + the action the model chose (+ a
+        // short target label). Lets a handful of runs name the residual vision steps so the
+        // avoidable ones can be recipe-ised. Fire-and-forget; never blocks the hot path.
+        const tgt = Number.isInteger(decision.elementId) ? (elements[decision.elementId]?.text || '') : '';
+        void logVisionStep({
+          userId,
+          site: session.site,
+          phase: visionPath,
+          detail: { step: steps, action: decision.action, target: String(tgt).slice(0, 60) },
+        });
       }
 
       if (decision.action === 'invalid') {

@@ -44,8 +44,8 @@ function logRecipeHit({ userId, site, stepName, phase = null }) {
   return logEvent({ userId, site, eventType: 'recipe_hit', stepName, phase });
 }
 
-function logVisionStep({ userId, site, phase = null }) {
-  return logEvent({ userId, site, eventType: 'vision_step', phase });
+function logVisionStep({ userId, site, phase = null, detail = null }) {
+  return logEvent({ userId, site, eventType: 'vision_step', phase, detail });
 }
 
 function logSessionOutcome({ userId, site, outcome, steps = null, durationMs = null }) {
