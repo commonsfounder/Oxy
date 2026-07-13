@@ -53,6 +53,29 @@ test('pickVariant prefers available variants over out-of-stock ones', () => {
   assert.equal(v.id, 2);
 });
 
+// Real allbirds sock variants: word size "medium" must match a letter option that carries a
+// parenthetical fit note ("M (W8-10 / M8)"). Exact-equality missed this, forcing a whole
+// vision-driven product search instead of the storefront-API add (2026-07-12 prod trace).
+test('pickVariant matches a spelled-out size against a letter option with a parenthetical', () => {
+  const product = {
+    variants: [
+      { id: 1, option1: 'S (W5-7)', available: true },
+      { id: 2, option1: 'M (W8-10 / M8)', available: true },
+      { id: 3, option1: 'L (W11 / M9-12)', available: true }
+    ]
+  };
+  assert.equal(pickVariant(product, { size: 'medium' }).id, 2);
+  assert.equal(pickVariant(product, { size: 'large' }).id, 3);
+});
+
+test('pickVariant does not false-match a spelled-out size onto an unrelated numeric option', () => {
+  const product = { variants: [{ id: 1, option1: '9', available: true }, { id: 2, option1: '9.5', available: true }] };
+  // "medium" has no letter/numeric counterpart here — must stay ambiguous, not grab "9".
+  assert.equal(pickVariant(product, { size: 'medium' }), null);
+  // a numeric goal still matches exactly and never bleeds onto the ".5" neighbour
+  assert.equal(pickVariant(product, { size: '9' }).id, 1);
+});
+
 test('pickVariant with no size/color and a single variant returns it', () => {
   const product = { variants: [{ id: 1, available: true }] };
   assert.equal(pickVariant(product, {}).id, 1);

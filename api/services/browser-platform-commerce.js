@@ -35,6 +35,25 @@ function normalizeOption(v) {
   return String(v || '').toLowerCase().replace(/^uk\s*/, '').trim();
 }
 
+// Spelled-out clothing sizes ↔ the single-letter option values merchants actually use.
+const SIZE_WORD_TO_LETTER = {
+  'extra small': 'xs', 'x-small': 'xs', 'xsmall': 'xs',
+  small: 's', medium: 'm', large: 'l',
+  'extra large': 'xl', 'x-large': 'xl', 'xlarge': 'xl', 'extra extra large': 'xxl',
+};
+
+// Does a normalized variant option value satisfy the wanted size? Handles three real shapes:
+//  1. exact ("m" === "m", "9" === "9");
+//  2. a letter option that carries a fit note — "m (w8-10 / m8)" — matched on its leading token;
+//  3. a spelled-out goal ("medium") mapped to the letter the option uses ("m").
+// Deliberately strict on numerics: "9" must not match "9.5" (leading token compare, no prefix).
+function sizeMatches(optNorm, wantNorm) {
+  if (!optNorm || !wantNorm) return false;
+  const wants = new Set([wantNorm, SIZE_WORD_TO_LETTER[wantNorm]].filter(Boolean));
+  const optHead = optNorm.split(/[\s/(]+/)[0]; // "m (w8-10 / m8)" -> "m", "9" -> "9"
+  return wants.has(optNorm) || wants.has(optHead);
+}
+
 function pickVariant(product, goalContext) {
   const variants = Array.isArray(product.variants) ? product.variants : [];
   const wantSize = goalContext && goalContext.size ? normalizeOption(goalContext.size) : null;
@@ -48,7 +67,7 @@ function pickVariant(product, goalContext) {
   const scored = pool.map(v => {
     const opts = [v.option1, v.option2, v.option3].map(normalizeOption).filter(Boolean);
     let score = 0;
-    if (wantSize && opts.some(o => o === wantSize)) score += 2;
+    if (wantSize && opts.some(o => sizeMatches(o, wantSize))) score += 2;
     if (wantColor && opts.some(o => o.includes(wantColor) || wantColor.includes(o))) score += 1;
     return { v, score };
   }).sort((a, b) => b.score - a.score);
