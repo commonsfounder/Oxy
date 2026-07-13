@@ -364,6 +364,42 @@ test('scoreProductNameVsGoal does not punish "17e" when the goal actually asked 
   assert.ok(suffixed > 0, 'goal explicitly asked for "17e", so it should score positively');
 });
 
+// Regression: a 2026-07-13 allbirds trace picked "Women's Wool Runner NZ Mid Waterproof"
+// (base + three unrequested model qualifiers) over the plain "Men's Wool Runner" — they
+// tied at score 4 because the scorer counted only the shared "wool"+"runner" and ignored
+// the extra NZ/Mid/Waterproof qualifiers. platform-add trusts this pick with no vision
+// check, so a tie silently carts the wrong shoe. The base model must out-rank the variant.
+test('scoreProductNameVsGoal penalizes unrequested footwear model qualifiers (NZ/Mid/Waterproof)', () => {
+  const goal = 'order the Wool Runner shoes in size 9';
+  const base = scoreProductNameVsGoal("Men's Wool Runner", goal);
+  const variant = scoreProductNameVsGoal("Women's Wool Runner NZ Mid Waterproof - Natural Black", goal);
+  assert.ok(base > variant, 'the plain Wool Runner must outscore the NZ/Mid/Waterproof variant');
+  assert.ok(variant < 0, 'a name carrying unrequested model qualifiers must not score positively');
+});
+
+test('scoreProductNameVsGoal does not penalize a model qualifier the goal actually asked for', () => {
+  const goal = 'order the waterproof Mizzle Wool Runner in size 9';
+  const wanted = scoreProductNameVsGoal("Men's Wool Runner Mizzle Waterproof", goal);
+  const base = scoreProductNameVsGoal("Men's Wool Runner", goal);
+  assert.ok(wanted > 0, 'goal asked for the Mizzle waterproof line, so it must score positively');
+  assert.ok(wanted > base, 'the requested waterproof Mizzle variant should out-rank the plain base');
+});
+
+test('scoreProductNameVsGoal penalizes the wrong gender when the goal names one', () => {
+  const goal = "order the women's Wool Runner in size 8";
+  const womens = scoreProductNameVsGoal("Women's Wool Runner", goal);
+  const mens = scoreProductNameVsGoal("Men's Wool Runner", goal);
+  assert.ok(womens > mens, 'the requested gender must outscore the other');
+  assert.ok(mens < 0, "a men's product must not score positively against a women's goal");
+});
+
+test('scoreProductNameVsGoal does not penalize gender when the goal is gender-neutral', () => {
+  const goal = 'order the Wool Runner shoes in size 9';
+  const mens = scoreProductNameVsGoal("Men's Wool Runner", goal);
+  const womens = scoreProductNameVsGoal("Women's Wool Runner", goal);
+  assert.ok(mens > 0 && womens > 0, 'neither gender is wrong when the goal names none');
+});
+
 test('scoreSearchResultText requires a whole-word match, not a substring ("17e" must not count as "17")', () => {
   const term = 'iPhone 17 256GB';
   const plain = scoreSearchResultText('Apple iPhone 17, 256GB, Lavender', term);

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { pickVariant, normalizeOption, resolveAndAddToCart } = require('../../api/services/browser-platform-commerce');
+const { scoreProductNameVsGoal } = require('../../api/services/browser-task');
 
 test('normalizeOption strips a UK prefix and lowercases', () => {
   assert.equal(normalizeOption('UK 10'), '10');
@@ -117,6 +118,38 @@ test('resolveAndAddToCart flags an ambiguous variant instead of guessing', async
   assert.equal(result.ok, false);
   assert.equal(result.needsAsk, true);
   assert.deepEqual(result.options, ['S', 'M']);
+});
+
+// End-to-end with the REAL scorer and real allbirds /products.json-shaped titles: a
+// gender-neutral "Wool Runner size 9" goal must resolve the base "Men's Wool Runner" over
+// the "Women's Wool Runner NZ Mid Waterproof" variant AND the unrelated "Tree Runner", then
+// pickVariant must still resolve the size-9 variant. Guards the 2026-07-13 tie that would
+// have silently carted the wrong shoe via the no-vision storefront-API add.
+test('resolveAndAddToCart picks the base Wool Runner (not a variant/other model) and resolves size 9', async () => {
+  let addedId = null;
+  const fakeCtx = {
+    get: async () => ({
+      ok: () => true,
+      json: async () => ({
+        products: [
+          { title: "Women's Wool Runner NZ Mid Waterproof - Natural Black", handle: 'wr-nz-mid',
+            variants: [{ id: 10, option1: '9', available: true }] },
+          { title: "Men's Tree Runner", handle: 'tree-runner',
+            variants: [{ id: 20, option1: '9', available: true }] },
+          { title: "Men's Wool Runner", handle: 'wool-runner',
+            variants: [{ id: 31, option1: '8', available: true }, { id: 32, option1: '9', available: true }] }
+        ]
+      })
+    }),
+    post: async (url, opts) => { addedId = opts.data.id; return { ok: () => true }; }
+  };
+  const result = await resolveAndAddToCart(
+    fakeCtx, 'https://allbirds.com', 'order the Wool Runner shoes in size 9',
+    { size: '9' }, scoreProductNameVsGoal
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.product.handle, 'wool-runner', 'the plain Wool Runner must win the scoring');
+  assert.equal(addedId, 32, 'pickVariant must resolve the size-9 variant of the chosen product');
 });
 
 test('resolveAndAddToCart adds the matched variant via cart/add.js and returns the cart URL', async () => {

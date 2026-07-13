@@ -1638,6 +1638,31 @@ const GENERIC_SPEC_WORD = /^\d+[a-z]*$/i;
 // token, neither the match bonus nor PRODUCT_DIFFERENTIATORS caught it, so it slipped
 // through with a positive score and nothing to out-rank it.
 const SUFFIXED_MODEL_WORD = /^(\d{1,3})([a-z])$/i;
+// Footwear/apparel base-vs-variant model qualifiers, the PRODUCT_DIFFERENTIATORS analogue
+// for clothing. Regression (2026-07-13 allbirds trace): "order the Wool Runner shoes"
+// tied the plain "Men's Wool Runner" against "Women's Wool Runner NZ Mid Waterproof" at
+// score 4 — both share only "wool"+"runner", and the extra NZ/Mid/Waterproof qualifiers
+// were invisible to the scorer, so platform-add could silently cart the wrong shoe. A goal
+// asking for the base line never means the NZ/Mid/Mizzle/waterproof/trail variant; if the
+// goal DOES name one of these it lands in goalWords and matches (scored, not penalized)
+// before this branch is reached. Kept to distinctive model words only — "up" (Runner-up),
+// "high", "low" are deliberately excluded, too common as ordinary product words to penalize
+// blind, exactly like the "case"/"pack" caveat on PRODUCT_DIFFERENTIATORS above.
+const MODEL_QUALIFIERS = /^(nz|mid|mizzle|waterproof|weatherproof|trail)$/i;
+// Gender is a product axis like tier: "Men's Wool Runner" and "Women's Wool Runner" are
+// different products. Penalize a name whose gender contradicts the goal's, but ONLY when
+// the goal actually specifies one — a gender-neutral goal ("the Wool Runner shoes") must
+// not punish either gender. Note \bmen\b does not match inside "women" (no word boundary
+// before the 'm'), so the two regexes are independent; a name with both words (rare) or
+// neither yields null and never triggers a penalty.
+function detectGender(s) {
+  const t = String(s || '').toLowerCase();
+  const female = /\b(women|womens|woman|womans|female|ladies|girls?)\b/.test(t);
+  const male = /\b(men|mens|man|mans|male|boys?)\b/.test(t);
+  if (female && !male) return 'female';
+  if (male && !female) return 'male';
+  return null;
+}
 // Regression: John Lewis search for "plain white bath towel" picked "...Bath Mat" over the
 // actual "...Towels" listing — "towel" (goal, singular) never matched "towels" (name, plural)
 // with a bare word-set comparison, while "mat" tied on the shared generic word "bath". Cheap
@@ -1663,10 +1688,15 @@ function scoreProductNameVsGoal(name, goal) {
     const suffixed = w.match(SUFFIXED_MODEL_WORD);
     if (suffixed && goalWords.has(suffixed[1])) {
       hasUnrequestedVariant = true; // goal asked for plain "17", this is the "17e" tier
-    } else if (PRODUCT_DIFFERENTIATORS.test(w)) {
-      hasUnrequestedVariant = true; // an unmentioned tier word (Pro/Max/Plus/...)
+    } else if (PRODUCT_DIFFERENTIATORS.test(w) || MODEL_QUALIFIERS.test(w)) {
+      hasUnrequestedVariant = true; // an unmentioned tier/model word (Pro/Max/NZ/Mid/...)
     }
   }
+  // Gender contradiction (goal says one gender, name says the other) is an unrequested
+  // variant just like a tier word. Only fires when the goal names a gender at all.
+  const goalGender = detectGender(goal);
+  const nameGender = detectGender(name);
+  if (goalGender && nameGender && goalGender !== nameGender) hasUnrequestedVariant = true;
   // Regression: "Nintendo Switch 2, 256GB Console" scored positively against "iPhone 17
   // 256GB" purely on the shared "256gb" token and got treated as a valid candidate.
   // Without any non-generic word in common, this can't be the same product.
