@@ -353,7 +353,17 @@ function calendarWindow(params = {}) {
   const ymd = when === 'tomorrow' ? addDaysYMD(today, 1)
     : when === 'today' ? today
       : null;
-  if (!ymd) return { timeMin: new Date().toISOString(), timeMax: null, ymd: null };
+  if (!ymd) {
+    // No explicit day was requested. Still cap how far out we look — otherwise
+    // singleEvents expansion of an annually-recurring event (e.g. a birthday) returns
+    // one instance per future year, and those can crowd out real near-term events in
+    // a maxResults-limited, startTime-ordered query.
+    return {
+      timeMin: new Date().toISOString(),
+      timeMax: `${addDaysYMD(today, 30)}T23:59:59Z`,
+      ymd: null
+    };
+  }
   return {
     // Query a small UTC buffer around the London day, then the backend applies
     // an exact London-calendar-day filter before synthesis. This avoids missing

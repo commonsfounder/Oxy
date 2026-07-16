@@ -5559,6 +5559,14 @@ function formatNaturalEventTime(start, end) {
   return `${day}, ${startTime}-${timeFmt.format(endDate)}`;
 }
 
+function calendarPeriodLabel(bounds) {
+  if (!bounds?.ymd) return 'Upcoming';
+  const today = formatLondonYMD();
+  if (bounds.ymd === today) return 'Today';
+  if (bounds.ymd === addDaysToYMD(today, 1)) return 'Tomorrow';
+  return bounds.ymd;
+}
+
 function normalizeCalendarEventForSynthesis(event = {}) {
   return {
     title: String(event.title || event.summary || 'Untitled').trim().slice(0, 160),
@@ -5588,7 +5596,16 @@ function buildConciseDataAnswer(dataResults = []) {
     lines.push('I did not find matching emails for that filter.');
   }
   if (calendarItems.length) {
-    lines.push(`Tomorrow has ${calendarItems.length} calendar item${calendarItems.length === 1 ? '' : 's'}.`);
+    const count = calendarItems.length;
+    const noun = `calendar item${count === 1 ? '' : 's'}`;
+    const periodLabel = calendarSets.find(entry => entry.periodLabel)?.periodLabel || 'Upcoming';
+    lines.push(
+      periodLabel === 'Today' || periodLabel === 'Tomorrow'
+        ? `${periodLabel} has ${count} ${noun}.`
+        : periodLabel === 'Upcoming'
+          ? `You have ${count} upcoming ${noun}.`
+          : `${count} ${noun} for ${periodLabel}.`
+    );
     for (const event of calendarItems.slice(0, 5)) {
       lines.push(`- ${event.title}${event.time ? `, ${event.time}` : ''}`);
     }
@@ -5597,8 +5614,12 @@ function buildConciseDataAnswer(dataResults = []) {
   }
   if (!emailItems.length && !calendarItems.length && emailSets.length && calendarSets.length) {
     lines[0] = 'Nothing urgent needs your attention. I did not find actionable email or calendar commitments to prepare for.';
-  } else if (emailItems.length || calendarItems.length) {
+  } else if (emailItems.length && calendarItems.length) {
     lines.push('Start with the email items that need a response, then use the calendar items as your preparation list.');
+  } else if (emailItems.length) {
+    lines.push('Start with the email items that need a response.');
+  } else if (calendarItems.length) {
+    lines.push('Use the calendar items above as your preparation list.');
   }
   return lines.join('\n');
 }
@@ -5663,11 +5684,12 @@ function buildStructuredDataSummary(entry, message = '') {
       .slice(0, 8)
       .map(normalizeCalendarEventForSynthesis);
     if (!items.length) return { text: 'No calendar events found in the requested window.', items: [] };
+    const periodLabel = calendarPeriodLabel(bounds);
     const label = bounds?.ymd ? `Calendar events for ${bounds.ymd}` : 'Calendar events';
     const text = `${label} (${items.length}):\n${items.map((event, index) =>
       `${index + 1}. ${event.title}${event.time ? ` at ${event.time}` : ''}`
     ).join('\n')}`;
-    return { text, items };
+    return { text, items, periodLabel };
   }
   if (entry?.action === 'get_telegram_contacts') {
     if (!Array.isArray(result.contacts) || result.contacts.length === 0) return { text: result.text || 'No contacts found.', items: [] };
@@ -5682,7 +5704,7 @@ function getStructuredDataResults(actionResults, message = '') {
     .filter(entry => DATA_ACTIONS.has(entry.action) && entry.result?.success)
     .map(entry => {
       const summary = buildStructuredDataSummary(entry, message);
-      return { action: entry.action, text: summary.text, items: summary.items || [], groups: summary.groups || [] };
+      return { action: entry.action, text: summary.text, items: summary.items || [], groups: summary.groups || [], periodLabel: summary.periodLabel };
     })
     .filter(entry => entry.text);
 }
@@ -7213,6 +7235,7 @@ module.exports.inferCompoundReadOnlyTurn = inferCompoundReadOnlyTurn;
 module.exports.summarizeReadOnlyActionResults = summarizeReadOnlyActionResults;
 module.exports.getStructuredDataResults = getStructuredDataResults;
 module.exports.guardVisibleDataResponse = guardVisibleDataResponse;
+module.exports.buildConciseDataAnswer = buildConciseDataAnswer;
 module.exports.isPureContentGenerationTurn = isPureContentGenerationTurn;
 module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
 module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActions;
