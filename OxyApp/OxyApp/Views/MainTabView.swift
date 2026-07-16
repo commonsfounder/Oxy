@@ -4,23 +4,24 @@ import UIKit
 struct MainTabView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
-    @State private var selectedTab = Tab.today
+    /// North star: agentic Home is the product. Chat is history / deep work, not identity.
+    @State private var selectedTab = Tab.home
 
     enum Tab: String, CaseIterable {
-        case chat, today, more
+        case home, chat, more
 
         var icon: String {
             switch self {
+            case .home: return "square.stack.3d.up"
             case .chat: return "bubble.left"
-            case .today: return "sun.max"
             case .more: return "square.grid.2x2"
             }
         }
 
         var label: String {
             switch self {
+            case .home: return "Home"
             case .chat: return "Chat"
-            case .today: return "Today"
             case .more: return "More"
             }
         }
@@ -30,12 +31,12 @@ struct MainTabView: View {
         // System TabView keeps iOS liquid-glass chrome. A second custom bar used to
         // stack on top of it (double tab bar); do not reintroduce that overlay.
         TabView(selection: $selectedTab) {
+            AgenticHomeView()
+                .tag(Tab.home)
+                .tabItem { Label(Tab.home.label, systemImage: Tab.home.icon) }
             ChatHomeView()
                 .tag(Tab.chat)
                 .tabItem { Label(Tab.chat.label, systemImage: Tab.chat.icon) }
-            ProactiveView()
-                .tag(Tab.today)
-                .tabItem { Label(Tab.today.label, systemImage: Tab.today.icon) }
             MoreView()
                 .tag(Tab.more)
                 .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
@@ -215,13 +216,13 @@ struct MoreView: View {
     private var menuSection: some View {
         VStack(alignment: .leading, spacing: 28) {
             menuGroup("You") {
-                AppRow(title: "Memory", subtitle: "What I remember about you") { destination = .memory }
+                AppRow(title: "Memory") { destination = .memory }
                 rowDivider
                 AppRow(title: "Account", subtitle: "Name, data, and sign out") { destination = .profile }
             }
 
             menuGroup("Milgrain") {
-                AppRow(title: "Pendant", subtitle: "The piece you wear", onTap: { destination = .pendant }) {
+                AppRow(title: "Pendant", onTap: { destination = .pendant }) {
                     HStack(spacing: 8) {
                         AppStatusDot(kind: pendantDot, diameter: 5)
                         if let s = pendantStatusText {
@@ -230,7 +231,7 @@ struct MoreView: View {
                     }
                 }
                 rowDivider
-                AppRow(title: "Connections", subtitle: "Apps and services I can use") { destination = .connectors }
+                AppRow(title: "Connections") { destination = .connectors }
                 rowDivider
                 AppRow(title: "Payments", subtitle: "Your linked card and balance") { destination = .payments }
             }

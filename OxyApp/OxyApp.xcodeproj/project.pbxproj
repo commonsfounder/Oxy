@@ -35,10 +35,10 @@
 		A10000010000000000000022 /* VoiceInputManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000022 /* VoiceInputManager.swift */; };
 		A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000024 /* NativeIntegrationManager.swift */; };
 		A10000010000000000000024 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000025 /* AppDelegate.swift */; };
-		A10000010000000000000025 /* ProactiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000027 /* ProactiveView.swift */; };
-		A10000010000000000000045 /* TodayLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000045 /* TodayLayout.swift */; };
-		A10000010000000000000046 /* IncomingCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000046 /* IncomingCard.swift */; };
-		A10000010000000000000057 /* TodayChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000057 /* TodayChrome.swift */; };
+		A10000010000000000000100 /* AgenticHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000100 /* AgenticHomeView.swift */; };
+		A10000010000000000000101 /* AgentTaskSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000101 /* AgentTaskSession.swift */; };
+		A10000010000000000000102 /* AgentTaskSessionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000102 /* AgentTaskSessionView.swift */; };
+		A10000010000000000000103 /* AgentStepViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000103 /* AgentStepViews.swift */; };
 		A10000010000000000000026 /* PendantAudioBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000028 /* PendantAudioBridge.swift */; };
 		A10000010000000000000028 /* HapticManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000030 /* HapticManager.swift */; };
 		A10000010000000000000029 /* ChatHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000031 /* ChatHomeView.swift */; };
@@ -88,10 +88,10 @@
 		A20000010000000000000024 /* NativeIntegrationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeIntegrationManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000025 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		A20000010000000000000026 /* OxyApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OxyApp.entitlements; sourceTree = "<group>"; };
-		A20000010000000000000027 /* ProactiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProactiveView.swift; sourceTree = "<group>"; };
-		A20000010000000000000045 /* TodayLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayLayout.swift; sourceTree = "<group>"; };
-		A20000010000000000000046 /* IncomingCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IncomingCard.swift; sourceTree = "<group>"; };
-		A20000010000000000000057 /* TodayChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayChrome.swift; sourceTree = "<group>"; };
+		A20000010000000000000100 /* AgenticHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgenticHomeView.swift; sourceTree = "<group>"; };
+		A20000010000000000000101 /* AgentTaskSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTaskSession.swift; sourceTree = "<group>"; };
+		A20000010000000000000102 /* AgentTaskSessionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTaskSessionView.swift; sourceTree = "<group>"; };
+		A20000010000000000000103 /* AgentStepViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStepViews.swift; sourceTree = "<group>"; };
 		A20000010000000000000028 /* PendantAudioBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendantAudioBridge.swift; sourceTree = "<group>"; };
 		A20000010000000000000030 /* HapticManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HapticManager.swift; sourceTree = "<group>"; };
 		A20000010000000000000031 /* ChatHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHomeView.swift; sourceTree = "<group>"; };
@@ -151,6 +151,7 @@
 			children = (
 				A20000010000000000000002 /* AppState.swift */,
 				A20000010000000000000003 /* Message.swift */,
+				A20000010000000000000101 /* AgentTaskSession.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -184,7 +185,7 @@
 				A20000010000000000000039 /* PendantStatusView.swift */,
 				A50000010000000000000006 /* Auth */,
 				A50000010000000000000007 /* Chat */,
-				A50000010000000000000015 /* Proactive */,
+				A50000010000000000000100 /* Home */,
 				A50000010000000000000012 /* Memory */,
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
@@ -278,15 +279,14 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		A50000010000000000000015 /* Proactive */ = {
+		A50000010000000000000100 /* Home */ = {
 			isa = PBXGroup;
 			children = (
-				A20000010000000000000027 /* ProactiveView.swift */,
-				A20000010000000000000045 /* TodayLayout.swift */,
-				A20000010000000000000046 /* IncomingCard.swift */,
-				A20000010000000000000057 /* TodayChrome.swift */,
+				A20000010000000000000100 /* AgenticHomeView.swift */,
+				A20000010000000000000102 /* AgentTaskSessionView.swift */,
+				A20000010000000000000103 /* AgentStepViews.swift */,
 			);
-			path = Proactive;
+			path = Home;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000016 /* Onboarding */ = {
@@ -406,10 +406,10 @@
 				A10000010000000000000022 /* VoiceInputManager.swift in Sources */,
 				A10000010000000000000023 /* NativeIntegrationManager.swift in Sources */,
 				A10000010000000000000024 /* AppDelegate.swift in Sources */,
-				A10000010000000000000025 /* ProactiveView.swift in Sources */,
-				A10000010000000000000045 /* TodayLayout.swift in Sources */,
-				A10000010000000000000046 /* IncomingCard.swift in Sources */,
-				A10000010000000000000057 /* TodayChrome.swift in Sources */,
+				A10000010000000000000100 /* AgenticHomeView.swift in Sources */,
+				A10000010000000000000101 /* AgentTaskSession.swift in Sources */,
+				A10000010000000000000102 /* AgentTaskSessionView.swift in Sources */,
+				A10000010000000000000103 /* AgentStepViews.swift in Sources */,
 				A10000010000000000000026 /* PendantAudioBridge.swift in Sources */,
 				A10000010000000000000033 /* PendantTelemetryMonitor.swift in Sources */,
 				A10000010000000000000028 /* HapticManager.swift in Sources */,

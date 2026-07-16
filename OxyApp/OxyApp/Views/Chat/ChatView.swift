@@ -1019,14 +1019,6 @@ private struct WelcomeCard: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .appEntrance(appeared, riseOffset: 18, delay: 0.1)
-
-                Text("Ask naturally. I’ll use your connected context only when it is available.")
-                    .font(.appBody(15))
-                    .foregroundStyle(Color.appMuted)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 14)
-                    .appEntrance(appeared, riseOffset: 12, delay: 0.14)
             }
             .padding(.horizontal, 24)
             .padding(.top, 58)
@@ -1034,7 +1026,7 @@ private struct WelcomeCard: View {
             Spacer()
 
             VStack(alignment: .leading, spacing: 12) {
-                Text("Good starting points")
+                Text("Suggestions")
                     .font(.appBody(11, weight: .medium))
                     .tracking(1.6)
                     .textCase(.uppercase)

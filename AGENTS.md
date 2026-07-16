@@ -44,6 +44,7 @@ Push to `origin/main` — Cloud Run auto-deploys from GitHub. **Committing local
 3. **Never call an API you haven't confirmed exists.** Before referencing a member of another class/module, open that file and check. If you add UI that needs new members on a service, implement the full surface (wired to real lifecycle, not stubs) in the same pass, and grep ALL call sites of the type across the codebase.
 4. **Don't copy identifiers across scopes without checking they resolve.** Node won't catch ReferenceErrors at parse time. Check import/require names against the module's actual exports (aliases in one file are not exports of the package). After nontrivial JS edits, run eslint `no-undef` across `api/**/*.js` (ignore `document`/`window` inside `page.evaluate` blocks).
 5. **A broken build from a multi-file pass needs a full sweep, not single-file patching.** Expect the fix to ripple across every file touched by the same pass.
+6. **No AI-isms in user-facing copy.** Don't write chatty, first-person, over-explaining UI text — subtitles that restate an obvious label ("Pendant" / "The piece you wear"), disclaimers about how the assistant works ("Ask naturally. I'll use your connected context only when it is available."), or soft marketing phrasing ("Good starting points"). Real product copy is terse and factual, or absent. If a label is self-explanatory, ship it without a subtitle.
 
 ## Memory discipline — mandatory handoff
 
