@@ -46,6 +46,15 @@ struct AgentTaskSessionView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        // Working-hero steps advance themselves once the "job" settles. Tying this
+        // to the step index via .task(id:) means it auto-cancels the moment the
+        // step changes or the cover is dismissed — no stray timer can fire late.
+        .task(id: session.currentIndex) {
+            guard case .workingHero = session.currentStep?.ui else { return }
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.appSpring) { session.advance() }
+        }
     }
 
     // MARK: - Chrome
@@ -56,8 +65,7 @@ struct AgentTaskSessionView: View {
                 HapticManager.shared.impact(.light)
                 onDismiss()
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
+                AppIcon("xmark", size: 14)
                     .foregroundStyle(ink.opacity(0.8))
                     .frame(width: 34, height: 34)
                     .background(.ultraThinMaterial, in: Circle())
@@ -98,6 +106,8 @@ struct AgentTaskSessionView: View {
                 RideConfirmStepView(details: details, ink: ink)
             case .paymentConfirm(let details):
                 PaymentConfirmStepView(details: details, ink: ink)
+            case .productDetail(let details):
+                ProductDetailStepView(details: details, ink: ink)
             case .workingHero(let status):
                 WorkingHeroStepView(title: step.title, status: status, ink: ink)
             }
@@ -115,8 +125,7 @@ struct AgentTaskSessionView: View {
                 onOpenChat(nil)
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "bubble.left")
-                        .font(.system(size: 14, weight: .semibold))
+                    AppIcon("chat", size: 15)
                     Text("Tap to chat")
                         .font(.system(size: 14, weight: .medium))
                 }

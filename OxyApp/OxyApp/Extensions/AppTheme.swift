@@ -15,40 +15,41 @@ private func appDynamicColor(dark: Color, light: Color) -> Color {
 }
 
 extension Color {
-    /// Main canvas. Warm black in dark mode, warm near-white in light.
+    /// Main canvas. Gleb cool pastel base in light (the app's identity); warm black
+    /// retained for dark, though the app is pinned light.
     static let appBackground = appDynamicColor(
         dark: Color(red: 0.047, green: 0.043, blue: 0.043),   // #0C0B0B
-        light: Color(red: 0.980, green: 0.976, blue: 0.969)   // #FAF9F7
+        light: Color(red: 0.969, green: 0.969, blue: 0.980)   // #F7F7FA — Gleb wash base
     )
 
-    /// Quiet raised surface.
+    /// Quiet raised surface — cool glassy near-white.
     static let appSurface = appDynamicColor(
         dark: Color(red: 0.082, green: 0.078, blue: 0.075),   // #151413
-        light: Color(red: 0.949, green: 0.937, blue: 0.914)   // #F2EFE9
+        light: Color(red: 0.965, green: 0.967, blue: 0.980)   // #F6F7FA
     )
 
     /// Raised surface (sheets, prominent rows).
     static let appSurface2 = appDynamicColor(
         dark: Color(red: 0.118, green: 0.110, blue: 0.102),   // #1E1C1A
-        light: Color(red: 0.918, green: 0.898, blue: 0.859)   // #EAE5DB
+        light: Color(red: 0.929, green: 0.933, blue: 0.957)   // #EDEEF4
     )
 
-    /// Hairline / divider.
+    /// Hairline / divider — soft cool edge that reads on glass.
     static let appHairline = appDynamicColor(
         dark: Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10),
-        light: Color.black.opacity(0.10)
+        light: Color(red: 0.18, green: 0.19, blue: 0.22).opacity(0.10)
     )
 
-    /// Primary text.
+    /// Primary text — Gleb ink.
     static let appInk = appDynamicColor(
         dark: Color(red: 0.949, green: 0.933, blue: 0.906),   // #F2EEE7
-        light: Color(red: 0.129, green: 0.118, blue: 0.102)   // #211E1A
+        light: Color(red: 0.180, green: 0.192, blue: 0.220)   // #2E313A — Gleb ink
     )
 
-    /// Secondary / captions.
+    /// Secondary / captions — Gleb muted.
     static let appMuted = appDynamicColor(
         dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
-        light: Color(red: 0.431, green: 0.404, blue: 0.361)   // #6E675C
+        light: Color(red: 0.451, green: 0.471, blue: 0.520)   // #737885 — Gleb muted
     )
 
     /// Metal accent. Use sparingly: selected detail, status, progress, important moments.

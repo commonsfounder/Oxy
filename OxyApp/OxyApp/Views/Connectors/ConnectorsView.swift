@@ -355,8 +355,7 @@ private struct AppIconView: View {
                     .lineLimit(1)
                     .padding(.horizontal, 4)
             } else {
-                Image(systemName: fallbackSystemName)
-                    .font(.system(size: 17, weight: .semibold))
+                AppIcon(sf: fallbackSystemName, size: 18)
                     .foregroundStyle(brand.foreground)
             }
         }

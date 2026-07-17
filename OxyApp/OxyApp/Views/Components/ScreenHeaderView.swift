@@ -17,8 +17,7 @@ struct ScreenHeaderView: View {
             if let onBack {
                 // Raw chevron — no frosted glass, no circular chrome (Milgrain spec).
                 Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .medium))
+                    AppIcon("chevron-left", size: 17)
                         .foregroundStyle(Color.mgHeading)
                         .frame(width: circle, height: circle)
                         .contentShape(Rectangle())

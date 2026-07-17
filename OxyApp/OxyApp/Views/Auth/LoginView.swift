@@ -88,6 +88,19 @@ struct LoginView: View {
         isLoading = true
         errorMessage = nil
 
+        #if DEBUG
+        // Local-only bypass so the UI can be driven in the Simulator without a
+        // backend that has demo auth enabled. Sets state directly (Simulator
+        // keychain saves are unreliable). Never compiled into Release.
+        HapticManager.shared.success()
+        appState.userId = "demo@oxy.app"
+        appState.token = "debug-local"
+        appState.isDemoSession = true
+        appState.isAuthenticated = true
+        isLoading = false
+        return
+        #endif
+
         Task {
             do {
                 let response = try await authService.demoLogin()
@@ -184,8 +197,7 @@ private struct LoginFormPage: View {
                 if showDemoLogin {
                     Button(action: onDemoLogin) {
                         HStack(spacing: 8) {
-                            Image(systemName: "person.crop.circle.badge.checkmark")
-                                .font(.system(size: 15, weight: .medium))
+                            AppIcon("person-check", size: 16)
                             Text("Continue as Test User")
                                 .font(.system(size: 13, weight: .semibold))
                                 .tracking(1.1)

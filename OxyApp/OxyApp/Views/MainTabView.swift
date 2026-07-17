@@ -10,11 +10,12 @@ struct MainTabView: View {
     enum Tab: String, CaseIterable {
         case home, chat, more
 
+        /// Bundled asset key (no SF Symbols).
         var icon: String {
             switch self {
-            case .home: return "square.stack.3d.up"
-            case .chat: return "bubble.left"
-            case .more: return "square.grid.2x2"
+            case .home: return "tab-home"
+            case .chat: return "tab-chat"
+            case .more: return "tab-more"
             }
         }
 
@@ -27,19 +28,27 @@ struct MainTabView: View {
         }
     }
 
+    private func tabLabel(_ tab: Tab) -> some View {
+        Label {
+            Text(tab.label)
+        } icon: {
+            Image("ic-\(tab.icon)").renderingMode(.template)
+        }
+    }
+
     var body: some View {
         // System TabView keeps iOS liquid-glass chrome. A second custom bar used to
         // stack on top of it (double tab bar); do not reintroduce that overlay.
         TabView(selection: $selectedTab) {
             AgenticHomeView()
                 .tag(Tab.home)
-                .tabItem { Label(Tab.home.label, systemImage: Tab.home.icon) }
+                .tabItem { tabLabel(.home) }
             ChatHomeView()
                 .tag(Tab.chat)
-                .tabItem { Label(Tab.chat.label, systemImage: Tab.chat.icon) }
+                .tabItem { tabLabel(.chat) }
             MoreView()
                 .tag(Tab.more)
-                .tabItem { Label(Tab.more.label, systemImage: Tab.more.icon) }
+                .tabItem { tabLabel(.more) }
         }
         .tint(Color.appAccent)
         // Environment still provided so scroll helpers / previews that read it stay safe;
@@ -51,6 +60,17 @@ struct MainTabView: View {
         .id(accentColor)
         .onAppear {
             HapticManager.shared.prepare()
+            #if DEBUG
+            if let tab = ProcessInfo.processInfo.environment["OXY_DEBUG_TAB"],
+               let t = Tab(rawValue: tab) {
+                selectedTab = t
+                return
+            }
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" {
+                selectedTab = .home
+                return
+            }
+            #endif
             if appState.isDemoSession || SiriRequestBus.shared.pendingQuery != nil {
                 selectedTab = .chat
             }

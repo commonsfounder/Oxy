@@ -82,7 +82,7 @@ final class AgentStep: Identifiable {
         switch ui {
         case .timePicker, .placePicker, .personPicker: return selectedID != nil
         case .workingHero: return false
-        case .planBoard, .rideConfirm, .paymentConfirm: return true
+        case .planBoard, .rideConfirm, .paymentConfirm, .productDetail: return true
         }
     }
 }
@@ -94,6 +94,7 @@ enum StepUI {
     case personPicker(people: [PersonOption], draftMessage: String)
     case rideConfirm(RideDetails)
     case paymentConfirm(PaymentDetails)
+    case productDetail(ProductDetails)
     case workingHero(status: String)
 }
 
@@ -136,6 +137,33 @@ struct PaymentDetails: Equatable {
     let detail: String
 }
 
+/// A product surfaced for a "buy X" job. Everything except `name` is optional so
+/// the step renders honestly before a real product-lookup connector fills it in —
+/// no fabricated prices or specs attached to a real product.
+struct ProductDetails: Equatable {
+    let name: String
+    let subtitle: String
+    var priceText: String?
+    var specs: [String]
+    var swatches: [ProductSwatch]
+
+    init(name: String, subtitle: String, priceText: String? = nil, specs: [String] = [], swatches: [ProductSwatch] = []) {
+        self.name = name
+        self.subtitle = subtitle
+        self.priceText = priceText
+        self.specs = specs
+        self.swatches = swatches
+    }
+}
+
+struct ProductSwatch: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let red: Double
+    let green: Double
+    let blue: Double
+}
+
 // MARK: - Plan generator (keyword scaffold, replace with real intent parsing later)
 
 enum AgentPlanGenerator {
@@ -151,6 +179,9 @@ enum AgentPlanGenerator {
         if containsRideKeyword(lower) {
             return rideSession(prompt: prompt)
         }
+        if containsBuyKeyword(lower) {
+            return buySession(prompt: prompt)
+        }
         return nil
     }
 
@@ -160,6 +191,14 @@ enum AgentPlanGenerator {
 
     private static func containsOrderKeyword(_ lower: String) -> Bool {
         (lower.contains("order") && (lower.contains("food") || lower.contains("takeout") || lower.contains("delivery")))
+    }
+
+    /// Word-anchored so "card", "care", "scary", "cargo" don't trigger a buy job
+    /// (an earlier substring match on "car"/"buy a" hijacked unrelated intents).
+    private static func containsBuyKeyword(_ lower: String) -> Bool {
+        let words = Set(lower.split { !$0.isLetter }.map(String.init))
+        if words.contains("buy") || words.contains("buying") || words.contains("purchase") { return true }
+        return lower.contains("order me a") || lower.contains("i want to buy")
     }
 
     private static func personName(in prompt: String) -> String {
@@ -209,6 +248,64 @@ enum AgentPlanGenerator {
             )), ctaLabel: "Book Uber")
         ]
         return AgentTaskSession(title: "Ride home", originalPrompt: prompt, steps: steps)
+    }
+
+    /// Pulls the product the user actually named out of their phrasing. No product
+    /// data is invented — the detail step shows the parsed name and stays honest
+    /// about price/specs until a real product-lookup connector fills them in.
+    private static func productName(from prompt: String) -> String {
+        var s = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let leads = [
+            "i want to buy a", "i want to buy", "i'd like to buy a", "i'd like to buy",
+            "i want to purchase a", "i want to purchase", "buy me a", "buy me", "buy a",
+            "purchase a", "purchase", "order me a", "order me", "get me a", "buy"
+        ]
+        let lower = s.lowercased()
+        for lead in leads where lower.hasPrefix(lead + " ") {
+            s = String(s.dropFirst(lead.count + 1)).trimmingCharacters(in: .whitespaces)
+            break
+        }
+        let cleaned = s.trimmingCharacters(in: CharacterSet(charactersIn: " .?!"))
+        return cleaned.isEmpty ? "your item" : cleaned.capitalized
+    }
+
+    private static func buySession(prompt: String) -> AgentTaskSession {
+        let name = productName(from: prompt)
+        let steps = [
+            AgentStep(
+                title: "Finding \(name)",
+                status: .active,
+                ui: .workingHero(status: "Searching options in the background"),
+                ctaLabel: "Next"
+            ),
+            AgentStep(
+                title: name,
+                ui: .productDetail(ProductDetails(
+                    name: name,
+                    subtitle: "Best match for your request",
+                    // Finish options are universal enough to show pre-backend; price and
+                    // specs stay empty until a real product-lookup connector fills them.
+                    swatches: [
+                        ProductSwatch(name: "Silver", red: 0.80, green: 0.80, blue: 0.82),
+                        ProductSwatch(name: "Graphite", red: 0.22, green: 0.22, blue: 0.24),
+                        ProductSwatch(name: "Slate", red: 0.42, green: 0.45, blue: 0.50),
+                        ProductSwatch(name: "Chalk", red: 0.95, green: 0.94, blue: 0.91),
+                        ProductSwatch(name: "Sand", red: 0.84, green: 0.80, blue: 0.70)
+                    ]
+                )),
+                ctaLabel: "Continue to checkout"
+            ),
+            AgentStep(
+                title: "Confirm",
+                ui: .paymentConfirm(PaymentDetails(
+                    merchant: name,
+                    amount: "At checkout",
+                    detail: "Final price is confirmed before anything is charged."
+                )),
+                ctaLabel: "Review & confirm"
+            )
+        ]
+        return AgentTaskSession(title: "Buy \(name)", originalPrompt: prompt, steps: steps)
     }
 
     private static func orderSession(prompt: String) -> AgentTaskSession {

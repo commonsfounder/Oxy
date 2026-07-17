@@ -75,13 +75,11 @@ struct TurnReceiptRow: View {
                 HStack(spacing: 3) {
                     Text("Open")
                         .font(.appBody(12.5, weight: .medium))
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
+                    AppIcon("chevron-right", size: 11)
                 }
                 .foregroundStyle(Color.appTitanium)
             } else if isExpandable {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
+                AppIcon("chevron-down", size: 12)
                     .foregroundStyle(Color.appMuted.opacity(0.75))
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
@@ -136,8 +134,7 @@ struct TurnReceiptRow: View {
                     HStack(spacing: 3) {
                         Text("Open")
                             .font(.appBody(12, weight: .medium))
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                        AppIcon("chevron-right", size: 10)
                     }
                     .foregroundStyle(Color.appTitanium)
                 }
@@ -156,12 +153,10 @@ struct TurnReceiptRow: View {
             switch state {
             case .success:
                 // Muted, not green — green is reserved for world-changing outcomes.
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .semibold))
+                AppIcon("check", size: 12)
                     .foregroundStyle(Color.appMuted)
             case .failure:
-                Image(systemName: "exclamationmark")
-                    .font(.system(size: 11, weight: .semibold))
+                AppIcon("alert", size: 12)
                     .foregroundStyle(Color.appDanger)
             case .neutral:
                 Circle()

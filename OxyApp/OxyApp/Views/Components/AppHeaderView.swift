@@ -22,8 +22,7 @@ struct AppHeaderView: View {
                 // Left: history / menu, in a soft circular button (matches the
                 // app's other circular nav controls), finished with Liquid Glass.
                 Button(action: onLeading) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 16, weight: .medium))
+                    AppIcon("menu", size: 18)
                         .foregroundColor(Color.appInk.opacity(0.85))
                         .frame(width: circle, height: circle)
                         .appGlass(Circle(), interactive: true)
@@ -57,8 +56,7 @@ struct AppHeaderView: View {
                     // new, so it'd be a no-op). One tap starts fresh from anywhere.
                     if !isEmptyChat, let onNewChat {
                         Button(action: onNewChat) {
-                            Image(systemName: "square.and.pencil")
-                                .font(.system(size: 16, weight: .medium))
+                            AppIcon("edit", size: 17)
                                 .foregroundColor(Color.appInk.opacity(0.85))
                                 .frame(width: circle, height: circle)
                                 .appGlass(Circle(), interactive: true)

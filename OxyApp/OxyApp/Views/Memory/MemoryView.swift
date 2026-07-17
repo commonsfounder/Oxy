@@ -67,8 +67,7 @@ struct MemoryView: View {
                                     withAnimation(.appStandard) { composerExpanded = true }
                                 } label: {
                                     HStack(spacing: 12) {
-                                        Image(systemName: "plus")
-                                            .font(.system(size: 13, weight: .medium))
+                                        AppIcon("plus", size: 14)
                                             .foregroundStyle(Color.mgSecondary)
                                         Text("Remember something…")
                                             .font(.appBody(15))
@@ -142,7 +141,7 @@ struct MemoryView: View {
                                     Button(role: .destructive) {
                                         pendingDeleteItem = item
                                     } label: {
-                                        Label("Delete", systemImage: "trash.fill")
+                                        Label { Text("Delete") } icon: { AppIcon("trash", size: 16) }
                                     }
                                     // The app's accent tint (mint/etc.) otherwise bleeds into
                                     // swipe actions, overriding the system's destructive red.
@@ -335,8 +334,7 @@ private struct MemoryRow: View {
                         .foregroundStyle(Color.mgSecondary)
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
+                AppIcon("chevron-right", size: 13)
                     .foregroundStyle(Color.mgSecondary.opacity(0.5))
                     .padding(.top, 2)
                     .padding(.trailing, 24)
@@ -357,8 +355,7 @@ private struct MemorySearchField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 13))
+            AppIcon("search", size: 15)
                 .foregroundStyle(Color.mgSecondary)
             TextField("Search memories…", text: $text)
                 .font(.appBody(14))
@@ -371,8 +368,7 @@ private struct MemorySearchField: View {
                 Button {
                     text = ""
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
+                    AppIcon("xmark-circle", size: 15)
                         .foregroundStyle(Color.mgSecondary)
                         .frame(width: 40, height: 40)
                         .contentShape(Rectangle())
@@ -461,8 +457,7 @@ private struct MemoryDropBox: View {
                 Spacer(minLength: 8)
                 if let onCollapse {
                     Button(action: onCollapse) {
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 13, weight: .medium))
+                        AppIcon("chevron-up", size: 14)
                             .foregroundStyle(Color.mgSecondary)
                             .frame(width: 32, height: 32)
                             .contentShape(Rectangle())

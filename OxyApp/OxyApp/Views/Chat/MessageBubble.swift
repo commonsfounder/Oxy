@@ -133,8 +133,7 @@ struct MessageBubble: View {
                             onActionCommand?(command)
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: 13, weight: .semibold))
+                                AppIcon(sf: "arrow.clockwise", size: 14)
                                 Text(recovery.recoveryAction?.label ?? "Keep going")
                                     .font(.appBody(13, weight: .semibold))
                             }
@@ -513,8 +512,7 @@ private struct FailedTurnView: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: "exclamationmark.circle")
-                .font(.system(size: 14, weight: .semibold))
+            AppIcon(sf: "exclamationmark.circle", size: 15)
                 .foregroundStyle(Color.appWarning)
             Text(message)
                 .font(.appBody(13.5))
@@ -696,8 +694,7 @@ private struct DirectionsResultCard: View {
             UIApplication.shared.open(url)
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .semibold))
+                AppIcon(sf: systemImage, size: 13)
                 Text(label)
                     .font(.appBody(12.5, weight: .semibold))
                     .lineLimit(1)
@@ -793,8 +790,7 @@ private struct MessageSourceChips: View {
                             Text(source.title)
                                 .font(.appBody(11))
                                 .lineLimit(1)
-                            Image(systemName: "arrow.up.right")
-                                .font(.system(size: 8, weight: .semibold))
+                            AppIcon(sf: "arrow.up.right", size: 10)
                         }
                         .foregroundStyle(Color.appTitanium)
                         .padding(.horizontal, 9)
@@ -823,12 +819,10 @@ private struct ToolStatusGlyph: View {
         Group {
             switch state {
             case .success:
-                Image(systemName: "checkmark")
-                    .font(.system(size: 12, weight: .semibold))
+                AppIcon(sf: "checkmark", size: 13)
                     .foregroundStyle(Color.appSuccess)
             case .failure:
-                Image(systemName: "exclamationmark")
-                    .font(.system(size: 12, weight: .semibold))
+                AppIcon(sf: "exclamationmark", size: 13)
                     .foregroundStyle(Color.appDanger)
             case .neutral:
                 Circle()
@@ -847,8 +841,7 @@ private struct ToolHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .regular))
+            AppIcon(sf: icon, size: 13)
                 .foregroundStyle(Color.appMuted)
                 .frame(width: 14, alignment: .center)
             Text(eyebrow)
@@ -906,8 +899,7 @@ struct UberHandoffCard: View {
             TodayCard {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        Image(systemName: "car")
-                            .font(.system(size: 12, weight: .regular))
+                        AppIcon(sf: "car", size: 14)
                             .foregroundStyle(Color.appMuted)
                         Text("Ride to \(destination)")
                             .font(.appBody(14.5, weight: .medium))

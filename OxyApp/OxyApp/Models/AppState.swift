@@ -19,8 +19,14 @@ final class AppState {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.logout()
-            self?.errorMessage = "Session expired. Please sign in again."
+            guard let self else { return }
+            #if DEBUG
+            // A local debug demo session uses a fake token; its 401s must not bounce
+            // us out of the UI we're trying to iterate on.
+            if self.isDemoSession { return }
+            #endif
+            self.logout()
+            self.errorMessage = "Session expired. Please sign in again."
         }
     }
 

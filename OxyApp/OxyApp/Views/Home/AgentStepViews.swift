@@ -42,12 +42,10 @@ private struct SelectableGlassRow<Content: View>: View {
                     .fill(isSelected ? ink : ink.opacity(0.08))
                     .frame(width: 26, height: 26)
                 if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
+                    AppIcon("check", size: 12, weight: .bold)
                         .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
                 } else {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
+                    AppIcon("plus", size: 12)
                         .foregroundStyle(ink.opacity(0.6))
                 }
             }
@@ -82,8 +80,7 @@ struct PlanBoardStepView: View {
                                 .fill(entry.status == .done ? ink : ink.opacity(0.08))
                                 .frame(width: 26, height: 26)
                             if entry.status == .done {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 11, weight: .bold))
+                                AppIcon("check", size: 12, weight: .bold)
                                     .foregroundStyle(.white)
                             } else {
                                 Text("\(index + 1)")
@@ -137,8 +134,7 @@ struct TimePickerStepView: View {
                                 Spacer()
                                 ZStack {
                                     Circle().fill(isSelected ? ink : ink.opacity(0.08)).frame(width: 22, height: 22)
-                                    Image(systemName: isSelected ? "checkmark" : "plus")
-                                        .font(.system(size: 10, weight: .bold))
+                                    AppIcon(isSelected ? "check" : "plus", size: 11, weight: .bold)
                                         .foregroundStyle(isSelected ? Color.white : ink.opacity(0.6))
                                 }
                             }
@@ -272,12 +268,12 @@ struct RideConfirmStepView: View {
             StepTitleBlock(title: "Book a ride", subtitle: "\(details.eta) away", ink: ink)
 
             VStack(spacing: 0) {
-                rideRow(icon: "location.circle.fill", label: "Pickup", value: details.pickup)
+                rideRow(icon: "location", label: "Pickup", value: details.pickup)
                 Divider().overlay(ink.opacity(0.08))
-                rideRow(icon: "mappin.circle.fill", label: "Drop-off", value: details.dropoff)
+                rideRow(icon: "pin", label: "Drop-off", value: details.dropoff)
                 if let price = details.price {
                     Divider().overlay(ink.opacity(0.08))
-                    rideRow(icon: "creditcard.fill", label: "Estimate", value: price)
+                    rideRow(icon: "card", label: "Estimate", value: price)
                 }
             }
             .padding(16)
@@ -287,8 +283,7 @@ struct RideConfirmStepView: View {
 
     private func rideRow(icon: String, label: String, value: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+            AppIcon(icon, size: 16)
                 .foregroundStyle(ink.opacity(0.6))
                 .frame(width: 20)
             Text(label)
@@ -339,30 +334,172 @@ struct PaymentConfirmStepView: View {
     }
 }
 
-// MARK: - Working hero (Phase 3)
+// MARK: - Product detail (buy job — data-driven, Gleb-styled)
+
+struct ProductDetailStepView: View {
+    let details: ProductDetails
+    var ink: Color
+    @State private var swatchIndex = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            StepTitleBlock(title: details.name, subtitle: details.subtitle, ink: ink)
+
+            if let priceText = details.priceText {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PRICE")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(ink.opacity(0.45))
+                    Text(priceText)
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(ink)
+                }
+            }
+
+            if !details.specs.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(details.specs, id: \.self) { spec in
+                            Text(spec)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(ink.opacity(0.7))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            // Generic hero plate — an honest placeholder until a real product-lookup
+            // connector supplies imagery. Tinted by the chosen finish; no hardcoded art.
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.45))
+                selectedSwatch.map { s in
+                    RadialGradient(
+                        colors: [
+                            Color(red: s.red, green: s.green, blue: s.blue).opacity(0.55),
+                            Color(red: 0.85, green: 0.9, blue: 1.0).opacity(0.3),
+                            .clear
+                        ],
+                        center: .center, startRadius: 8, endRadius: 200
+                    )
+                }
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 0.7)
+                AppIcon("cube", size: 60)
+                    .foregroundStyle(ink.opacity(0.4))
+                    .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
+            }
+            .frame(height: 190)
+            .frame(maxWidth: .infinity)
+            .shadow(color: .black.opacity(0.06), radius: 16, y: 8)
+
+            if !details.swatches.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(selectedSwatch?.name.uppercased() ?? "FINISH")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(ink.opacity(0.45))
+                    HStack(spacing: 12) {
+                        ForEach(Array(details.swatches.enumerated()), id: \.element.id) { index, swatch in
+                            Circle()
+                                .fill(Color(red: swatch.red, green: swatch.green, blue: swatch.blue))
+                                .frame(width: 26, height: 26)
+                                .overlay(
+                                    Circle().strokeBorder(
+                                        swatchIndex == index ? ink.opacity(0.8) : Color.black.opacity(0.1),
+                                        lineWidth: swatchIndex == index ? 2 : 0.5
+                                    )
+                                )
+                                .scaleEffect(swatchIndex == index ? 1.08 : 1)
+                                .onTapGesture {
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { swatchIndex = index }
+                                    HapticManager.shared.impact(.light)
+                                }
+                        }
+                    }
+                }
+            }
+
+            if details.priceText == nil {
+                HStack(spacing: 6) {
+                    AppIcon("shield-check", size: 13)
+                    Text("Final price is confirmed at checkout")
+                        .font(.system(size: 12))
+                }
+                .foregroundStyle(ink.opacity(0.45))
+            }
+        }
+    }
+
+    private var selectedSwatch: ProductSwatch? {
+        details.swatches.indices.contains(swatchIndex) ? details.swatches[swatchIndex] : nil
+    }
+}
+
+// MARK: - Working hero (Phase 3 — holographic search)
 
 struct WorkingHeroStepView: View {
     let title: String
     let status: String
     var ink: Color
     @State private var pulse = false
+    @State private var rotation: Double = 0
 
     var body: some View {
         VStack(spacing: 22) {
             Spacer(minLength: 40)
 
             ZStack {
+                // Radar rings
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .strokeBorder(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.7, green: 0.85, blue: 1.0).opacity(0.0),
+                                    Color(red: 0.6, green: 0.8, blue: 1.0).opacity(0.45),
+                                    Color(red: 1.0, green: 0.85, blue: 0.7).opacity(0.25),
+                                    Color(red: 0.7, green: 0.85, blue: 1.0).opacity(0.0)
+                                ],
+                                center: .center
+                            ),
+                            lineWidth: 1.2
+                        )
+                        .frame(width: CGFloat(150 + i * 44), height: CGFloat(150 + i * 44))
+                        .scaleEffect(pulse ? 1.04 : 0.96)
+                        .opacity(pulse ? 0.9 : 0.55)
+                        .rotationEffect(.degrees(rotation + Double(i * 20)))
+                }
+
                 Circle()
-                    .fill(ink.opacity(0.06))
-                    .frame(width: 140, height: 140)
-                    .scaleEffect(pulse ? 1.08 : 0.94)
-                Circle()
-                    .strokeBorder(ink.opacity(0.18), lineWidth: 1)
-                    .frame(width: 140, height: 140)
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(red: 0.75, green: 0.88, blue: 1.0).opacity(0.55),
+                                Color(red: 1.0, green: 0.9, blue: 0.8).opacity(0.25),
+                                .clear
+                            ],
+                            center: .center,
+                            startRadius: 6,
+                            endRadius: 90
+                        )
+                    )
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(pulse ? 1.02 : 0.98)
             }
+            .frame(height: 240)
             .onAppear {
-                withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
                     pulse = true
+                }
+                withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) {
+                    rotation = 360
                 }
             }
 
@@ -389,8 +526,7 @@ struct SessionDoneStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 30, weight: .semibold))
+            AppIcon("check-circle", size: 30)
                 .foregroundStyle(ink.opacity(0.8))
             Text(title)
                 .font(.system(size: 22, weight: .semibold))

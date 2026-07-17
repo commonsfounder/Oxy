@@ -7,8 +7,7 @@ struct ErrorBanner: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "wifi.exclamationmark")
-                .font(.system(size: 12, weight: .medium))
+            AppIcon("wifi-alert", size: 14)
                 .foregroundStyle(Color.appMuted)
 
             Text(message)
@@ -34,8 +33,7 @@ struct ErrorBanner: View {
 
             if let onDismiss {
                 Button(action: onDismiss) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                    AppIcon("xmark", size: 12)
                         .foregroundStyle(Color.appMuted)
                         .frame(width: 32, height: 32)
                         .contentShape(Rectangle())

@@ -21,6 +21,9 @@ struct OxyApp: App {
             RootView()
                 .environment(appState)
                 .tint(Color.appAccent)
+                // Gleb light identity, app-wide. Every app* token's light value is the
+                // source of truth for the surface; native chrome follows this pin.
+                .preferredColorScheme(.light)
         }
     }
 }
@@ -45,6 +48,17 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.35), value: appState.isAuthenticated)
         .task {
             appState.restoreSession()
+            #if DEBUG
+            // Boot straight to the app for local UI iteration when launched with
+            // OXY_DEBUG_AUTOLOGIN=1 (used to drive the Simulator without tapping).
+            if !appState.isAuthenticated,
+               ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" {
+                appState.userId = "demo@oxy.app"
+                appState.token = "debug-local"
+                appState.isDemoSession = true
+                appState.isAuthenticated = true
+            }
+            #endif
             didRestoreSession = true
         }
     }
