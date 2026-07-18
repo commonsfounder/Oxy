@@ -32,8 +32,7 @@ struct AgenticHomeView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
                         GlebTopChrome(
-                            temperatureC: weather?.temperatureC ?? 28,
-                            weatherSymbol: weather?.symbolName ?? "sun.max.fill",
+                            weather: weather,
                             onProfile: {
                                 HapticManager.shared.impact(.light)
                                 NotificationCenter.default.post(name: .oxyJumpToMore, object: nil)
@@ -627,30 +626,42 @@ struct MissionCardView: View {
         }
     }
 
+    /// Whether tapping the card does anything at all — gates both the button's
+    /// enabled state and its press-scale, so a card with nothing to do doesn't
+    /// visually invite a tap it can't honour.
+    private var isTappable: Bool { canExpand || mission.cta != nil }
+
     var body: some View {
-        Group {
-            switch mission.kind {
-            case .incoming where mission.deliveryStage != nil:
-                deliveryCard
-            case .incoming:
-                reservationCard
-            case .mail:
-                mailCard
-            default:
-                standardCard
-            }
-        }
-        .padding(16)
-        .background { MissionGlassPlate() }
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .onTapGesture {
+        // A plain onTapGesture here gave the single most-tapped surface in the whole
+        // Home feed zero press feedback, unlike every other tappable element in the
+        // app (pillCTA, AppRow, etc. all use appScale) — a real feedback gap on a
+        // tens-of-times-a-day surface, not just a cosmetic nit.
+        Button {
             if canExpand {
                 HapticManager.shared.impact(.light)
-                withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { expanded.toggle() }
+                withAnimation(.appExpand) { expanded.toggle() }
             } else if mission.cta != nil {
                 onCTA()
             }
+        } label: {
+            Group {
+                switch mission.kind {
+                case .incoming where mission.deliveryStage != nil:
+                    deliveryCard
+                case .incoming:
+                    reservationCard
+                case .mail:
+                    mailCard
+                default:
+                    standardCard
+                }
+            }
+            .padding(16)
+            .background { MissionGlassPlate() }
+            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
+        .buttonStyle(.appScale(0.98))
+        .disabled(!isTappable)
     }
 
     // MARK: - Delivery (Gleb route-card anatomy: title · id-pill · progress rail)

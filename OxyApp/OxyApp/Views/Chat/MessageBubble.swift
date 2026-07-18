@@ -59,6 +59,20 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.pending }
     }
 
+    /// Deduped product photos across every completed action in this turn (currently
+    /// only run_browser_task populates these).
+    private var productImageUrls: [String] {
+        guard !isUser else { return [] }
+        var seen = Set<String>()
+        var out: [String] = []
+        for action in completedActions {
+            for url in action.imageUrls ?? [] where seen.insert(url).inserted {
+                out.append(url)
+            }
+        }
+        return out
+    }
+
     // User turns stay compact rounded bubbles, right-aligned. Assistant turns sit
     // as plain text directly on the canvas — no fill, no accent bar — so the
     // conversation reads like a considered reply, not a chat-widget echo.
@@ -98,6 +112,14 @@ struct MessageBubble: View {
 
             if let turnError = message.turnError {
                 FailedTurnView(message: turnError, onRetry: onRetryFailedTurn)
+                    .padding(.top, message.content.isEmpty ? 0 : 8)
+            }
+
+            // Real product photos the browser-task agent found (og:image, or the largest
+            // visible <img>) — previously this capability didn't exist, so the agent could
+            // only ever describe what it saw in words.
+            if !productImageUrls.isEmpty {
+                ProductImageRow(urls: productImageUrls)
                     .padding(.top, message.content.isEmpty ? 0 : 8)
             }
 
@@ -534,6 +556,40 @@ private struct FailedTurnView: View {
             RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
                 .strokeBorder(Color.appHairline, lineWidth: 0.5)
         )
+    }
+}
+
+/// Horizontally-scrolling row of product photos the browser-task agent found on the
+/// page it finished on. Thumbnails, not a gallery — tap-to-zoom isn't wired up yet.
+private struct ProductImageRow: View {
+    let urls: [String]
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(urls, id: \.self) { urlString in
+                    if let url = URL(string: urlString) {
+                        // The load is async and unpredictable in timing — without a
+                        // transition the placeholder plate hard-cuts to the photo the
+                        // instant it arrives. Fading it in bridges that jump.
+                        AsyncImage(url: url, transaction: Transaction(animation: .appFast)) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image.resizable().scaledToFill().transition(.opacity)
+                            default:
+                                Color.appSurface2
+                            }
+                        }
+                        .frame(width: 96, height: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

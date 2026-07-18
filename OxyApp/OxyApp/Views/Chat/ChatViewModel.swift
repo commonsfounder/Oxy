@@ -948,6 +948,30 @@ final class ChatViewModel {
     }
 
     private func updateActivity(status: String, label: String) {
+        // Multi-step turns (agentic loop actions, e.g. shopping/browsing) stream real
+        // progress via these two statuses — surface the label directly instead of
+        // silently dropping anything outside the travel-specific cases below, which
+        // is why every non-travel turn used to sit on a single generic step for its
+        // whole duration.
+        if status == "action_start" {
+            setActivity(label, state: .active)
+            return
+        }
+        if status == "action_complete" {
+            // getActionStatusLabel appends " complete"/" failed" server-side — strip it
+            // so this matches the title the action_start step was created with, rather
+            // than inserting a second, differently-titled step for the same action.
+            let base = label
+                .replacingOccurrences(of: " complete", with: "")
+                .replacingOccurrences(of: " failed", with: "")
+            setActivity(base, state: label.hasSuffix("failed") ? .failed : .complete)
+            return
+        }
+        if status == "agent_thinking" {
+            setActivity("Working on it", state: .active)
+            return
+        }
+
         let combined = "\(status) \(label)".lowercased()
         if combined.contains("location") {
             setActivity("Getting your location", state: .active)

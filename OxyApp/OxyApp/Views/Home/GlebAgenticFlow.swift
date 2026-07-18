@@ -168,47 +168,113 @@ enum GlebChrome {
 // MARK: - Top chrome chips (weather + dual orbs + profile)
 
 struct GlebTopChrome: View {
-    var temperatureC: Double?
-    var weatherSymbol: String
+    var weather: OxyWeatherService.OxyWeatherSnapshot?
     var onProfile: () -> Void
 
+    @State private var weatherExpanded = false
+
     var body: some View {
-        HStack(spacing: 10) {
-            // Weather pill
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                weatherPill
+                Spacer()
+                profileButton
+            }
+
+            if weatherExpanded, let weather {
+                weatherDetail(weather)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    // MARK: - Weather (tap to expand rain/UV/humidity/wind/high-low, same data the
+    // app already fetches but used to throw away above the fold)
+
+    private var weatherPill: some View {
+        Button {
+            guard weather != nil else { return }
+            HapticManager.shared.impact(.light)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { weatherExpanded.toggle() }
+        } label: {
             HStack(spacing: 6) {
-                AppIcon(AppGlyph.weather(weatherSymbol), size: 15)
+                AppIcon(AppGlyph.weather(weather?.symbolName ?? "sun.max"), size: 15)
                     .foregroundStyle(Color.orange.opacity(0.9))
-                if let temperatureC {
-                    Text("\(Int(temperatureC.rounded()))°")
+                if let weather {
+                    Text("\(Int(weather.temperatureC.rounded()))°")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(GlebChrome.ink.opacity(0.8))
+                    // Rotate rather than swap assets — matches TurnReceiptRow's chevron,
+                    // the app's existing pattern for this exact state-indication moment.
+                    AppIcon("chevron-down", size: 10)
+                        .foregroundStyle(GlebChrome.ink.opacity(0.4))
+                        .rotationEffect(.degrees(weatherExpanded ? 180 : 0))
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.7), lineWidth: 0.5))
-
-            Spacer()
-
-            Button(action: onProfile) {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(red: 0.95, green: 0.75, blue: 0.7), Color(red: 0.55, green: 0.4, blue: 0.45)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 38, height: 38)
-                    .overlay(
-                        AppIcon("person", size: 18)
-                            .foregroundStyle(.white.opacity(0.9))
-                    )
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5))
-                    .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
-            }
-            .buttonStyle(.plain)
         }
+        .buttonStyle(.plain)
+        .disabled(weather == nil)
+    }
+
+    @ViewBuilder
+    private func weatherDetail(_ w: OxyWeatherService.OxyWeatherSnapshot) -> some View {
+        let cells: [(String, String)] = [
+            w.precipProbability.map { ("Rain", "\($0)%") },
+            w.uvBand.map { ("UV", $0) },
+            w.humidity.map { ("Humidity", "\($0)%") },
+            w.windSpeed.map { ("Wind", "\(Int($0.rounded())) km/h") },
+            w.highC.map { ("High", "\(Int($0.rounded()))°") },
+            w.lowC.map { ("Low", "\(Int($0.rounded()))°") }
+        ].compactMap { $0 }
+
+        VStack(alignment: .leading, spacing: 14) {
+            Text(w.conditionDescription)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(GlebChrome.ink.opacity(0.75))
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 16) {
+                ForEach(cells, id: \.0) { cell in
+                    VStack(spacing: 4) {
+                        Text(cell.0.uppercased())
+                            .font(.system(size: 9, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundStyle(GlebChrome.muted)
+                        Text(cell.1)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(GlebChrome.ink)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(16)
+        .background { MissionGlassPlate() }
+    }
+
+    private var profileButton: some View {
+        Button(action: onProfile) {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color(red: 0.95, green: 0.75, blue: 0.7), Color(red: 0.55, green: 0.4, blue: 0.45)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 38, height: 38)
+                .overlay(
+                    AppIcon("person", size: 18)
+                        .foregroundStyle(.white.opacity(0.9))
+                )
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5))
+                .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
+        }
+        // The one tappable element in this bar with no press feedback — every other
+        // button in the app uses appScale; this was an unintentional exception.
+        .buttonStyle(.appScale)
     }
 }

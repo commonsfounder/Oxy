@@ -130,10 +130,13 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let distanceText: String?
     let recoverable: Bool?
     let recoveryAction: BrowserRecoveryAction?
+    /// Product photo(s) the browser-task agent found on the page it finished on (og:image,
+    /// falling back to the largest visible <img>) — up to 3, shown as an image row in chat.
+    let imageUrls: [String]?
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
-        case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
+        case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction, imageUrls
     }
 
     init(
@@ -157,6 +160,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         distanceText: String? = nil,
         recoverable: Bool? = nil,
         recoveryAction: BrowserRecoveryAction? = nil,
+        imageUrls: [String]? = nil,
     ) {
         self.action = action
         self.success = success
@@ -178,6 +182,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.distanceText = distanceText
         self.recoverable = recoverable
         self.recoveryAction = recoveryAction
+        self.imageUrls = imageUrls
     }
 
     init(native result: NativeLocalActionResult) {
@@ -219,6 +224,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             distanceText = try result.decodeIfPresent(String.self, forKey: .distanceText)
             recoverable = try result.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try result.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
+            imageUrls = try result.decodeIfPresent([String].self, forKey: .imageUrls)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -239,6 +245,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             distanceText = try container.decodeIfPresent(String.self, forKey: .distanceText)
             recoverable = try container.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try container.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
+            imageUrls = try container.decodeIfPresent([String].self, forKey: .imageUrls)
         }
     }
 
@@ -264,6 +271,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(distanceText, forKey: .distanceText)
         try container.encodeIfPresent(recoverable, forKey: .recoverable)
         try container.encodeIfPresent(recoveryAction, forKey: .recoveryAction)
+        try container.encodeIfPresent(imageUrls, forKey: .imageUrls)
     }
 }
 

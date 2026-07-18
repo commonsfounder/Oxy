@@ -137,6 +137,12 @@ extension Animation {
     static let appRelax    = Animation.spring(response: 0.4,  dampingFraction: 1.0)
     static let appSpring   = Animation.spring(response: 0.28, dampingFraction: 1.0)
     static let appMomentum = Animation.spring(response: 0.3,  dampingFraction: 0.8)
+    /// Expand/collapse (mission cards, weather detail) wants a touch more life than the
+    /// critically-damped tokens above — named so the value isn't hand-typed at each call site.
+    static let appExpand   = Animation.spring(response: 0.42, dampingFraction: 0.82)
+    /// A precise, mechanical on/off feel for AppToggle/MilgrainToggle — deliberately a fixed
+    /// duration ease rather than a spring, so the switch reads as a hard flip, not a settle.
+    static let appToggle   = Animation.easeInOut(duration: 0.18)
 }
 
 // MARK: - Helpers (scale on press, glass where it still fits)
@@ -396,7 +402,7 @@ struct AppToggle: View {
 
     var body: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
+            withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
                 .fill(isOn ? Color.appInk : Color.appAdaptive(dark: .white, light: .black).opacity(0.12))
@@ -619,7 +625,7 @@ struct MilgrainToggle: View {
 
     var body: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.18)) { isOn.toggle() }
+            withAnimation(.appToggle) { isOn.toggle() }
         } label: {
             Capsule()
                 .fill(isOn ? Color.appAccent : Color.mgOff)
