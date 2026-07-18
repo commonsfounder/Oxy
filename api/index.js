@@ -560,6 +560,32 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
   return data;
 }
 
+// Refreshes an already-created briefing/nudge row's dashboard-facing data (emails,
+// incoming deliveries/reservations) in place, independent of the once-per-day throttle
+// that gates generating NEW narrative text/pushes for that kind. Silent — no chat
+// message, no push — this exists purely so the Home cards reflect the current inbox
+// instead of a frozen snapshot from whenever the narrative last fired. If a bug in the
+// extraction logic gets fixed mid-day, the very next open picks up the correction here
+// rather than waiting for tomorrow's window.
+async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
+  try {
+    const { data, error } = await supabase
+      .from('briefings')
+      .select('id, metadata')
+      .eq('user_id', userId)
+      .eq('kind', kind)
+      .contains('metadata', { date: todayKey })
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error || !data?.length) return;
+    const [row] = data;
+    await supabase
+      .from('briefings')
+      .update({ metadata: { ...row.metadata, emails: emailContext.emails, incoming: emailContext.incoming } })
+      .eq('id', row.id);
+  } catch {}
+}
+
 const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('./prompts');
 
 function normalizeGeminiHistory(history) {
@@ -4886,7 +4912,15 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const todayKey = getLocalDateKey(now);
   const key = `proactive.briefing.${window.id}.${todayKey}`;
   const prefs = await getPreferenceMap(userId);
-  if (prefs[key] === 'sent') return null;
+  if (prefs[key] === 'sent') {
+    // The once-per-window narrative already fired today, but the dashboard's email/
+    // incoming cards shouldn't go stale for the rest of the day because of that — every
+    // runProactiveCheck call (fires on every Home open) refreshes the existing row's raw
+    // data in place. Silent: no new narrative, no chat message, no push.
+    const emailContext = await gatherEmailContext(userId);
+    await refreshBriefingEmailData(userId, `${window.id}_briefing`, todayKey, emailContext);
+    return null;
+  }
 
   const [text, emailContext] = await Promise.all([
     buildIntervalBriefing(userId, window, nativeContext, now),
@@ -5036,11 +5070,19 @@ async function maybeCreateEmailNudges(userId, now = new Date()) {
     const prefs = await getPreferenceMap(userId);
     const todayKey = getLocalDateKey(now);
     const key = `proactive.email.nudges.${todayKey}`;
-    if (prefs[key] === 'sent') return null;
 
     const nativeContext = await getLatestNativeContext(userId);
     const settings = parseJsonObject(nativeContext?.settings);
     if (['Quiet', 'Low'].includes(settings.autonomy)) return null;
+
+    if (prefs[key] === 'sent') {
+      // Same self-healing as maybeCreateIntervalBriefing — keep the row's emails/incoming
+      // current even though today's nudge text already fired, so a card that was wrong
+      // when it was written (or has since become stale) doesn't sit there all day.
+      const emailContext = await gatherEmailContext(userId);
+      await refreshBriefingEmailData(userId, 'email_nudge', todayKey, emailContext);
+      return null;
+    }
 
     const emailContext = await gatherEmailContext(userId);
     if (!emailContext.emails.length) return null;
