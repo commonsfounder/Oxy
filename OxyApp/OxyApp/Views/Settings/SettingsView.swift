@@ -14,15 +14,15 @@ struct SettingsView: View {
     // Light/dark/system — the single source of truth read by the app root's
     // preferredColorScheme. Writing it re-themes the whole app live.
 
-    // Same living aurora as Today/Chat — the glass cards below need it behind them
-    // to refract, otherwise they're just dark blobs on black.
+    // The Gleb pastel wash sits behind the glass section plates below so they
+    // refract the living mesh instead of reading as flat cards on a flat canvas.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground.ignoresSafeArea()
+                GlebChrome.pastelBlob.ignoresSafeArea()
 
                 VStack(spacing: 0) {
                     ScreenHeaderView(title: "Settings", onBack: { dismiss() })
@@ -120,11 +120,13 @@ struct SettingsView: View {
     // MARK: - Helpers
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        // Clean section. Rows sit on the canvas,
-        // split by hairlines, the way the rest of the app now reads.
+        // Section title on the wash, rows on a glass plate that refracts it — the
+        // same floating-glass language as Home's mission plates and More's menu.
         VStack(alignment: .leading, spacing: 10) {
             AppSectionTitle(title, size: 20)
             VStack(spacing: 0) { content() }
+                .padding(.horizontal, 16)
+                .background { MissionGlassPlate() }
         }
     }
 
@@ -266,7 +268,7 @@ private struct BackendURLEditorSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.mgBg.ignoresSafeArea()
+                GlebChrome.pastelBlob.ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 16) {
                     MilgrainSectionHeader(title: "Custom Backend URL")
 

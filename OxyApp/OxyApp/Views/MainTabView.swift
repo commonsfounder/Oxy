@@ -103,9 +103,10 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // Transparent over the shared aurora canvas (like Today/Chat) so More
-                // takes the same finish instead of its own flat black.
-                Color.clear.ignoresSafeArea()
+                // The Gleb pastel wash, same living mesh as Home — glass menu plates
+                // float over it so More reads as one piece with the agentic surfaces
+                // instead of a flat settings list.
+                GlebChrome.pastelBlob.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         identityHeader
@@ -270,8 +271,11 @@ struct MoreView: View {
                 .tracking(1.6)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.appMuted)
-                .padding(.bottom, 6)
-            content()
+                .padding(.bottom, 10)
+            // Rows sit on a glass plate that refracts the wash behind it.
+            VStack(spacing: 0) { content() }
+                .padding(.horizontal, 16)
+                .background { MissionGlassPlate() }
         }
     }
 

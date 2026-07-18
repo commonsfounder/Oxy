@@ -52,8 +52,10 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            // Canvas is the app-level aurora (see MainTabView) so it bleeds full-screen.
-            Color.clear
+            // The Gleb pastel wash, same living mesh as Home, so message bubbles and the
+            // material composer read as glass floating over it rather than on flat white.
+            GlebChrome.pastelBlob
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Offline banner

@@ -189,53 +189,6 @@ struct GlebTopChrome: View {
             .background(.ultraThinMaterial, in: Capsule())
             .overlay(Capsule().strokeBorder(Color.white.opacity(0.7), lineWidth: 0.5))
 
-            // Dual agent orbs
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(
-                        AngularGradient(
-                            colors: [
-                                Color(red: 0.85, green: 0.85, blue: 0.9),
-                                Color(red: 0.7, green: 0.75, blue: 0.85),
-                                Color(red: 0.9, green: 0.9, blue: 0.95)
-                            ],
-                            center: .center
-                        )
-                    )
-                    .frame(width: 34, height: 34)
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.8), lineWidth: 0.6))
-                    .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-
-                ZStack {
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [Color(red: 0.55, green: 0.4, blue: 0.95), Color(red: 0.15, green: 0.1, blue: 0.25)],
-                                center: .center,
-                                startRadius: 2,
-                                endRadius: 18
-                            )
-                        )
-                        .frame(width: 34, height: 34)
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [Color.white.opacity(0.9), Color(red: 0.6, green: 0.5, blue: 1.0).opacity(0.3), .clear],
-                                center: UnitPoint(x: 0.35, y: 0.35),
-                                startRadius: 0,
-                                endRadius: 14
-                            )
-                        )
-                        .frame(width: 34, height: 34)
-                }
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 0.5))
-                .shadow(color: Color.purple.opacity(0.35), radius: 8, y: 2)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.65), lineWidth: 0.5))
-
             Spacer()
 
             Button(action: onProfile) {

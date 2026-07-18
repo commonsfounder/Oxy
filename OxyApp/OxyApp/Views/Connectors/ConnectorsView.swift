@@ -371,6 +371,12 @@ private struct AppIconView: View {
         if names.contains("trainline") { return ("TL", Color(red: 0/255, green: 169/255, blue: 126/255), .white, 15) }
         if names.contains("deliveroo") { return ("D", Color(red: 0/255, green: 204/255, blue: 188/255), .white, 19) }
         if names.contains("netflix") { return ("N", .black, Color(red: 229/255, green: 9/255, blue: 20/255), 21) }
+        // No bundled logo asset yet for these — a brand-colour wordmark chip reads as
+        // intentional, unlike the generic sparkle placeholder these were falling to.
+        if names.contains("slack") { return ("Slack", Color(red: 74/255, green: 21/255, blue: 75/255), .white, 11) }
+        if names.contains("plaid") { return ("Plaid", .black, .white, 11) }
+        if names.contains("strava") { return ("Strava", Color(red: 252/255, green: 76/255, blue: 2/255), .white, 10) }
+        if names.contains("oura") { return ("Oura", .black, .white, 12) }
         return (nil, Color.oxySurface3, Color.oxySub, 17)
     }
 
