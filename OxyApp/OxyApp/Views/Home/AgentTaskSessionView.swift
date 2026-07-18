@@ -1,10 +1,11 @@
 import SwiftUI
 
-// MARK: - Agent Task Session shell (Video B pattern)
+// MARK: - Agent Task Session shell (real-data native buy flow)
 //
 // Persistent chrome: close · task title · step k/n. Body swaps per-step generated
-// UI. Bottom dock always offers a way back into free chat. Black pill CTA advances
-// the plan; label is contextual per step (set by the plan generator).
+// UI, driven by real results from the same backend pipeline chat uses. Bottom dock
+// always offers a way back into free chat. Black pill CTA advances the flow or, on
+// the payment step, calls the real confirm_browser_payment action.
 
 struct AgentTaskSessionView: View {
     @Bindable var session: AgentTaskSession
@@ -29,6 +30,15 @@ struct AgentTaskSessionView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
 
+                if let errorMessage = session.errorMessage {
+                    ErrorBanner(message: errorMessage, onRetry: {
+                        session.errorMessage = nil
+                        Task { await session.start(onHandoff: onOpenChat) }
+                    })
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                }
+
                 ScrollView(showsIndicators: false) {
                     stepContent
                         .padding(.horizontal, 20)
@@ -46,14 +56,11 @@ struct AgentTaskSessionView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        // Working-hero steps advance themselves once the "job" settles. Tying this
-        // to the step index via .task(id:) means it auto-cancels the moment the
-        // step changes or the cover is dismissed — no stray timer can fire late.
-        .task(id: session.currentIndex) {
-            guard case .workingHero = session.currentStep?.ui else { return }
-            try? await Task.sleep(nanoseconds: 2_400_000_000)
-            guard !Task.isCancelled else { return }
-            withAnimation(.appSpring) { session.advance() }
+        // Real data only: kicks off the hidden pipeline once when the session opens.
+        // Tied to the view's identity, so it auto-cancels if the cover is dismissed
+        // mid-flight.
+        .task {
+            await session.start(onHandoff: onOpenChat)
         }
     }
 
@@ -94,16 +101,6 @@ struct AgentTaskSessionView: View {
     private var stepContent: some View {
         if let step = session.currentStep {
             switch step.ui {
-            case .planBoard(let entries):
-                PlanBoardStepView(entries: entries, ink: ink)
-            case .timePicker(let slots):
-                TimePickerStepView(step: step, slots: slots, ink: ink)
-            case .placePicker(let subtitle, let results):
-                PlacePickerStepView(step: step, subtitle: subtitle, results: results, ink: ink)
-            case .personPicker(let people, let draft):
-                PersonPickerStepView(step: step, people: people, draftMessage: draft, ink: ink)
-            case .rideConfirm(let details):
-                RideConfirmStepView(details: details, ink: ink)
             case .paymentConfirm(let details):
                 PaymentConfirmStepView(details: details, ink: ink)
             case .productDetail(let details):
@@ -149,13 +146,17 @@ struct AgentTaskSessionView: View {
             } else if let step = session.currentStep {
                 Button {
                     HapticManager.shared.impact(.medium)
-                    withAnimation(.appSpring) { session.advance() }
+                    if case .paymentConfirm = step.ui {
+                        Task { await session.confirmPayment(onHandoff: onOpenChat) }
+                    } else {
+                        withAnimation(.appSpring) { session.advance() }
+                    }
                 } label: {
                     primaryLabel(step.ctaLabel)
                 }
                 .buttonStyle(.appScale(0.96))
-                .disabled(!step.canAdvance)
-                .opacity(step.canAdvance ? 1 : 0.4)
+                .disabled(!step.canAdvance || session.isWorking)
+                .opacity(step.canAdvance && !session.isWorking ? 1 : 0.4)
             }
         }
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)

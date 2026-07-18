@@ -5,18 +5,11 @@ import SwiftUI
 // Visual language after the Gleb Kuznetsov concept (soft pastel wash, glass,
 // serif greeting): https://x.com/glebich/status/2066714881911586836
 //
-// KNOWN GAP (2026-07-18, being fixed): AgentPlanGenerator/AgentTaskSession
-// (Models/AgentTaskSession.swift, Views/Home/AgentTaskSessionView.swift,
-// Views/Home/AgentStepViews.swift) is a native step-flow shell (search animation →
-// item detail/selection → confirm) the product wants to KEEP — it reads far better
-// than a chat wall for structured purchases/bookings — but today it's 100%
-// client-side fabricated data: hardcoded generic device-finish swatches
-// ("Silver"/"Graphite"/"Sand") slapped on ANY item regardless of category, no real
-// search, no real price, no real photo. It needs to be wired to the real backend
-// (the same run_browser_task pipeline chat already uses for shopping, or the
-// existing search_flights/search_hotels actions for travel) instead of faking each
-// step. Until that's done, do not let real user intents reach it silently believing
-// it's real — see handleIntent below.
+// A "buy X" intent opens AgentTaskSession's native step-flow shell (search
+// animation → item detail → payment confirm), but every field on it comes from the
+// real backend — the same run_browser_task/confirm_browser_payment pipeline chat
+// already uses, just without rendering a chat transcript. See
+// Models/AgentTaskSession.swift and docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
 
 struct AgenticHomeView: View {
     @Environment(AppState.self) private var appState
@@ -307,12 +300,20 @@ struct AgenticHomeView: View {
         handleIntent((prompt?.isEmpty == false ? prompt : nil) ?? mission.title)
     }
 
-    /// Generated-UI-for-the-job path: a client-side plan session when the intent
-    /// matches a known job shape (dinner, ride, order, buy), otherwise free chat.
+    /// Generated-UI-for-the-job path: a native step session, wired to the real
+    /// backend pipeline, when the intent is a genuine buy — everything else
+    /// (including former dinner/ride/order-food phrasings) goes to free chat, same
+    /// as any unmatched message.
     private func handleIntent(_ text: String) {
         HapticManager.shared.impact(.medium)
-        if let session = AgentPlanGenerator.generate(for: text) {
-            activeSession = session
+        if AgentPlanGenerator.matchesBuy(text) {
+            activeSession = AgentTaskSession(
+                title: text,
+                originalPrompt: text,
+                userId: appState.userId,
+                chatService: service,
+                location: LocationManager.shared.locationDict
+            )
         } else {
             openChat(autoSend: text, startFresh: true)
         }

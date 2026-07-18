@@ -133,10 +133,18 @@ struct ActionResult: Codable, Identifiable, Equatable {
     /// Product photo(s) the browser-task agent found on the page it finished on (og:image,
     /// falling back to the largest visible <img>) — up to 3, shown as an image row in chat.
     let imageUrls: [String]?
+    /// Real product name/price/checkout-total/color-options the browser-task agent read off
+    /// the page it's on — used by the native buy-flow step UI. Never fabricated: absent
+    /// whenever the model didn't genuinely observe the field on the page.
+    let productName: String?
+    let price: String?
+    let total: String?
+    let colorOptions: [String]?
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction, imageUrls
+        case productName, price, total, colorOptions
     }
 
     init(
@@ -161,6 +169,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
         recoverable: Bool? = nil,
         recoveryAction: BrowserRecoveryAction? = nil,
         imageUrls: [String]? = nil,
+        productName: String? = nil,
+        price: String? = nil,
+        total: String? = nil,
+        colorOptions: [String]? = nil
     ) {
         self.action = action
         self.success = success
@@ -183,6 +195,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.recoverable = recoverable
         self.recoveryAction = recoveryAction
         self.imageUrls = imageUrls
+        self.productName = productName
+        self.price = price
+        self.total = total
+        self.colorOptions = colorOptions
     }
 
     init(native result: NativeLocalActionResult) {
@@ -225,6 +241,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
             recoverable = try result.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try result.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
             imageUrls = try result.decodeIfPresent([String].self, forKey: .imageUrls)
+            productName = try result.decodeIfPresent(String.self, forKey: .productName)
+            price = try result.decodeIfPresent(String.self, forKey: .price)
+            total = try result.decodeIfPresent(String.self, forKey: .total)
+            colorOptions = try result.decodeIfPresent([String].self, forKey: .colorOptions)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -246,6 +266,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
             recoverable = try container.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try container.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
             imageUrls = try container.decodeIfPresent([String].self, forKey: .imageUrls)
+            productName = try container.decodeIfPresent(String.self, forKey: .productName)
+            price = try container.decodeIfPresent(String.self, forKey: .price)
+            total = try container.decodeIfPresent(String.self, forKey: .total)
+            colorOptions = try container.decodeIfPresent([String].self, forKey: .colorOptions)
         }
     }
 
@@ -272,6 +296,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(recoverable, forKey: .recoverable)
         try container.encodeIfPresent(recoveryAction, forKey: .recoveryAction)
         try container.encodeIfPresent(imageUrls, forKey: .imageUrls)
+        try container.encodeIfPresent(productName, forKey: .productName)
+        try container.encodeIfPresent(price, forKey: .price)
+        try container.encodeIfPresent(total, forKey: .total)
+        try container.encodeIfPresent(colorOptions, forKey: .colorOptions)
     }
 }
 

@@ -1,12 +1,12 @@
 import Foundation
 
-// MARK: - Agent Task Session (Video B pattern)
+// MARK: - Agent Task Session (real-data native buy flow)
 //
-// A generated multi-step "job" surface: plan board -> step 1/n -> step n/n -> done.
-// v1 is a client-side plan generator from intent keywords (dinner->time+restaurant+
-// invite+ride, ride->ride confirm, order->place+payment) so the UI can ship ahead of
-// a structured backend agent-task API. Real connectors can replace the mock data in
-// each step without touching the shell.
+// A generated multi-step "job" surface for shopping intents: working/searching
+// animation -> item detail -> payment confirm. Steps are appended as real data
+// arrives from the exact same backend pipeline chat already uses
+// (ChatService.sendMessage -> SSE -> agentic loop -> run_browser_task), not
+// scripted up front — see docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
 
 @Observable
 final class AgentTaskSession: Identifiable {
@@ -15,12 +15,27 @@ final class AgentTaskSession: Identifiable {
     let originalPrompt: String
     var steps: [AgentStep]
     var currentIndex: Int
+    var errorMessage: String?
+    var isWorking = false
 
-    init(title: String, originalPrompt: String, steps: [AgentStep]) {
+    private let userId: String
+    private let chatService: ChatService
+    private let location: [String: Double]?
+
+    init(
+        title: String,
+        originalPrompt: String,
+        userId: String,
+        chatService: ChatService = ChatService(),
+        location: [String: Double]? = nil
+    ) {
         self.title = title
         self.originalPrompt = originalPrompt
-        self.steps = steps
-        currentIndex = steps.firstIndex(where: { $0.status == .active }) ?? 0
+        self.userId = userId
+        self.chatService = chatService
+        self.location = location
+        self.steps = [AgentStep(title: title, status: .active, ui: .workingHero(status: "Getting started…"), ctaLabel: "")]
+        self.currentIndex = 0
     }
 
     var currentStep: AgentStep? {
@@ -31,8 +46,8 @@ final class AgentTaskSession: Identifiable {
         currentIndex >= steps.count
     }
 
-    /// "k/n" against only the steps a user actually steps through — plan boards and
-    /// working heroes are chrome, not counted progress.
+    /// "k/n" against only the steps a user actually steps through — the working
+    /// hero is chrome, not counted progress.
     var progressText: String? {
         let countable = steps.enumerated().filter { $0.element.countsTowardProgress }
         guard countable.count > 1 else { return nil }
@@ -50,6 +65,145 @@ final class AgentTaskSession: Identifiable {
             currentIndex = steps.count
         }
     }
+
+    private func appendStep(_ step: AgentStep) {
+        if steps.indices.contains(currentIndex) { steps[currentIndex].status = .done }
+        steps.append(step)
+        currentIndex = steps.count - 1
+        steps[currentIndex].status = .active
+    }
+
+    /// Kicks off the buy job through the real hidden pipeline, mutating `steps` as
+    /// genuine backend results arrive. `onHandoff` fires (with a prompt to
+    /// auto-send, or nil to just open the chat surface) whenever the outcome can't
+    /// honestly be shown as a fixed native step — a clarifying question, a
+    /// still-in-progress multi-turn task, or a network/backend error — real chat is
+    /// the honest fallback there, not a fabricated step.
+    @MainActor
+    func start(onHandoff: @escaping (String?) -> Void) async {
+        guard isWorking == false else { return }
+        isWorking = true
+        defer { isWorking = false }
+
+        let stream = chatService.sendMessage(userId: userId, message: originalPrompt, location: location)
+        var sawBrowserAction = false
+        for await event in stream {
+            switch event {
+            case .status(let status, let label):
+                updateWorkingStatus(status: status, label: label)
+            case .actions(let results):
+                guard let result = results.first(where: { $0.action == "run_browser_task" }) else { continue }
+                sawBrowserAction = true
+                handle(result: result, onHandoff: onHandoff)
+            case .error(let message):
+                errorMessage = message
+                return
+            case .done:
+                if !sawBrowserAction { onHandoff(nil) }
+                return
+            default:
+                break
+            }
+        }
+        if !sawBrowserAction { onHandoff(nil) }
+    }
+
+    /// "Review & confirm" — sends the same affirmative reply a person would type in
+    /// chat through the same hidden pipeline, letting the agent call the existing
+    /// confirm_browser_payment action itself. No new payment code path; every
+    /// safety gate that action already honours (spend cap, card note) is unchanged.
+    @MainActor
+    func confirmPayment(onHandoff: @escaping (String?) -> Void) async {
+        guard isWorking == false else { return }
+        isWorking = true
+        defer { isWorking = false }
+
+        let stream = chatService.sendMessage(
+            userId: userId,
+            message: "Yes, go ahead and confirm the payment.",
+            location: location
+        )
+        for await event in stream {
+            switch event {
+            case .actions(let results):
+                guard let result = results.first(where: { $0.action == "confirm_browser_payment" }) else { continue }
+                if result.success {
+                    complete()
+                } else {
+                    errorMessage = result.error ?? result.text ?? "The payment didn't go through."
+                }
+                return
+            case .error(let message):
+                errorMessage = message
+                return
+            case .done:
+                onHandoff(nil)
+                return
+            default:
+                break
+            }
+        }
+        // No clean confirm_browser_payment result came back — don't guess at
+        // success or failure on ambiguous data; let the user verify in real chat.
+        onHandoff(nil)
+    }
+
+    private func updateWorkingStatus(status: String, label: String) {
+        guard case .workingHero = currentStep?.ui, !label.isEmpty else { return }
+        currentStep?.ui = .workingHero(status: label)
+    }
+
+    private func handle(result: ActionResult, onHandoff: (String?) -> Void) {
+        if result.confirmation == "review_required" {
+            let name = result.productName ?? title
+            title = name
+            appendStep(AgentStep(
+                title: name,
+                ui: .productDetail(ProductDetails(
+                    name: name,
+                    subtitle: result.text ?? "Ready to check out",
+                    priceText: result.total,
+                    imageUrls: result.imageUrls ?? [],
+                    colorOptions: result.colorOptions ?? []
+                )),
+                ctaLabel: "Continue to checkout"
+            ))
+            appendStep(AgentStep(
+                title: "Confirm",
+                ui: .paymentConfirm(PaymentDetails(
+                    merchant: name,
+                    amount: result.total ?? "At checkout",
+                    detail: result.text ?? "Final price is confirmed before anything is charged."
+                )),
+                ctaLabel: "Review & confirm"
+            ))
+            return
+        }
+        if result.success, result.productName != nil || result.imageUrls?.isEmpty == false {
+            let name = result.productName ?? title
+            title = name
+            appendStep(AgentStep(
+                title: name,
+                ui: .productDetail(ProductDetails(
+                    name: name,
+                    subtitle: result.text ?? "",
+                    priceText: result.price,
+                    imageUrls: result.imageUrls ?? []
+                )),
+                ctaLabel: "Done"
+            ))
+            return
+        }
+        // Plain text with no product data attached — most likely a clarifying
+        // question or an answer with nothing to show as a product card. Neither has
+        // an honest fixed native shape, so hand off to real chat.
+        onHandoff(nil)
+    }
+
+    private func complete() {
+        if steps.indices.contains(currentIndex) { steps[currentIndex].status = .done }
+        currentIndex = steps.count
+    }
 }
 
 @Observable
@@ -59,8 +213,8 @@ final class AgentStep: Identifiable {
     let id = UUID()
     let title: String
     var status: Status
-    let ui: StepUI
-    /// Contextual label for the primary CTA on this step ("To Invite Stephen" / "Confirm $42").
+    var ui: StepUI
+    /// Contextual label for the primary CTA on this step ("Continue to checkout" / "Review & confirm").
     let ctaLabel: String
     var selectedID: UUID?
 
@@ -73,62 +227,23 @@ final class AgentStep: Identifiable {
 
     var countsTowardProgress: Bool {
         switch ui {
-        case .planBoard, .workingHero: return false
+        case .workingHero: return false
         default: return true
         }
     }
 
     var canAdvance: Bool {
         switch ui {
-        case .timePicker, .placePicker, .personPicker: return selectedID != nil
         case .workingHero: return false
-        case .planBoard, .rideConfirm, .paymentConfirm, .productDetail: return true
+        case .paymentConfirm, .productDetail: return true
         }
     }
 }
 
 enum StepUI {
-    case planBoard(entries: [PlanEntry])
-    case timePicker(slots: [TimeSlotOption])
-    case placePicker(subtitle: String, results: [PlaceOption])
-    case personPicker(people: [PersonOption], draftMessage: String)
-    case rideConfirm(RideDetails)
     case paymentConfirm(PaymentDetails)
     case productDetail(ProductDetails)
     case workingHero(status: String)
-}
-
-struct PlanEntry: Identifiable {
-    let id = UUID()
-    let title: String
-    var status: AgentStep.Status
-}
-
-struct TimeSlotOption: Identifiable, Equatable {
-    let id = UUID()
-    let time: String
-    let label: String
-}
-
-struct PlaceOption: Identifiable, Equatable {
-    let id = UUID()
-    let name: String
-    let rating: String
-    let tag: String
-    let blurb: String
-}
-
-struct PersonOption: Identifiable, Equatable {
-    let id = UUID()
-    let name: String
-    let relation: String
-}
-
-struct RideDetails: Equatable {
-    let pickup: String
-    let dropoff: String
-    let eta: String
-    let price: String?
 }
 
 struct PaymentDetails: Equatable {
@@ -137,188 +252,37 @@ struct PaymentDetails: Equatable {
     let detail: String
 }
 
-/// A product surfaced for a "buy X" job. Everything except `name` is optional so
-/// the step renders honestly before a real product-lookup connector fills it in —
-/// no fabricated prices or specs attached to a real product.
+/// A product surfaced for a "buy X" job. Everything except `name` is real backend
+/// data or absent — no fabricated prices, photos, or color options attached to a
+/// real product.
 struct ProductDetails: Equatable {
     let name: String
     let subtitle: String
     var priceText: String?
-    var specs: [String]
-    var swatches: [ProductSwatch]
+    var imageUrls: [String]
+    /// Only ever populated when the backend genuinely observed distinct selectable
+    /// color/size options on the page — never a fallback/default set.
+    var colorOptions: [String]
 
-    init(name: String, subtitle: String, priceText: String? = nil, specs: [String] = [], swatches: [ProductSwatch] = []) {
+    init(name: String, subtitle: String, priceText: String? = nil, imageUrls: [String] = [], colorOptions: [String] = []) {
         self.name = name
         self.subtitle = subtitle
         self.priceText = priceText
-        self.specs = specs
-        self.swatches = swatches
+        self.imageUrls = imageUrls
+        self.colorOptions = colorOptions
     }
 }
 
-struct ProductSwatch: Identifiable, Equatable {
-    let id = UUID()
-    let name: String
-    let red: Double
-    let green: Double
-    let blue: Double
-}
-
-// MARK: - Plan generator (keyword scaffold, replace with real intent parsing later)
+// MARK: - Intent match (keyword scaffold — only decides whether this is a buy job;
+// all data for the job itself comes from the real backend, never from here)
 
 enum AgentPlanGenerator {
-    static func generate(for prompt: String) -> AgentTaskSession? {
-        let lower = prompt.lowercased()
-
-        if lower.contains("dinner") || lower.contains("book a table") || lower.contains("book us a table") {
-            return dinnerSession(prompt: prompt)
-        }
-        if containsOrderKeyword(lower) {
-            return orderSession(prompt: prompt)
-        }
-        if containsRideKeyword(lower) {
-            return rideSession(prompt: prompt)
-        }
-        if containsBuyKeyword(lower) {
-            return buySession(prompt: prompt)
-        }
-        return nil
-    }
-
-    private static func containsRideKeyword(_ lower: String) -> Bool {
-        ["uber", "taxi", "cab", "ride home", "book a ride", "book me a ride"].contains { lower.contains($0) }
-    }
-
-    private static func containsOrderKeyword(_ lower: String) -> Bool {
-        (lower.contains("order") && (lower.contains("food") || lower.contains("takeout") || lower.contains("delivery")))
-    }
-
     /// Word-anchored so "card", "care", "scary", "cargo" don't trigger a buy job
     /// (an earlier substring match on "car"/"buy a" hijacked unrelated intents).
-    private static func containsBuyKeyword(_ lower: String) -> Bool {
+    static func matchesBuy(_ prompt: String) -> Bool {
+        let lower = prompt.lowercased()
         let words = Set(lower.split { !$0.isLetter }.map(String.init))
         if words.contains("buy") || words.contains("buying") || words.contains("purchase") { return true }
         return lower.contains("order me a") || lower.contains("i want to buy")
-    }
-
-    private static func personName(in prompt: String) -> String {
-        if let range = prompt.range(of: "with ", options: .caseInsensitive) {
-            let rest = prompt[range.upperBound...]
-            let word = rest.split(separator: " ").first.map(String.init) ?? "them"
-            return word.trimmingCharacters(in: .punctuationCharacters)
-        }
-        return "them"
-    }
-
-    private static func dinnerSession(prompt: String) -> AgentTaskSession {
-        let name = personName(in: prompt)
-        let planEntries = [
-            PlanEntry(title: "Choosing a time", status: .active),
-            PlanEntry(title: "Choose and book a restaurant", status: .pending),
-            PlanEntry(title: "Invite \(name)", status: .pending),
-            PlanEntry(title: "Book a ride home", status: .pending)
-        ]
-        let steps = [
-            AgentStep(title: "Plan", status: .active, ui: .planBoard(entries: planEntries), ctaLabel: "Start"),
-            AgentStep(title: "Choose a time", ui: .timePicker(slots: [
-                TimeSlotOption(time: "6:30 PM", label: "Free time"),
-                TimeSlotOption(time: "7:00 PM", label: "Free time"),
-                TimeSlotOption(time: "8:15 PM", label: "After gym")
-            ]), ctaLabel: "Next"),
-            AgentStep(title: "Book a restaurant", ui: .placePicker(subtitle: "Near you", results: [
-                PlaceOption(name: "Scramble Place", rating: "4.7", tag: "American", blurb: "Bright, casual, great for groups."),
-                PlaceOption(name: "Lilac & Vine", rating: "4.5", tag: "Wine bar", blurb: "Small plates, quiet corners."),
-                PlaceOption(name: "Kōji", rating: "4.8", tag: "Japanese", blurb: "Tasting menu, book ahead.")
-            ]), ctaLabel: "To Invite \(name)"),
-            AgentStep(title: "Invite \(name)", ui: .personPicker(
-                people: [PersonOption(name: name, relation: "Friend")],
-                draftMessage: "Do you want to come to dinner with me?"
-            ), ctaLabel: "Send invite"),
-            AgentStep(title: "Book a ride", ui: .rideConfirm(RideDetails(
-                pickup: "Home", dropoff: "Restaurant", eta: "8 min", price: "~$14"
-            )), ctaLabel: "Book Uber")
-        ]
-        return AgentTaskSession(title: "Dinner with \(name)", originalPrompt: prompt, steps: steps)
-    }
-
-    private static func rideSession(prompt: String) -> AgentTaskSession {
-        let steps = [
-            AgentStep(title: "Book a ride", status: .active, ui: .rideConfirm(RideDetails(
-                pickup: "Current location", dropoff: "Home", eta: "6 min", price: "~$11"
-            )), ctaLabel: "Book Uber")
-        ]
-        return AgentTaskSession(title: "Ride home", originalPrompt: prompt, steps: steps)
-    }
-
-    /// Pulls the product the user actually named out of their phrasing. No product
-    /// data is invented — the detail step shows the parsed name and stays honest
-    /// about price/specs until a real product-lookup connector fills them in.
-    private static func productName(from prompt: String) -> String {
-        var s = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        let leads = [
-            "i want to buy a", "i want to buy", "i'd like to buy a", "i'd like to buy",
-            "i want to purchase a", "i want to purchase", "buy me a", "buy me", "buy a",
-            "purchase a", "purchase", "order me a", "order me", "get me a", "buy"
-        ]
-        let lower = s.lowercased()
-        for lead in leads where lower.hasPrefix(lead + " ") {
-            s = String(s.dropFirst(lead.count + 1)).trimmingCharacters(in: .whitespaces)
-            break
-        }
-        let cleaned = s.trimmingCharacters(in: CharacterSet(charactersIn: " .?!"))
-        return cleaned.isEmpty ? "your item" : cleaned.capitalized
-    }
-
-    private static func buySession(prompt: String) -> AgentTaskSession {
-        let name = productName(from: prompt)
-        let steps = [
-            AgentStep(
-                title: "Finding \(name)",
-                status: .active,
-                ui: .workingHero(status: "Searching options in the background"),
-                ctaLabel: "Next"
-            ),
-            AgentStep(
-                title: name,
-                ui: .productDetail(ProductDetails(
-                    name: name,
-                    subtitle: "Best match for your request",
-                    // Finish options are universal enough to show pre-backend; price and
-                    // specs stay empty until a real product-lookup connector fills them.
-                    swatches: [
-                        ProductSwatch(name: "Silver", red: 0.80, green: 0.80, blue: 0.82),
-                        ProductSwatch(name: "Graphite", red: 0.22, green: 0.22, blue: 0.24),
-                        ProductSwatch(name: "Slate", red: 0.42, green: 0.45, blue: 0.50),
-                        ProductSwatch(name: "Chalk", red: 0.95, green: 0.94, blue: 0.91),
-                        ProductSwatch(name: "Sand", red: 0.84, green: 0.80, blue: 0.70)
-                    ]
-                )),
-                ctaLabel: "Continue to checkout"
-            ),
-            AgentStep(
-                title: "Confirm",
-                ui: .paymentConfirm(PaymentDetails(
-                    merchant: name,
-                    amount: "At checkout",
-                    detail: "Final price is confirmed before anything is charged."
-                )),
-                ctaLabel: "Review & confirm"
-            )
-        ]
-        return AgentTaskSession(title: "Buy \(name)", originalPrompt: prompt, steps: steps)
-    }
-
-    private static func orderSession(prompt: String) -> AgentTaskSession {
-        let steps = [
-            AgentStep(title: "Order food", status: .active, ui: .placePicker(subtitle: "Delivers to you", results: [
-                PlaceOption(name: "Green Bowl", rating: "4.6", tag: "Healthy", blurb: "Salads, grain bowls."),
-                PlaceOption(name: "Pasta Bar", rating: "4.4", tag: "Italian", blurb: "Fresh pasta, 25 min."),
-                PlaceOption(name: "Sushi Go", rating: "4.7", tag: "Japanese", blurb: "Rolls, bento, fast.")
-            ]), ctaLabel: "Confirm order"),
-            AgentStep(title: "Confirm payment", ui: .paymentConfirm(PaymentDetails(
-                merchant: "Order", amount: "$28.40", detail: "Charged to your linked card"
-            )), ctaLabel: "Pay $28.40")
-        ]
-        return AgentTaskSession(title: "Order food", originalPrompt: prompt, steps: steps)
     }
 }
