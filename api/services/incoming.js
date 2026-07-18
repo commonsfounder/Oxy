@@ -13,6 +13,11 @@ const DELIVERY_STAGES = [
 const RESERVATION_RE = /\b(reservation|booking|table for|booked|your booking)\b/i;
 const RESERVATION_CONFIRMED_RE = /\b(confirmed|is confirmed)\b/i;
 
+// A bare "shipped"/"dispatched" also shows up in dev-tool digests and changelog mail
+// ("we just shipped a new CLI feature") — require an order/package noun nearby before
+// trusting it as real shipping language.
+const COMMERCE_CONTEXT_RE = /\b(order|package|parcel|shipment|tracking|delivery|courier)\b/i;
+
 // Known senders → display vendor. Falls back to the email display name.
 const VENDORS = [
   { re: /amazon/i, name: 'Amazon' },
@@ -38,8 +43,12 @@ function extractIncoming(emails = []) {
     const snippet = normalize(email.snippet);
     const hay = `${subject} ${snippet}`;
 
+    const knownVendor = VENDORS.some(v => v.re.test(from));
     const stageMatch = DELIVERY_STAGES.find(s => s.re.test(hay) || s.re.test(from));
-    if (stageMatch) {
+    // Only trust the stage match as a real delivery when the sender is a recognized
+    // commerce/courier vendor, or the email also carries an order/package noun — never
+    // surface an arbitrary sender (a GitHub digest, a Railway notification) as "vendor".
+    if (stageMatch && (knownVendor || COMMERCE_CONTEXT_RE.test(hay))) {
       items.push({
         kind: 'delivery',
         title: subject.replace(/^(re:|fwd:)\s*/i, '') || 'Package',

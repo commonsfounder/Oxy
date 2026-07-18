@@ -241,6 +241,9 @@ function messageToEmail(message = {}) {
     inReplyTo: getHeader(headers, 'In-Reply-To'),
     snippet: message.snippet || '',
     labelIds: message.labelIds || [],
+    // Presence of a List-Unsubscribe header marks bulk/mailing-list mail (newsletters,
+    // marketing). Personal 1:1 mail doesn't carry it — used to filter the dashboard feed.
+    listUnsubscribe: getHeader(headers, 'List-Unsubscribe'),
     body: extractMessageBody(message.payload)
   };
 }

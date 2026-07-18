@@ -4164,7 +4164,9 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
 // isn't something to browse/toggle, it just works when invoked from chat.
 const CONNECTORS = [
   { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'microsoft', name: 'Outlook & Calendar', icon: 'microsoft', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  // icon 'outlook' (not 'microsoft') — that's the actual bundled asset name; id stays
+  // 'microsoft' since that's what the OAuth provider matching keys off of.
+  { id: 'microsoft', name: 'Outlook & Calendar', icon: 'outlook', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
   { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', implemented: true, type: 'api', kind: 'connection' },
   { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
   { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
@@ -4768,13 +4770,32 @@ async function gatherEmailContext(userId) {
   try {
     const enabled = await getEnabledConnectors(userId);
     if (!enabled.includes('google')) return { emails: [], incoming: [] };
-    const result = await dispatch(userId, 'get_emails', { max_results: 10, label: 'INBOX' });
+    // Over-fetch, then drop marketing/bulk mail, so a promo-heavy inbox still yields a
+    // full page of real, actionable mail (fetching only 10 could be all promotions).
+    const result = await dispatch(userId, 'get_emails', { max_results: 25, label: 'INBOX' });
     if (!result?.success || !Array.isArray(result.emails)) return { emails: [], incoming: [] };
-    const emails = result.emails.slice(0, 10);
+    const real = result.emails.filter(e => !isPromotionalOrBulk(e));
+    const emails = real.slice(0, 10);
+    // Deliveries/reservations can legitimately be CATEGORY_UPDATES, so parse incoming
+    // from the same de-promoted set rather than the raw fetch.
     return { emails: await summarizeEmails(emails), incoming: extractIncoming(emails) };
   } catch (e) {
     return { emails: [], incoming: [] };
   }
+}
+
+// The dashboard's Inbox cards frame each email as "needs you / draft reply", so marketing
+// blasts, social notifications, and mailing-list mail don't belong there. Gmail already
+// sorts these into its Promotions/Social/Forums tabs (the CATEGORY_* labels); we trust
+// that first, then fall back to the List-Unsubscribe header for accounts with tabs off.
+const PROMOTIONAL_LABELS = new Set(['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS']);
+function isPromotionalOrBulk(email = {}) {
+  const labels = email.labelIds || [];
+  if (labels.some(l => PROMOTIONAL_LABELS.has(l))) return true;
+  // Bulk-sender marker. Keep it only when Gmail flagged the message IMPORTANT — that's how
+  // a genuine bill or account alert (which can also carry List-Unsubscribe) survives.
+  if (email.listUnsubscribe && !labels.includes('IMPORTANT')) return true;
+  return false;
 }
 
 // One-line "what this actually is" per email for the Today Inbox card, which previously
