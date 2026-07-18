@@ -1809,7 +1809,8 @@ const ACTION_STATUS_LABELS = {
   forget_memory: 'Updating memory',
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
-  create_presentation: 'Building presentation'
+  create_presentation: 'Building presentation',
+  run_browser_task: 'Browsing the web'
 };
 
 function getActionStatusLabel(actionType, phase = 'start') {
@@ -2340,7 +2341,13 @@ async function executeAction(userId, action, params, context = {}) {
           actionSummary: 'Order ready for payment'
         };
       }
-      if (outcome.type === 'done') return { success: true, text: outcome.text };
+      if (outcome.type === 'done') {
+        return {
+          success: true,
+          text: outcome.text,
+          ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
+        };
+      }
       if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true };
       if (outcome.type === 'ask') return { success: true, text: outcome.question };
       return { success: false, error: outcome.error || 'Browse task failed.' };
@@ -6109,8 +6116,30 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       trace.log(useAgentic ? 'stream.route agentic_single_text' : 'stream.route classic_incremental');
     }
 
+    // Hoisted above the useAgentic block so the classic-streaming fallback further down
+    // can tell whether the agentic branch already opened (and possibly wrote to) the SSE
+    // connection before throwing, rather than trying to set headers a second time.
+    let agenticSse = null;
+    let agenticSendStatus = null;
     if (useAgentic) {
       const isBroadMoneyGoal = /make money|earn cash|side hustle|monetize|make income|financial freedom|profit/i.test(message);
+
+      // Open the SSE stream BEFORE the loop runs, not after — the loop internally
+      // already calls onStep at each think/execute/observe phase (agent-orchestrator.js),
+      // it was just wired to null here, so a multi-step turn (e.g. "order me some
+      // jeans") sat on a single generic "Preparing result" for its entire duration
+      // with no real progress reaching the client.
+      if (streaming) {
+        try {
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.flushHeaders();
+        } catch {}
+        agenticSse = obj => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+        agenticSendStatus = (status, label, extra = {}) => agenticSse({ type: 'status', status, label, ...extra });
+      }
+
       try {
         const agentResult = await runAgenticLoop({
           userId,
@@ -6123,7 +6152,22 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           context: { userMessage: message, location, nativeHints, autonomy: autonomyLevel },
           executeActionsFn: executeActions,
           trace,
-          onStep: null,
+          onStep: !agenticSendStatus ? null : step => {
+            if (step.phase === 'thinking') {
+              agenticSendStatus('agent_thinking', 'Working on it');
+            } else if (step.phase === 'executing') {
+              for (const action of step.actions || []) {
+                agenticSendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type });
+              }
+            } else if (step.phase === 'observed') {
+              for (const r of step.results || []) {
+                agenticSendStatus('action_complete', getActionStatusLabel(r.action, actionCompletionPhase(r.result)), {
+                  action: r.action,
+                  success: r.result?.success !== false
+                });
+              }
+            }
+          },
           persistTask: true // broad goals like "go make me money" get persistent tracking
         });
 
@@ -6159,12 +6203,9 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         } catch {}
 
         if (streaming) {
-          try {
-            res.setHeader('Content-Type', 'text/event-stream');
-            res.setHeader('Cache-Control', 'no-cache');
-            res.setHeader('Connection', 'keep-alive');
-          } catch {}
-          const sse = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch {} };
+          // Headers were already sent (and any onStep progress already streamed) before
+          // the loop ran above — reuse that same connection rather than re-setting headers.
+          const sse = agenticSse;
           trace.log(`stream.agentic.text_single len=${spoken.length}`);
           sse({ type: 'text', chunk: spoken });
           if (actionResults.length) sse({ type: 'actions', results: actionResults });
@@ -6192,10 +6233,15 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     // ── Streaming mode (SSE) ────────────────────────────────────────────
     if (streaming) {
-      res.setHeader('Content-Type', 'text/event-stream');
-      res.setHeader('Cache-Control', 'no-cache');
-      res.setHeader('Connection', 'keep-alive');
-      res.flushHeaders();
+      // If the agentic branch above already opened the SSE stream (headers flushed)
+      // before throwing and falling through to this classic path, reuse that same
+      // connection — calling res.setHeader again after flushHeaders() throws.
+      if (!agenticSse) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.flushHeaders();
+      }
       const sse = obj => {
         if (obj?.type === 'audio') {
           console.log(`[audio][backend:chat-stream] sending audio event seq=${obj.seq ?? 'na'} chunk=${obj.chunk ?? 'na'} bytes=${Buffer.from(obj.data || '', 'base64').length} mime=${obj.mimeType || 'audio/wav'}`);

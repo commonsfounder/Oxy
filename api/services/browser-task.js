@@ -557,6 +557,37 @@ async function detectBlockWall(page) {
   }
 }
 
+// The chat surface can show real photos of what the agent found — previously it could
+// only ever describe them in words. og:image is the single canonical product shot on
+// almost every storefront (set specifically for link previews, so it's reliably the
+// right image even when the page has dozens of unrelated thumbnails/icons); the
+// largest visible <img> is the fallback for sites that don't set it.
+async function extractProductImageUrls(page) {
+  try {
+    return await page.evaluate(() => {
+      const abs = src => { try { return new URL(src, document.baseURI).href; } catch { return null; } };
+      const urls = [];
+      for (const sel of ['meta[property="og:image"]', 'meta[property="og:image:secure_url"]', 'meta[name="og:image"]']) {
+        const content = document.querySelector(sel)?.getAttribute('content');
+        const u = content && abs(content);
+        if (u && !urls.includes(u)) urls.push(u);
+      }
+      if (urls.length === 0) {
+        const imgs = Array.from(document.querySelectorAll('img'))
+          .filter(img => img.src && img.naturalWidth >= 200 && img.naturalHeight >= 200)
+          .sort((a, b) => (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight));
+        for (const img of imgs.slice(0, 3)) {
+          const u = abs(img.src);
+          if (u && !urls.includes(u)) urls.push(u);
+        }
+      }
+      return urls.slice(0, 3);
+    });
+  } catch {
+    return [];
+  }
+}
+
 // A genuine login wall sometimes still offers a guest path right there — M&S's CIAM login
 // page ("Sign in" + a separate "Guest Checkout" link) and Wickes' checkout "login-or-guest"
 // page both do. Clicking past it avoids asking the human to sign in for an order that never
@@ -961,7 +992,14 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
 
 NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
-to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click. (Full original rules preserved in spirit.)`;
+to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click.
+
+Your "summary" is plain text read aloud/displayed in chat — it is NOT where images go. A
+photo of the item on the page you finish "done" on is captured and shown automatically,
+separately from your summary, so don't reference it, promise it, or describe having
+"found photos/images" in the summary text itself — just answer the goal in words (colour,
+style, material if relevant). Mid-task, no image is ever shown, so never imply one just
+appeared. (Full original rules preserved in spirit.)`;
 }
 
 function parseModelDecision(rawText) {
@@ -4042,13 +4080,16 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
           const bits = [];
           if (ctx.color) bits.push(ctx.color);
           if (ctx.size) bits.push(`size ${ctx.size}`);
+          // "item" is a fixed noun so this never collapses to "Found the for you" when
+          // there's no color/size to describe (only a budget or a discovered deal).
           const desc = bits.length ? bits.join(' ') + ' ' : '';
-          nice = `Found the ${desc}for you${ctx.budget ? ` (under £${ctx.budget})` : ''}. ${decision.summary || ''}`.trim();
+          nice = `Found the ${desc}item for you${ctx.budget ? ` (under £${ctx.budget})` : ''}. ${decision.summary || ''}`.trim();
           if (deals.length) {
             nice += ` Deals I spotted: ${deals.join(' • ')}.`;
           }
         }
-        return { type: 'done', text: nice };
+        const imageUrls = await extractProductImageUrls(session.page);
+        return { type: 'done', text: nice, imageUrls };
       }
 
       if (decision.action === 'ask') {
