@@ -375,7 +375,6 @@ private struct AppIconView: View {
         // intentional, unlike the generic sparkle placeholder these were falling to.
         if names.contains("slack") { return ("Slack", Color(red: 74/255, green: 21/255, blue: 75/255), .white, 11) }
         if names.contains("plaid") { return ("Plaid", .black, .white, 11) }
-        if names.contains("strava") { return ("Strava", Color(red: 252/255, green: 76/255, blue: 2/255), .white, 10) }
         if names.contains("oura") { return ("Oura", .black, .white, 12) }
         return (nil, Color.oxySurface3, Color.oxySub, 17)
     }

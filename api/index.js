@@ -4220,7 +4220,11 @@ const CONNECTORS = [
   // Stripe here is the app's OWN payment processor for concierge money movement, not a
   // personal Stripe account the user links — a functionality, not a connection.
   { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'plaid', name: 'Plaid (Banking)', icon: 'plaid', category: 'Finance', implemented: true, type: 'api', kind: 'connection' },
+  // Plaid Link issues a real per-user access_token (see connectors/plaid.js), but the app has
+  // no client-side Plaid Link flow to actually produce one — the Connections screen's Connect
+  // button just flips a preference flag, same as any other functionality. A functionality,
+  // not a connection, until real Link is wired up.
+  { id: 'plaid', name: 'Plaid (Banking)', icon: 'plaid', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
   // Handoffs — I open the app perfectly pre-filled (easiest for you). No account is linked
   // in any of these; they're functionalities, not connections.
   { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
