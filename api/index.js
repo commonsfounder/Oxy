@@ -2364,14 +2364,19 @@ async function executeAction(userId, action, params, context = {}) {
           text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}.${cardNote} Say the word and I'll place the order.`,
           total: outcome.total,
           summary: outcome.summary,
-          actionSummary: 'Order ready for payment'
+          actionSummary: 'Order ready for payment',
+          ...(outcome.productName ? { productName: outcome.productName } : {}),
+          ...(outcome.colorOptions?.length ? { colorOptions: outcome.colorOptions } : {}),
+          ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
         };
       }
       if (outcome.type === 'done') {
         return {
           success: true,
           text: outcome.text,
-          ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
+          ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {}),
+          ...(outcome.productName ? { productName: outcome.productName } : {}),
+          ...(outcome.price ? { price: outcome.price } : {})
         };
       }
       if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true };

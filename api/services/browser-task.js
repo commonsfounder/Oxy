@@ -988,11 +988,17 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"back","note":"<why, e.g. UK 10 unavailable on this product>"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
-{"action":"done","summary":"<short summary answering the goal>"}
-{"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>"}
+{"action":"done","summary":"<short summary answering the goal>","productName":"<item name as shown on the page, if any>","price":"<price as shown on the page, if any>"}
+{"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>","productName":"<item name as shown on the page, if any>","colorOptions":["<only if the page shows distinct selectable color/size options>"]}
 
 NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
 to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click.
+
+"productName" and "price" are the actual item name/price exactly as displayed on the
+current page — omit either if the page doesn't clearly show it, never guess or invent one.
+"colorOptions" is an array of the distinct selectable color/size option labels you can
+actually see on the page (e.g. ["Black","Indigo","Light Wash"]) — omit it entirely if the
+page shows no such options; never fabricate a generic list.
 
 Your "summary" is plain text read aloud/displayed in chat — it is NOT where images go. A
 photo of the item on the page you finish "done" on is captured and shown automatically,
@@ -1028,6 +1034,18 @@ function parseModelDecision(rawText) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
   return parsed;
+}
+
+// Only ever a real, model-observed list — never a fallback/default set. An item with no
+// detected options must produce no swatch picker on the client, so anything malformed or
+// empty collapses to undefined rather than an empty array standing in for "none found".
+function sanitizeColorOptions(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const opts = raw
+    .map(v => String(v || '').trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  return opts.length ? opts : undefined;
 }
 
 function findElementByText(elements, text) {
@@ -4089,7 +4107,15 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
           }
         }
         const imageUrls = await extractProductImageUrls(session.page);
-        return { type: 'done', text: nice, imageUrls };
+        const productName = decision.productName ? String(decision.productName).trim() : undefined;
+        const price = decision.price ? String(decision.price).trim() : undefined;
+        return {
+          type: 'done',
+          text: nice,
+          imageUrls,
+          ...(productName ? { productName } : {}),
+          ...(price ? { price } : {})
+        };
       }
 
       if (decision.action === 'ask') {
@@ -4226,6 +4252,14 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
           if (consecutiveBadDecisions >= 3) return STUCK();
           continue;
         }
+        const rfpProductName = decision.productName ? String(decision.productName).trim() : undefined;
+        const rfpColorOptions = sanitizeColorOptions(decision.colorOptions);
+        const rfpImageUrls = await extractProductImageUrls(session.page);
+        const rfpExtra = {
+          ...(rfpProductName ? { productName: rfpProductName } : {}),
+          ...(rfpColorOptions ? { colorOptions: rfpColorOptions } : {}),
+          ...(rfpImageUrls.length ? { imageUrls: rfpImageUrls } : {})
+        };
         // Find the real pay button (the cart-summary text never matches a clickable
         // element) so confirmPayment can re-find and click it. If no pay control is
         // visible yet, don't hand off a dead-end — ask the user how to proceed.
@@ -4258,16 +4292,16 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
           const payRetry = (await extractClickableElements(session.page)).find((el) => matchesPaymentKeyword(el.text));
           if (payRetry) {
             session.pendingPaymentLabel = payRetry.text;
-            return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
+            return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '', ...rfpExtra };
           }
           if (isCheckoutPaymentUrl(session.page.url())) {
             session.pendingPaymentLabel = 'Pay';
-            return { type: 'ready_for_payment', summary: decision.summary || 'Checkout — payment step', total: decision.total || '' };
+            return { type: 'ready_for_payment', summary: decision.summary || 'Checkout — payment step', total: decision.total || '', ...rfpExtra };
           }
           return { type: 'ask', question: 'The order looks ready, but I can\'t see a payment button on screen yet — want me to keep going, or check the cart yourself?' };
         }
         session.pendingPaymentLabel = payEl.text;
-        return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '' };
+        return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '', ...rfpExtra };
       }
 
       // click or fill — the id MUST be one we actually showed the model. A miss here is
