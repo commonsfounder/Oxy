@@ -4808,10 +4808,18 @@ async function gatherEmailContext(userId) {
     const result = await dispatch(userId, 'get_emails', { max_results: 25, label: 'INBOX' });
     if (!result?.success || !Array.isArray(result.emails)) return { emails: [], incoming: [] };
     const real = result.emails.filter(e => !isPromotionalOrBulk(e));
-    const emails = real.slice(0, 10);
+    // A little headroom above the 10 we actually want — summarizeEmails' content
+    // judgment below drops a few more (marketing Gmail filed under CATEGORY_UPDATES
+    // next to real notifications, which the label/header check above can't separate).
+    const candidates = real.slice(0, 15);
+    const summarized = await summarizeEmails(candidates);
+    const emails = summarized
+      .filter(e => !e.llmPromotional)
+      .map(({ llmPromotional, ...rest }) => rest)
+      .slice(0, 10);
     // Deliveries/reservations can legitimately be CATEGORY_UPDATES, so parse incoming
-    // from the same de-promoted set rather than the raw fetch.
-    return { emails: await summarizeEmails(emails), incoming: extractIncoming(emails) };
+    // from the same de-promoted, de-marketed set rather than the raw fetch.
+    return { emails, incoming: extractIncoming(emails) };
   } catch (e) {
     return { emails: [], incoming: [] };
   }
@@ -4835,6 +4843,13 @@ function isPromotionalOrBulk(email = {}) {
 // just dumped the raw subject line verbatim. Single batched call (not one per email) to
 // keep this cheap — runs on the FAST_MODEL helper tier, on a background schedule so the
 // extra latency doesn't block any user-facing request.
+// Also judges promotional-ness by content, not just Gmail's label — the label/
+// List-Unsubscribe check in isPromotionalOrBulk only catches CATEGORY_PROMOTIONS/SOCIAL/
+// FORUMS plus a header that turns out to be unreliable in practice. Gmail files plenty of
+// real marketing (product newsletters, paid-study recruitment) under CATEGORY_UPDATES
+// alongside genuine notifications (bill reminders, build failures), and a label alone
+// can't tell those apart — this reuses the same batched call already paying for an LLM
+// read of each email, just asking it one more thing.
 async function summarizeEmails(emails) {
   if (!emails.length) return emails;
   try {
@@ -4842,18 +4857,23 @@ async function summarizeEmails(emails) {
     const listing = emails.map((e, i) =>
       `${i}. From: ${e.from}\nSubject: ${e.subject}\nSnippet: ${(e.snippet || '').slice(0, 300)}`
     ).join('\n\n');
-    const prompt = `For each numbered email below, write ONE short plain-English line (under 12 words) describing what it actually is or wants from the user — not a restatement of the subject line. Plain prose, no markdown.
+    const prompt = `For each numbered email below, judge two things:
+1. ONE short plain-English line (under 12 words) describing what it actually is or wants from the user — not a restatement of the subject line.
+2. Whether it's marketing/promotional/bulk content the user didn't specifically ask for (product newsletters, feature announcements, paid-study or survey recruitment, sales, discounts) as opposed to something personal, transactional, or genuinely actionable (a bill, a real notification about something the user did, a message worth replying to, an account/security alert).
 
 ${listing}
 
-Respond with ONLY a JSON array of strings, one per email, same order as input. Example: ["Your Amazon order shipped, arrives Thursday","Newsletter — nothing needed"]`;
+Respond with ONLY a JSON array, one object per email, same order as input, shape [{"summary":"...","promotional":true|false}]. Example: [{"summary":"Your Amazon order shipped, arrives Thursday","promotional":false},{"summary":"Product newsletter — nothing needed","promotional":true}]`;
     const res = await model.generateContent(prompt);
     const match = (res.response.text() || '').match(/\[[\s\S]*\]/);
     if (!match) return emails;
-    const summaries = JSON.parse(match[0]);
+    const judged = JSON.parse(match[0]);
     return emails.map((e, i) => ({
       ...e,
-      summary: typeof summaries[i] === 'string' ? summaries[i].trim() : undefined
+      summary: typeof judged[i]?.summary === 'string' ? judged[i].summary.trim() : undefined,
+      // Fail open (false) on a missing/malformed judgment for this email — better to
+      // show one extra email than to silently drop something that might matter.
+      llmPromotional: judged[i]?.promotional === true
     }));
   } catch (e) {
     return emails;
