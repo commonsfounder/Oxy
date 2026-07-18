@@ -1,18 +1,35 @@
 import Foundation
 
-// MARK: - Agent Task Session (real-data native buy flow)
+// MARK: - Agent Task Session (real-data native job flows)
 //
-// A generated multi-step "job" surface for shopping intents: working/searching
-// animation -> item detail -> payment confirm. Steps are appended as real data
-// arrives from the exact same backend pipeline chat already uses
-// (ChatService.sendMessage -> SSE -> agentic loop -> run_browser_task), not
-// scripted up front — see docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
+// A generated multi-step "job" surface: working/searching animation -> a
+// real-data result step -> confirm. Steps are appended as real data arrives
+// from the exact same backend pipeline chat already uses
+// (ChatService.sendMessage -> SSE -> agentic loop -> run_browser_task /
+// book_uber), not scripted up front — see
+// docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
+//
+// Two job kinds share this shell today:
+//  - .shopping: "buy X" and "order food" both drive run_browser_task (the
+//    same Playwright-driven checkout pipeline — food delivery just lands on
+//    an Uber Eats/Deliveroo-style DELIVERY recipe instead of a retailer one).
+//  - .ride: "get me an uber" drives the real book_uber action — a deep-link
+//    handoff into the Uber app with a best-effort fare estimate, not an
+//    in-app booking.
+// Restaurant reservations ("book a table") have no real backend yet, so that
+// intent isn't matched here at all — it falls through to real chat.
+
+enum AgentJobKind: Equatable {
+    case shopping
+    case ride
+}
 
 @Observable
 final class AgentTaskSession: Identifiable {
     let id = UUID()
     var title: String
     let originalPrompt: String
+    let kind: AgentJobKind
     var steps: [AgentStep]
     var currentIndex: Int
     var errorMessage: String?
@@ -25,12 +42,14 @@ final class AgentTaskSession: Identifiable {
     init(
         title: String,
         originalPrompt: String,
+        kind: AgentJobKind,
         userId: String,
         chatService: ChatService = ChatService(),
         location: [String: Double]? = nil
     ) {
         self.title = title
         self.originalPrompt = originalPrompt
+        self.kind = kind
         self.userId = userId
         self.chatService = chatService
         self.location = location
@@ -73,7 +92,7 @@ final class AgentTaskSession: Identifiable {
         steps[currentIndex].status = .active
     }
 
-    /// Kicks off the buy job through the real hidden pipeline, mutating `steps` as
+    /// Kicks off the job through the real hidden pipeline, mutating `steps` as
     /// genuine backend results arrive. `onHandoff` fires (with a prompt to
     /// auto-send, or nil to just open the chat surface) whenever the outcome can't
     /// honestly be shown as a fixed native step — a clarifying question, a
@@ -85,27 +104,32 @@ final class AgentTaskSession: Identifiable {
         isWorking = true
         defer { isWorking = false }
 
+        let watchedAction = kind == .ride ? "book_uber" : "run_browser_task"
         let stream = chatService.sendMessage(userId: userId, message: originalPrompt, location: location)
-        var sawBrowserAction = false
+        var sawWatchedAction = false
         for await event in stream {
             switch event {
             case .status(let status, let label):
                 updateWorkingStatus(status: status, label: label)
             case .actions(let results):
-                guard let result = results.first(where: { $0.action == "run_browser_task" }) else { continue }
-                sawBrowserAction = true
-                handle(result: result, onHandoff: onHandoff)
+                guard let result = results.first(where: { $0.action == watchedAction }) else { continue }
+                sawWatchedAction = true
+                if kind == .ride {
+                    handleRide(result: result, onHandoff: onHandoff)
+                } else {
+                    handle(result: result, onHandoff: onHandoff)
+                }
             case .error(let message):
                 errorMessage = message
                 return
             case .done:
-                if !sawBrowserAction { onHandoff(nil) }
+                if !sawWatchedAction { onHandoff(nil) }
                 return
             default:
                 break
             }
         }
-        if !sawBrowserAction { onHandoff(nil) }
+        if !sawWatchedAction { onHandoff(nil) }
     }
 
     /// "Review & confirm" — sends the same affirmative reply a person would type in
@@ -200,6 +224,27 @@ final class AgentTaskSession: Identifiable {
         onHandoff(nil)
     }
 
+    /// book_uber is a synchronous deep-link handoff (executionMode: 'direct',
+    /// confirmation: 'none') — no review step, no second network round trip.
+    /// `cardText`'s fare/ETA is Oxy's own estimate (Google Routes based), not a
+    /// live Uber quote, so RideConfirmStepView labels it honestly as an estimate.
+    private func handleRide(result: ActionResult, onHandoff: (String?) -> Void) {
+        guard result.success else {
+            errorMessage = result.error ?? result.text ?? "Couldn't get an Uber ready."
+            return
+        }
+        appendStep(AgentStep(
+            title: "Ride ready",
+            ui: .rideConfirm(RideDetails(
+                summary: result.text ?? "Ride ready.",
+                estimate: result.cardText,
+                deepLink: result.deepLink,
+                webLink: result.webLink
+            )),
+            ctaLabel: "Open Uber"
+        ))
+    }
+
     private func complete() {
         if steps.indices.contains(currentIndex) { steps[currentIndex].status = .done }
         currentIndex = steps.count
@@ -235,7 +280,7 @@ final class AgentStep: Identifiable {
     var canAdvance: Bool {
         switch ui {
         case .workingHero: return false
-        case .paymentConfirm, .productDetail: return true
+        case .paymentConfirm, .productDetail, .rideConfirm: return true
         }
     }
 }
@@ -243,6 +288,7 @@ final class AgentStep: Identifiable {
 enum StepUI {
     case paymentConfirm(PaymentDetails)
     case productDetail(ProductDetails)
+    case rideConfirm(RideDetails)
     case workingHero(status: String)
 }
 
@@ -250,6 +296,15 @@ struct PaymentDetails: Equatable {
     let merchant: String
     let amount: String
     let detail: String
+}
+
+/// Real book_uber result data. `estimate` (from the action's cardText) is Oxy's
+/// own fare/ETA estimate, not a live Uber quote — the step view says so.
+struct RideDetails: Equatable {
+    let summary: String
+    let estimate: String?
+    let deepLink: String?
+    let webLink: String?
 }
 
 /// A product surfaced for a "buy X" job. Everything except `name` is real backend
@@ -273,13 +328,36 @@ struct ProductDetails: Equatable {
     }
 }
 
-// MARK: - Intent match (keyword scaffold — only decides whether this is a buy job;
-// all data for the job itself comes from the real backend, never from here)
+// MARK: - Intent match (keyword scaffold — only decides which real pipeline a
+// prompt should drive, and as which job kind; all data for the job itself comes
+// from the real backend, never from here)
 
 enum AgentPlanGenerator {
+    /// Which native job, if any, this prompt should open. Order matters: food
+    /// delivery and ride keywords are checked before the broader buy check, since
+    /// "order me a" alone would otherwise also satisfy matchesBuy. Restaurant
+    /// reservations ("book a table", "dinner") aren't matched at all — there's no
+    /// real backend for that yet, so those fall through to real chat same as any
+    /// unmatched message.
+    static func jobKind(for prompt: String) -> AgentJobKind? {
+        let lower = prompt.lowercased()
+        if containsFoodKeyword(lower) { return .shopping }
+        if containsRideKeyword(lower) { return .ride }
+        if matchesBuy(prompt) { return .shopping }
+        return nil
+    }
+
+    private static func containsRideKeyword(_ lower: String) -> Bool {
+        ["uber", "taxi", "cab", "ride home", "book a ride", "book me a ride"].contains { lower.contains($0) }
+    }
+
+    private static func containsFoodKeyword(_ lower: String) -> Bool {
+        lower.contains("order") && (lower.contains("food") || lower.contains("takeout") || lower.contains("delivery"))
+    }
+
     /// Word-anchored so "card", "care", "scary", "cargo" don't trigger a buy job
     /// (an earlier substring match on "car"/"buy a" hijacked unrelated intents).
-    static func matchesBuy(_ prompt: String) -> Bool {
+    private static func matchesBuy(_ prompt: String) -> Bool {
         let lower = prompt.lowercased()
         let words = Set(lower.split { !$0.isLetter }.map(String.init))
         if words.contains("buy") || words.contains("buying") || words.contains("purchase") { return true }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Generated-for-the-job step content (real-data native buy flow)
+// MARK: - Generated-for-the-job step content (real-data native job flows)
 //
 // Each case swaps the whole body of AgentTaskSessionView. Shared shell (title,
 // glass plates) lives here; every field on a step comes from the real backend
@@ -59,6 +59,40 @@ struct PaymentConfirmStepView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(ink.opacity(0.4))
                 .padding(.top, 12)
+        }
+    }
+}
+
+// MARK: - Ride confirm (book_uber — real deep link + fare estimate)
+
+struct RideConfirmStepView: View {
+    let details: RideDetails
+    var ink: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            StepTitleBlock(title: "Ride ready", subtitle: details.summary, ink: ink)
+
+            if let estimate = details.estimate {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ESTIMATE")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.2)
+                        .foregroundStyle(ink.opacity(0.45))
+                    Text(estimate)
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(ink)
+                }
+                .padding(.bottom, 14)
+            }
+
+            HStack(spacing: 6) {
+                AppIcon("shield-check", size: 13)
+                Text("Fare and time are Oxy's estimate — Uber shows the real price before you confirm the trip in the app.")
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(ink.opacity(0.45))
         }
     }
 }

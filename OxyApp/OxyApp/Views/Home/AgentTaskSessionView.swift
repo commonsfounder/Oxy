@@ -1,11 +1,13 @@
 import SwiftUI
+import UIKit
 
-// MARK: - Agent Task Session shell (real-data native buy flow)
+// MARK: - Agent Task Session shell (real-data native job flows)
 //
 // Persistent chrome: close · task title · step k/n. Body swaps per-step generated
 // UI, driven by real results from the same backend pipeline chat uses. Bottom dock
-// always offers a way back into free chat. Black pill CTA advances the flow or, on
-// the payment step, calls the real confirm_browser_payment action.
+// always offers a way back into free chat. Black pill CTA advances the flow, or on
+// the payment/ride step, calls the real confirm_browser_payment action / opens the
+// real Uber deep link.
 
 struct AgentTaskSessionView: View {
     @Bindable var session: AgentTaskSession
@@ -105,6 +107,8 @@ struct AgentTaskSessionView: View {
                 PaymentConfirmStepView(details: details, ink: ink)
             case .productDetail(let details):
                 ProductDetailStepView(details: details, ink: ink)
+            case .rideConfirm(let details):
+                RideConfirmStepView(details: details, ink: ink)
             case .workingHero(let status):
                 WorkingHeroStepView(title: step.title, status: status, ink: ink)
             }
@@ -146,9 +150,13 @@ struct AgentTaskSessionView: View {
             } else if let step = session.currentStep {
                 Button {
                     HapticManager.shared.impact(.medium)
-                    if case .paymentConfirm = step.ui {
+                    switch step.ui {
+                    case .paymentConfirm:
                         Task { await session.confirmPayment(onHandoff: onOpenChat) }
-                    } else {
+                    case .rideConfirm(let details):
+                        openRideLink(details)
+                        withAnimation(.appSpring) { session.advance() }
+                    default:
                         withAnimation(.appSpring) { session.advance() }
                     }
                 } label: {
@@ -160,6 +168,17 @@ struct AgentTaskSessionView: View {
             }
         }
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)
+    }
+
+    // Same deep-link-then-web-link fallback ChatViewModel.openActionLink already
+    // uses for book_uber results — one open behavior for the same action result
+    // shape, whether it arrived via chat or this hidden pipeline.
+    private func openRideLink(_ details: RideDetails) {
+        if let link = details.deepLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        } else if let link = details.webLink, let url = URL(string: link) {
+            UIApplication.shared.open(url)
+        }
     }
 
     private func primaryLabel(_ text: String) -> some View {

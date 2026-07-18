@@ -5,10 +5,11 @@ import SwiftUI
 // Visual language after the Gleb Kuznetsov concept (soft pastel wash, glass,
 // serif greeting): https://x.com/glebich/status/2066714881911586836
 //
-// A "buy X" intent opens AgentTaskSession's native step-flow shell (search
-// animation → item detail → payment confirm), but every field on it comes from the
-// real backend — the same run_browser_task/confirm_browser_payment pipeline chat
-// already uses, just without rendering a chat transcript. See
+// A buy/food-order/ride intent opens AgentTaskSession's native step-flow shell
+// (search animation → result → confirm), but every field on it comes from the
+// real backend — the same run_browser_task/confirm_browser_payment/book_uber
+// pipeline chat already uses, just without rendering a chat transcript. Restaurant
+// bookings have no real backend yet, so that intent isn't matched — see
 // Models/AgentTaskSession.swift and docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
 
 struct AgenticHomeView: View {
@@ -301,15 +302,16 @@ struct AgenticHomeView: View {
     }
 
     /// Generated-UI-for-the-job path: a native step session, wired to the real
-    /// backend pipeline, when the intent is a genuine buy — everything else
-    /// (including former dinner/ride/order-food phrasings) goes to free chat, same
-    /// as any unmatched message.
+    /// backend pipeline, when the intent is a buy, food order, or ride — restaurant
+    /// bookings and anything else unmatched fall through to real chat, same as any
+    /// unmatched message.
     private func handleIntent(_ text: String) {
         HapticManager.shared.impact(.medium)
-        if AgentPlanGenerator.matchesBuy(text) {
+        if let kind = AgentPlanGenerator.jobKind(for: text) {
             activeSession = AgentTaskSession(
                 title: text,
                 originalPrompt: text,
+                kind: kind,
                 userId: appState.userId,
                 chatService: service,
                 location: LocationManager.shared.locationDict
