@@ -500,9 +500,13 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     let subject: String
     let snippet: String?
     let date: String?
-    /// One-line "what this actually is" from a server-side model pass — nil for older
-    /// briefings created before summarization existed, or if that pass failed.
+    /// Stakes-first, casual one-liner from a server-side model pass — states the real
+    /// consequence/deadline when there is one, not a neutral restatement of the email.
+    /// Nil for older briefings created before this existed, or if that pass failed.
     let summary: String?
+    /// Short server-judged action verb for the ONE useful next step ("Pay it", "Sort it",
+    /// "Reply", "Ignore"...) — nil falls back to a generic "Draft reply" on the card.
+    let cta: String?
     /// Which connected inbox this came from ("gmail" / "outlook") — nil for briefings
     /// created before multi-provider tagging existed. Drives the provider badge on the
     /// Home inbox card so a user with more than one connected account can tell them apart.

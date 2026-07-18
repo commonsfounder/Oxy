@@ -69,7 +69,13 @@ struct AgenticHomeView: View {
                                         ink: GlebChrome.ink,
                                         onCTA: { handleMissionCTA(mission) },
                                         onMailCTA: { email in
-                                            handleIntent("Help me with this email from \(email.cleanFrom): \(email.cleanSubject)")
+                                            // Lead with the server's judged action (e.g. "Pay it") and the
+                                            // stakes-first summary so chat picks up in the right mode
+                                            // immediately, not a generic "help me" with just a subject line.
+                                            let action = email.cta?.isEmpty == false ? email.cta! : "Help me with"
+                                            let stakes = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            let context = (stakes?.isEmpty == false ? stakes! : email.cleanSubject)
+                                            handleIntent("\(action) — email from \(email.cleanFrom): \(context)")
                                         }
                                     )
                                     .transition(.asymmetric(
@@ -885,7 +891,7 @@ struct MissionCardView: View {
                     onMailCTA(email)
                 } label: {
                     HStack(spacing: 8) {
-                        Text("Draft reply")
+                        Text(email.cta?.isEmpty == false ? email.cta! : "Draft reply")
                             .font(.system(size: 14, weight: .semibold))
                         AppIcon("arrow-right", size: 15, weight: .semibold)
                     }

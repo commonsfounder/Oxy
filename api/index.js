@@ -4878,17 +4878,20 @@ function isPromotionalOrBulk(email = {}) {
   return false;
 }
 
-// One-line "what this actually is" per email for the Today Inbox card, which previously
-// just dumped the raw subject line verbatim. Single batched call (not one per email) to
-// keep this cheap — runs on the FAST_MODEL helper tier, on a background schedule so the
-// extra latency doesn't block any user-facing request.
+// Stakes-first triage per email for the Today Inbox card — this used to just dump the raw
+// subject line verbatim, then (one pass later) a neutral "what this is" restatement. Neither
+// tells you at a glance whether you need to actually do something about it. The bar now is
+// Poke's texting voice: what happened, what it actually costs you if you ignore it, and by
+// when — the way a sharp assistant would text a friend, not the way you'd file an email.
+// Single batched call (not one per email) to keep this cheap — runs on the FAST_MODEL helper
+// tier, on a background schedule so the extra latency doesn't block any user-facing request.
 // Also judges promotional-ness by content, not just Gmail's label — the label/
 // List-Unsubscribe check in isPromotionalOrBulk only catches CATEGORY_PROMOTIONS/SOCIAL/
 // FORUMS plus a header that turns out to be unreliable in practice. Gmail files plenty of
 // real marketing (product newsletters, paid-study recruitment) under CATEGORY_UPDATES
 // alongside genuine notifications (bill reminders, build failures), and a label alone
 // can't tell those apart — this reuses the same batched call already paying for an LLM
-// read of each email, just asking it one more thing.
+// read of each email, just asking it two more things.
 async function summarizeEmails(emails) {
   if (!emails.length) return emails;
   try {
@@ -4896,13 +4899,32 @@ async function summarizeEmails(emails) {
     const listing = emails.map((e, i) =>
       `${i}. From: ${e.from}\nSubject: ${e.subject}\nSnippet: ${(e.snippet || '').slice(0, 300)}`
     ).join('\n\n');
-    const prompt = `For each numbered email below, judge two things:
-1. ONE short plain-English line (under 12 words) describing what it actually is or wants from the user — not a restatement of the subject line.
-2. Whether it's marketing/promotional/bulk content the user didn't specifically ask for (product newsletters, feature announcements, paid-study or survey recruitment, sales, discounts) as opposed to something personal, transactional, or genuinely actionable (a bill, a real notification about something the user did, a message worth replying to, an account/security alert).
+    const prompt = `For each numbered email below, judge three things:
+
+1. summary: ONE short, casual line (under 20 words) written the way a sharp assistant would
+text a friend, not the way you'd file an email. If there's a real consequence — a fee, a
+suspension, a deadline, a decision the user has to make — name it plainly and say what
+happens if they don't act. If it's genuinely just FYI with nothing at stake, say that
+plainly too instead of dressing it up. Never restate the subject line or describe the
+email ("this is an email about...").
+
+2. cta: a short 1-3 word label for the ONE most useful next step, matching the actual verb
+needed — e.g. "Pay it", "Sort it", "Reply", "Review", "Confirm", "Ignore". Not a generic
+default — pick the word for what actually has to happen.
+
+3. promotional: true if this is marketing/bulk content the user didn't specifically ask for
+(product newsletters, feature announcements, paid-study or survey recruitment, sales,
+discounts) as opposed to something personal, transactional, or genuinely actionable (a bill,
+a real notification about something the user did, a message worth replying to, an
+account/security alert).
 
 ${listing}
 
-Respond with ONLY a JSON array, one object per email, same order as input, shape [{"summary":"...","promotional":true|false}]. Example: [{"summary":"Your Amazon order shipped, arrives Thursday","promotional":false},{"summary":"Product newsletter — nothing needed","promotional":true}]`;
+Respond with ONLY a JSON array, one object per email, same order as input, shape
+[{"summary":"...","cta":"...","promotional":true|false}]. Examples:
+[{"summary":"Capital One suspended your card after a missed payment — pay £22.80 today to unblock it","cta":"Pay it","promotional":false},
+{"summary":"Amazon order shipped, arrives Thursday, nothing needed","cta":"Track it","promotional":false},
+{"summary":"Product newsletter — nothing needed","cta":"Ignore","promotional":true}]`;
     const res = await model.generateContent(prompt);
     const match = (res.response.text() || '').match(/\[[\s\S]*\]/);
     if (!match) return emails;
@@ -4910,6 +4932,7 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
     return emails.map((e, i) => ({
       ...e,
       summary: typeof judged[i]?.summary === 'string' ? judged[i].summary.trim() : undefined,
+      cta: typeof judged[i]?.cta === 'string' ? judged[i].cta.trim().slice(0, 24) : undefined,
       // Fail open (false) on a missing/malformed judgment for this email — better to
       // show one extra email than to silently drop something that might matter.
       llmPromotional: judged[i]?.promotional === true
