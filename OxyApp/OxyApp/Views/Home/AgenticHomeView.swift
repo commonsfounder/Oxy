@@ -4,9 +4,19 @@ import SwiftUI
 //
 // Visual language after the Gleb Kuznetsov concept (soft pastel wash, glass,
 // serif greeting): https://x.com/glebich/status/2066714881911586836
-// But the flow is real: the composer routes the user's own intent through
-// AgentPlanGenerator → AgentTaskSession (generic, query-driven steps), or free
-// chat. Living mission cards come from real briefings. No hardcoded scripts.
+//
+// KNOWN GAP (2026-07-18, being fixed): AgentPlanGenerator/AgentTaskSession
+// (Models/AgentTaskSession.swift, Views/Home/AgentTaskSessionView.swift,
+// Views/Home/AgentStepViews.swift) is a native step-flow shell (search animation →
+// item detail/selection → confirm) the product wants to KEEP — it reads far better
+// than a chat wall for structured purchases/bookings — but today it's 100%
+// client-side fabricated data: hardcoded generic device-finish swatches
+// ("Silver"/"Graphite"/"Sand") slapped on ANY item regardless of category, no real
+// search, no real price, no real photo. It needs to be wired to the real backend
+// (the same run_browser_task pipeline chat already uses for shopping, or the
+// existing search_flights/search_hotels actions for travel) instead of faking each
+// step. Until that's done, do not let real user intents reach it silently believing
+// it's real — see handleIntent below.
 
 struct AgenticHomeView: View {
     @Environment(AppState.self) private var appState
@@ -91,17 +101,6 @@ struct AgenticHomeView: View {
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .task { await load(forceCheck: false) }
-        .task {
-            #if DEBUG
-            // Open a job flow straight away for headless screenshotting of the
-            // in-job steps (OXY_DEBUG_OPEN_JOB=<intent>). Never in Release.
-            if let intent = ProcessInfo.processInfo.environment["OXY_DEBUG_OPEN_JOB"],
-               !intent.isEmpty,
-               activeSession == nil {
-                activeSession = AgentPlanGenerator.generate(for: intent)
-            }
-            #endif
-        }
         .onChange(of: chatLaunch) { old, new in
             if old != nil && new == nil {
                 Task { await load(forceCheck: false) }
@@ -569,12 +568,17 @@ enum HomeMissionBuilder {
             for email in briefing.emails where !email.isLikelyPromotional {
                 let id = "mail-\(briefing.id)-\(email.id)"
                 guard seen.insert(id).inserted else { continue }
+                // Prefer the server's one-line "what this actually is" (written specifically
+                // to answer why an email needs attention, or that it doesn't) over the raw
+                // Gmail snippet, which is often a truncated HTML fragment. Sender name is
+                // already shown separately via `sender` below, so it doesn't need repeating here.
+                let summary = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
                 out.append(HomeMission(
                     id: id,
                     kind: .mail,
                     eyebrow: "Inbox",
                     title: email.cleanSubject,
-                    detail: email.cleanFrom + (email.cleanSnippet.map { " · \($0)" } ?? ""),
+                    detail: (summary?.isEmpty == false ? summary : email.cleanSnippet),
                     cta: "Open",
                     prompt: "Help me with this email from \(email.cleanFrom): \(email.cleanSubject)",
                     symbol: "envelope.fill",
@@ -797,18 +801,19 @@ struct MissionCardView: View {
                     Text(mission.title)
                         .font(.system(size: 13))
                         .foregroundStyle(ink.opacity(0.55))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                    // The one-line summary — this is the actual answer to "why does this
+                    // need my attention" and shouldn't be hidden behind a tap. What's behind
+                    // the expand toggle now is just the secondary Archive action below.
+                    if let detail = mission.detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(ink.opacity(0.6))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 0)
-            }
-
-            if expanded, let detail = mission.detail, !detail.isEmpty {
-                Text(detail)
-                    .font(.system(size: 13))
-                    .foregroundStyle(ink.opacity(0.6))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .transition(.opacity)
             }
 
             HStack(spacing: 8) {
