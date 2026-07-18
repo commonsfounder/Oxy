@@ -64,9 +64,14 @@ struct AgenticHomeView: View {
                         } else {
                             LazyVStack(spacing: 12) {
                                 ForEach(missions) { mission in
-                                    MissionCardView(mission: mission, ink: GlebChrome.ink) {
-                                        handleMissionCTA(mission)
-                                    }
+                                    MissionCardView(
+                                        mission: mission,
+                                        ink: GlebChrome.ink,
+                                        onCTA: { handleMissionCTA(mission) },
+                                        onMailCTA: { email in
+                                            handleIntent("Help me with this email from \(email.cleanFrom): \(email.cleanSubject)")
+                                        }
+                                    )
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
                                         removal: .opacity
@@ -477,7 +482,7 @@ struct HomeMission: Identifiable, Equatable {
     enum Kind: Equatable {
         case action
         case status
-        case mail
+        case mailGroup
         case incoming
         case agent
     }
@@ -496,12 +501,22 @@ struct HomeMission: Identifiable, Equatable {
     var deliveryStage: Int? = nil
     var vendor: String? = nil
     var sender: String? = nil
+    /// Every real (non-promotional) inbox email across all recent briefings, swiped
+    /// through as one card instead of one card per email — only set on `.mailGroup`.
+    var mailItems: [BriefingEmail] = []
 }
 
 enum HomeMissionBuilder {
     static func build(from briefings: [Briefing]) -> [HomeMission] {
         var out: [HomeMission] = []
         var seen = Set<String>()
+        // Collected across every briefing and appended as one swipeable card at the
+        // end, instead of one full card per email — an inbox list doesn't belong in
+        // a feed of "what matters today". Deduped by the email's own identity
+        // (from+subject), not per-briefing, since the same email can appear in more
+        // than one briefing window.
+        var mailItems: [BriefingEmail] = []
+        var seenMailIDs = Set<String>()
 
         for briefing in briefings {
             for signal in briefing.signals {
@@ -569,25 +584,8 @@ enum HomeMissionBuilder {
             }
 
             for email in briefing.emails where !email.isLikelyPromotional {
-                let id = "mail-\(briefing.id)-\(email.id)"
-                guard seen.insert(id).inserted else { continue }
-                // Prefer the server's one-line "what this actually is" (written specifically
-                // to answer why an email needs attention, or that it doesn't) over the raw
-                // Gmail snippet, which is often a truncated HTML fragment. Sender name is
-                // already shown separately via `sender` below, so it doesn't need repeating here.
-                let summary = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
-                out.append(HomeMission(
-                    id: id,
-                    kind: .mail,
-                    eyebrow: "Inbox",
-                    title: email.cleanSubject,
-                    detail: (summary?.isEmpty == false ? summary : email.cleanSnippet),
-                    cta: "Open",
-                    prompt: "Help me with this email from \(email.cleanFrom): \(email.cleanSubject)",
-                    symbol: "envelope.fill",
-                    isPrimary: false,
-                    sender: email.displayFrom
-                ))
+                guard seenMailIDs.insert(email.id).inserted else { continue }
+                mailItems.append(email)
             }
 
             let k = briefing.kind.lowercased()
@@ -608,6 +606,21 @@ enum HomeMissionBuilder {
             }
         }
 
+        if !mailItems.isEmpty {
+            out.append(HomeMission(
+                id: "mail-group",
+                kind: .mailGroup,
+                eyebrow: "Inbox",
+                title: mailItems.count == 1 ? "1 email needs you" : "\(mailItems.count) emails need you",
+                detail: nil,
+                cta: nil,
+                prompt: nil,
+                symbol: "envelope.fill",
+                isPrimary: false,
+                mailItems: mailItems
+            ))
+        }
+
         let ranked = out.sorted { a, b in
             if a.isPrimary != b.isPrimary { return a.isPrimary && !b.isPrimary }
             return false
@@ -622,13 +635,15 @@ struct MissionCardView: View {
     let mission: HomeMission
     var ink: Color
     var onCTA: () -> Void
+    /// Fires with the specific email a page's "Draft reply" was tapped on — only
+    /// used by `.mailGroup`, which has no single card-level prompt to send via `onCTA`.
+    var onMailCTA: (BriefingEmail) -> Void = { _ in }
 
     @State private var expanded = false
 
     private var canExpand: Bool {
         switch mission.kind {
         case .incoming where mission.deliveryStage != nil: return true
-        case .mail: return true
         default: return false
         }
     }
@@ -639,36 +654,45 @@ struct MissionCardView: View {
     private var isTappable: Bool { canExpand || mission.cta != nil }
 
     var body: some View {
-        // A plain onTapGesture here gave the single most-tapped surface in the whole
-        // Home feed zero press feedback, unlike every other tappable element in the
-        // app (pillCTA, AppRow, etc. all use appScale) — a real feedback gap on a
-        // tens-of-times-a-day surface, not just a cosmetic nit.
-        Button {
-            if canExpand {
-                HapticManager.shared.impact(.light)
-                withAnimation(.appExpand) { expanded.toggle() }
-            } else if mission.cta != nil {
-                onCTA()
-            }
-        } label: {
-            Group {
-                switch mission.kind {
-                case .incoming where mission.deliveryStage != nil:
-                    deliveryCard
-                case .incoming:
-                    reservationCard
-                case .mail:
-                    mailCard
-                default:
-                    standardCard
+        // The inbox card owns its own swipe/tap gestures (a per-page "Draft reply"
+        // button plus the TabView's own drag recognizer) — wrapping it in the shared
+        // outer Button below would have `.disabled(!isTappable)` (true here, since
+        // there's no single card-level cta) propagate through the environment and
+        // disable those nested controls too. Render it as its own root instead.
+        if mission.kind == .mailGroup {
+            mailGroupCard
+                .padding(16)
+                .background { MissionGlassPlate() }
+        } else {
+            // A plain onTapGesture here gave the single most-tapped surface in the whole
+            // Home feed zero press feedback, unlike every other tappable element in the
+            // app (pillCTA, AppRow, etc. all use appScale) — a real feedback gap on a
+            // tens-of-times-a-day surface, not just a cosmetic nit.
+            Button {
+                if canExpand {
+                    HapticManager.shared.impact(.light)
+                    withAnimation(.appExpand) { expanded.toggle() }
+                } else if mission.cta != nil {
+                    onCTA()
                 }
+            } label: {
+                Group {
+                    switch mission.kind {
+                    case .incoming where mission.deliveryStage != nil:
+                        deliveryCard
+                    case .incoming:
+                        reservationCard
+                    default:
+                        standardCard
+                    }
+                }
+                .padding(16)
+                .background { MissionGlassPlate() }
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             }
-            .padding(16)
-            .background { MissionGlassPlate() }
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .buttonStyle(.appScale(0.98))
+            .disabled(!isTappable)
         }
-        .buttonStyle(.appScale(0.98))
-        .disabled(!isTappable)
     }
 
     // MARK: - Delivery (Gleb route-card anatomy: title · id-pill · progress rail)
@@ -782,34 +806,70 @@ struct MissionCardView: View {
         return parts.last
     }
 
-    // MARK: - Mail (sender monogram · subject · summary · quick reply)
+    // MARK: - Mail group (one swipeable card for every real inbox email, not one card each)
 
-    private var mailCard: some View {
-        let name = mission.sender ?? "Inbox"
+    @State private var mailPage = 0
+
+    private var mailGroupCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(mission.eyebrow.uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(ink.opacity(0.42))
+                Spacer(minLength: 8)
+                if mission.mailItems.count > 1 {
+                    Text("\(mailPage + 1)/\(mission.mailItems.count)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(ink.opacity(0.45))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+            }
+
+            TabView(selection: $mailPage) {
+                ForEach(Array(mission.mailItems.enumerated()), id: \.element.id) { index, email in
+                    mailPageCard(email)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: 176)
+        }
+    }
+
+    private func mailPageCard(_ email: BriefingEmail) -> some View {
+        let name = email.displayFrom
+        let summary = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                Circle()
-                    .fill(ink.opacity(0.08))
-                    .frame(width: 40, height: 40)
-                    .overlay(
-                        Text(monogram(name))
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(ink.opacity(0.65))
-                    )
+                ZStack(alignment: .topLeading) {
+                    Circle()
+                        .fill(ink.opacity(0.08))
+                        .frame(width: 40, height: 40)
+                        .overlay(
+                            Text(monogram(name))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(ink.opacity(0.65))
+                        )
+                    providerBadge(email.provider)
+                        .offset(x: -6, y: -6)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(ink)
                         .lineLimit(1)
-                    Text(mission.title)
+                    Text(email.cleanSubject)
                         .font(.system(size: 13))
                         .foregroundStyle(ink.opacity(0.55))
                         .lineLimit(1)
                     // The one-line summary — this is the actual answer to "why does this
-                    // need my attention" and shouldn't be hidden behind a tap. What's behind
-                    // the expand toggle now is just the secondary Archive action below.
-                    if let detail = mission.detail, !detail.isEmpty {
-                        Text(detail)
+                    // need my attention" — prefers the server's judgment over the raw
+                    // (often truncated HTML) Gmail/Outlook snippet.
+                    if let text = (summary?.isEmpty == false ? summary : email.cleanSnippet), !text.isEmpty {
+                        Text(text)
                             .font(.system(size: 12.5))
                             .foregroundStyle(ink.opacity(0.6))
                             .lineLimit(2)
@@ -818,21 +878,53 @@ struct MissionCardView: View {
                 }
                 Spacer(minLength: 0)
             }
-
-            HStack(spacing: 8) {
-                pillCTA("Draft reply", primary: true)
-                if expanded {
-                    Text("Archive")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(ink.opacity(0.6))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .background(ink.opacity(0.06), in: Capsule())
-                        .transition(.opacity)
+            Spacer(minLength: 0)
+            HStack {
+                Button {
+                    HapticManager.shared.impact(.light)
+                    onMailCTA(email)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text("Draft reply")
+                            .font(.system(size: 14, weight: .semibold))
+                        AppIcon("arrow-right", size: 15, weight: .semibold)
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 11)
+                    .background { Capsule().fill(Color.black) }
                 }
+                .buttonStyle(.appScale(0.96))
                 Spacer(minLength: 0)
             }
         }
+    }
+
+    /// Small full-colour brand mark (Assets: "google" / "outlook") pinned to the
+    /// top-left corner so a user with more than one connected inbox can tell which
+    /// account an item came from at a glance. AppIcon can't be reused here — it
+    /// always renders in monochrome template mode, which would strip the brand colour.
+    @ViewBuilder
+    private func providerBadge(_ provider: String?) -> some View {
+        switch provider {
+        case "outlook":
+            providerBadgeIcon("outlook")
+        case "gmail":
+            providerBadgeIcon("google")
+        default:
+            EmptyView()
+        }
+    }
+
+    private func providerBadgeIcon(_ assetName: String) -> some View {
+        Image(assetName)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 16, height: 16)
+            .padding(3)
+            .background(Circle().fill(Color.white))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+            .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
     }
 
     // MARK: - Reservation (calendar-forward)

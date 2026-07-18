@@ -503,6 +503,10 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     /// One-line "what this actually is" from a server-side model pass — nil for older
     /// briefings created before summarization existed, or if that pass failed.
     let summary: String?
+    /// Which connected inbox this came from ("gmail" / "outlook") — nil for briefings
+    /// created before multi-provider tagging existed. Drives the provider badge on the
+    /// Home inbox card so a user with more than one connected account can tell them apart.
+    let provider: String?
 
     var id: String { from + "|" + subject }
 

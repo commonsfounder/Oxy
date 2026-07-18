@@ -4798,6 +4798,22 @@ async function getLatestNativeContext(userId) {
   return data || null;
 }
 
+// Outlook's Graph API shape (from connectors/microsoft.js's summarizeMessage: id, subject,
+// from, senderName, receivedAt, preview, isRead) doesn't match Gmail's (from, subject,
+// snippet, date, labelIds, listUnsubscribe) — normalize to the common shape everything
+// downstream (isPromotionalOrBulk, summarizeEmails, extractIncoming, BriefingEmail on the
+// client) already reads, and tag `provider` so the dashboard can show which inbox an item
+// came from once a user has more than one connected.
+function normalizeOutlookEmail(m = {}) {
+  return {
+    from: m.senderName ? `${m.senderName} <${m.from || ''}>` : (m.from || ''),
+    subject: m.subject || '',
+    snippet: m.preview || '',
+    date: m.receivedAt || '',
+    provider: 'outlook'
+  };
+}
+
 // Regression: the Today dashboard's Inbox/Incoming cards read metadata.emails/metadata.incoming
 // off the freshest briefing (OxyApp/Models/Message.swift), but a prior refactor
 // (commit 454d17b) never carried real email data into any briefing's metadata — those cards
@@ -4807,12 +4823,30 @@ async function getLatestNativeContext(userId) {
 async function gatherEmailContext(userId) {
   try {
     const enabled = await getEnabledConnectors(userId);
-    if (!enabled.includes('google')) return { emails: [], incoming: [] };
+    const wantsGoogle = enabled.includes('google');
+    const wantsMicrosoft = enabled.includes('microsoft');
+    if (!wantsGoogle && !wantsMicrosoft) return { emails: [], incoming: [] };
+
     // Over-fetch, then drop marketing/bulk mail, so a promo-heavy inbox still yields a
     // full page of real, actionable mail (fetching only 10 could be all promotions).
-    const result = await dispatch(userId, 'get_emails', { max_results: 25, label: 'INBOX' });
-    if (!result?.success || !Array.isArray(result.emails)) return { emails: [], incoming: [] };
-    const real = result.emails.filter(e => !isPromotionalOrBulk(e));
+    const [googleResult, outlookResult] = await Promise.all([
+      wantsGoogle ? dispatch(userId, 'get_emails', { max_results: 25, label: 'INBOX' }) : null,
+      wantsMicrosoft ? dispatch(userId, 'get_outlook_emails', { max: 25 }) : null
+    ]);
+
+    const googleEmails = (googleResult?.success && Array.isArray(googleResult.emails))
+      ? googleResult.emails.map(e => ({ ...e, provider: 'gmail' }))
+      : [];
+    // Outlook has no CATEGORY_PROMOTIONS/List-Unsubscribe-header equivalent surfaced here,
+    // so isPromotionalOrBulk (which reads those Gmail-specific fields) is a no-op for it —
+    // summarizeEmails' content-based llmPromotional judgment below is the only filter that
+    // actually applies to Outlook mail, same as it already is for Gmail mail that slips
+    // past Gmail's own labels.
+    const outlookEmails = (outlookResult?.success && Array.isArray(outlookResult.emails))
+      ? outlookResult.emails.map(normalizeOutlookEmail)
+      : [];
+
+    const real = [...googleEmails, ...outlookEmails].filter(e => !isPromotionalOrBulk(e));
     // A little headroom above the 10 we actually want — summarizeEmails' content
     // judgment below drops a few more (marketing Gmail filed under CATEGORY_UPDATES
     // next to real notifications, which the label/header check above can't separate).
