@@ -9,19 +9,31 @@ import Foundation
 // book_uber), not scripted up front — see
 // docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
 //
-// Two job kinds share this shell today:
+// Three job kinds share this shell today:
 //  - .shopping: "buy X" and "order food" both drive run_browser_task (the
 //    same Playwright-driven checkout pipeline — food delivery just lands on
 //    an Uber Eats/Deliveroo-style DELIVERY recipe instead of a retailer one).
 //  - .ride: "get me an uber" drives the real book_uber action — a deep-link
 //    handoff into the Uber app with a best-effort fare estimate, not an
 //    in-app booking.
+//  - .task: a generic "go handle this" job kicked off from somewhere other than
+//    typed text — e.g. tapping a Home inbox card's judged action ("Pay it",
+//    "Sort it") — so the concierge acts on context it already has instead of
+//    re-opening chat and re-prompting for the same email. Same run_browser_task
+//    watch as .shopping (the `start()` ternary below already defaults any
+//    non-.ride kind to it); kept as a separate case only so call sites and
+//    session titles read honestly for what actually triggered them. This is
+//    genuinely unproven for anything outside e-commerce checkout (a bank bill-pay
+//    page has no Shopify/DELIVERY-style recipe and no login/2FA handling) — the
+//    same honest "ask"/no-product-data → hand off to chat fallback `handle()`
+//    already has is what carries it when the automation can't actually finish.
 // Restaurant reservations ("book a table") have no real backend yet, so that
 // intent isn't matched here at all — it falls through to real chat.
 
 enum AgentJobKind: Equatable {
     case shopping
     case ride
+    case task
 }
 
 @Observable

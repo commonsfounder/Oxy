@@ -23,6 +23,10 @@ struct AgenticHomeView: View {
     @State private var chatLaunch: ChatLaunch?
     @State private var activeSession: AgentTaskSession?
     @State private var localMissions: [HomeMission] = []
+    /// "Ignore" on an inbox card is a purely local dismiss — there's no real
+    /// archive/mark-read backend action to call, so this never claims the email was
+    /// actually archived server-side, only that it's hidden from this feed.
+    @State private var dismissedMailIDs: Set<String> = []
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
@@ -68,15 +72,7 @@ struct AgenticHomeView: View {
                                         mission: mission,
                                         ink: GlebChrome.ink,
                                         onCTA: { handleMissionCTA(mission) },
-                                        onMailCTA: { email in
-                                            // Lead with the server's judged action (e.g. "Pay it") and the
-                                            // stakes-first summary so chat picks up in the right mode
-                                            // immediately, not a generic "help me" with just a subject line.
-                                            let action = email.cta?.isEmpty == false ? email.cta! : "Help me with"
-                                            let stakes = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            let context = (stakes?.isEmpty == false ? stakes! : email.cleanSubject)
-                                            handleIntent("\(action) — email from \(email.cleanFrom): \(context)")
-                                        }
+                                        onMailCTA: { email in handleMailCTA(email) }
                                     )
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
@@ -294,7 +290,12 @@ struct AgenticHomeView: View {
     // MARK: - Data
 
     private var missions: [HomeMission] {
-        localMissions + HomeMissionBuilder.build(from: briefings)
+        (localMissions + HomeMissionBuilder.build(from: briefings)).compactMap { mission in
+            guard mission.kind == .mailGroup else { return mission }
+            var visible = mission
+            visible.mailItems = mission.mailItems.filter { !dismissedMailIDs.contains($0.id) }
+            return visible.mailItems.isEmpty ? nil : visible
+        }
     }
 
     // MARK: - Actions
@@ -310,6 +311,59 @@ struct AgenticHomeView: View {
     private func handleMissionCTA(_ mission: HomeMission) {
         let prompt = mission.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         handleIntent((prompt?.isEmpty == false ? prompt : nil) ?? mission.title)
+    }
+
+    /// Inbox card action routing. The concierge already has everything it needs
+    /// (sender, subject, the stakes-first summary) — re-opening chat and re-explaining
+    /// that context for every tap defeats the point of surfacing it on the card at
+    /// all. Route by what the server judged the real next step to be:
+    ///  - "Ignore"/"Archive": nothing to hand off — dismiss locally. There's no real
+    ///    archive/mark-read action wired up server-side yet, so this only hides the
+    ///    card, it doesn't claim to have touched the actual inbox.
+    ///  - "Reply": a reply is content sent on the user's behalf under their name —
+    ///    that still deserves a look before it goes, so this opens chat (which
+    ///    already gates send_email behind a confirm step) rather than firing blind.
+    ///  - everything else ("Pay it", "Sort it", "Review", "Confirm"...): go straight
+    ///    to the same hidden native pipeline the buy/ride flow uses — no chat
+    ///    transcript, real backend action, honest hand-off to chat if the concierge
+    ///    can't actually finish it (e.g. a bank site needs a login it doesn't have).
+    private func handleMailCTA(_ email: BriefingEmail) {
+        switch mailCTAKind(email.cta) {
+        case .ignore:
+            HapticManager.shared.impact(.light)
+            withAnimation(.appSpring) { dismissedMailIDs.insert(email.id) }
+        case .reply:
+            handleIntent(mailGoal(for: email))
+        case .handle:
+            HapticManager.shared.impact(.medium)
+            activeSession = AgentTaskSession(
+                title: email.cta ?? "Handling it",
+                originalPrompt: mailGoal(for: email),
+                kind: .task,
+                userId: appState.userId,
+                chatService: service,
+                location: LocationManager.shared.locationDict
+            )
+        }
+    }
+
+    private enum MailCTAKind { case reply, ignore, handle }
+
+    private func mailCTAKind(_ cta: String?) -> MailCTAKind {
+        let lower = (cta ?? "").lowercased()
+        if lower.contains("ignore") || lower.contains("archive") { return .ignore }
+        if lower.contains("reply") || lower.contains("respond") { return .reply }
+        return .handle
+    }
+
+    /// Leads with the server's judged action and the stakes-first summary (not just
+    /// the bare subject line) so whichever pipeline picks this up — chat or the
+    /// hidden native runner — starts already knowing what actually matters.
+    private func mailGoal(for email: BriefingEmail) -> String {
+        let action = email.cta?.isEmpty == false ? email.cta! : "Help me with"
+        let stakes = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let context = (stakes?.isEmpty == false ? stakes! : email.cleanSubject)
+        return "\(action) — email from \(email.cleanFrom): \(context)"
     }
 
     /// Generated-UI-for-the-job path: a native step session, wired to the real
@@ -842,6 +896,13 @@ struct MissionCardView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 176)
+            // Dismissing (Ignore) or the underlying briefing refreshing can shrink
+            // mailItems out from under a page index that was pointing past the new
+            // end — clamp so the TabView never holds a selection tag that no longer
+            // exists.
+            .onChange(of: mission.mailItems.count) { _, newCount in
+                if mailPage >= newCount { mailPage = max(0, newCount - 1) }
+            }
         }
     }
 
