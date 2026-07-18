@@ -5,7 +5,16 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('microsoft connector bootstrap');
 
-const SUPPORTED_ACTIONS = ['send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events'];
+const SUPPORTED_ACTIONS = [
+  'send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events',
+  // Deliberately NOT registered in action-contracts.js — never offered to the
+  // agent/tool-calling loop, only ever called directly by the dashboard's "handle this
+  // email" endpoint. See buildEmailActionPlan in api/index.js. Named distinctly from
+  // google.js's own get_email_action_links — connectors/index.js's registry is a flat
+  // action-name -> module map, so two connectors registering the same action name would
+  // silently overwrite each other (whichever loads last wins for every request).
+  'get_outlook_email_action_links'
+];
 
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const TENANT = process.env.MS_TENANT || 'common';
@@ -90,6 +99,38 @@ async function getAccessToken(userId) {
   return updated.access_token;
 }
 
+function stripHtml(html = '') {
+  return String(html)
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+function extractLinksFromHtml(html = '') {
+  const links = [];
+  const re = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = re.exec(html)) !== null && links.length < 20) {
+    const url = match[1].trim();
+    const label = stripHtml(match[2]).replace(/\s+/g, ' ').trim();
+    if (!label || !/^https?:\/\//i.test(url)) continue;
+    links.push({ label: label.slice(0, 60), url });
+  }
+  return links;
+}
+
 function summarizeMessage(m = {}) {
   return {
     id: m.id,
@@ -154,6 +195,19 @@ async function execute(userId, action, params) {
         });
         const emails = (resp.data?.value || []).map(summarizeMessage);
         return { success: true, text: `Fetched ${emails.length} Outlook email${emails.length === 1 ? '' : 's'}.`, emails };
+      }
+
+      case 'get_outlook_email_action_links': {
+        const { messageId } = params;
+        if (!messageId) return { success: false, error: 'get_outlook_email_action_links requires messageId' };
+        const resp = await axios.get(`${GRAPH}/me/messages/${messageId}`, {
+          headers,
+          params: { $select: 'body' },
+          timeout: 15000
+        });
+        const html = resp.data?.body?.contentType === 'html' ? (resp.data.body.content || '') : '';
+        const body = stripHtml(html || resp.data?.body?.content || '');
+        return { success: true, body, links: extractLinksFromHtml(html) };
       }
 
       case 'search_outlook_emails': {

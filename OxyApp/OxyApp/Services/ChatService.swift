@@ -192,6 +192,16 @@ struct ChatService {
             body: ["userId": userId]
         )
     }
+
+    /// The "go handle it" path for an inbox card — a plain REST call, never a chat/agent
+    /// turn, so the model never gets a chance to decide for itself whether to try
+    /// browsing/logging into a bank site. See buildEmailActionPlan in api/index.js.
+    func emailActionPlan(userId: String, provider: String?, messageId: String) async throws -> EmailActionPlan {
+        var body: [String: Any] = ["userId": userId, "messageId": messageId]
+        if let provider { body["provider"] = provider }
+        let data = try await api.request(path: "/emails/action-plan", method: "POST", body: body)
+        return try JSONDecoder().decode(EmailActionPlan.self, from: data)
+    }
 }
 
 struct BackendVersion: Decodable {

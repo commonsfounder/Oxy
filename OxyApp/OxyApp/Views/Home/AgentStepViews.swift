@@ -97,6 +97,69 @@ struct RideConfirmStepView: View {
     }
 }
 
+// MARK: - Link result ("go handle it" on an inbox card — real steps + real links
+// mined from the email itself, never a login attempt on the user's behalf)
+
+struct LinkResultStepView: View {
+    let details: LinkResultDetails
+    var ink: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            StepTitleBlock(title: "Here's how", subtitle: nil, ink: ink)
+
+            if !details.steps.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(details.steps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(ink.opacity(0.55))
+                                .frame(width: 20, height: 20)
+                                .background(ink.opacity(0.08), in: Circle())
+                            Text(step)
+                                .font(.system(size: 14))
+                                .foregroundStyle(ink.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(16)
+                .background { MissionGlassPlate() }
+            }
+
+            if !details.links.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(details.links) { link in
+                        if let url = URL(string: link.url) {
+                            Link(destination: url) {
+                                HStack(spacing: 10) {
+                                    AppIcon("arrow-up-right", size: 13)
+                                    Text(link.label)
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Spacer(minLength: 0)
+                                }
+                                .foregroundStyle(ink)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 12)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                AppIcon("shield-check", size: 13)
+                Text("Real links from that email — nothing was logged into on your behalf.")
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(ink.opacity(0.45))
+        }
+    }
+}
+
 // MARK: - Product detail (buy job — real backend data)
 
 struct ProductDetailStepView: View {

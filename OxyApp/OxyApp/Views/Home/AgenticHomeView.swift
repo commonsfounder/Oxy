@@ -323,10 +323,12 @@ struct AgenticHomeView: View {
     ///  - "Reply": a reply is content sent on the user's behalf under their name —
     ///    that still deserves a look before it goes, so this opens chat (which
     ///    already gates send_email behind a confirm step) rather than firing blind.
-    ///  - everything else ("Pay it", "Sort it", "Review", "Confirm"...): go straight
-    ///    to the same hidden native pipeline the buy/ride flow uses — no chat
-    ///    transcript, real backend action, honest hand-off to chat if the concierge
-    ///    can't actually finish it (e.g. a bank site needs a login it doesn't have).
+    ///  - everything else ("Pay it", "Sort it", "Review", "Confirm"...): never
+    ///    routed through run_browser_task or chat's agent loop — a bank/card-issuer
+    ///    site can't be safely logged into by a bot (2FA, aggressive anti-automation),
+    ///    so that's never even attempted. Instead this mines the ORIGINAL email for
+    ///    real links the provider already sent (e.g. Revolut's own "Add money" link)
+    ///    and writes manual steps — see buildEmailActionPlan in api/index.js.
     private func handleMailCTA(_ email: BriefingEmail) {
         switch mailCTAKind(email.cta) {
         case .ignore:
@@ -335,6 +337,13 @@ struct AgenticHomeView: View {
         case .reply:
             handleIntent(mailGoal(for: email))
         case .handle:
+            guard let messageId = email.messageId, !messageId.isEmpty else {
+                // Older briefing, created before messageId tagging existed — nothing
+                // to look up server-side, so fall back to the honest chat handoff
+                // rather than opening a session that's guaranteed to fail.
+                handleIntent(mailGoal(for: email))
+                return
+            }
             HapticManager.shared.impact(.medium)
             activeSession = AgentTaskSession(
                 title: email.cta ?? "Handling it",
@@ -342,7 +351,8 @@ struct AgenticHomeView: View {
                 kind: .task,
                 userId: appState.userId,
                 chatService: service,
-                location: LocationManager.shared.locationDict
+                location: LocationManager.shared.locationDict,
+                emailAction: .init(provider: email.provider, messageId: messageId)
             )
         }
     }

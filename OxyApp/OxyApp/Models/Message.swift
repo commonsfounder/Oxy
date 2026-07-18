@@ -511,6 +511,10 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     /// created before multi-provider tagging existed. Drives the provider badge on the
     /// Home inbox card so a user with more than one connected account can tell them apart.
     let provider: String?
+    /// Real provider message id (Gmail message id / Graph message id) — lets the "go
+    /// handle it" path re-fetch this exact email server-side via /emails/action-plan.
+    /// Nil for briefings created before this existed; that CTA falls back to chat then.
+    let messageId: String?
 
     var id: String { from + "|" + subject }
 
@@ -547,6 +551,22 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
         ]
         return signals.contains { haystack.contains($0) }
     }
+}
+
+/// Response from POST /emails/action-plan — the server mines the real email for real
+/// links it already contained and writes manual steps, it never attempts to log into
+/// anything on the user's behalf. See buildEmailActionPlan in api/index.js.
+struct EmailActionPlan: Codable, Equatable {
+    let success: Bool
+    let error: String?
+    let steps: [String]?
+    let links: [EmailActionLink]?
+}
+
+struct EmailActionLink: Codable, Equatable, Identifiable {
+    let label: String
+    let url: String
+    var id: String { url }
 }
 
 /// A delivery, order, or reservation parsed server-side from the user's inbox.

@@ -109,6 +109,8 @@ struct AgentTaskSessionView: View {
                 ProductDetailStepView(details: details, ink: ink)
             case .rideConfirm(let details):
                 RideConfirmStepView(details: details, ink: ink)
+            case .linkResult(let details):
+                LinkResultStepView(details: details, ink: ink)
             case .workingHero(let status):
                 WorkingHeroStepView(title: step.title, status: status, ink: ink)
             }

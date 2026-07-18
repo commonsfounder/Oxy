@@ -16,17 +16,19 @@ import Foundation
 //  - .ride: "get me an uber" drives the real book_uber action — a deep-link
 //    handoff into the Uber app with a best-effort fare estimate, not an
 //    in-app booking.
-//  - .task: a generic "go handle this" job kicked off from somewhere other than
-//    typed text — e.g. tapping a Home inbox card's judged action ("Pay it",
-//    "Sort it") — so the concierge acts on context it already has instead of
-//    re-opening chat and re-prompting for the same email. Same run_browser_task
-//    watch as .shopping (the `start()` ternary below already defaults any
-//    non-.ride kind to it); kept as a separate case only so call sites and
-//    session titles read honestly for what actually triggered them. This is
-//    genuinely unproven for anything outside e-commerce checkout (a bank bill-pay
-//    page has no Shopify/DELIVERY-style recipe and no login/2FA handling) — the
-//    same honest "ask"/no-product-data → hand off to chat fallback `handle()`
-//    already has is what carries it when the automation can't actually finish.
+//  - .task: a "go handle this" job kicked off from somewhere other than typed
+//    text — e.g. tapping a Home inbox card's judged action ("Pay it", "Sort
+//    it") — so the concierge acts on context it already has instead of
+//    re-opening chat and re-prompting for the same email. When constructed
+//    with `emailAction` set (every inbox-card call site does this), `start()`
+//    NEVER touches run_browser_task/the hidden chat pipeline at all — a bank
+//    or card-issuer site can't be safely logged into by a bot (2FA, aggressive
+//    anti-automation), so that path is deliberately not even attempted. Instead
+//    it calls /emails/action-plan directly, which mines the ORIGINAL email for
+//    real links the provider already sent and writes manual steps — see
+//    buildEmailActionPlan in api/index.js. Without `emailAction` (not used by
+//    any call site today, kept for a future non-email "go handle this" job) it
+//    falls back to the same run_browser_task watch .shopping uses.
 // Restaurant reservations ("book a table") have no real backend yet, so that
 // intent isn't matched here at all — it falls through to real chat.
 
@@ -50,6 +52,16 @@ final class AgentTaskSession: Identifiable {
     private let userId: String
     private let chatService: ChatService
     private let location: [String: Double]?
+    private let emailAction: EmailActionContext?
+
+    /// Identifies the exact email /emails/action-plan should mine — the provider message
+    /// id, not the from+subject identity BriefingEmail.id uses (fragile/ambiguous across
+    /// similar subjects), plus which connector to route to since Gmail/Outlook use
+    /// different message ids and different backend actions.
+    struct EmailActionContext {
+        let provider: String?
+        let messageId: String
+    }
 
     init(
         title: String,
@@ -57,7 +69,8 @@ final class AgentTaskSession: Identifiable {
         kind: AgentJobKind,
         userId: String,
         chatService: ChatService = ChatService(),
-        location: [String: Double]? = nil
+        location: [String: Double]? = nil,
+        emailAction: EmailActionContext? = nil
     ) {
         self.title = title
         self.originalPrompt = originalPrompt
@@ -65,6 +78,7 @@ final class AgentTaskSession: Identifiable {
         self.userId = userId
         self.chatService = chatService
         self.location = location
+        self.emailAction = emailAction
         self.steps = [AgentStep(title: title, status: .active, ui: .workingHero(status: "Getting started…"), ctaLabel: "")]
         self.currentIndex = 0
     }
@@ -115,6 +129,11 @@ final class AgentTaskSession: Identifiable {
         guard isWorking == false else { return }
         isWorking = true
         defer { isWorking = false }
+
+        if let emailAction {
+            await runEmailAction(emailAction, onHandoff: onHandoff)
+            return
+        }
 
         let watchedAction = kind == .ride ? "book_uber" : "run_browser_task"
         let stream = chatService.sendMessage(userId: userId, message: originalPrompt, location: location)
@@ -182,6 +201,35 @@ final class AgentTaskSession: Identifiable {
         // No clean confirm_browser_payment result came back — don't guess at
         // success or failure on ambiguous data; let the user verify in real chat.
         onHandoff(nil)
+    }
+
+    /// Never touches run_browser_task or the hidden chat pipeline — calls
+    /// /emails/action-plan directly, which mines the ORIGINAL email for real links the
+    /// provider already sent and writes manual steps. It doesn't attempt to log into
+    /// anything, so there's no "ask"/stuck-mid-loop case to hand off from here the way
+    /// the browser-task paths have — a plan with nothing usable just hands off honestly
+    /// instead of showing an empty result step.
+    private func runEmailAction(_ context: EmailActionContext, onHandoff: (String?) -> Void) async {
+        do {
+            let plan = try await chatService.emailActionPlan(
+                userId: userId,
+                provider: context.provider,
+                messageId: context.messageId
+            )
+            let steps = plan.steps ?? []
+            let links = plan.links ?? []
+            guard plan.success, !steps.isEmpty || !links.isEmpty else {
+                onHandoff(nil)
+                return
+            }
+            appendStep(AgentStep(
+                title: title,
+                ui: .linkResult(LinkResultDetails(steps: steps, links: links)),
+                ctaLabel: "Done"
+            ))
+        } catch {
+            errorMessage = "Couldn't put together next steps for that email."
+        }
     }
 
     private func updateWorkingStatus(status: String, label: String) {
@@ -292,7 +340,7 @@ final class AgentStep: Identifiable {
     var canAdvance: Bool {
         switch ui {
         case .workingHero: return false
-        case .paymentConfirm, .productDetail, .rideConfirm: return true
+        case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
         }
     }
 }
@@ -301,7 +349,16 @@ enum StepUI {
     case paymentConfirm(PaymentDetails)
     case productDetail(ProductDetails)
     case rideConfirm(RideDetails)
+    case linkResult(LinkResultDetails)
     case workingHero(status: String)
+}
+
+/// Real steps + real links mined from an email by /emails/action-plan — never a
+/// fabricated URL; every link's exact URL came from the email itself (see
+/// buildEmailActionPlan's server-side check), the model only selects and labels.
+struct LinkResultDetails: Equatable {
+    let steps: [String]
+    let links: [EmailActionLink]
 }
 
 struct PaymentDetails: Equatable {

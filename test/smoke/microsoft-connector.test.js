@@ -45,10 +45,11 @@ function withMockedDeps({ tokensRow = null, axiosMock } = {}, fn) {
   }
 }
 
-test('microsoft connector exports the 5 Outlook actions', () => {
+test('microsoft connector exports the 6 Outlook actions', () => {
   const microsoft = withMockedDeps({}, () => require('../../connectors/microsoft'));
   assert.deepEqual(microsoft.SUPPORTED_ACTIONS, [
-    'send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events'
+    'send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events',
+    'get_outlook_email_action_links'
   ]);
 });
 

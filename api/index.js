@@ -4441,6 +4441,23 @@ app.post('/briefings/:id/read', async (req, res) => {
   }
 });
 
+// Dashboard "go handle it" path for an inbox card — deliberately a plain REST call, not
+// a chat/agent-loop turn. Routing this through the general model's tool-calling would let
+// it decide for itself whether to try run_browser_task on a bank site; calling
+// buildEmailActionPlan directly means that's never even on the table. See its own comment
+// for what it actually does (mines the real email for real links, never attempts a login).
+app.post('/emails/action-plan', async (req, res) => {
+  try {
+    const { userId, provider, messageId } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    if (!messageId) return res.status(400).json({ error: 'messageId is required' });
+    const plan = await buildEmailActionPlan(userId, { provider, messageId });
+    res.json(plan);
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Could not put together next steps for that email.' });
+  }
+});
+
 app.post('/proactive/:userId/run', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -4810,7 +4827,11 @@ function normalizeOutlookEmail(m = {}) {
     subject: m.subject || '',
     snippet: m.preview || '',
     date: m.receivedAt || '',
-    provider: 'outlook'
+    provider: 'outlook',
+    // Real Graph message id — lets the dashboard re-fetch THIS exact email later
+    // (buildEmailActionPlan) when a card's action is tapped, instead of re-searching by
+    // subject text, which is fragile and ambiguous across duplicate/similar subjects.
+    messageId: m.id || ''
   };
 }
 
@@ -4835,7 +4856,7 @@ async function gatherEmailContext(userId) {
     ]);
 
     const googleEmails = (googleResult?.success && Array.isArray(googleResult.emails))
-      ? googleResult.emails.map(e => ({ ...e, provider: 'gmail' }))
+      ? googleResult.emails.map(e => ({ ...e, provider: 'gmail', messageId: e.id || '' }))
       : [];
     // Outlook has no CATEGORY_PROMOTIONS/List-Unsubscribe-header equivalent surfaced here,
     // so isPromotionalOrBulk (which reads those Gmail-specific fields) is a no-op for it —
@@ -4852,9 +4873,23 @@ async function gatherEmailContext(userId) {
     // next to real notifications, which the label/header check above can't separate).
     const candidates = real.slice(0, 15);
     const summarized = await summarizeEmails(candidates);
+    // Explicit field picker rather than a blanket `...rest` spread — Gmail's fetchFullMessage
+    // result carries the entire email body plus headers (threadId, labelIds, references,
+    // etc.), none of which the dashboard card needs; storing all of it in briefing.metadata
+    // on every refresh was pure bloat. messageId is the one addition worth keeping — it's
+    // how buildEmailActionPlan re-fetches this exact email later.
     const emails = summarized
       .filter(e => !e.llmPromotional)
-      .map(({ llmPromotional, ...rest }) => rest)
+      .map(e => ({
+        from: e.from,
+        subject: e.subject,
+        snippet: e.snippet,
+        date: e.date,
+        summary: e.summary,
+        cta: e.cta,
+        provider: e.provider,
+        messageId: e.messageId
+      }))
       .slice(0, 10);
     // Deliveries/reservations can legitimately be CATEGORY_UPDATES, so parse incoming
     // from the same de-promoted, de-marketed set rather than the raw fetch.
@@ -4939,6 +4974,62 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
     }));
   } catch (e) {
     return emails;
+  }
+}
+
+// Deliberately never routed through the general agent/tool-calling loop, and
+// get_email_action_links is deliberately not registered in action-contracts.js — a bank
+// or card-issuer site can't be safely logged into by a bot (2FA, aggressive anti-automation),
+// so the model is never even given the option to try run_browser_task on one of these. This
+// mines the ORIGINAL email for real links the provider already sent (e.g. Revolut's own
+// "Add money" link) and asks the model only to write short manual steps and pick which of
+// those real links matter — it selects and labels existing links, it never gets to invent a
+// URL. Called directly from the /emails/action-plan REST route below, not from chat.
+async function buildEmailActionPlan(userId, { provider, messageId }) {
+  if (!messageId) return { success: false, error: 'No message to look up.' };
+  const action = provider === 'outlook' ? 'get_outlook_email_action_links' : 'get_email_action_links';
+  const result = await dispatch(userId, action, { messageId });
+  if (!result?.success) return { success: false, error: result?.error || 'Could not open that email.' };
+
+  const body = String(result.body || '').slice(0, 4000);
+  const links = Array.isArray(result.links) ? result.links.slice(0, 20) : [];
+  if (!body && !links.length) return { success: false, error: 'That email has nothing to go on.' };
+
+  try {
+    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
+    const linkListing = links.map((l, i) => `${i}. "${l.label}" -> ${l.url}`).join('\n') || '(no links found)';
+    const prompt = `An email needs the user's attention. Here is its full text and every real link it contained.
+
+EMAIL BODY:
+${body}
+
+LINKS FOUND IN THE EMAIL:
+${linkListing}
+
+Write:
+1. steps: 2-4 short plain-English steps for how the user can actually handle this themselves (e.g. "Open the Revolut app", "Tap Add money", "Transfer enough to bring your balance above zero"). Base this ONLY on what the email says — never invent account balances, amounts, or facts not present in the text.
+2. links: pick up to 3 of the links listed above that are genuinely useful for handling this (skip unsubscribe/legal/tracking-pixel links). For each, give a short clean label (2-4 words) and copy its url EXACTLY as given above, character for character — never alter, shorten, or invent a URL. If none of the links are useful, return an empty array.
+
+Respond with ONLY JSON, shape {"steps":["...","..."],"links":[{"label":"...","url":"..."}]}.`;
+    const res = await model.generateContent(prompt);
+    const match = (res.response.text() || '').match(/\{[\s\S]*\}/);
+    if (!match) return { success: true, steps: [], links: links.slice(0, 3) };
+    const parsed = JSON.parse(match[0]);
+    const steps = Array.isArray(parsed.steps)
+      ? parsed.steps.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim()).slice(0, 4)
+      : [];
+    // Only trust a returned link if its URL exactly matches one actually extracted from the
+    // email — the model selects and labels, it never gets to introduce a URL of its own.
+    const knownUrls = new Set(links.map(l => l.url));
+    const chosenLinks = Array.isArray(parsed.links)
+      ? parsed.links
+        .filter(l => l && typeof l.url === 'string' && typeof l.label === 'string' && knownUrls.has(l.url))
+        .slice(0, 3)
+      : [];
+    return { success: true, steps, links: chosenLinks };
+  } catch (e) {
+    // Fail open to the raw extracted links — still real, still useful, just unlabeled/unfiltered.
+    return { success: true, steps: [], links: links.slice(0, 3) };
   }
 }
 

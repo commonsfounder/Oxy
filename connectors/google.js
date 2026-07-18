@@ -7,7 +7,11 @@ logMissingRuntimeEnvOnce('google connector bootstrap');
 
 const SUPPORTED_ACTIONS = [
   'send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events',
-  'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc'
+  'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc',
+  // Deliberately NOT registered in action-contracts.js — this is never offered to the
+  // agent/tool-calling loop as an option, only ever called directly by the dashboard's
+  // "handle this email" endpoint. See buildEmailActionPlan in api/index.js for why.
+  'get_email_action_links'
 ];
 
 async function getTokens(userId) {
@@ -184,6 +188,32 @@ function collectBodyParts(part, out = { plain: [], html: [] }) {
   if (data && mimeType === 'text/html') out.html.push(stripHtml(decodeBase64Url(data)));
   for (const child of part.parts || []) collectBodyParts(child, out);
   return out;
+}
+
+// stripHtml above discards every tag including <a href> — fine for the readable body,
+// useless for finding a real actionable link (e.g. Revolut's own "Add money" link in
+// their balance-negative email). This walks the RAW (unstripped) HTML parts so hrefs
+// survive, for the one caller that actually needs them.
+function collectRawHtmlParts(part, out = []) {
+  if (!part) return out;
+  const mimeType = String(part.mimeType || '').toLowerCase();
+  const data = part.body?.data;
+  if (data && mimeType === 'text/html') out.push(decodeBase64Url(data));
+  for (const child of part.parts || []) collectRawHtmlParts(child, out);
+  return out;
+}
+
+function extractLinksFromHtml(html = '') {
+  const links = [];
+  const re = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = re.exec(html)) !== null && links.length < 20) {
+    const url = match[1].trim();
+    const label = stripHtml(match[2]).replace(/\s+/g, ' ').trim();
+    if (!label || !/^https?:\/\//i.test(url)) continue;
+    links.push({ label: label.slice(0, 60), url });
+  }
+  return links;
 }
 
 function extractMessageBody(payload = {}) {
@@ -462,6 +492,16 @@ async function execute(userId, action, params) {
           return fetchFullMessage(headers, msg.id);
         }));
         return { success: true, emails, text: summarizeEmails(emails) };
+      }
+
+      case 'get_email_action_links': {
+        const { messageId } = params;
+        if (!messageId) return { success: false, error: 'get_email_action_links requires messageId' };
+        const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
+          { headers, params: { format: 'full' }, timeout: 15000 });
+        const email = messageToEmail(detail.data);
+        const rawHtml = collectRawHtmlParts(detail.data.payload).join('\n');
+        return { success: true, body: email.body, links: extractLinksFromHtml(rawHtml) };
       }
 
       case 'search_emails': {
