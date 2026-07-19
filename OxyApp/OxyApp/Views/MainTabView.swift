@@ -232,51 +232,33 @@ struct MoreView: View {
         }
     }
 
-    // MARK: - Menu (labelled rows with subtitles)
+    // MARK: - Menu (flat list, ordered: account, device, memory, connections, payments, settings)
 
     private var menuSection: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            menuGroup("You") {
-                AppRow(title: "Memory") { destination = .memory }
-                rowDivider
-                AppRow(title: "Account") { destination = .profile }
-            }
-
-            menuGroup("Milgrain") {
-                AppRow(title: "Pendant", onTap: { destination = .pendant }) {
-                    HStack(spacing: 8) {
-                        AppStatusDot(kind: pendantDot, diameter: 5)
-                        if let s = pendantStatusText {
-                            Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
-                        }
+        VStack(spacing: 0) {
+            AppRow(title: "Account") { destination = .profile }
+            rowDivider
+            AppRow(title: "Pendant", onTap: { destination = .pendant }) {
+                HStack(spacing: 8) {
+                    AppStatusDot(kind: pendantDot, diameter: 5)
+                    if let s = pendantStatusText {
+                        Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
                     }
                 }
-                rowDivider
-                AppRow(title: "Connections") { destination = .connectors }
-                rowDivider
-                AppRow(title: "Payments") { destination = .payments }
             }
-
-            menuGroup("Preferences") {
-                AppRow(title: "Settings") { destination = .settings }
-            }
+            rowDivider
+            AppRow(title: "Memory") { destination = .memory }
+            rowDivider
+            AppRow(title: "Connections") { destination = .connectors }
+            rowDivider
+            AppRow(title: "Payments") { destination = .payments }
+            rowDivider
+            AppRow(title: "Settings") { destination = .settings }
         }
+        .padding(.horizontal, 16)
+        // Rows sit on a glass plate that refracts the wash behind it.
+        .background { MissionGlassPlate() }
         .padding(.top, 24)
-    }
-
-    private func menuGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title)
-                .font(.appBody(11, weight: .medium))
-                .tracking(1.6)
-                .textCase(.uppercase)
-                .foregroundStyle(Color.appMuted)
-                .padding(.bottom, 10)
-            // Rows sit on a glass plate that refracts the wash behind it.
-            VStack(spacing: 0) { content() }
-                .padding(.horizontal, 16)
-                .background { MissionGlassPlate() }
-        }
     }
 
     private var rowDivider: some View {
