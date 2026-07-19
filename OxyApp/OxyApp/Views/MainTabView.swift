@@ -239,7 +239,7 @@ struct MoreView: View {
             menuGroup("You") {
                 AppRow(title: "Memory") { destination = .memory }
                 rowDivider
-                AppRow(title: "Account", subtitle: "Name, data, and sign out") { destination = .profile }
+                AppRow(title: "Account") { destination = .profile }
             }
 
             menuGroup("Milgrain") {
@@ -254,11 +254,11 @@ struct MoreView: View {
                 rowDivider
                 AppRow(title: "Connections") { destination = .connectors }
                 rowDivider
-                AppRow(title: "Payments", subtitle: "Your linked card and balance") { destination = .payments }
+                AppRow(title: "Payments") { destination = .payments }
             }
 
             menuGroup("Preferences") {
-                AppRow(title: "Settings", subtitle: "Defaults and preferences") { destination = .settings }
+                AppRow(title: "Settings") { destination = .settings }
             }
         }
         .padding(.top, 24)
