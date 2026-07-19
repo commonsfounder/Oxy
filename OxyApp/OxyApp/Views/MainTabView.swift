@@ -148,50 +148,44 @@ struct MoreView: View {
     // MARK: - Identity header (Milgrain clean)
 
     private var identityHeader: some View {
-        Button {
-            HapticManager.shared.impact(.light)
-            destination = .profile
-        } label: {
-            VStack(alignment: .leading, spacing: 0) {
-                BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
-                    .padding(.bottom, 28)
+        // Static display, not a nav trigger — "Account" is its own row in the menu
+        // below, so this doubling as an invisible button to the same screen was a
+        // redundant, undiscoverable tap target.
+        VStack(alignment: .leading, spacing: 0) {
+            BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
+                .padding(.bottom, 28)
 
-                Text(displayName)
-                    .font(.heroDisplay(28))
-                    .appHeroTracking(28)
-                    .foregroundStyle(Color.appInk)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.7)
+            Text(displayName)
+                .font(.heroDisplay(28))
+                .appHeroTracking(28)
+                .foregroundStyle(Color.appInk)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
 
-                if !accountEmail.isEmpty {
-                    Text(accountEmail)
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .padding(.top, 6)
-                }
-
-                if appState.isDemoSession {
-                    Text("Demo/Test session")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(Color.appAccent)
-                        .padding(.top, 10)
-                }
-
-                // Hairline rule separating identity from navigation
-                Rectangle()
-                    .fill(Color.appHairline)
-                    .frame(height: 0.5)
-                    .padding(.top, 28)
+            if !accountEmail.isEmpty {
+                Text(accountEmail)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.top, 6)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
+
+            if appState.isDemoSession {
+                Text("Demo/Test session")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.2)
+                    .foregroundStyle(Color.appAccent)
+                    .padding(.top, 10)
+            }
+
+            // Hairline rule separating identity from navigation
+            Rectangle()
+                .fill(Color.appHairline)
+                .frame(height: 0.5)
+                .padding(.top, 28)
         }
-        // A full-bleed 46pt header: scaling it is motion you can't perceive, only cost.
-        // Plain = static, the skill's prescription for big surfaces.
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var displayName: String {
