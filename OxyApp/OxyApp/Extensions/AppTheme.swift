@@ -632,7 +632,7 @@ struct MilgrainToggle: View {
                 .frame(width: 30, height: 16)
                 .overlay(
                     Circle()
-                        .fill(isOn ? Color.appOnAccent : Color.mgSecondary)
+                        .fill(isOn ? Color.white : Color.mgSecondary)
                         .frame(width: 12, height: 12)
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
