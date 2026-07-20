@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createRoutine, listRoutines, deleteRoutine } = require('../../api/services/routines');
+const { createRoutine, listRoutines, deleteRoutine, listDueRoutines, markRoutineRun } = require('../../api/services/routines');
 
 function fakeSupabase(rows = []) {
   return {
@@ -168,5 +168,100 @@ test('deleteRoutine never throws even when the supabase client blows up', async 
   };
   const result = await deleteRoutine(brokenSupabase, 'u1', 'r1');
   assert.equal(result.ok, false);
+  assert.ok(result.error);
+});
+
+test('createRoutine with intervalMinutes sets next_run_at', async () => {
+  const supabase = fakeSupabase();
+  const before = Date.now();
+  const routine = await createRoutine(supabase, { userId: 'u1', name: 'Daily digest', prompt: 'Summarize inbox', intervalMinutes: 1440 });
+  assert.ok(new Date(routine.next_run_at).getTime() > before);
+});
+
+test('createRoutine without intervalMinutes leaves next_run_at null', async () => {
+  const supabase = fakeSupabase();
+  const routine = await createRoutine(supabase, { userId: 'u1', name: 'One-off', prompt: 'Do a thing' });
+  assert.equal(routine.next_run_at, null);
+});
+
+function fakeDueRoutinesSupabase(rows = []) {
+  return {
+    from() {
+      return {
+        select() {
+          return {
+            not() {
+              return {
+                lte: async (col, val) => ({
+                  data: rows.filter((r) => r[col] <= val),
+                  error: null
+                })
+              };
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+test('listDueRoutines returns only routines whose next_run_at has passed', async () => {
+  const rows = [
+    { id: 'r1', user_id: 'u1', interval_minutes: 60, next_run_at: new Date(Date.now() - 1000).toISOString() },
+    { id: 'r2', user_id: 'u1', interval_minutes: 60, next_run_at: new Date(Date.now() + 100000).toISOString() }
+  ];
+  const supabase = fakeDueRoutinesSupabase(rows);
+  const due = await listDueRoutines(supabase, new Date());
+  assert.deepEqual(due.map((r) => r.id), ['r1']);
+});
+
+test('listDueRoutines never throws even when the supabase client blows up', async () => {
+  const brokenSupabase = { from() { throw new Error('boom'); } };
+  const due = await listDueRoutines(brokenSupabase, new Date());
+  assert.deepEqual(due, []);
+});
+
+function fakeMarkRunSupabase(rows = []) {
+  return {
+    from() {
+      return {
+        select() {
+          return {
+            eq(col, val) {
+              return {
+                single: async () => {
+                  const row = rows.find((r) => r[col] === val);
+                  return row ? { data: row, error: null } : { data: null, error: { message: 'not found' } };
+                }
+              };
+            }
+          };
+        },
+        update(patch) {
+          return {
+            eq: async (col, val) => {
+              const row = rows.find((r) => r[col] === val);
+              if (row) Object.assign(row, patch);
+              return { error: null };
+            }
+          };
+        }
+      };
+    }
+  };
+}
+
+test('markRoutineRun advances next_run_at by interval_minutes', async () => {
+  const rows = [{ id: 'r1', interval_minutes: 60, next_run_at: new Date().toISOString() }];
+  const supabase = fakeMarkRunSupabase(rows);
+  const now = new Date();
+  await markRoutineRun(supabase, 'r1', now);
+  const updated = rows.find((r) => r.id === 'r1');
+  assert.equal(new Date(updated.next_run_at).getTime(), now.getTime() + 60 * 60000);
+});
+
+test('markRoutineRun never throws even when the supabase client blows up', async () => {
+  const brokenSupabase = { from() { throw new Error('boom'); } };
+  const result = await markRoutineRun(brokenSupabase, 'r1', new Date());
   assert.ok(result.error);
 });
