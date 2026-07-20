@@ -70,6 +70,25 @@ struct SettingsView: View {
                             }
                         }
 
+                        settingsSection(title: "Chat") {
+                            dropdownRow(
+                                label: "Effort",
+                                options: [
+                                    ("low", "Low"),
+                                    ("medium", "Medium"),
+                                    ("high", "High")
+                                ],
+                                selection: $settings.chatEffort
+                            )
+
+                            MilgrainDivider()
+
+                            settingRow(label: "Guard mode", description: "Confirm every action before it runs.") {
+                                MilgrainToggle(isOn: $settings.guardMode)
+                                    .onChange(of: settings.guardMode) { _, _ in saveSettings() }
+                            }
+                        }
+
                         settingsSection(title: "About") {
                             legalLink(label: "Support", path: "/support")
                             MilgrainDivider()
@@ -230,6 +249,25 @@ struct SettingsView: View {
         }
         normalizeSettings()
         UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
+        // Chat effort/guard mode are also persisted server-side (chat_settings table) so
+        // they survive a reinstall/new device, not just a relaunch — UserDefaults above
+        // already covers relaunch. Refresh from the server on appear; local stays
+        // authoritative until this resolves.
+        Task { await refreshChatSettingsFromServer() }
+    }
+
+    private func refreshChatSettingsFromServer() async {
+        do {
+            let data = try await APIClient.shared.request(path: "/chat-settings")
+            let remote = try JSONDecoder().decode(ChatSettingsResponse.self, from: data)
+            settings.chatEffort = remote.effort
+            settings.guardMode = remote.guardMode
+            if let encoded = try? JSONEncoder().encode(settings) {
+                UserDefaults.standard.set(encoded, forKey: "oxy_settings")
+            }
+        } catch {
+            // Ambient sync — local UserDefaults values already loaded above stay in effect.
+        }
     }
 
     private func saveSettings() {
@@ -240,6 +278,13 @@ struct SettingsView: View {
         }
         Task {
             await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
+        }
+        Task {
+            _ = try? await APIClient.shared.request(
+                path: "/chat-settings",
+                method: "PUT",
+                body: ["effort": settings.chatEffort, "guardMode": settings.guardMode]
+            )
         }
     }
 
@@ -439,12 +484,18 @@ struct OxySettings: Codable {
     var preferredTransportMode: String = "driving"
     var reviewBeforeOpeningApps: Bool = false
     var confirmSensitiveAppOpens: Bool = true
+    /// Response depth preference — stored/exposed only, not wired into model selection.
+    var chatEffort: String = "medium"
+    /// Server-enforced (see action-runner.js's executionMode gate) — deliberately a
+    /// distinct field from reviewBeforeOpeningApps/confirmSensitiveAppOpens above, which
+    /// only gate local deep-link auto-open and never touch the server.
+    var guardMode: Bool = false
 
     enum CodingKeys: String, CodingKey {
         case name, userName, autonomy, proactiveBriefings, healthAlerts, locationReminders
         case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
         case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
-        case confirmSensitiveAppOpens
+        case confirmSensitiveAppOpens, chatEffort, guardMode
     }
 
     init() {}
@@ -469,6 +520,8 @@ struct OxySettings: Codable {
         preferredTransportMode = try container.decodeIfPresent(String.self, forKey: .preferredTransportMode) ?? "driving"
         reviewBeforeOpeningApps = try container.decodeIfPresent(Bool.self, forKey: .reviewBeforeOpeningApps) ?? false
         confirmSensitiveAppOpens = try container.decodeIfPresent(Bool.self, forKey: .confirmSensitiveAppOpens) ?? true
+        chatEffort = try container.decodeIfPresent(String.self, forKey: .chatEffort) ?? "medium"
+        guardMode = try container.decodeIfPresent(Bool.self, forKey: .guardMode) ?? false
     }
 
     struct AccentOption: Identifiable {
@@ -482,6 +535,7 @@ struct OxySettings: Codable {
     static let designPalettes = ["stone", "mint", "blue", "violet"]
     static let designMotions = ["calm", "snappy", "none"]
     static let autonomyLevels = ["Reactive", "Reserved", "Balanced", "Proactive", "Autonomous"]
+    static let chatEffortLevels = ["low", "medium", "high"]
     static func normalizedTheme(_ theme: String) -> String {
         switch theme {
         case "light", "system":

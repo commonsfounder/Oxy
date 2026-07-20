@@ -37,7 +37,9 @@ struct ChatService {
                 "preferredMapsApp": settings.preferredMapsApp,
                 "preferredTransportMode": settings.preferredTransportMode,
                 "reviewBeforeOpeningApps": settings.reviewBeforeOpeningApps,
-                "confirmSensitiveAppOpens": settings.confirmSensitiveAppOpens
+                "confirmSensitiveAppOpens": settings.confirmSensitiveAppOpens,
+                "chatEffort": settings.chatEffort,
+                "guardMode": settings.guardMode
             ]
         }
 
