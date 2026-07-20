@@ -833,7 +833,7 @@ function describesBlockWall(question) {
 // Dialog count/title are included so an item modal (Deliveroo/Uber Eats) counts as a state
 // change even when the URL and main <h1> don't move.
 async function computeProgressSignature(page) {
-  const fallback = (u) => ({ sig: u, stateKey: u, itemCount: 0 });
+  const fallback = (u) => ({ sig: u, stateKey: u, itemCount: 0, hasProducts: 0 });
   try {
     const url = page.url() || '';
     const info = await page.evaluate(() => {
@@ -881,6 +881,7 @@ async function computeProgressSignature(page) {
       sig: `${url}|c${info.itemCount}|d${info.dialogs}|k${info.pageKey}|${info.dialogTitle}|${info.sample}`,
       stateKey: `${info.path}|d${info.dialogs}|${info.pageKey}|${info.dialogTitle}|p${info.hasProducts || 0}`,
       itemCount: info.itemCount,
+      hasProducts: info.hasProducts || 0,
     };
   } catch {
     return fallback(page && typeof page.url === 'function' ? page.url() : 'err');
@@ -929,6 +930,17 @@ function assessProgress(counters, { isOrder = false, cartEverNonzero = false } =
     };
   }
   return { verdict: 'ok', correction: '' };
+}
+
+// Fast-path gate for the text-only decision (Task 2/3): only attempt it on pages that
+// are unlikely to need pixels to disambiguate — no product grid (image-only tiles are
+// the exact failure mode the screenshot path exists for, see line 37-39/900-903) and a
+// short enough element list that a wrong text-only pick is cheap to notice and correct.
+const TEXT_ONLY_MAX_ELEMENTS = envInt('OXY_BROWSER_TEXT_ONLY_MAX_ELEMENTS', 40);
+function shouldAttemptTextOnlyDecision({ hasProducts, elementCount }) {
+  if (hasProducts) return false;
+  if (elementCount > TEXT_ONLY_MAX_ELEMENTS) return false;
+  return true;
 }
 
 function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
@@ -3522,6 +3534,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
       session.lastProgressSig = lastProgressSig;
       session.stepsSinceProgress = stepsSinceProgress;
+      session.lastHasProducts = prog ? prog.hasProducts : 0;
 
       // Seen-set of coarse page states: a state we've already visited (or never leaving the
       // current one) counts toward "no new state"; a genuinely new page resets the counter.
@@ -5387,6 +5400,7 @@ module.exports = {
   describesBlockWall,
   isOrderGoal,
   assessProgress,
+  shouldAttemptTextOnlyDecision,
   buildDecisionPrompt,
   parseModelDecision,
   scoreSearchResultText,
