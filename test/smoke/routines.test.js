@@ -110,6 +110,27 @@ test('listRoutines never throws even when the supabase client blows up', async (
   assert.ok(result.error);
 });
 
+test('listRoutines surfaces supabase errors without throwing', async () => {
+  const erroringSupabase = {
+    from() {
+      return {
+        select() {
+          return {
+            eq() {
+              return {
+                order: async () => ({ data: null, error: { message: 'some db error' } })
+              };
+            }
+          };
+        }
+      };
+    }
+  };
+  const result = await listRoutines(erroringSupabase, 'u1');
+  assert.ok(result.error);
+  assert.deepEqual(result.routines, []);
+});
+
 test('deleteRoutine removes only the matching id for that user', async () => {
   const store = [{ id: 'r1', user_id: 'u1', name: 'x', prompt: 'y' }];
   const supabase = fakeSupabase(store);
