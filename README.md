@@ -1,6 +1,8 @@
 # Oxy
 
-Oxy is a conversational, action-taking assistant you talk to like a friend — text or voice. It listens, remembers personal context across conversations, and takes real action across the services you already use: email, calendar, messaging, rides, trains, flights, hotels, music, smart home, finance, and more. Shopping/checkout automation (via browser control) is one capability among many, not the whole product — see [PRODUCT.md](PRODUCT.md) and [docs/NORTH_STAR.md](docs/NORTH_STAR.md) for the product framing.
+**Note on naming:** the shipped product is called **Milgrain** — "Oxy" only survives as this repo's name and as internal identifiers (Xcode project/target, bundle ID `ai.oxy.app`, `oxy.app` email domain, code symbols like `OxySettings`). All user-facing UI, Shortcuts, and copy say Milgrain, not Oxy. The AI assistant itself is intentionally nameless — it doesn't refer to itself as "Milgrain" or "Oxy" in conversation.
+
+Milgrain is a conversational, action-taking assistant you talk to like a friend — text or voice. It listens, remembers personal context across conversations, and takes real action across the services you already use: email, calendar, messaging, rides, trains, flights, hotels, music, smart home, finance, and more. Shopping/checkout automation (via browser control) is one capability among many, not the whole product — see [PRODUCT.md](PRODUCT.md) and [docs/NORTH_STAR.md](docs/NORTH_STAR.md) for the product framing.
 
 ## What It Does
 
@@ -12,7 +14,7 @@ Oxy is a conversational, action-taking assistant you talk to like a friend — t
 - **Credential vault** — Securely stores and reuses login/delivery/payment identity for checkout and connector flows.
 - **Real payments** — Stripe-backed card flow with review gates and hard per-transaction/per-day spend caps.
 - **Native iOS app** — SwiftUI client (`OxyApp/`) with Chat, Home, Connectors, Memory, Routines, Vault, Payments, and Onboarding surfaces.
-- **Apple Shortcuts bridge** — A generated `.shortcut` file lets Oxy trigger native iOS actions (iMessage, Reminders, HomeKit) from the assistant's responses.
+- **Apple Shortcuts bridge** — A generated `.shortcut` file lets the assistant trigger native iOS actions (iMessage, Reminders, HomeKit) from its responses.
 
 ## Architecture
 
@@ -134,7 +136,7 @@ Schema lives across `supabase/migrations/` (22 files as of this writing — base
 
 6. **Create your first user**
 
-   Register via `POST /auth/register` (or the iOS app's onboarding flow) — Oxy uses per-user accounts and signed sessions.
+   Register via `POST /auth/register` (or the iOS app's onboarding flow) — the app uses per-user accounts and signed sessions.
 
 ### iOS client setup
 
