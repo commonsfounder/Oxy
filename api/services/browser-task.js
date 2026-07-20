@@ -26,6 +26,7 @@ const {
 const { getAgentCard } = require('./agent-card');
 const { getVaultCredential, normalizeSite } = require('./vault-credentials');
 const { recordTaskStep } = require('./task-steps');
+const { recordTaskEntity } = require('./task-entities');
 const { randomUUID } = require('node:crypto');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
@@ -3236,6 +3237,15 @@ function makePersistingProgress(supabase, { taskId, userId }) {
 // of which return a plain outcome object — wrapping here (rather than touching every return
 // site) keeps this change to the one place, at the cost of nothing since every downstream
 // call site already just forwards whatever `onProgress` reference it was given.
+// Personal-memory entity capture (Phase 3) — fires here, in the OUTER wrapper, not inside
+// runOrderingTurnImplInner: taskId is only known here (generated below), and the two spots
+// deep in the inner loop where productName is actually assembled have no taskId in scope.
+// Fire-and-forget-but-safe: recordTaskEntity never throws (task-entities.js's contract), so
+// this can never turn a successful turn into a reported failure.
+function shouldRecordEntity(outcome) {
+  return (outcome?.type === 'done' || outcome?.type === 'ready_for_payment') && Boolean(outcome?.productName);
+}
+
 async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress: rawOnProgress = () => {}, credentialSites = [] }) {
   const taskId = randomUUID();
   const persistingProgress = makePersistingProgress(getSupabase(), { taskId, userId });
@@ -3247,6 +3257,16 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
   if (outcome.type === 'ready_for_credential_use') {
     const session = getSession(userId);
     if (session) session.pendingCredentialTaskId = taskId;
+  }
+  if (shouldRecordEntity(outcome)) {
+    const site = getSession(userId)?.site || 'unknown';
+    await recordTaskEntity(getSupabase(), {
+      taskId,
+      userId,
+      site,
+      entityName: outcome.productName,
+      entityType: 'product'
+    });
   }
   return { ...outcome, taskId };
 }
@@ -5386,6 +5406,7 @@ module.exports = {
   siteKeyFromUrl,
   siteInScope,
   makePersistingProgress,
+  shouldRecordEntity,
   confirmPayment,
   classifyLoginInput,
   formatLoginValue,
