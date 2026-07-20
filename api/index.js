@@ -86,6 +86,7 @@ const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, rea
 const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
+const { getTaskSteps } = require('./services/task-steps');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -2365,6 +2366,7 @@ async function executeAction(userId, action, params, context = {}) {
           total: outcome.total,
           summary: outcome.summary,
           actionSummary: 'Order ready for payment',
+          taskId: outcome.taskId,
           ...(outcome.productName ? { productName: outcome.productName } : {}),
           ...(outcome.colorOptions?.length ? { colorOptions: outcome.colorOptions } : {}),
           ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
@@ -2374,13 +2376,14 @@ async function executeAction(userId, action, params, context = {}) {
         return {
           success: true,
           text: outcome.text,
+          taskId: outcome.taskId,
           ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {}),
           ...(outcome.productName ? { productName: outcome.productName } : {}),
           ...(outcome.price ? { price: outcome.price } : {})
         };
       }
-      if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true };
-      if (outcome.type === 'ask') return { success: true, text: outcome.question };
+      if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true, taskId: outcome.taskId };
+      if (outcome.type === 'ask') return { success: true, text: outcome.question, taskId: outcome.taskId };
       return { success: false, error: outcome.error || 'Browse task failed.' };
     }
 
@@ -7493,6 +7496,18 @@ app.get('/connectors/stripe/payment-action', requireSessionAuth, async (req, res
   try {
     const action = await getPaymentActionRequired(supabase, userId);
     res.json({ action });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/tasks/:id/steps', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { steps, error } = await getTaskSteps(supabase, req.params.id, userId);
+    if (error) return res.status(500).json({ error });
+    res.json({ steps });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
