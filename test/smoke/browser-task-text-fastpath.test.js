@@ -49,3 +49,18 @@ test('text-only prompt lists elements by id and text, same contract as the visio
   assert.match(prompt, /#0 "Search"/);
   assert.match(prompt, /#3 "Add to basket"/);
 });
+
+const { isTextOnlyDeclined } = require('../../api/services/browser-task');
+
+test('insufficient_info triggers vision fallback', () => {
+  assert.equal(isTextOnlyDeclined({ action: 'insufficient_info' }), true);
+});
+
+test('invalid (failed text-only call) triggers vision fallback', () => {
+  assert.equal(isTextOnlyDeclined({ action: 'invalid', error: 'model call failed' }), true);
+});
+
+test('a real decision does not trigger fallback', () => {
+  assert.equal(isTextOnlyDeclined({ action: 'click', elementId: 3 }), false);
+  assert.equal(isTextOnlyDeclined({ action: 'done', summary: 'ok' }), false);
+});

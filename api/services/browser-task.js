@@ -943,6 +943,10 @@ function shouldAttemptTextOnlyDecision({ hasProducts, elementCount }) {
   return true;
 }
 
+function isTextOnlyDeclined(decision) {
+  return !decision || decision.action === 'insufficient_info' || decision.action === 'invalid';
+}
+
 function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
@@ -4190,24 +4194,33 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         // so a vision step is labelled by the page it was spent on.
         let visionPath = null;
         try { visionPath = new URL(session.page.url()).pathname; } catch { /* keep null */ }
-        const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
-        // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
-        // at each step, to eyeball that badges land on real controls. No-op when unset.
-        if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
-          require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
+
+        let usedVision = false;
+        if (shouldAttemptTextOnlyDecision({ hasProducts: session.lastHasProducts, elementCount: elements.length })) {
+          decision = await timed('step.decide-text', () =>
+            decideNextAction(session.goal, session.history, elements, null, pendingCorrection, session.goalContext, { textOnly: true }));
         }
-        decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
+        if (!decision || isTextOnlyDeclined(decision)) {
+          usedVision = true;
+          const screenshot = await timed('step.screenshot', () => captureMarkedScreenshot(session.page, elements).catch(() => null));
+          // ponytail: debug-only — set OXY_DEBUG_SCREENSHOT_DIR to dump what the model sees
+          // at each step, to eyeball that badges land on real controls. No-op when unset.
+          if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
+            require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
+          }
+          decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
+        }
         pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
         session.transientBrowserRetries = 0;
-        // Trace WHICH vision step this was: the page path + the action the model chose (+ a
-        // short target label). Lets a handful of runs name the residual vision steps so the
-        // avoidable ones can be recipe-ised. Fire-and-forget; never blocks the hot path.
+        // Trace WHICH step this was: the page path + the action the model chose (+ a short
+        // target label) + whether the fast path handled it or vision was needed. Lets a
+        // handful of runs measure how often the fast path actually skips the screenshot call.
         const tgt = Number.isInteger(decision.elementId) ? (elements[decision.elementId]?.text || '') : '';
         void logVisionStep({
           userId,
           site: session.site,
           phase: visionPath,
-          detail: { step: steps, action: decision.action, target: String(tgt).slice(0, 60) },
+          detail: { step: steps, action: decision.action, target: String(tgt).slice(0, 60), mode: usedVision ? 'vision' : 'text' },
         });
       }
 
@@ -5466,6 +5479,7 @@ module.exports = {
   isOrderGoal,
   assessProgress,
   shouldAttemptTextOnlyDecision,
+  isTextOnlyDeclined,
   buildDecisionPrompt,
   buildTextOnlyDecisionPrompt,
   parseModelDecision,
