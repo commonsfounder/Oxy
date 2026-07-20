@@ -5283,8 +5283,11 @@ async function confirmCredentialUse(userId, onProgress = () => {}) {
     }
     // Fill-time re-verification: the offer was made on an earlier turn, and the page may
     // have navigated since (redirect, SSO hop, etc.) before the user confirmed. Never fill
-    // a credential scoped to one site into whatever page happens to be showing now.
-    if (siteKeyFromUrl(session.page.url()) !== session.pendingCredentialSite) {
+    // a credential scoped to one site into whatever page happens to be showing now. Reuses
+    // siteInScope (not strict equality) because pendingCredentialSite can hold the granted
+    // registrable domain (delta.com) while the live page legitimately sits on its sign-in
+    // subdomain (signin.delta.com) — see siteInScope's dot-boundary match above.
+    if (!siteInScope(siteKeyFromUrl(session.page.url()), [session.pendingCredentialSite])) {
       session.pendingCredentialSite = null;
       session.pendingCredentialTaskId = null;
       return { type: 'error', error: 'The page changed since the sign-in was offered.' };

@@ -42,3 +42,15 @@ test('siteInScope: no match when allowedSites is empty or has no relation to cur
   assert.equal(siteInScope('delta.com', []), false);
   assert.equal(siteInScope('delta.com', ['united.com']), false);
 });
+
+// confirmCredentialUse's fill-time guard re-checks the live page against
+// session.pendingCredentialSite via `siteInScope(siteKeyFromUrl(page.url()),
+// [session.pendingCredentialSite])` — a single-entry-array call, exactly like these two
+// cases. The subdomain-passes case is already covered above ("a sign-in subdomain matches
+// a granted registrable domain"); this documents the corresponding reject case the guard
+// must still catch: a redirect away to a genuinely different site after the credential
+// offer was made, using the concrete example from the fix.
+test('siteInScope: rejects redirect to an unrelated site, in the single-entry-array form the fill-time guard uses', () => {
+  assert.equal(siteInScope('paypal.com', ['delta.com']), false);
+  assert.equal(siteInScope('evil.com', ['delta.com']), false);
+});
