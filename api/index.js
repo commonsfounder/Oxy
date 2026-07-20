@@ -88,7 +88,7 @@ const { saveVaultCredential, listVaultCredentials, deleteVaultCredential } = req
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
-const { createRoutine, listRoutines, deleteRoutine } = require('./services/routines');
+const { createRoutine, listRoutines, deleteRoutine, listDueRoutines, markRoutineRun } = require('./services/routines');
 const { resolveEntityReference } = require('./services/entity-recall');
 const { listRecentEntities } = require('./services/task-entities');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
@@ -5487,6 +5487,27 @@ async function runProactiveSweep(logger = console) {
   for (const user of users || []) {
     const userSummary = await runProactiveForUser(user.user_id, logger);
     mergeProactiveSummary(summary, userSummary);
+  }
+
+  // Scheduled routines (Phase 4 of the aside-parity roadmap) — reuses the existing
+  // req/res-decoupled runAgenticLoop execution path (same one POST /agent/tasks/:id/run
+  // uses for background agent runs), not a second dispatch mechanism.
+  const dueRoutines = await listDueRoutines(supabase, new Date());
+  for (const routine of dueRoutines) {
+    try {
+      await runAgenticLoop({
+        userId: routine.user_id,
+        initialMessage: routine.prompt,
+        dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+        maxIterations: 6,
+        context: { autonomy: 'Active' },
+        executeActionsFn: executeActions,
+        persistTask: false
+      });
+      await markRoutineRun(supabase, routine.id, new Date());
+    } catch (err) {
+      logger?.error?.('routine_run_failed', { routineId: routine.id, error: err.message });
+    }
   }
 
   summary.durationMs = Date.now() - startedAt;
