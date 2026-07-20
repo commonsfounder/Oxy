@@ -49,7 +49,7 @@ function createActionRunner({
 
         if (validationError) {
           result = applyActionContractResultMetadata(action, validationError);
-        } else if (contract?.executionMode === 'review' && !context.bypassReview) {
+        } else if ((contract?.executionMode === 'review' || context.guardMode) && !context.bypassReview) {
           await setPendingAction(userId, action, context);
           const cardInfo = MONEY_ACTION_TYPES.has(action.type) ? await getLinkedCardInfo(userId) : null;
           result = buildPendingReviewResult(action, cardInfo);
@@ -85,7 +85,7 @@ function createActionRunner({
 
       if (validationError) {
         result = applyActionContractResultMetadata(action, validationError);
-      } else if (contract?.executionMode === 'review' && !context.bypassReview) {
+      } else if ((contract?.executionMode === 'review' || context.guardMode) && !context.bypassReview) {
         await setPendingAction(userId, action, context);
         const cardInfo = MONEY_ACTION_TYPES.has(action.type) ? await getLinkedCardInfo(userId) : null;
         result = buildPendingReviewResult(action, cardInfo);
