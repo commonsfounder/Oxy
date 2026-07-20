@@ -163,6 +163,17 @@ function siteKeyFromUrl(url) {
   catch { return 'unknown'; }
 }
 
+// Real sign-in flows often live on a dedicated subdomain (signin.delta.com,
+// accounts.google.com) that will never match a granted domain (delta.com) under exact
+// equality. Treat a site as in scope if it equals a granted entry, or is a subdomain of one
+// (ends with "." + entry) — the literal dot requires a genuine label boundary, so
+// "evildelta.com" does NOT match a grant for "delta.com" (naive .endsWith(allowed) would
+// wrongly allow that). Only used for the scope CHECK; the credential lookup itself still
+// keys off the exact granted domain that matched, not whatever subdomain the browser is on.
+function siteInScope(currentSite, allowedSites) {
+  return (allowedSites || []).some((allowed) => currentSite === allowed || currentSite.endsWith(`.${allowed}`));
+}
+
 // Decide whether an incoming request must ABANDON the live in-memory session and open a
 // fresh one, vs. continue on the existing session. Continuing is right for auto-continue
 // (empty goal), a reply on the same task, and converting a lookup to "order it". Starting
@@ -3583,14 +3594,19 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       // re-ask every step.
       if (!session.credentialOfferAttempted && session.allowedCredentialSites?.length) {
         const currentSite = siteKeyFromUrl(currentUrl);
-        if (session.allowedCredentialSites.includes(currentSite)) {
+        if (siteInScope(currentSite, session.allowedCredentialSites)) {
+          // Re-derive which granted entry matched (exact or subdomain) — that's the domain
+          // the credential is actually stored/looked up under, not necessarily currentSite.
+          const grantedSite = session.allowedCredentialSites.find(
+            (allowed) => currentSite === allowed || currentSite.endsWith(`.${allowed}`)
+          );
           const pwVisible = await session.page.locator(PASSWORD_FIELD_SELECTOR).first().isVisible().catch(() => false);
           if (pwVisible) {
-            const credential = await getVaultCredential(getSupabase(), userId, currentSite).catch(() => null);
+            const credential = await getVaultCredential(getSupabase(), userId, grantedSite).catch(() => null);
             if (credential) {
               session.credentialOfferAttempted = true;
-              session.pendingCredentialSite = currentSite;
-              return { type: 'ready_for_credential_use', site: currentSite, label: credential.label };
+              session.pendingCredentialSite = grantedSite;
+              return { type: 'ready_for_credential_use', site: grantedSite, label: credential.label };
             }
           }
         }
@@ -5265,6 +5281,14 @@ async function confirmCredentialUse(userId, onProgress = () => {}) {
       session.pendingCredentialSite = null;
       return { type: 'error', error: 'That saved credential is no longer available — the sign-in was not completed.' };
     }
+    // Fill-time re-verification: the offer was made on an earlier turn, and the page may
+    // have navigated since (redirect, SSO hop, etc.) before the user confirmed. Never fill
+    // a credential scoped to one site into whatever page happens to be showing now.
+    if (siteKeyFromUrl(session.page.url()) !== session.pendingCredentialSite) {
+      session.pendingCredentialSite = null;
+      session.pendingCredentialTaskId = null;
+      return { type: 'error', error: 'The page changed since the sign-in was offered.' };
+    }
     if (!(await loginCredentialFieldsPresent(session.page))) {
       return { type: 'error', error: "Couldn't find the sign-in form anymore — the page may have changed." };
     }
@@ -5357,6 +5381,7 @@ module.exports = {
   CLICKABLE_SELECTOR,
   runOrderingTurn,
   siteKeyFromUrl,
+  siteInScope,
   makePersistingProgress,
   confirmPayment,
   classifyLoginInput,
