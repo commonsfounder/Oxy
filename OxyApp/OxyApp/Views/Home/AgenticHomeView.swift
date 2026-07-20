@@ -54,6 +54,10 @@ struct AgenticHomeView: View {
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
+    /// "Recently touched" strip (Phase 3 of the aside-parity roadmap) — entities the
+    /// agent itself touched while running a task, not a search UI. Empty array hides
+    /// the strip entirely rather than showing an empty-state placeholder.
+    @State private var recentEntities: [RecentEntity] = []
 
     var body: some View {
         ZStack {
@@ -111,6 +115,11 @@ struct AgenticHomeView: View {
 
                         suggestionRail
                             .padding(.top, 2)
+
+                        if !recentEntities.isEmpty {
+                            recentEntitiesRail
+                                .padding(.top, 2)
+                        }
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 120)
@@ -143,10 +152,12 @@ struct AgenticHomeView: View {
         .toolbar(.hidden, for: .tabBar)
         .task {
             await load(forceCheck: false)
+            await loadRecentEntities()
             while !Task.isCancelled {
                 try? await Task.sleep(for: Self.pollInterval)
                 guard !Task.isCancelled else { break }
                 await load(forceCheck: false)
+                await loadRecentEntities()
             }
         }
         .onChange(of: chatLaunch) { old, new in
@@ -381,6 +392,41 @@ struct AgenticHomeView: View {
         "Order food nearby",
         "Buy a gift"
     ]
+
+    private var recentEntitiesRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(recentEntities) { entity in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entity.entityName)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(GlebChrome.ink.opacity(0.85))
+                            .lineLimit(1)
+                        Text(entity.site)
+                            .font(.system(size: 11, weight: .regular))
+                            .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.5))
+                }
+            }
+            .padding(.vertical, 2)
+        }
+    }
+
+    private func loadRecentEntities() async {
+        do {
+            let data = try await APIClient.shared.request(path: "/memory/recent-entities")
+            let response = try JSONDecoder().decode(RecentEntitiesResponse.self, from: data)
+            await MainActor.run { recentEntities = response.entities }
+        } catch {
+            // Ambient surface, not a primary screen — a failed fetch just means the
+            // strip stays hidden, no error state to show.
+        }
+    }
 
     private var composerBar: some View {
         HStack(spacing: 10) {
