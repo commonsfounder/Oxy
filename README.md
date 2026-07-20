@@ -1,120 +1,97 @@
 # Oxy
 
-Oxy is an AI-powered personal assistant that you talk to like a friend. It connects to the real services you use every day — Gmail, Google Calendar, Telegram, Spotify, Uber, Trainline, and more — and takes action on your behalf through natural conversation. Voice or text, Oxy listens, understands, remembers, and does things for you.
+Oxy is a conversational, action-taking assistant you talk to like a friend — text or voice. It listens, remembers personal context across conversations, and takes real action across the services you already use: email, calendar, messaging, rides, trains, flights, hotels, music, smart home, finance, and more. Shopping/checkout automation (via browser control) is one capability among many, not the whole product — see [PRODUCT.md](PRODUCT.md) and [docs/NORTH_STAR.md](docs/NORTH_STAR.md) for the product framing.
 
 ## What It Does
 
-- **Conversational AI** — Chat via text or voice. Oxy responds naturally, remembers personal context across conversations, and adapts its tone to your preferences over time.
-- **Agentic Core (NEW)** — Full ReAct-style loops, native Gemini function calling, explicit planning, sequential tool orchestration with result passing, reflection/verification, simulation/dry-run mode, and persistent agent tasks/goals for long-running work.
-- **Proactive Nudges (Poke-inspired)** — Deeper email action scanning + calendar nudges, unprompted context-aware briefings.
-- **Recipes & Automations** — Save and execute custom recipes/automations (like Poke Kitchen).
-- **Expanded Integrations** — Health logging, smart home control, Notion/GitHub, flight tracking, photo editing + general tools (browse/calculate).
-- **Rich iMessage & Native** — Enhanced rich cards, one-tap actions, better iMessage integration via Shortcuts + native.
-- **Advanced Orchestration** — Branching plans, multi-agent delegation stubs, richer memory.
-- **Voice I/O** — Record audio from your browser, get it transcribed (Gemini), processed by the AI, and hear a spoken reply (Gemini TTS) — all in a single round-trip via Server-Sent Events.
-- **Real Actions** — Oxy doesn't just talk. When you say "text Sarah I'm running late" or "book an Uber to the station", it actually does it through connected services. High-risk actions gated by review.
-- **Memory + Episodic Traces** — Oxy automatically extracts and stores personal facts + agent execution history (how goals were achieved) and uses them to personalise future replies and agent behavior.
-- **Connectors + General Tools** — Pluggable connectors + new general tools: web_browse, calculate, create_agent_task, simulate_actions.
-- **Persistent Agency** — Create long-lived tasks/goals. Background execution via agent loops and proactive.
-- **Apple Shortcuts Bridge** — An included `.shortcut` file and generator script let Oxy trigger native iOS actions (iMessage, Reminders, HomeKit) from the AI's responses.
+- **Conversational AI** — Chat via text or voice, with persistent memory of personal facts and preferences that shapes future replies.
+- **Connector system** — 22 pluggable service integrations (see table below): real API actions (send email, check calendar, control smart home, check crypto/stocks, etc.) and handoff/deep-link connectors (Uber, Lyft, Trainline, Spotify, Amazon).
+- **Browser-automation agent** — A Playwright-driven agent (`api/services/browser-task.js`) that can complete real checkout flows (adding to cart, applying a stored delivery/payment identity, confirming an order) on retailer sites without a dedicated API.
+- **Proactive briefings & routines** — Scheduled/interval-based routines and unprompted, context-aware briefings pulled from real calendar/email/search grounding.
+- **Task & entity memory** — Persistent agent tasks with step-level tracing, plus recall of prior entities/tasks so the agent can refer back to "that hotel" or "the order from yesterday."
+- **Credential vault** — Securely stores and reuses login/delivery/payment identity for checkout and connector flows.
+- **Real payments** — Stripe-backed card flow with review gates and hard per-transaction/per-day spend caps.
+- **Native iOS app** — SwiftUI client (`OxyApp/`) with Chat, Home, Connectors, Memory, Routines, Vault, Payments, and Onboarding surfaces.
+- **Apple Shortcuts bridge** — A generated `.shortcut` file lets Oxy trigger native iOS actions (iMessage, Reminders, HomeKit) from the assistant's responses.
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Frontend (PWA)                       │
-│  React 18 · Babel (in-browser) · Single index.html      │
-│  Voice recording · SSE streaming · Service Worker        │
-└───────────────────┬─────────────────────────────────────┘
-                    │  HTTPS
-┌───────────────────▼─────────────────────────────────────┐
-│                   API Server (Express 5)                 │
-│  api/index.js — chat, audio, memory, connectors, auth   │
-│  api/proxy.js — action dispatch helper                  │
-└───────┬──────────────┬──────────────────────────────────┘
+┌───────────────────────────────────────────┐
+│              OxyApp (iOS, SwiftUI)         │
+│  Chat · Home · Connectors · Memory ·       │
+│  Routines · Vault · Payments · Onboarding  │
+└───────────────────┬───────────────────────┘
+                    │ HTTPS / SSE
+┌───────────────────▼───────────────────────┐
+│           API Server (Express 5)           │
+│  api/index.js — chat, audio, memory, auth  │
+│  api/services/ — ~40 domain services       │
+│    (browser-task, agent-orchestrator,      │
+│     checkout-profile, vault-credentials,   │
+│     routines, entity-recall, stripe-cards) │
+└───────┬──────────────┬────────────────────┘
         │              │
 ┌───────▼──────┐ ┌─────▼──────────────────────────────────┐
-│  Supabase    │ │          Connector System               │
-│  (Postgres)  │ │  connectors/google.js   — Gmail + Cal  │
-│              │ │  connectors/telegram.js — Messaging     │
-│  Tables:     │ │  connectors/uber.js     — Ride booking  │
-│  memories    │ │  connectors/trainline.js— Train search  │
-│  conversations│ │  connectors/index.js   — Registry      │
-│  action_log  │ └─────────────────────────────────────────┘
-│  connectors  │
-│  preferences │         ┌──────────────────────┐
-└──────────────┘         │   External APIs      │
-                         │  Gemini (LLM + TTS)  │
-                         │  Gemini (STT)         │
-                         │  Google (Gmail, Cal)  │
-                         │  Telegram User API    │
-                         │  Spotify Web API      │
-                         │  Twilio (SMS/calls)   │
-                         │  TransportAPI (trains) │
-                         │  Google Maps Geocoding │
-                         │  Home Assistant        │
-                         └──────────────────────┘
+│  Supabase    │ │            Connector System              │
+│  (Postgres,  │ │  connectors/ — google, microsoft, uber,  │
+│  RLS)        │ │  telegram, trainline, maps, spotify,     │
+│              │ │  notion, github, monzo, stripe, plaid,   │
+│  22 migra-   │ │  weather, amazon, slack, lyft, strava,   │
+│  tions       │ │  oura, eventbrite, flights, hotels,      │
+│              │ │  stocks                                  │
+└──────────────┘ └───────────────────────────────────────────┘
+                         │
+                 ┌───────▼──────────────┐
+                 │   External APIs       │
+                 │  Gemini (LLM/TTS/STT) │
+                 │  Playwright (browser  │
+                 │    automation)        │
+                 │  Google, Microsoft,   │
+                 │  Stripe, Plaid, etc.  │
+                 └───────────────────────┘
 ```
 
-### Frontend
+### iOS Client
 
-The entire UI lives in a single `index.html` file — React 18 loaded from CDN, compiled in-browser by Babel. No build step required. It's a Progressive Web App with a service worker (`sw.js`) for offline caching and push notifications.
-
-**Pages:**
-| Page | Description |
-|------|-------------|
-| Chat | Main conversation view with text input and voice recording (hold-to-talk) |
-| Connectors | Toggle connected services on/off, OAuth flows for Google & Telegram |
-| Memory | View and manage what Oxy remembers about you |
-| Action History | Log of every action Oxy has executed |
-| Settings | Voice toggle, autonomy level, data management |
+The primary client is a native SwiftUI app at `OxyApp/OxyApp.xcodeproj` (scheme `OxyApp`). Key view areas: `Views/Chat`, `Views/Home`, `Views/Connectors`, `Views/Memory`, `Views/Routines`, `Views/Vault`, `Views/Payments`, `Views/Onboarding`, `Views/Auth`, `Views/Settings`.
 
 ### Backend
 
-An Express 5 server deployed as a standard Node.js process on Cloud Run.
+An Express 5 server (`server.js` → `api/index.js`) deployed as a standard Node.js process on Cloud Run.
 
-**Core flow for a message:**
-1. User sends text or audio
-2. Audio is transcribed via Gemini
-3. Conversation history, memories, preferences, and connected-app context are loaded from Supabase
-4. Gemini generates a response (with Google Search grounding enabled)
-5. If the response contains an `<action>` block, actions are dispatched to the connector system
-6. For data-fetching actions (train times, emails, calendar), results are fed back to Gemini for natural summarisation
-7. TTS audio is generated via Gemini and streamed back alongside the text response
-8. Memory facts are extracted and saved in the background
+**Core flow for a chat message (`POST /chat`):**
+1. User sends text or audio (`POST /process-audio` transcribes via Gemini first).
+2. Conversation history, memories, preferences, connected-app context, task/entity recall, and routine state are loaded from Supabase.
+3. Gemini generates a response (with Google Search grounding).
+4. If the response includes an `<action>` block, actions dispatch to the connector system, or to the browser-automation agent for checkout-style tasks.
+5. Data-fetching results (emails, calendar, train times, order state) are fed back to Gemini for natural summarisation.
+6. TTS audio is generated and streamed back alongside text via SSE.
+7. Memory facts are extracted and saved in the background; task/step traces are recorded for agent runs.
 
 ### Connector System
 
-Connectors are modular service integrations in `connectors/`. Each exports:
-- `SUPPORTED_ACTIONS` — array of action type strings it handles
-- `execute(userId, action, params)` — performs the action and returns `{ success, text, ... }`
+Connectors live in `connectors/` and each exports `SUPPORTED_ACTIONS` + `execute(userId, action, params)`. The registry and per-connector categorisation live in `connectors/index.js`.
 
-**Currently implemented:**
+| Category | Connectors |
+|----------|-----------|
+| Real API (server-side actions) | `google`, `microsoft`, `telegram`, `maps`, `notion`, `github`, `monzo`, `stripe`, `plaid`, `weather`, `slack`, `strava`, `oura`, `eventbrite`, `flights`, `hotels`, `stocks` |
+| Handoff / deep-link | `uber`, `trainline`, `spotify`, `lyft`, `amazon` |
 
-| Connector | Actions | Auth |
-|-----------|---------|------|
-| **Google** | `send_email`, `get_emails`, `search_emails`, `create_calendar_event`, `get_calendar_events` | OAuth 2.0 (per-user tokens stored in Supabase) |
-| **Telegram** | `send_telegram`, `get_telegram_contacts` | Telegram User API with phone verification + optional 2FA |
-| **Uber** | `book_uber` | Deep links (no auth required) |
-| **Trainline** | `search_trains` | TransportAPI keys + Trainline booking URLs |
+### Browser-Automation Agent
 
-**Planned (UI-visible but not yet implemented):** iMessage, WhatsApp, Spotify, Apple Reminders, Deliveroo, Monzo, HomeKit, Google Maps, Notion, Betfair.
+`api/services/browser-task.js` is the main ordering/checkout loop, backed by:
+- `browser-recipes.js` / `browser-learned-recipes.js` — deterministic + learned step registries per site
+- `browser-fastpaths.js` — cached fast paths for known flows
+- `browser-platform-commerce.js` / `browser-platform-woocommerce.js` — platform-API tiers used before falling back to raw browser control
+- `checkout-profile.js` / `vault-credentials.js` — stored delivery identity and credential vault
+- `concierge-spend-guard.js` / `money-guard.js` — hard spend caps and review gates on real payments
 
-### MCP Server
-
-`mcp-server.js` is a standalone Express server (port 3100) exposing Oxy's tools via a simple `POST /tools` JSON-RPC interface. This enables external AI agents to call Oxy's capabilities (messaging, reminders, music, calendar, smart home).
+Runs on Playwright (`playwright`, `playwright-extra`, `puppeteer-extra-plugin-stealth`).
 
 ### Database (Supabase)
 
-| Table | Purpose |
-|-------|---------|
-| `conversations` | Chat history (role, content, timestamps per user) |
-| `memories` | Extracted personal facts about each user |
-| `action_log` | Audit trail of every action executed |
-| `connectors` | Per-user connector state and OAuth tokens |
-| `preferences` | Learned user preferences (response length, tone, format) |
-
-Schema is in `supabase/migrations/supabase-migration.sql`.
+Schema lives across `supabase/migrations/` (22 files as of this writing — base schema, auth, RLS, browser sessions/resume/session-events, routines, task entities/steps, travel, vault credentials, retention, subscriptions, and more). Row-level security is enabled; see `supabase-migration-rls.sql`.
 
 ## Getting Started
 
@@ -123,8 +100,9 @@ Schema is in `supabase/migrations/supabase-migration.sql`.
 - Node.js 18+
 - A Supabase project (free tier works)
 - API keys for the services you want to use
+- Xcode (for the iOS client)
 
-### Setup
+### Backend setup
 
 1. **Clone the repo**
    ```bash
@@ -141,239 +119,109 @@ Schema is in `supabase/migrations/supabase-migration.sql`.
    ```bash
    cp .env.example .env
    ```
-   Fill in the values — at minimum you need:
-   - `SUPABASE_URL` and `SUPABASE_KEY` — for the database
-   - `GEMINI_API_KEY` — for the AI (conversation + TTS + speech-to-text)
-   - `OXY_SESSION_SECRET` — signs per-user login sessions
-
-   Optional (enable more connectors):
-   - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN` — Gmail + Calendar
-   - `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` — Telegram messaging
-   - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` — SMS/calls
-   - `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REFRESH_TOKEN` — Music
-   - `TRANSPORT_API_APP_ID`, `TRANSPORT_API_APP_KEY` — Live train times
-   - `GOOGLE_MAPS_API_KEY` — Geocoding + Google Places lookup for Uber/local destinations
-   - `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_BUNDLE_ID`, `APNS_PRIVATE_KEY` — iOS proactive push notifications
-   - `APNS_USE_SANDBOX=true` — use APNs sandbox while testing development builds
-   - `HOME_ASSISTANT_URL`, `HOME_ASSISTANT_TOKEN` — Smart home
+   See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`, `OXY_SESSION_SECRET`. Optional blocks enable individual connectors (Google, Microsoft, Telegram, Stripe, Plaid, Monzo, etc.) — each connector degrades gracefully if its keys are absent.
 
 4. **Run the database migrations**
 
-   Execute the SQL in `supabase/migrations/supabase-migration.sql` + `supabase/migrations/supabase-migration-agentic.sql` (and any v2 etc.) against your Supabase project (via the SQL editor in the Supabase dashboard).
-
-   The agentic migration adds agent_tasks, agent_traces, simulation_runs for persistent goals, planning, and dry-run support.
-
-**5 Next Steps after migrations (agentic upgrade):**
-1. Run `node scripts/apply-agentic-migration.js` (it will show the SQL and verify).
-2. (Re)start your server (`npm run dev` or deploy).
-3. Test persistent tasks: Use POST /agent/tasks or say a long-term goal in chat with high autonomy.
-4. Test agent loop: Send a complex multi-step request like "Plan my day: check calendar, find nearby coffee, book Uber if time allows, remind me".
-5. Check `GET /agent/tasks?userId=...` and use simulation with "simulate ..." requests. Set autonomy to High/Bold in settings for deeper loops.
+   Apply the SQL files in `supabase/migrations/` against your Supabase project in order (via the SQL editor or CLI). `supabase-migration-rls.sql` must be applied for row-level security.
 
 5. **Start the server**
    ```bash
    npm start        # production
-   npm run dev      # development (with nodemon)
+   npm run dev       # development (nodemon)
    ```
-
-   The app is available at `http://localhost:3000` (or whichever port Express binds to).
+   The API listens on `http://localhost:3000` (or `$PORT`).
 
 6. **Create your first user**
 
-   Open the app and register with a user ID and password. Oxy now uses per-user accounts and signed sessions instead of a shared API secret.
+   Register via `POST /auth/register` (or the iOS app's onboarding flow) — Oxy uses per-user accounts and signed sessions.
+
+### iOS client setup
+
+Open `OxyApp/OxyApp.xcodeproj` in Xcode, select the `OxyApp` scheme, and build. Point it at your local or deployed backend URL in the app's settings/config.
 
 ### Deploying to Cloud Run
 
-Cloud Run is the primary deploy target for Oxy. This repo now runs as a standard Node service and includes:
+Cloud Run is the primary deploy target. **Pushing to `origin/main` triggers an automatic deploy** — committing locally is not enough.
 
-- `server.js` listening on `0.0.0.0:$PORT`
-- `Dockerfile` for Cloud Run source or container deploys
-- `.dockerignore` to keep deploys lean
-- `cloudrun.env.example.yaml` for runtime env vars
-- `/realtime-voice` WebSocket handling for Gemini Live sessions
+```bash
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+gcloud run services describe oxy --region europe-west2 --format="value(status.url)"
+```
 
-1. **Install and auth `gcloud`**
-   ```bash
-   gcloud auth login
-   gcloud config set project YOUR_PROJECT_ID
-   ```
+Run proactive briefings and routines as a separate scheduled Cloud Run Job:
 
-2. **Enable the required services**
-   ```bash
-   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
-   ```
+```bash
+gcloud run jobs create oxy-proactive \
+  --source . \
+  --region europe-west2 \
+  --command npm \
+  --args run,proactive:job \
+  --tasks 1 \
+  --max-retries 1
 
-3. **Create your Cloud Run env file**
-   ```bash
-   cp cloudrun.env.example.yaml cloudrun.env.yaml
-   ```
-   Fill in the real values. For production, Secret Manager is better than plain env files, but this is the fastest path to a working deploy.
-   If you want Gemini Live over Vertex AI instead of the Developer API, also fill in:
-   - `GOOGLE_GENAI_USE_ENTERPRISE=true`
-   - `GOOGLE_CLOUD_PROJECT`
-   - `GOOGLE_CLOUD_LOCATION`
+gcloud scheduler jobs create http oxy-proactive-every-15m \
+  --location europe-west2 \
+  --schedule "*/15 * * * *" \
+  --uri "https://run.googleapis.com/apis/run.googleapis.com/v1/namespaces/YOUR_PROJECT_ID/jobs/oxy-proactive:run" \
+  --http-method POST \
+  --oauth-service-account-email YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com
+```
 
-4. **Deploy from source**
-   ```bash
-   gcloud run deploy oxy \
-     --source . \
-     --region europe-west2 \
-     --allow-unauthenticated \
-     --env-vars-file cloudrun.env.yaml
-   ```
+A separate `retention:job` (`retention-job.js`) enforces the data retention policy and should be scheduled similarly.
 
-   Cloud Run will use the checked-in `Dockerfile` automatically.
+### Smoke-test
 
-5. **Set `APP_URL` after the first deploy**
+- `GET /health`, `GET /version`
+- register/login, `POST /chat`
+- a Google connector OAuth round-trip
+- a live browser-automation order (`test/dev/jl-order-e2e.js`)
 
-   Once the service is up, get its public URL:
-   ```bash
-   gcloud run services describe oxy \
-     --region europe-west2 \
-     --format="value(status.url)"
-   ```
+## Testing
 
-   Then update the service so OAuth and browser postMessage checks use the real Cloud Run URL:
-   ```bash
-   gcloud run services update oxy \
-     --region europe-west2 \
-     --update-env-vars APP_URL=https://YOUR-SERVICE-URL.a.run.app
-   ```
-
-6. **Smoke-test**
-
-   Check:
-   - `GET /health`
-   - register/login
-   - typed chat
-   - hold-to-talk voice
-   - Google connector OAuth callback
-
-7. **Run proactive briefings as a separate Cloud Run Job**
-
-   The app now includes a standalone proactive runner at `npm run proactive:job`. Deploy that as a Cloud Run Job and schedule it every 15 minutes so morning briefings and background follow-ups are not tied to web requests:
-
-   ```bash
-   gcloud run jobs create oxy-proactive \
-     --source . \
-     --region europe-west2 \
-     --command npm \
-     --args run,proactive:job \
-     --tasks 1 \
-     --max-retries 1
-   ```
-
-   Give the job the same runtime env vars/secrets as the main `oxy` service.
-
-   Then schedule it:
-
-   ```bash
-   gcloud scheduler jobs create http oxy-proactive-every-15m \
-     --location europe-west2 \
-     --schedule "*/15 * * * *" \
-     --uri "https://run.googleapis.com/apis/run.googleapis.com/v1/namespaces/YOUR_PROJECT_ID/jobs/oxy-proactive:run" \
-     --http-method POST \
-     --oauth-service-account-email YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com
-   ```
-
-Notes:
-- `mcp-server.js` is a separate process. If you still want the MCP server in Cloud Run, deploy it as a second service instead of trying to run both processes in one container.
+```bash
+npm test              # smoke tests (test/smoke/*.test.js)
+npm run brain:evals   # context-brain evals
+npm run latency       # latency benchmark
+npm run release:check # syntax check + smoke tests, run before every deploy
+```
 
 ## Project Structure
 
 ```
 Oxy/
-├── index.html              # Full frontend (React PWA, CSS, all pages)
-├── server.js               # Express entry point
-├── sw.js                   # Service worker (offline + push notifications)
-├── manifest.json           # PWA manifest
-├── package.json            # Dependencies and scripts
-├── .env.example            # Environment variable template
-├── supabase/migrations/supabase-migration.sql  # Database schema
-├── mcp-server.js           # Standalone MCP tool server
-├── create-shortcut.js      # Apple Shortcuts generator
-├── Milgrain.shortcut       # Pre-built Apple Shortcut file
+├── server.js                # Express entry point (Cloud Run listener)
 ├── api/
-│   ├── index.js            # Main API (chat, audio, memory, connectors, auth)
-│   ├── proxy.js            # Action dispatch helper
-│   └── geocoding.js        # Google Maps geocoding helper
-├── connectors/
-│   ├── index.js            # Connector registry and dispatcher
-│   ├── google.js           # Gmail + Google Calendar connector
-│   ├── telegram.js         # Telegram User API connector
-│   ├── uber.js             # Uber deep-link connector
-│   └── trainline.js        # UK train search connector
-└── icons/                  # PWA icons (192px, 512px, SVG)
+│   ├── index.js              # Main API — chat, audio, memory, connectors, auth
+│   ├── proxy.js               # Action dispatch helper
+│   ├── intent-router.js       # Intent routing
+│   ├── action-contracts.js    # Action schema/contracts
+│   ├── geocoding.js           # Google Maps geocoding helper
+│   └── services/              # ~40 domain services (browser automation, agent
+│                               #   orchestration, routines, vault, payments,
+│                               #   entity/task recall, retention, ...)
+├── connectors/                 # 22 connector modules + index.js registry
+├── OxyApp/                     # Native SwiftUI iOS client
+│   └── OxyApp.xcodeproj        # scheme: OxyApp
+├── supabase/migrations/        # 22 SQL migration files (schema, RLS, etc.)
+├── test/                       # smoke tests, dev e2e runners, benchmarks
+├── scripts/                    # one-off/maintenance scripts
+├── mcp-server.js               # Standalone MCP tool server (separate process)
+├── create-shortcut.js          # Apple Shortcuts generator
+├── Milgrain.shortcut           # Pre-built Apple Shortcut file
+├── proactive-job.js            # Scheduled proactive briefing/routine runner
+├── retention-job.js            # Data retention enforcement job
+├── AGENTS.md                   # Shared playbook for all coding agents in this repo
+├── PRODUCT.md                  # Product register: users, purpose, brand, principles
+└── docs/                       # Architecture plans, specs, runbooks, handoffs
 ```
 
-## How It Works — End to End
+## Notes
 
-1. **You speak or type** → The frontend captures audio via `MediaRecorder` or takes text input
-2. **Audio is transcribed** → Sent to `/process-audio`, transcribed by Gemini
-3. **Context is assembled** → Your memories, conversation history, preferences, connected apps, and messaging patterns are loaded from Supabase
-4. **Gemini thinks** → The AI generates a response using all available context, with Google Search grounding for real-world facts
-5. **Actions are executed** → If the response includes an `<action>` block, each action is dispatched to the relevant connector
-6. **Results are spoken back** → Gemini TTS converts the response to audio, streamed back as base64 WAV via SSE
-7. **Memory is updated** → Personal facts are extracted and saved for future conversations
-8. **Preferences evolve** → If you say things like "be more concise" or "use bullet points", Oxy adapts
-
-## Gemini Live Prototype Branch
-
-The repo also includes a separate companion-focused Gemini Live prototype over WebSocket. It is meant for evaluating a future native companion app voice path without changing the existing web text chat pipeline.
-
-### Prototype path
-
-- WebSocket endpoint: `/companion-live`
-- Intended client: companion/mobile app, not the current web UI
-- Flow:
-  1. client authenticates with a session token as the first socket message
-  2. client sends `session.start`
-  3. client streams PCM audio chunks with `audio.append`
-  4. backend opens one Gemini Live session and forwards audio directly
-  5. Gemini handles STT, reasoning, and TTS natively
-  6. tool calls are executed through Oxy connectors and returned into the same Live session
-  7. live audio and transcripts stream back in real time
-
-### Prototype socket events
-
-Client to server:
-
-- `auth`
-- `session.start`
-- `audio.append`
-- `audio.end`
-- `session.stop`
-
-Server to client:
-
-- `session.connecting`
-- `session.authenticated`
-- `session.ready`
-- `status`
-- `telemetry`
-- `transcript.user`
-- `transcript.assistant`
-- `audio`
-- `actions`
-- `turn.complete`
-- `error`
-
-### Benchmarking the prototype against the current pipeline
-
-Use the included script to compare the current `/process-audio` pipeline with the prototype `/companion-live` path:
-
-```bash
-npm run benchmark:voice -- --url https://YOUR-SERVICE.a.run.app --user YOUR_USER --password YOUR_PASSWORD --audio C:\path\sample.wav --voice Aoede
-```
-
-The benchmark reports:
-
-- first transcription latency
-- first assistant text latency
-- first assistant audio latency
-- turn complete latency
-
-This is the intended decision tool before committing to a full migration.
+- `mcp-server.js` runs as a separate process/service — deploy it as its own Cloud Run service rather than bundling with the main API.
+- See `AGENTS.md` for the shared engineering playbook (deploy discipline, git workflow, editing rules) followed by every agent working in this repo.
+- See `docs/` for deeper architecture plans (travel concierge, browser-task session handoffs, UI direction, ship-readiness gaps).
 
 ## License
 
