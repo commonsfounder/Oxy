@@ -35,10 +35,17 @@ while explicitly not chasing full browser-replacement parity.
 - Harden the existing browser-task engine: expand recipe coverage, tighten error-recovery/retry
   paths, keep the self-learning fastpath registry growing (builds directly on the existing
   `browser_fastpaths` design).
-- **Live step-trace activity feed**: backend emits per-step task events; iOS surfaces them as a
-  running "Recent tasks" panel with live status (mirrors Aside's transparency UX). This event
-  stream is required plumbing for Phase 2 (audit log) and Phase 3 (memory writes) — build it
-  generically enough to carry both.
+- **Step-trace activity feed**: backend persists per-step task events keyed by a per-turn
+  `task_id`; iOS fetches them as a post-hoc "how I got there" trace under the finished result
+  card (mirrors Aside's transparency UX, but not literally live — `run_browser_task` completes
+  synchronously within one chat turn, so iOS only learns the `task_id` after the whole turn has
+  already finished; there is no mid-turn stream to poll). A genuinely live, in-progress feed
+  would require restructuring the chat SSE pipeline to stream step events mid-turn — not done in
+  Phase 1. This event-storage layer (`task_steps` table) is still the plumbing Phase 2 (audit
+  log) and Phase 3 (memory writes) build on — those phases should design against "steps recorded
+  per turn," not against a live mid-task stream. Also note: `task_id` is currently fresh per
+  turn, not stable across a multi-turn task (e.g. add-to-basket → checkout) — Phase 2's audit log
+  will need a stable per-task identity spanning turns if that's required.
 - **Routines**: user-saved, reusable task templates (name + prompt + optional schedule stub).
   Simple CRUD; no new infra beyond a table and a list UI.
 
