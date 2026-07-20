@@ -1035,6 +1035,68 @@ style, material if relevant). Mid-task, no image is ever shown, so never imply o
 appeared. (Full original rules preserved in spirit.)`;
 }
 
+// Text-only variant of buildDecisionPrompt for the fast-path (Task 3): no screenshot is
+// attached, so this must never tell the model to "look" or "see" the page — only the
+// already-extracted element text is available. If the element text is genuinely
+// ambiguous (icon-only controls, a product tile with no name text, several near-identical
+// labels), the model must decline via "insufficient_info" rather than guess — that decline
+// is what routes the step to the existing screenshot+vision path (Task 3), so a wrong guess
+// here is worse than a decline.
+function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
+  const historyText = history.length
+    ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
+    : '(nothing yet)';
+  const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
+  const lastId = elements.length ? elements.length - 1 : 0;
+  const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
+
+  let contextBlock = '';
+  if (goalContext) {
+    const parts = [];
+    if (goalContext.size) parts.push(`size: ${goalContext.size}`);
+    if (goalContext.color) parts.push(`color: ${goalContext.color}`);
+    if (goalContext.budget) parts.push(`max budget: £${goalContext.budget}`);
+    if (goalContext.dealHints && goalContext.dealHints.length) parts.push(`deal prefs: ${goalContext.dealHints.join(', ')}`);
+    if (parts.length) contextBlock = `\nEXTRACTED CONTEXT FROM USER GOAL: ${parts.join(' | ')}\n`;
+  }
+
+  return `You are controlling a real web browser to help with this goal: "${goal}"
+${contextBlock}${correctionBlock}
+You do NOT have an image of the page — only this text list of its clickable elements,
+each with its accessible name (label, button text, or aria-label):
+
+${elementsText}
+
+If that text is enough to confidently pick the next action (a clearly-labelled search box,
+button, or link that matches what the goal needs next), do so. If the labels are too vague,
+generic ("Item", "Button", numbers with no context), or you suspect the right control isn't
+text-labelled at all (an image-only product tile, an icon-only button), reply exactly:
+{"action":"insufficient_info"}
+Do NOT guess an elementId when you are not confident — decline instead.
+
+For shopping/ordering goals (anything with "order", "basket", "cart", "buy", "checkout", "add to"):
+COMMIT IMMEDIATELY to the first reasonable match when the label is clear. After add, go
+straight to basket then checkout. "ready_for_payment" is the win condition.
+
+CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a number.
+
+What's happened so far:
+${historyText}
+
+Reply with ONLY one JSON object, one of these shapes:
+{"action":"click","elementId":<number>}
+{"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"back","note":"<why>"}
+{"action":"wait"}
+{"action":"ask","question":"<short question for the user>"}
+{"action":"done","summary":"<short summary answering the goal>","productName":"<item name>","price":"<price>"}
+{"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price>","productName":"<item name>"}
+{"action":"insufficient_info"}
+
+NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform to use.
+`;
+}
+
 function parseModelDecision(rawText) {
   let text = String(rawText || '').trim();
   // Reasoning models don't always honour the JSON mime type — they wrap the object in
@@ -1325,12 +1387,15 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
-async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null) {
+async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null, { textOnly = false } = {}) {
   const provider = (process.env.OXY_BROWSER_PROVIDER || 'gemini').toLowerCase();
-  const promptText = buildDecisionPrompt(goal, history, elements, correction, goalContext);
+  const promptText = textOnly
+    ? buildTextOnlyDecisionPrompt(goal, history, elements, correction, goalContext)
+    : buildDecisionPrompt(goal, history, elements, correction, goalContext);
+  const effectiveScreenshot = textOnly ? null : screenshotB64;
 
   // Very rough token estimator for cost tracking (image tokens dominate)
-  const imageTokens = screenshotB64 ? Math.round((screenshotB64.length * 0.65) / 4) : 0;
+  const imageTokens = effectiveScreenshot ? Math.round((effectiveScreenshot.length * 0.65) / 4) : 0;
   const textTokens = Math.round(promptText.length / 4);
   const estInputTokens = imageTokens + textTokens + (elements.length * 15);
 
@@ -1354,7 +1419,7 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     const model = BROWSER_MODEL;
 
     const content = [{ type: 'text', text: promptText }];
-    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+    if (effectiveScreenshot) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${effectiveScreenshot}` } });
 
     const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
     const resP = fetch(`${baseURL}/chat/completions`, {
@@ -1386,7 +1451,7 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     const model = (BROWSER_MODEL && BROWSER_MODEL.includes('claude')) ? BROWSER_MODEL : 'claude-opus-4-8';
 
     const content = [{ type: 'text', text: promptText }];
-    if (screenshotB64) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: screenshotB64 } });
+    if (effectiveScreenshot) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: effectiveScreenshot } });
 
     const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
     const resP = fetch('https://api.anthropic.com/v1/messages', {
@@ -1412,7 +1477,7 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     if (!apiKey) throw new Error('XAI_API_KEY (or GROK_API_KEY) required for browser Grok');
     const model = BROWSER_MODEL || 'grok-4.3';
     const content = [{ type: 'text', text: promptText }];
-    if (screenshotB64) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${screenshotB64}` } });
+    if (effectiveScreenshot) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${effectiveScreenshot}` } });
 
     const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
     const resP = fetch('https://api.x.ai/v1/chat/completions', {
@@ -1435,7 +1500,7 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
   // Gemini default path
   const model = getGemini().getGenerativeModel({ model: BROWSER_MODEL });
   const parts = [{ text: promptText }];
-  if (screenshotB64) parts.push({ inlineData: { mimeType: 'image/jpeg', data: screenshotB64 } });
+  if (effectiveScreenshot) parts.push({ inlineData: { mimeType: 'image/jpeg', data: effectiveScreenshot } });
   const request = {
     contents: [{ role: 'user', parts }],
     generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', ...browserThinkingConfig() }
@@ -5402,6 +5467,7 @@ module.exports = {
   assessProgress,
   shouldAttemptTextOnlyDecision,
   buildDecisionPrompt,
+  buildTextOnlyDecisionPrompt,
   parseModelDecision,
   scoreSearchResultText,
   pickBestSearchResult,
