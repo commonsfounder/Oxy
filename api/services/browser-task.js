@@ -24,6 +24,8 @@ const {
   saveCheckoutEmail,
 } = require('./checkout-profile');
 const { getAgentCard } = require('./agent-card');
+const { recordTaskStep } = require('./task-steps');
+const { randomUUID } = require('node:crypto');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
 const RECIPES_ENABLED = process.env.OXY_BROWSER_RECIPES !== 'false';
@@ -3202,7 +3204,38 @@ async function navigateToSiteBasket(session, page, steps, onProgress) {
   return true;
 }
 
-async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress = () => {} }) {
+// Best-effort wrapper around an `onProgress(text)` callback that also persists every step
+// to the task_steps table (via recordTaskStep) so a later API can expose live "what is the
+// agent doing right now" visibility. Never throws — a logging failure here must never break
+// a running browser task.
+function makePersistingProgress(supabase, { taskId, userId }) {
+  return async (text) => {
+    try {
+      await recordTaskStep(supabase, { taskId, userId, stepName: text });
+    } catch (_err) {
+      // never let telemetry break the running task
+    }
+  };
+}
+
+// Thin wrapper: gives each turn a taskId, wraps the caller's onProgress so every step also
+// persists to task_steps, and stamps the resulting outcome with that taskId so callers can
+// poll for step-by-step progress later. runOrderingTurnImplInner has ~20 early returns, all
+// of which return a plain outcome object — wrapping here (rather than touching every return
+// site) keeps this change to the one place, at the cost of nothing since every downstream
+// call site already just forwards whatever `onProgress` reference it was given.
+async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress: rawOnProgress = () => {} }) {
+  const taskId = randomUUID();
+  const persistingProgress = makePersistingProgress(getSupabase(), { taskId, userId });
+  const onProgress = (text) => {
+    rawOnProgress?.(text);
+    persistingProgress(text);
+  };
+  const outcome = await runOrderingTurnImplInner(userId, { url, goal, location, onProgress });
+  return { ...outcome, taskId };
+}
+
+async function runOrderingTurnImplInner(userId, { url, goal, location = null, onProgress = () => {} }) {
   // Started here, not after the session is open — a slow first-time browser launch +
   // page load must count against the same budget that bounds the step loop, or the
   // open alone can eat the mobile client's 45s watchdog before a single step runs.
@@ -5158,6 +5191,7 @@ module.exports = {
   extractClickableElements,
   CLICKABLE_SELECTOR,
   runOrderingTurn,
+  makePersistingProgress,
   confirmPayment,
   cancelPayment,
   classifyPaymentInput,
