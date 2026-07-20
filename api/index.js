@@ -2343,11 +2343,21 @@ async function executeAction(userId, action, params, context = {}) {
       // an already-open order; runOrderingTurn resolves it from the live session or
       // persisted resume context and returns its own honest error if there's truly
       // nothing to continue.
+      const credentialSites = Array.isArray(params?.credentialSites) ? params.credentialSites : [];
       let outcome;
       try {
-        outcome = await browserTask.runOrderingTurn(userId, { url, goal, location: context.location });
+        outcome = await browserTask.runOrderingTurn(userId, { url, goal, location: context.location, credentialSites });
       } catch (e) {
         return { success: false, error: `Browse task failed: ${e.message}` };
+      }
+      if (outcome.type === 'ready_for_credential_use') {
+        return {
+          success: true,
+          confirmation: 'review_required',
+          text: `I found a sign-in for ${outcome.site} — use your saved "${outcome.label}" credential to sign in?`,
+          actionSummary: 'Sign-in ready',
+          taskId: outcome.taskId
+        };
       }
       if (outcome.type === 'ready_for_payment') {
         const total = parsePrice(outcome.total || '');

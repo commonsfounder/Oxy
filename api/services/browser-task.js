@@ -3225,18 +3225,22 @@ function makePersistingProgress(supabase, { taskId, userId }) {
 // of which return a plain outcome object — wrapping here (rather than touching every return
 // site) keeps this change to the one place, at the cost of nothing since every downstream
 // call site already just forwards whatever `onProgress` reference it was given.
-async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress: rawOnProgress = () => {} }) {
+async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgress: rawOnProgress = () => {}, credentialSites = [] }) {
   const taskId = randomUUID();
   const persistingProgress = makePersistingProgress(getSupabase(), { taskId, userId });
   const onProgress = (text) => {
     rawOnProgress?.(text);
     persistingProgress(text);
   };
-  const outcome = await runOrderingTurnImplInner(userId, { url, goal, location, onProgress });
+  const outcome = await runOrderingTurnImplInner(userId, { url, goal, location, onProgress, credentialSites });
+  if (outcome.type === 'ready_for_credential_use') {
+    const session = getSession(userId);
+    if (session) session.pendingCredentialTaskId = taskId;
+  }
   return { ...outcome, taskId };
 }
 
-async function runOrderingTurnImplInner(userId, { url, goal, location = null, onProgress = () => {} }) {
+async function runOrderingTurnImplInner(userId, { url, goal, location = null, onProgress = () => {}, credentialSites = [] }) {
   // Started here, not after the session is open — a slow first-time browser launch +
   // page load must count against the same budget that bounds the step loop, or the
   // open alone can eat the mobile client's 45s watchdog before a single step runs.
@@ -3346,6 +3350,10 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
   }
 
   let steps = 0;
+  if (credentialSites.length) {
+    session.allowedCredentialSites = credentialSites.map(normalizeSite).filter(Boolean);
+    session.credentialOfferAttempted = false;
+  }
   let consecutiveBadDecisions = session.consecutiveBadDecisions || 0;
   let consecutiveWaits = session.consecutiveWaits || 0;
   // A click on a VALID element "succeeds" even when it achieves nothing, so the bad-decision
@@ -3564,6 +3572,29 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       // Cheap: URL pattern check is a string test; DOM read only when URL matches or has
       // a password field. Session stays open so "keep going" resumes the same order.
       const currentUrl = session.page.url();
+
+      // Vault credential offer — Phase 2 of the aside-parity roadmap (api/services/
+      // vault-credentials.js). Fires for ANY task (order or not), independent of the
+      // guest-checkout login-wall machinery below, which is about AVOIDING login. This is
+      // the opposite: offering to actually sign in with a credential the user explicitly
+      // scoped this task to use (session.allowedCredentialSites, set above from
+      // run_browser_task's credentialSites param). Fails closed — no scope, no offer — and
+      // only offers once per session so a page that keeps a password field visible doesn't
+      // re-ask every step.
+      if (!session.credentialOfferAttempted && session.allowedCredentialSites?.length) {
+        const currentSite = siteKeyFromUrl(currentUrl);
+        if (session.allowedCredentialSites.includes(currentSite)) {
+          const pwVisible = await session.page.locator(PASSWORD_FIELD_SELECTOR).first().isVisible().catch(() => false);
+          if (pwVisible) {
+            const credential = await getVaultCredential(getSupabase(), userId, currentSite).catch(() => null);
+            if (credential) {
+              session.credentialOfferAttempted = true;
+              session.pendingCredentialSite = currentSite;
+              return { type: 'ready_for_credential_use', site: currentSite, label: credential.label };
+            }
+          }
+        }
+      }
       if (session.isOrder && isCheckoutLoginWallUrl(currentUrl)
         && session.history.some(h => /checkout|proceed to checkout|register \/ login/i.test(h))) {
         return {
@@ -5325,6 +5356,7 @@ module.exports = {
   extractClickableElements,
   CLICKABLE_SELECTOR,
   runOrderingTurn,
+  siteKeyFromUrl,
   makePersistingProgress,
   confirmPayment,
   classifyLoginInput,

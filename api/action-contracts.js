@@ -413,13 +413,13 @@ const ACTION_CONTRACTS = {
     // validator reject that empty-goal continuation before the handler ever runs,
     // breaking auto-continue (regression test: browser-ordering-loop.test.js).
     required: [],
-    optional: ['goal', 'url'],
+    optional: ['goal', 'url', 'credentialSites'],
     inputExample: { goal: 'order a medium black t-shirt from Rothys', url: 'https://www.rothys.com' },
     successSummary: 'Order progressed',
     failureSummary: 'Order task failed',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result.'
+    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists.'
   },
   // The second half of the two-phase flow above — only ever called on a turn AFTER the user
   // has explicitly approved a review_required result from run_browser_task. executionMode:
