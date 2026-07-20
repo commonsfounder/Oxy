@@ -90,6 +90,7 @@ const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
 const { createRoutine, listRoutines, deleteRoutine } = require('./services/routines');
 const { resolveEntityReference } = require('./services/entity-recall');
+const { listRecentEntities } = require('./services/task-entities');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -7560,6 +7561,20 @@ app.delete('/vault/credentials/:id', requireSessionAuth, async (req, res) => {
     const result = await deleteVaultCredential(supabase, userId, req.params.id);
     if (!result.ok) return res.status(500).json({ error: result.error });
     res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Recently touched entities (Phase 3 of the aside-parity roadmap) — a light "what did the
+// agent last work on" surface, not a search UI. Reuses task_entities written by
+// api/services/browser-task.js's runOrderingTurnImpl.
+app.get('/memory/recent-entities', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { entities } = await listRecentEntities(supabase, userId, 10);
+    res.json({ entities });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
