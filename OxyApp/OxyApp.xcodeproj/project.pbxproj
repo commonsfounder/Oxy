@@ -13,6 +13,9 @@
 		A10000010000000000000003 /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000003 /* Message.swift */; };
 		A10000010000000000000200 /* TaskStep.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000200 /* TaskStep.swift */; };
 		A10000010000000000000201 /* TaskStepsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000201 /* TaskStepsService.swift */; };
+		A10000010000000000000202 /* Routine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000202 /* Routine.swift */; };
+		A10000010000000000000203 /* RoutinesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000203 /* RoutinesService.swift */; };
+		A10000010000000000000204 /* RoutinesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000204 /* RoutinesListView.swift */; };
 		A10000010000000000000004 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000004 /* KeychainHelper.swift */; };
 		A10000010000000000000005 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000005 /* APIClient.swift */; };
 		A10000010000000000000006 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000006 /* AuthService.swift */; };
@@ -67,6 +70,9 @@
 		A20000010000000000000003 /* Message.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Message.swift; sourceTree = "<group>"; };
 		A20000010000000000000200 /* TaskStep.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStep.swift; sourceTree = "<group>"; };
 		A20000010000000000000201 /* TaskStepsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskStepsService.swift; sourceTree = "<group>"; };
+		A20000010000000000000202 /* Routine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Routine.swift; sourceTree = "<group>"; };
+		A20000010000000000000203 /* RoutinesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesService.swift; sourceTree = "<group>"; };
+		A20000010000000000000204 /* RoutinesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesListView.swift; sourceTree = "<group>"; };
 		A20000010000000000000004 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A20000010000000000000005 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A20000010000000000000006 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
@@ -159,6 +165,7 @@
 				A20000010000000000000003 /* Message.swift */,
 				A20000010000000000000101 /* AgentTaskSession.swift */,
 				A20000010000000000000200 /* TaskStep.swift */,
+				A20000010000000000000202 /* Routine.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -171,6 +178,7 @@
 				A20000010000000000000006 /* AuthService.swift */,
 				A20000010000000000000007 /* ChatService.swift */,
 				A20000010000000000000201 /* TaskStepsService.swift */,
+				A20000010000000000000203 /* RoutinesService.swift */,
 				A20000010000000000000041 /* OxyShortcuts.swift */,
 				A20000010000000000000042 /* WeatherService.swift */,
 				A20000010000000000000043 /* PendantLiveActivity.swift */,
@@ -195,6 +203,7 @@
 				A50000010000000000000007 /* Chat */,
 				A50000010000000000000100 /* Home */,
 				A50000010000000000000012 /* Memory */,
+				A50000010000000000000018 /* Routines */,
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
 				A50000010000000000000016 /* Onboarding */,
@@ -261,6 +270,14 @@
 				A20000010000000000000017 /* MemoryView.swift */,
 			);
 			path = Memory;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000018 /* Routines */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000204 /* RoutinesListView.swift */,
+			);
+			path = Routines;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000013 /* Connectors */ = {
@@ -392,6 +409,9 @@
 				A10000010000000000000003 /* Message.swift in Sources */,
 				A10000010000000000000200 /* TaskStep.swift in Sources */,
 				A10000010000000000000201 /* TaskStepsService.swift in Sources */,
+				A10000010000000000000202 /* Routine.swift in Sources */,
+				A10000010000000000000203 /* RoutinesService.swift in Sources */,
+				A10000010000000000000204 /* RoutinesListView.swift in Sources */,
 				A10000010000000000000004 /* KeychainHelper.swift in Sources */,
 				A10000010000000000000005 /* APIClient.swift in Sources */,
 				A10000010000000000000006 /* AuthService.swift in Sources */,

@@ -30,7 +30,7 @@ struct MoreView: View {
     private var lightMode: Bool { colorScheme == .light }
 
     enum MoreDestination: Identifiable {
-        case profile, pendant, connectors, memory, settings, payments
+        case profile, pendant, connectors, memory, routines, settings, payments
         var id: String { "\(self)" }
     }
 
@@ -76,6 +76,7 @@ struct MoreView: View {
                     case .pendant: PendantStatusView()
                     case .connectors: ConnectorsView()
                     case .memory: MemoryView()
+                    case .routines: RoutinesListView()
                     case .settings: SettingsView()
                     case .payments: PaymentsView()
                     }
@@ -168,7 +169,7 @@ struct MoreView: View {
         }
     }
 
-    // MARK: - Menu (flat list, ordered: account, device, memory, connections, payments, settings)
+    // MARK: - Menu (flat list, ordered: account, device, memory, routines, connections, payments, settings)
 
     private var menuSection: some View {
         VStack(spacing: 0) {
@@ -184,6 +185,8 @@ struct MoreView: View {
             }
             rowDivider
             AppRow(title: "Memory") { destination = .memory }
+            rowDivider
+            AppRow(title: "Routines") { destination = .routines }
             rowDivider
             AppRow(title: "Connections") { destination = .connectors }
             rowDivider

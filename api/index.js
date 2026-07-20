@@ -87,6 +87,7 @@ const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./servi
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
+const { createRoutine, listRoutines, deleteRoutine } = require('./services/routines');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -7508,6 +7509,45 @@ app.get('/tasks/:id/steps', requireSessionAuth, async (req, res) => {
     const { steps, error } = await getTaskSteps(supabase, req.params.id, userId);
     if (error) return res.status(500).json({ error });
     res.json({ steps });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Routines — a user-saved name + prompt they can re-run later (api/services/routines.js).
+app.post('/routines', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { name, prompt } = req.body || {};
+    if (!name || !prompt) return res.status(400).json({ error: 'name and prompt required' });
+    const routine = await createRoutine(supabase, { userId, name, prompt });
+    if (routine.error) return res.status(500).json({ error: routine.error });
+    res.status(201).json(routine);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/routines', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { routines, error } = await listRoutines(supabase, userId);
+    if (error) return res.status(500).json({ error });
+    res.json({ routines });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/routines/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await deleteRoutine(supabase, userId, req.params.id);
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
