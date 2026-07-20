@@ -84,6 +84,7 @@ const { clearCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
 const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
+const { saveVaultCredential, listVaultCredentials, deleteVaultCredential } = require('./services/vault-credentials');
 const { resolveCurrencyForLocation } = require('./services/currency-from-location');
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
@@ -7486,6 +7487,48 @@ app.delete('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   try {
     await deleteAgentCard(supabase, userId);
     res.json({ saved: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// General-purpose credential vault — Phase 2 of the aside-parity roadmap. Any site
+// credential (not just payment cards); stored encrypted, one per (user, site), decrypted
+// only inside the browser-task engine at point of use (confirmCredentialUse in
+// api/services/browser-task.js). GET never returns the password. Credential entry
+// happens over these authed routes (iOS Vault screen), NEVER via chat.
+app.post('/vault/credentials', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { site, label, username, password } = req.body || {};
+    const result = await saveVaultCredential(supabase, userId, { site, label, username, password });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ saved: true, credential: result.credential });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/vault/credentials', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { credentials, error } = await listVaultCredentials(supabase, userId);
+    if (error) return res.status(500).json({ error });
+    res.json({ credentials });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/vault/credentials/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await deleteVaultCredential(supabase, userId, req.params.id);
+    if (!result.ok) return res.status(500).json({ error: result.error });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
