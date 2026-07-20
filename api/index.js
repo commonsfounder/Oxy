@@ -89,6 +89,7 @@ const { resolveCurrencyForLocation } = require('./services/currency-from-locatio
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
 const { createRoutine, listRoutines, deleteRoutine } = require('./services/routines');
+const { resolveEntityReference } = require('./services/entity-recall');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -6215,7 +6216,12 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return res.json(result);
     }
 
-    const contextualTurn = await timedDev('chat', 'intent_classification.contextual', {}, () => inferContextualDeterministicTurn(userId, message, settings, trace, {
+    const resolvedEntity = await resolveEntityReference(supabase, userId, message).catch(() => null);
+    const routingMessage = resolvedEntity
+      ? message.replace(/\bthat \w+\b|\bthe \w+ i (?:opened|saw|looked at|checked)\b/i, `"${resolvedEntity.entityName}" (from ${resolvedEntity.site})`)
+      : message;
+
+    const contextualTurn = await timedDev('chat', 'intent_classification.contextual', {}, () => inferContextualDeterministicTurn(userId, routingMessage, settings, trace, {
       since: chatStartedAt
     }));
     if (contextualTurn?.spokenOnly) {
@@ -6234,7 +6240,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return;
     }
 
-    const deterministicAction = contextualTurn || inferDeterministicAction(message, { settings });
+    const deterministicAction = contextualTurn || inferDeterministicAction(routingMessage, { settings });
     devTiming('chat', 'intent_classification.end', {
       route: deterministicAction ? 'deterministic_action' : 'model',
       reason: deterministicAction?.reason || null,
