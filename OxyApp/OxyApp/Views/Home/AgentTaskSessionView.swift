@@ -80,7 +80,7 @@ struct AgentTaskSessionView: View {
             .buttonStyle(.plain)
 
             Text(session.title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.appBody(15, weight: .semibold))
                 .foregroundStyle(ink)
                 .lineLimit(1)
 
@@ -88,7 +88,7 @@ struct AgentTaskSessionView: View {
 
             if let progress = session.progressText {
                 Text(progress)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.appBody(13, weight: .semibold))
                     .foregroundStyle(ink.opacity(0.5))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
@@ -153,7 +153,7 @@ struct AgentTaskSessionView: View {
                 HStack(spacing: 8) {
                     AppIcon("chat", size: 15)
                     Text("Tap to chat")
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.appBody(14, weight: .medium))
                 }
                 .foregroundStyle(ink.opacity(0.75))
                 .padding(.horizontal, 16)
@@ -214,7 +214,7 @@ struct AgentTaskSessionView: View {
 
     private func primaryLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold))
+            .font(.appBody(14, weight: .semibold))
             .foregroundStyle(colorScheme == .dark ? Color.black : Color.white)
             .padding(.horizontal, 20)
             .padding(.vertical, 13)

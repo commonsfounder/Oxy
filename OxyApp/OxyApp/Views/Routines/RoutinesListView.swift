@@ -205,7 +205,7 @@ struct RoutinesListView: View {
 
     private func delete(_ routine: Routine) async {
         HapticManager.shared.impact(.light)
-        await MainActor.run { routines.removeAll { $0.id == routine.id } }
+        await MainActor.run { withAnimation(.appStandard) { routines.removeAll { $0.id == routine.id } } }
         do {
             try await RoutinesService.deleteRoutine(id: routine.id)
         } catch {

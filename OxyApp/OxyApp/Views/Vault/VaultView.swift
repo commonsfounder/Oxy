@@ -102,6 +102,7 @@ struct VaultView: View {
                     }
                     .padding(.vertical, 14)
                     .frame(minHeight: 44)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
         }
@@ -159,7 +160,7 @@ struct VaultView: View {
     private func removeCredential(_ credential: VaultCredentialSummary) async {
         do {
             _ = try await APIClient.shared.request(path: "/vault/credentials/\(credential.id)", method: "DELETE")
-            await MainActor.run { credentials.removeAll { $0.id == credential.id } }
+            await MainActor.run { withAnimation(.appStandard) { credentials.removeAll { $0.id == credential.id } } }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
