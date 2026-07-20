@@ -24,6 +24,7 @@ const {
   saveCheckoutEmail,
 } = require('./checkout-profile');
 const { getAgentCard } = require('./agent-card');
+const { getVaultCredential, normalizeSite } = require('./vault-credentials');
 const { recordTaskStep } = require('./task-steps');
 const { randomUUID } = require('node:crypto');
 const axios = require('axios');
@@ -5143,6 +5144,139 @@ function cancelPayment(userId) {
   touchSession(userId);
 }
 
+// ---------------- Login-credential filling — post-confirmation only ----------------
+// Mirrors the payment-card section above exactly: a vault credential (api/services/
+// vault-credentials.js) is only ever decrypted here, server-side, strictly after the user
+// has explicitly confirmed a ready_for_credential_use gate (see Task 4's addition to the
+// ordering loop) — never inside a model prompt.
+
+const LOGIN_INPUT_CLASSIFIERS = [
+  { field: 'password', pattern: /\bpassword\b|\bpasswd\b|\bpwd\b/i },
+  { field: 'username', pattern: /\b(user(?:name)?|e-?mail(?:\s*address)?|login.?id|account.?id)\b/i },
+];
+
+function classifyLoginInput(hintText) {
+  const h = String(hintText || '');
+  if (!h) return null;
+  for (const { field, pattern } of LOGIN_INPUT_CLASSIFIERS) {
+    if (pattern.test(h)) return field;
+  }
+  return null;
+}
+
+function formatLoginValue(field, credential) {
+  if (field === 'username') return credential.username || null;
+  if (field === 'password') return credential.password || null;
+  return null;
+}
+
+/** Fill every empty, classifiable login field across all frames. Returns count filled.
+ *  Reuses enumeratePaymentInputs — despite its name it's a generic input/select
+ *  enumerator, not payment-specific; see its definition above for why it lives there. */
+async function fillLoginCredential(session, credential, onProgress = () => {}) {
+  const page = session.page;
+  const done = new Set();
+  for (const frame of page.frames()) {
+    const inputs = await enumeratePaymentInputs(frame);
+    for (const input of inputs) {
+      const field = classifyLoginInput(input.hint);
+      if (!field || !input.empty || done.has(field)) continue;
+      const value = formatLoginValue(field, credential);
+      if (!value) continue;
+      const ok = await fillFrameTextInput(frame, input.idx, value);
+      if (ok) {
+        done.add(field);
+        onProgress(field === 'password' ? 'Filled password' : 'Filled username');
+      }
+    }
+  }
+  return done.size;
+}
+
+/** True when any frame currently shows an empty password field. */
+async function loginCredentialFieldsPresent(page) {
+  for (const frame of page.frames()) {
+    const inputs = await enumeratePaymentInputs(frame);
+    if (inputs.some((inp) => inp.empty && classifyLoginInput(inp.hint) === 'password')) return true;
+  }
+  return false;
+}
+
+async function findAndClickSignInButton(page) {
+  const elements = await extractClickableElements(page);
+  const target = elements.find((el) => /^(sign in|log in|login|continue)$/i.test(el.text.trim()));
+  if (!target) return null;
+  const handle = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
+  ).then((h) => h.asElement());
+  if (!handle) return null;
+  await handle.click({ timeout: 10000 });
+  return target.text;
+}
+
+const CREDENTIAL_WATCH_BUDGET_MS = envInt('OXY_BROWSER_CREDENTIAL_WATCH_MS', 20000);
+
+/**
+ * Fills and submits the vault credential for session.pendingCredentialSite, set by the
+ * ordering loop (Task 4) when it offers a ready_for_credential_use gate and the user
+ * confirms. Logs one task_steps audit row per use — recordTaskStep never throws, so a
+ * telemetry failure can never break the sign-in it's recording.
+ */
+async function confirmCredentialUse(userId, onProgress = () => {}) {
+  const session = getSession(userId);
+  if (!session || !session.pendingCredentialSite) {
+    return { type: 'error', error: 'No sign-in is waiting for confirmation — it may have expired.' };
+  }
+  try {
+    const credential = await getVaultCredential(getSupabase(), userId, session.pendingCredentialSite);
+    if (!credential) {
+      session.pendingCredentialSite = null;
+      return { type: 'error', error: 'That saved credential is no longer available — the sign-in was not completed.' };
+    }
+    if (!(await loginCredentialFieldsPresent(session.page))) {
+      return { type: 'error', error: "Couldn't find the sign-in form anymore — the page may have changed." };
+    }
+    await fillLoginCredential(session, credential, onProgress);
+    await settle(session.page, 800);
+    const clickedLabel = await findAndClickSignInButton(session.page);
+
+    await recordTaskStep(getSupabase(), {
+      taskId: session.pendingCredentialTaskId || 'unknown',
+      userId,
+      stepName: `Signed in to ${credential.site} with saved credential`,
+      phase: 'credential_use',
+      detail: { credentialId: credential.id, site: credential.site }
+    });
+
+    const site = session.pendingCredentialSite;
+    session.pendingCredentialSite = null;
+    session.pendingCredentialTaskId = null;
+    if (!clickedLabel) {
+      return { type: 'done', text: `Filled in your saved ${site} sign-in — the page didn't show a button to submit, so check it looks right.` };
+    }
+
+    const deadline = Date.now() + CREDENTIAL_WATCH_BUDGET_MS;
+    while (Date.now() < deadline) {
+      await settle(session.page, 1000);
+      if (!(await loginCredentialFieldsPresent(session.page))) {
+        return { type: 'done', text: `Signed in to ${site} with your saved credential.` };
+      }
+    }
+    return { type: 'done', text: `Signed in to ${site} — say "keep going" to continue.` };
+  } catch (error) {
+    return { type: 'error', error: error.message };
+  }
+}
+
+function cancelCredentialUse(userId) {
+  const session = getSession(userId);
+  if (session) {
+    session.pendingCredentialSite = null;
+    session.pendingCredentialTaskId = null;
+  }
+}
+
 module.exports = {
   primeWarmBrowser,
   primeFastpaths,
@@ -5193,6 +5327,12 @@ module.exports = {
   runOrderingTurn,
   makePersistingProgress,
   confirmPayment,
+  classifyLoginInput,
+  formatLoginValue,
+  fillLoginCredential,
+  loginCredentialFieldsPresent,
+  confirmCredentialUse,
+  cancelCredentialUse,
   cancelPayment,
   classifyPaymentInput,
   formatCardValue,

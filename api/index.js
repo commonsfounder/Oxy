@@ -2404,6 +2404,21 @@ async function executeAction(userId, action, params, context = {}) {
       return { success: true, text: 'Order cancelled — nothing was charged.' };
     }
 
+    case 'confirm_credential_use': {
+      try {
+        const result = await browserTask.confirmCredentialUse(userId);
+        if (result.type === 'error') return { success: false, error: result.error };
+        return { success: true, text: result.text };
+      } catch (e) {
+        return { success: false, error: `Sign-in confirmation failed: ${e.message}` };
+      }
+    }
+
+    case 'cancel_credential_use': {
+      browserTask.cancelCredentialUse(userId);
+      return { success: true, text: 'Okay, not signing in.' };
+    }
+
     // === NEW AGENTIC GENERAL TOOLS ===
     case 'web_browse': {
       const url = String(params?.url || '').trim();

@@ -443,6 +443,30 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Cancel failed',
     confirmation: 'none',
     executionMode: 'direct'
+  },
+  // The second half of the credential-use two-phase flow (Phase 2 of the aside-parity
+  // roadmap) — only ever called on a turn AFTER the user has explicitly approved a
+  // review_required result from run_browser_task's ready_for_credential_use branch.
+  // executionMode: 'direct' is correct here for the same reason it is on
+  // confirm_browser_payment: the human review already happened on the prior turn.
+  confirm_credential_use: {
+    risk: 'high',
+    required: [],
+    inputExample: {},
+    successSummary: 'Signed in',
+    failureSummary: 'Sign-in failed',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Only call this after the user has explicitly said yes to using their saved credential, offered by run_browser_task on a prior turn.'
+  },
+  cancel_credential_use: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Sign-in cancelled',
+    failureSummary: 'Cancel failed',
+    confirmation: 'none',
+    executionMode: 'direct'
   }
 };
 
