@@ -34,8 +34,7 @@ struct AgentTaskSessionView: View {
 
                 if let errorMessage = session.errorMessage {
                     ErrorBanner(message: errorMessage, onRetry: {
-                        session.errorMessage = nil
-                        Task { await session.start(onHandoff: onOpenChat) }
+                        Task { await session.retry() }
                     })
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
@@ -58,12 +57,11 @@ struct AgentTaskSessionView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        // Real data only: kicks off the hidden pipeline once when the session opens.
-        // Tied to the view's identity, so it auto-cancels if the cover is dismissed
-        // mid-flight.
-        .task {
-            await session.start(onHandoff: onOpenChat)
-        }
+        // session.start() is kicked off by AgenticHomeView at creation time, not here —
+        // this view's own lifecycle no longer gates the network work, so dismissing the
+        // sheet (swipe away) lets the job keep running in the background instead of
+        // auto-cancelling. Re-presenting an already-started session just resumes
+        // watching its (already-live) state.
     }
 
     // MARK: - Chrome
@@ -111,6 +109,10 @@ struct AgentTaskSessionView: View {
                 RideConfirmStepView(details: details, ink: ink)
             case .linkResult(let details):
                 LinkResultStepView(details: details, ink: ink)
+            case .assistantAsk(let text):
+                AssistantAskStepView(text: text, ink: ink, isSending: session.isWorking) { reply in
+                    Task { await session.sendReply(reply) }
+                }
             case .workingHero(let status):
                 WorkingHeroStepView(title: step.title, status: status, ink: ink)
             }
@@ -149,12 +151,12 @@ struct AgentTaskSessionView: View {
                     primaryLabel("Done")
                 }
                 .buttonStyle(.appScale(0.96))
-            } else if let step = session.currentStep {
+            } else if let step = session.currentStep, !isAssistantAsk(step.ui) {
                 Button {
                     HapticManager.shared.impact(.medium)
                     switch step.ui {
                     case .paymentConfirm:
-                        Task { await session.confirmPayment(onHandoff: onOpenChat) }
+                        Task { await session.confirmPayment() }
                     case .rideConfirm(let details):
                         openRideLink(details)
                         withAnimation(.appSpring) { session.advance() }
@@ -170,6 +172,12 @@ struct AgentTaskSessionView: View {
             }
         }
         .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)
+    }
+
+    /// The reply lives inside `AssistantAskStepView` itself — no dock CTA to advance.
+    private func isAssistantAsk(_ ui: StepUI) -> Bool {
+        if case .assistantAsk = ui { return true }
+        return false
     }
 
     // Same deep-link-then-web-link fallback ChatViewModel.openActionLink already

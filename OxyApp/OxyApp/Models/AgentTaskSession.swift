@@ -119,56 +119,61 @@ final class AgentTaskSession: Identifiable {
     }
 
     /// Kicks off the job through the real hidden pipeline, mutating `steps` as
-    /// genuine backend results arrive. `onHandoff` fires (with a prompt to
-    /// auto-send, or nil to just open the chat surface) whenever the outcome can't
-    /// honestly be shown as a fixed native step — a clarifying question, a
-    /// still-in-progress multi-turn task, or a network/backend error — real chat is
-    /// the honest fallback there, not a fabricated step.
+    /// genuine backend results arrive. Never hands off to chat — when the agent
+    /// replies with plain text instead of a watched action (a clarifying question,
+    /// most often), that text becomes an `.assistantAsk` step with a reply field
+    /// right in this shell; `sendReply` continues the same conversation. The only
+    /// remaining honest escape hatch is the dock's explicit "Tap to chat" button,
+    /// a deliberate user choice, not an automatic redirect.
     @MainActor
-    func start(onHandoff: @escaping (String?) -> Void) async {
+    func start() async {
         guard isWorking == false else { return }
-        isWorking = true
-        defer { isWorking = false }
-
         if let emailAction {
-            await runEmailAction(emailAction, onHandoff: onHandoff)
+            isWorking = true
+            defer { isWorking = false }
+            await runEmailAction(emailAction)
             return
         }
+        await runTurn(message: originalPrompt)
+    }
 
-        let watchedAction = kind == .ride ? "book_uber" : "run_browser_task"
-        let stream = chatService.sendMessage(userId: userId, message: originalPrompt, location: location)
-        var sawWatchedAction = false
-        for await event in stream {
-            switch event {
-            case .status(let status, let label):
-                updateWorkingStatus(status: status, label: label)
-            case .actions(let results):
-                guard let result = results.first(where: { $0.action == watchedAction }) else { continue }
-                sawWatchedAction = true
-                if kind == .ride {
-                    handleRide(result: result, onHandoff: onHandoff)
-                } else {
-                    handle(result: result, onHandoff: onHandoff)
-                }
-            case .error(let message):
-                errorMessage = message
-                return
-            case .done:
-                if !sawWatchedAction { onHandoff(nil) }
-                return
-            default:
-                break
-            }
+    /// Continues the job with the user's answer to an `.assistantAsk` step — same
+    /// hidden pipeline, same conversation (the server keys history by user, not by
+    /// a job-specific session id), so this is exactly what typing the reply in real
+    /// chat would do, just without leaving this shell.
+    @MainActor
+    func sendReply(_ text: String) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isWorking == false, !trimmed.isEmpty else { return }
+        appendStep(AgentStep(title: title, status: .active, ui: .workingHero(status: "Thinking…"), ctaLabel: ""))
+        await runTurn(message: trimmed)
+    }
+
+    /// Re-runs the original ask after a network/backend error — the only case still
+    /// shown as an inline error (with its own Retry), never a chat handoff, since
+    /// nothing conversational actually happened yet to continue from.
+    @MainActor
+    func retry() async {
+        guard isWorking == false else { return }
+        errorMessage = nil
+        if let emailAction {
+            isWorking = true
+            defer { isWorking = false }
+            await runEmailAction(emailAction)
+            return
         }
-        if !sawWatchedAction { onHandoff(nil) }
+        await runTurn(message: originalPrompt)
     }
 
     /// "Review & confirm" — sends the same affirmative reply a person would type in
     /// chat through the same hidden pipeline, letting the agent call the existing
     /// confirm_browser_payment action itself. No new payment code path; every
     /// safety gate that action already honours (spend cap, card note) is unchanged.
+    /// If the agent comes back with something other than that action (rare — e.g. it
+    /// wants to double-check a detail first), that's the same conversational case as
+    /// everywhere else: an `.assistantAsk` step, not a silent handoff.
     @MainActor
-    func confirmPayment(onHandoff: @escaping (String?) -> Void) async {
+    func confirmPayment() async {
         guard isWorking == false else { return }
         isWorking = true
         defer { isWorking = false }
@@ -178,8 +183,13 @@ final class AgentTaskSession: Identifiable {
             message: "Yes, go ahead and confirm the payment.",
             location: location
         )
+        var assistantText = ""
         for await event in stream {
             switch event {
+            case .text(let chunk):
+                assistantText += chunk
+            case .replace(let replacement):
+                assistantText = replacement
             case .actions(let results):
                 guard let result = results.first(where: { $0.action == "confirm_browser_payment" }) else { continue }
                 if result.success {
@@ -192,24 +202,70 @@ final class AgentTaskSession: Identifiable {
                 errorMessage = message
                 return
             case .done:
-                onHandoff(nil)
+                finishWithAssistantText(assistantText)
                 return
             default:
                 break
             }
         }
-        // No clean confirm_browser_payment result came back — don't guess at
-        // success or failure on ambiguous data; let the user verify in real chat.
-        onHandoff(nil)
+        finishWithAssistantText(assistantText)
+    }
+
+    private func runTurn(message: String) async {
+        isWorking = true
+        defer { isWorking = false }
+
+        let watchedAction = kind == .ride ? "book_uber" : "run_browser_task"
+        let stream = chatService.sendMessage(userId: userId, message: message, location: location)
+        var sawWatchedAction = false
+        var assistantText = ""
+        for await event in stream {
+            switch event {
+            case .status(let status, let label):
+                updateWorkingStatus(status: status, label: label)
+            case .text(let chunk):
+                assistantText += chunk
+            case .replace(let replacement):
+                assistantText = replacement
+            case .actions(let results):
+                guard let result = results.first(where: { $0.action == watchedAction }) else { continue }
+                sawWatchedAction = true
+                if kind == .ride {
+                    handleRide(result: result)
+                } else {
+                    handle(result: result, fallbackText: assistantText)
+                }
+            case .error(let message):
+                errorMessage = message
+                return
+            case .done:
+                if !sawWatchedAction { finishWithAssistantText(assistantText) }
+                return
+            default:
+                break
+            }
+        }
+        if !sawWatchedAction { finishWithAssistantText(assistantText) }
+    }
+
+    /// The honest terminus for a turn that never called the watched action: if the
+    /// model said something, show it as a step you can reply to; if it genuinely
+    /// said nothing, that's a real (rare) failure, not silent — surface it inline.
+    private func finishWithAssistantText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            errorMessage = "Didn't get a clear answer back — try again or rephrase."
+        } else {
+            appendStep(AgentStep(title: title, ui: .assistantAsk(trimmed), ctaLabel: ""))
+        }
     }
 
     /// Never touches run_browser_task or the hidden chat pipeline — calls
     /// /emails/action-plan directly, which mines the ORIGINAL email for real links the
     /// provider already sent and writes manual steps. It doesn't attempt to log into
-    /// anything, so there's no "ask"/stuck-mid-loop case to hand off from here the way
-    /// the browser-task paths have — a plan with nothing usable just hands off honestly
-    /// instead of showing an empty result step.
-    private func runEmailAction(_ context: EmailActionContext, onHandoff: (String?) -> Void) async {
+    /// anything, so there's nothing to retry conversationally if it comes back empty —
+    /// that's a real dead end, surfaced as an inline error.
+    private func runEmailAction(_ context: EmailActionContext) async {
         do {
             let plan = try await chatService.emailActionPlan(
                 userId: userId,
@@ -219,7 +275,7 @@ final class AgentTaskSession: Identifiable {
             let steps = plan.steps ?? []
             let links = plan.links ?? []
             guard plan.success, !steps.isEmpty || !links.isEmpty else {
-                onHandoff(nil)
+                errorMessage = plan.error ?? "Couldn't find anything actionable in that email."
                 return
             }
             appendStep(AgentStep(
@@ -237,7 +293,7 @@ final class AgentTaskSession: Identifiable {
         currentStep?.ui = .workingHero(status: label)
     }
 
-    private func handle(result: ActionResult, onHandoff: (String?) -> Void) {
+    private func handle(result: ActionResult, fallbackText: String) {
         if result.confirmation == "review_required" {
             let name = result.productName ?? title
             title = name
@@ -278,17 +334,18 @@ final class AgentTaskSession: Identifiable {
             ))
             return
         }
-        // Plain text with no product data attached — most likely a clarifying
-        // question or an answer with nothing to show as a product card. Neither has
-        // an honest fixed native shape, so hand off to real chat.
-        onHandoff(nil)
+        // The watched action fired but didn't come back as a product/review card —
+        // most likely a clarifying question attached to the action result itself
+        // rather than the plain stream text. Same honest treatment as any other
+        // conversational reply: a step you can answer, not a silent redirect.
+        finishWithAssistantText(result.text ?? fallbackText)
     }
 
     /// book_uber is a synchronous deep-link handoff (executionMode: 'direct',
     /// confirmation: 'none') — no review step, no second network round trip.
     /// `cardText`'s fare/ETA is Oxy's own estimate (Google Routes based), not a
     /// live Uber quote, so RideConfirmStepView labels it honestly as an estimate.
-    private func handleRide(result: ActionResult, onHandoff: (String?) -> Void) {
+    private func handleRide(result: ActionResult) {
         guard result.success else {
             errorMessage = result.error ?? result.text ?? "Couldn't get an Uber ready."
             return
@@ -339,7 +396,7 @@ final class AgentStep: Identifiable {
 
     var canAdvance: Bool {
         switch ui {
-        case .workingHero: return false
+        case .workingHero, .assistantAsk: return false
         case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
         }
     }
@@ -350,6 +407,11 @@ enum StepUI {
     case productDetail(ProductDetails)
     case rideConfirm(RideDetails)
     case linkResult(LinkResultDetails)
+    /// The agent replied with plain text instead of calling a watched action — most
+    /// often a clarifying question. Rendered with an inline reply field; answering
+    /// calls `AgentTaskSession.sendReply` to continue the same conversation, never a
+    /// handoff to chat.
+    case assistantAsk(String)
     case workingHero(status: String)
 }
 

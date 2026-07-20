@@ -541,13 +541,19 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     /// Marketing / bulk mail the dashboard shouldn't surface as something that needs you.
     /// ponytail: keyword heuristic; move to a server-side classifier if it misfires.
     var isLikelyPromotional: Bool {
-        let haystack = "\(from) \(subject) \(snippet ?? "")".lowercased()
+        // Include `summary` (the server's AI paraphrase) — a raw subject/snippet can
+        // read as neutral ("ClearScore Cup is live") while the summary spells out the
+        // actual marketing hook ("enter a prize draw"), which the original from/subject/
+        // snippet-only haystack never saw.
+        let haystack = "\(from) \(subject) \(snippet ?? "") \(summary ?? "")".lowercased()
         let signals = [
             "% off", " off ", "sale", "deal", "discount", "coupon", "promo", "offer",
             "unsubscribe", "newsletter", "no-reply", "noreply", "do-not-reply",
             "free costume", "free gift", "streak", "festival", "limited time",
             "shop now", "buy now", "save up", "win ", "prize", "pool is closing",
-            "premium", "upgrade now", "flash", "clearance", "lowest price", "best price"
+            "premium", "upgrade now", "flash", "clearance", "lowest price", "best price",
+            "leaderboard", "enter to win", "cup challenge", "daily news digest",
+            "weekly update", "great opportunity", "new features and product"
         ]
         return signals.contains { haystack.contains($0) }
     }

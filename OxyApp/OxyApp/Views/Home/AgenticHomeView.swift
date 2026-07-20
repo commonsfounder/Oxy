@@ -14,6 +14,11 @@ import SwiftUI
 
 struct AgenticHomeView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Foreground poll interval — Home has no push/BGAppRefreshTask, so this is the
+    /// only thing that keeps cards from going stale while the screen sits open.
+    private static let pollInterval: Duration = .seconds(90)
 
     @State private var briefings: [Briefing] = []
     @State private var isLoading = false
@@ -21,12 +26,31 @@ struct AgenticHomeView: View {
     @State private var errorMessage: String?
     @State private var weather: OxyWeatherService.OxyWeatherSnapshot?
     @State private var chatLaunch: ChatLaunch?
+    /// Whichever session's sheet is currently on screen, if any.
     @State private var activeSession: AgentTaskSession?
+    /// Sessions that were dismissed (swiped away) while still running — the sheet
+    /// closing no longer cancels the job; it keeps executing via the `Task` started
+    /// in `startSession`, and shows as a Working/Needs-you card on Home (see
+    /// `sessionMissions`) until it completes or the user abandons it.
+    @State private var backgroundSessions: [AgentTaskSession] = []
+    /// Home is the sole root screen — no bottom tab bar. Chat and More are reached
+    /// via the composer / avatar (unchanged) or an edge swipe, and both dismiss the
+    /// same way every other cover in this app does: `.swipeToDismiss()`.
+    @State private var isChatHomePresented = false
+    @State private var isMorePresented = false
+    @State private var chatDragOffset: CGFloat = 0
+    @State private var chatDragActive = false
     @State private var localMissions: [HomeMission] = []
     /// "Ignore" on an inbox card is a purely local dismiss — there's no real
     /// archive/mark-read backend action to call, so this never claims the email was
-    /// actually archived server-side, only that it's hidden from this feed.
+    /// actually archived server-side, only that it's hidden from this feed. Persisted
+    /// to UserDefaults (keyed per user) so an ignored email stays ignored across
+    /// launches instead of reappearing every time this in-memory Set resets.
     @State private var dismissedMailIDs: Set<String> = []
+    /// Swiping a mission card away (any kind except `.mailGroup`, which already has its
+    /// own per-email "Ignore" CTA) is a purely local hide, same contract as
+    /// `dismissedMailIDs` — persisted so it stays hidden across launches.
+    @State private var dismissedMissionIDs: Set<String> = []
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
@@ -43,7 +67,7 @@ struct AgenticHomeView: View {
                             weather: weather,
                             onProfile: {
                                 HapticManager.shared.impact(.light)
-                                NotificationCenter.default.post(name: .oxyJumpToMore, object: nil)
+                                isMorePresented = true
                             }
                         )
                         .padding(.top, 8)
@@ -72,7 +96,10 @@ struct AgenticHomeView: View {
                                         mission: mission,
                                         ink: GlebChrome.ink,
                                         onCTA: { handleMissionCTA(mission) },
-                                        onMailCTA: { email in handleMailCTA(email) }
+                                        onMailCTA: { email in handleMailCTA(email) },
+                                        onDismiss: mission.kind == .mailGroup ? nil : {
+                                            mission.id.hasPrefix("session-") ? abandonSession(mission.id) : dismissMission(mission.id)
+                                        }
                                     )
                                     .transition(.asymmetric(
                                         insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
@@ -97,15 +124,112 @@ struct AgenticHomeView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
             }
+
+            // Right-edge swipe → Chat, mirroring ChatHomeView's own left-edge sidebar
+            // gesture (same technique: a thin edge strip + DragGesture, not a
+            // screen-wide recognizer — Home's ScrollView already owns pull-to-refresh
+            // and the inbox card owns its own horizontal swipes).
+            Color.clear
+                .frame(width: 20)
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(chatEdgeGesture)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            chatPeekIndicator
         }
         .preferredColorScheme(.light)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .task { await load(forceCheck: false) }
+        .task {
+            await load(forceCheck: false)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.pollInterval)
+                guard !Task.isCancelled else { break }
+                await load(forceCheck: false)
+            }
+        }
         .onChange(of: chatLaunch) { old, new in
             if old != nil && new == nil {
                 Task { await load(forceCheck: false) }
             }
+        }
+        .onChange(of: isChatHomePresented) { old, new in
+            if old && !new {
+                Task { await load(forceCheck: false) }
+            }
+        }
+        .onChange(of: isMorePresented) { old, new in
+            if old && !new {
+                Task { await load(forceCheck: false) }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await load(forceCheck: false) }
+            }
+        }
+        .onAppear {
+            loadDismissedMailIDs()
+            loadDismissedMissionIDs()
+            #if DEBUG
+            if let tab = ProcessInfo.processInfo.environment["OXY_DEBUG_TAB"] {
+                if tab == "chat" { isChatHomePresented = true }
+                if tab == "more" { isMorePresented = true }
+                return
+            }
+            if ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" { return }
+            #endif
+            if appState.isDemoSession || SiriRequestBus.shared.pendingQuery != nil {
+                isChatHomePresented = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
+            isChatHomePresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
+            isMorePresented = true
+        }
+        .fullScreenCover(isPresented: $isChatHomePresented) {
+            // No `.swipeToDismiss()` here — ChatHomeView already owns a left-edge
+            // swipe for its own conversation-history drawer, and stacking a second
+            // left-edge gesture on top of it left no reliable way back to Home. An
+            // explicit close button is the honest fix, not a gesture-priority hack.
+            ChatHomeView()
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        isChatHomePresented = false
+                    } label: {
+                        AppIcon("tab-home", size: 16)
+                            .foregroundStyle(Color.appInk)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.appScale)
+                    .accessibilityLabel("Home")
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+                }
+        }
+        .fullScreenCover(isPresented: $isMorePresented) {
+            MoreView()
+                .swipeToDismiss()
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        isMorePresented = false
+                    } label: {
+                        AppIcon("tab-home", size: 16)
+                            .foregroundStyle(Color.appInk)
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.appScale)
+                    .accessibilityLabel("Home")
+                    .padding(.top, 8)
+                    .padding(.trailing, 12)
+                }
         }
         .fullScreenCover(item: $chatLaunch) { launch in
             NavigationStack {
@@ -131,8 +255,12 @@ struct AgenticHomeView: View {
         .fullScreenCover(item: $activeSession) { session in
             AgentTaskSessionView(
                 session: session,
-                onDismiss: { activeSession = nil },
+                onDismiss: {
+                    backgroundIfNeeded(session)
+                    activeSession = nil
+                },
                 onComplete: { title in
+                    backgroundSessions.removeAll { $0.id == session.id }
                     localMissions.insert(HomeMission(
                         id: "local-\(UUID().uuidString)",
                         kind: .status,
@@ -147,8 +275,23 @@ struct AgenticHomeView: View {
                     activeSession = nil
                 },
                 onOpenChat: { prompt in
+                    // Manually escaping to chat mid-job (e.g. tapping while a purchase
+                    // is still running) shouldn't let that in-flight work vanish with
+                    // no way to ever see its outcome — same background tracking as a
+                    // plain dismiss.
+                    backgroundIfNeeded(session)
                     activeSession = nil
-                    openChat(autoSend: prompt, startFresh: true)
+                    // `startFresh: true` here was wiping the exact turn the hidden
+                    // pipeline just ran — for .shopping/.ride jobs, `session.start()`
+                    // already called chatService.sendMessage (the same /chat endpoint
+                    // real chat uses, which persists the turn server-side regardless of
+                    // what this session's SSE consumer did with it) before ever handing
+                    // off here. Landing on a blank new chat threw away the model's own
+                    // reply — often a clarifying question ("what gift, for who?") — so a
+                    // "buy a gift" job would flash the native UI, find no run_browser_task
+                    // call yet, and dump the user into an empty chat with no visible
+                    // reason why. Loading real history instead surfaces that reply.
+                    openChat(autoSend: prompt, startFresh: false)
                 }
             )
         }
@@ -287,16 +430,98 @@ struct AgenticHomeView: View {
         }
     }
 
+    // MARK: - Navigation gestures
+
+    private static let chatDragCommitDistance: CGFloat = -60
+
+    /// Right-edge swipe → Chat. `minimumDistance: 12` + a translation threshold
+    /// (not just `.gesture` on the whole screen) so this never fights Home's own
+    /// `.refreshable` pull or the inbox card's horizontal swipe paging. Tracks the
+    /// drag live (rather than firing only on release) so `chatPeekIndicator` can
+    /// follow the finger — the same live-drag feel `SwipeToDismissModifier` and
+    /// ChatHomeView's own sidebar gesture already use elsewhere in this app.
+    private var chatEdgeGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard value.translation.width < 0 else { return }
+                if !chatDragActive {
+                    chatDragActive = true
+                    HapticManager.shared.impact(.light)
+                }
+                chatDragOffset = max(value.translation.width, Self.chatDragCommitDistance - 20)
+            }
+            .onEnded { value in
+                let committed = value.translation.width < Self.chatDragCommitDistance
+                if committed {
+                    HapticManager.shared.impact(.medium)
+                    isChatHomePresented = true
+                }
+                chatDragActive = false
+                withAnimation(.appSpring) { chatDragOffset = 0 }
+            }
+    }
+
+    /// Floating chat-glyph badge that follows the right-edge drag, fading in as the
+    /// gesture approaches its commit distance — the visual half of `chatEdgeGesture`,
+    /// same idea as iOS's own edge-swipe-back hint.
+    private var chatPeekIndicator: some View {
+        HStack {
+            Spacer()
+            AppIcon("chat", size: 17)
+                .foregroundStyle(GlebChrome.ink.opacity(0.75))
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.75), lineWidth: 0.6))
+                .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+        }
+        .padding(.trailing, 10)
+        .offset(x: chatDragOffset)
+        .opacity(chatDragActive ? min(Double(-chatDragOffset) / Double(-Self.chatDragCommitDistance), 1) : 0)
+        .allowsHitTesting(false)
+    }
+
     // MARK: - Data
 
     private var missions: [HomeMission] {
-        (localMissions + HomeMissionBuilder.build(from: briefings)).compactMap { mission in
-            guard mission.kind == .mailGroup else { return mission }
+        (sessionMissions + localMissions + HomeMissionBuilder.build(from: briefings)).compactMap { mission in
+            guard mission.kind == .mailGroup else {
+                return dismissedMissionIDs.contains(mission.id) ? nil : mission
+            }
             var visible = mission
             visible.mailItems = mission.mailItems.filter { !dismissedMailIDs.contains($0.id) }
             return visible.mailItems.isEmpty ? nil : visible
         }
     }
+
+    /// One card per backgrounded job, reflecting its live `@Observable` state — no
+    /// snapshotting, so this updates itself as the session progresses even while its
+    /// sheet is closed. The currently-presented session is excluded so its card
+    /// doesn't sit duplicated behind the open sheet.
+    private var sessionMissions: [HomeMission] {
+        backgroundSessions
+            .filter { $0.id != activeSession?.id }
+            .map { session in
+                let (eyebrow, cta): (String, String?) = {
+                    if session.errorMessage != nil { return ("Needs you", "Retry") }
+                    if session.isWorking { return ("Working", nil) }
+                    if case .assistantAsk = session.currentStep?.ui { return ("Needs you", "Reply") }
+                    return ("Ready", "Review")
+                }()
+                return HomeMission(
+                    id: sessionMissionID(session),
+                    kind: .agent,
+                    eyebrow: eyebrow,
+                    title: session.title,
+                    detail: session.errorMessage,
+                    cta: cta,
+                    prompt: nil,
+                    symbol: "circle.dotted",
+                    isPrimary: true
+                )
+            }
+    }
+
+    private func sessionMissionID(_ session: AgentTaskSession) -> String { "session-\(session.id)" }
 
     // MARK: - Actions
 
@@ -309,8 +534,37 @@ struct AgenticHomeView: View {
     }
 
     private func handleMissionCTA(_ mission: HomeMission) {
+        if let session = backgroundSessions.first(where: { sessionMissionID($0) == mission.id }) {
+            HapticManager.shared.impact(.medium)
+            activeSession = session
+            return
+        }
         let prompt = mission.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         handleIntent((prompt?.isEmpty == false ? prompt : nil) ?? mission.title)
+    }
+
+    /// Explicitly abandons a backgrounded job — swiping its Home card away. The job
+    /// itself has no server-side cancel (run_browser_task/book_uber calls that are
+    /// already in flight finish regardless), this only stops tracking and showing it.
+    private func abandonSession(_ id: String) {
+        backgroundSessions.removeAll { sessionMissionID($0) == id }
+    }
+
+    /// Every place a native job starts: create it, present its sheet, and kick off
+    /// the real pipeline call immediately — not from the sheet's own `.task`, so the
+    /// work isn't tied to the sheet's lifecycle and survives a dismiss.
+    private func startSession(_ session: AgentTaskSession) {
+        activeSession = session
+        Task { await session.start() }
+    }
+
+    /// Shared by both ways a session's sheet can go away (swipe-dismiss and the
+    /// dock's manual "Tap to chat") — if there's genuinely nothing left to do,
+    /// don't bother tracking a card for it; otherwise keep it visible on Home until
+    /// it resolves.
+    private func backgroundIfNeeded(_ session: AgentTaskSession) {
+        guard !session.isComplete, !backgroundSessions.contains(where: { $0.id == session.id }) else { return }
+        backgroundSessions.append(session)
     }
 
     /// Inbox card action routing. The concierge already has everything it needs
@@ -334,6 +588,7 @@ struct AgenticHomeView: View {
         case .ignore:
             HapticManager.shared.impact(.light)
             withAnimation(.appSpring) { dismissedMailIDs.insert(email.id) }
+            persistDismissedMailIDs()
         case .reply:
             handleIntent(mailGoal(for: email))
         case .handle:
@@ -345,7 +600,7 @@ struct AgenticHomeView: View {
                 return
             }
             HapticManager.shared.impact(.medium)
-            activeSession = AgentTaskSession(
+            startSession(AgentTaskSession(
                 title: email.cta ?? "Handling it",
                 originalPrompt: mailGoal(for: email),
                 kind: .task,
@@ -353,8 +608,31 @@ struct AgenticHomeView: View {
                 chatService: service,
                 location: LocationManager.shared.locationDict,
                 emailAction: .init(provider: email.provider, messageId: messageId)
-            )
+            ))
         }
+    }
+
+    private var dismissedMailIDsKey: String { "oxy_dismissed_mail_ids_\(appState.userId)" }
+
+    private func loadDismissedMailIDs() {
+        let saved = UserDefaults.standard.stringArray(forKey: dismissedMailIDsKey) ?? []
+        dismissedMailIDs = Set(saved)
+    }
+
+    private func persistDismissedMailIDs() {
+        UserDefaults.standard.set(Array(dismissedMailIDs), forKey: dismissedMailIDsKey)
+    }
+
+    private var dismissedMissionIDsKey: String { "oxy_dismissed_mission_ids_\(appState.userId)" }
+
+    private func loadDismissedMissionIDs() {
+        let saved = UserDefaults.standard.stringArray(forKey: dismissedMissionIDsKey) ?? []
+        dismissedMissionIDs = Set(saved)
+    }
+
+    private func dismissMission(_ id: String) {
+        dismissedMissionIDs.insert(id)
+        UserDefaults.standard.set(Array(dismissedMissionIDs), forKey: dismissedMissionIDsKey)
     }
 
     private enum MailCTAKind { case reply, ignore, handle }
@@ -383,14 +661,14 @@ struct AgenticHomeView: View {
     private func handleIntent(_ text: String) {
         HapticManager.shared.impact(.medium)
         if let kind = AgentPlanGenerator.jobKind(for: text) {
-            activeSession = AgentTaskSession(
+            startSession(AgentTaskSession(
                 title: text,
                 originalPrompt: text,
                 kind: kind,
                 userId: appState.userId,
                 chatService: service,
                 location: LocationManager.shared.locationDict
-            )
+            ))
         } else {
             openChat(autoSend: text, startFresh: true)
         }
@@ -452,7 +730,10 @@ struct AgenticHomeView: View {
                         subject: "Deck for the 3pm review",
                         snippet: "Can you send the latest before we meet?",
                         date: "9:02 AM",
-                        summary: "Wants the deck before the 3pm review"
+                        summary: "Wants the deck before the 3pm review",
+                        cta: nil,
+                        provider: nil,
+                        messageId: nil
                     )
                 ],
                 incoming: [
@@ -587,9 +868,28 @@ enum HomeMissionBuilder {
         // than one briefing window.
         var mailItems: [BriefingEmail] = []
         var seenMailIDs = Set<String>()
+        // `briefing.emails` is a fresh live re-fetch of the inbox each time it's written
+        // (refreshBriefingEmailData on the server overwrites TODAY's row in place), not an
+        // incremental diff — so briefings older than the newest one are just stale
+        // duplicates of what was unread on some earlier day. Accumulating mail across all
+        // of them (as this used to do) is exactly why weeks-old newsletters kept sitting
+        // in "needs you" forever: only the single most recent briefing that actually
+        // carries an emails list reflects the current inbox.
+        let latestEmailBriefingID = briefings.first(where: { !$0.emails.isEmpty })?.id
 
         for briefing in briefings {
-            for signal in briefing.signals {
+            // Server-side "what matters" signal generation (and the auto-execution behind
+            // it — this is what silently created real reminders like "Red Warning for
+            // extreme heat" and "Cadbury End-of-Year Show" with no confirmation) was killed
+            // on 2026-06-25 (commit 3c9f3a8, "stop generating AI what-matters signals") —
+            // every briefing since then always has `signals: []`. Old rows from before that
+            // date still carry their signals forever, and nothing ever aged them out
+            // client-side, so they kept resurfacing indefinitely. Signals can now only ever
+            // be a fossil, so gate on recency — this hides all pre-existing ghosts
+            // immediately without touching `incoming`/`agent_task`, which are still live.
+            let briefingAge = Date.oxyParse(briefing.createdAt).map { Date().timeIntervalSince($0) }
+            let signalsAreFresh = briefingAge.map { $0 < 2 * 24 * 3600 } ?? false
+            for signal in (signalsAreFresh ? briefing.signals : []) {
                 let id = "sig-\(briefing.id)-\(signal.id)"
                 guard seen.insert(id).inserted else { continue }
 
@@ -653,9 +953,11 @@ enum HomeMissionBuilder {
                 ))
             }
 
-            for email in briefing.emails where !email.isLikelyPromotional {
-                guard seenMailIDs.insert(email.id).inserted else { continue }
-                mailItems.append(email)
+            if briefing.id == latestEmailBriefingID {
+                for email in briefing.emails where !email.isLikelyPromotional {
+                    guard seenMailIDs.insert(email.id).inserted else { continue }
+                    mailItems.append(email)
+                }
             }
 
             let k = briefing.kind.lowercased()
@@ -708,8 +1010,44 @@ struct MissionCardView: View {
     /// Fires with the specific email a page's "Draft reply" was tapped on — only
     /// used by `.mailGroup`, which has no single card-level prompt to send via `onCTA`.
     var onMailCTA: (BriefingEmail) -> Void = { _ in }
+    /// Swipe-to-dismiss, either direction. Nil for `.mailGroup` — that card already owns
+    /// its own horizontal gesture (TabView paging between emails) and per-email "Ignore".
+    var onDismiss: (() -> Void)? = nil
 
     @State private var expanded = false
+    @State private var dragOffset: CGFloat = 0
+    @State private var dragStarted = false
+    @State private var isDismissing = false
+
+    private static let dismissCommitDistance: CGFloat = 110
+
+    private var dismissGesture: some Gesture {
+        DragGesture(minimumDistance: 16)
+            .onChanged { value in
+                guard onDismiss != nil else { return }
+                if !dragStarted {
+                    dragStarted = true
+                    HapticManager.shared.impact(.light)
+                }
+                dragOffset = value.translation.width
+            }
+            .onEnded { value in
+                guard onDismiss != nil else { return }
+                dragStarted = false
+                if abs(value.translation.width) > Self.dismissCommitDistance {
+                    HapticManager.shared.impact(.medium)
+                    isDismissing = true
+                    withAnimation(.appSpring) {
+                        dragOffset = value.translation.width > 0 ? 600 : -600
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                        onDismiss?()
+                    }
+                } else {
+                    withAnimation(.appSpring) { dragOffset = 0 }
+                }
+            }
+    }
 
     private var canExpand: Bool {
         switch mission.kind {
@@ -762,6 +1100,9 @@ struct MissionCardView: View {
             }
             .buttonStyle(.appScale(0.98))
             .disabled(!isTappable)
+            .offset(x: dragOffset)
+            .opacity(isDismissing ? 0 : 1)
+            .simultaneousGesture(dismissGesture)
         }
     }
 

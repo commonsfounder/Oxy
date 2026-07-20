@@ -277,6 +277,73 @@ struct ProductDetailStepView: View {
     }
 }
 
+// MARK: - Assistant ask (conversational reply, in-shell — never a handoff to chat)
+
+struct AssistantAskStepView: View {
+    let text: String
+    var ink: Color
+    var isSending: Bool
+    var onSend: (String) -> Void
+
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                AppIcon("sparkles", size: 16)
+                    .foregroundStyle(ink.opacity(0.5))
+                Text(text)
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background { MissionGlassPlate() }
+
+            HStack(spacing: 8) {
+                TextField("Type your answer", text: $draft, axis: .vertical)
+                    .font(.system(size: 15))
+                    .foregroundStyle(ink)
+                    .focused($focused)
+                    .submitLabel(.send)
+                    .onSubmit(send)
+                    .disabled(isSending)
+
+                Button(action: send) {
+                    if isSending {
+                        ProgressView()
+                            .tint(.white)
+                            .frame(width: 30, height: 30)
+                            .background(ink.opacity(0.5), in: Circle())
+                    } else {
+                        AppIcon("arrow-up", size: 14, weight: .bold)
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(ink, in: Circle())
+                    }
+                }
+                .buttonStyle(.appScale(0.94))
+                .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.6))
+        }
+    }
+
+    private func send() {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isSending else { return }
+        HapticManager.shared.impact(.light)
+        draft = ""
+        focused = false
+        onSend(trimmed)
+    }
+}
+
 // MARK: - Working hero (holographic search)
 
 struct WorkingHeroStepView: View {

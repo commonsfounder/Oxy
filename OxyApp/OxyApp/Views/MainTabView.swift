@@ -2,85 +2,19 @@ import SwiftUI
 import UIKit
 
 struct MainTabView: View {
-    @Environment(AppState.self) private var appState
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
-    /// North star: agentic Home is the product. Chat is history / deep work, not identity.
-    @State private var selectedTab = Tab.home
 
-    enum Tab: String, CaseIterable {
-        case home, chat, more
-
-        /// Bundled asset key (no SF Symbols).
-        var icon: String {
-            switch self {
-            case .home: return "tab-home"
-            case .chat: return "tab-chat"
-            case .more: return "tab-more"
-            }
-        }
-
-        var label: String {
-            switch self {
-            case .home: return "Home"
-            case .chat: return "Chat"
-            case .more: return "More"
-            }
-        }
-    }
-
-    private func tabLabel(_ tab: Tab) -> some View {
-        Label {
-            Text(tab.label)
-        } icon: {
-            Image("ic-\(tab.icon)").renderingMode(.template)
-        }
-    }
-
+    /// Home is the sole root screen — no bottom tab bar. Chat and More are reached
+    /// from Home itself (composer / avatar tap / edge swipe), each as a full-screen
+    /// cover that swipes back out, mirroring iOS's own Camera↔Photos convention.
+    /// See AgenticHomeView for the presentation + gesture wiring.
     var body: some View {
-        // System TabView keeps iOS liquid-glass chrome. A second custom bar used to
-        // stack on top of it (double tab bar); do not reintroduce that overlay.
-        TabView(selection: $selectedTab) {
-            AgenticHomeView()
-                .tag(Tab.home)
-                .tabItem { tabLabel(.home) }
-            ChatHomeView()
-                .tag(Tab.chat)
-                .tabItem { tabLabel(.chat) }
-            MoreView()
-                .tag(Tab.more)
-                .tabItem { tabLabel(.more) }
-        }
-        .tint(Color.appAccent)
-        // Environment still provided so scroll helpers / previews that read it stay safe;
-        // we no longer drive a custom floating bar from it.
-        .environment(TabBarVisibility())
-        .onChange(of: selectedTab) { _, _ in
-            HapticManager.shared.select()
-        }
-        .id(accentColor)
-        .onAppear {
-            HapticManager.shared.prepare()
-            #if DEBUG
-            if let tab = ProcessInfo.processInfo.environment["OXY_DEBUG_TAB"],
-               let t = Tab(rawValue: tab) {
-                selectedTab = t
-                return
+        AgenticHomeView()
+            .tint(Color.appAccent)
+            .id(accentColor)
+            .onAppear {
+                HapticManager.shared.prepare()
             }
-            if ProcessInfo.processInfo.environment["OXY_DEBUG_AUTOLOGIN"] == "1" {
-                selectedTab = .home
-                return
-            }
-            #endif
-            if appState.isDemoSession || SiriRequestBus.shared.pendingQuery != nil {
-                selectedTab = .chat
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToChat)) { _ in
-            withAnimation { selectedTab = .chat }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .oxyJumpToMore)) { _ in
-            withAnimation { selectedTab = .more }
-        }
     }
 }
 
@@ -107,20 +41,28 @@ struct MoreView: View {
                 // float over it so More reads as one piece with the agentic surfaces
                 // instead of a flat settings list.
                 GlebChrome.pastelBlob.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        identityHeader
-                            .appEntrance(appeared, riseOffset: 16, delay: 0.04)
-                        menuSection
-                            .appEntrance(appeared, riseOffset: 12, delay: 0.14)
+                // Identity + the six-row menu is short, fixed-height content — pinned to
+                // the top it left the bottom third of the screen as bare gradient. Center
+                // it in the available height instead (falls back to top-anchored, scrolling
+                // normally, if the content ever grows past one screen).
+                GeometryReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            identityHeader
+                                .appEntrance(appeared, riseOffset: 16, delay: 0.04)
+                            menuSection
+                                .appEntrance(appeared, riseOffset: 12, delay: 0.14)
+                        }
+                        .padding(.horizontal, AppSpacing.margin)
+                        .padding(.top, 32)
+                        .padding(.bottom, 48)
+                        .frame(minHeight: proxy.size.height, alignment: .center)
                     }
-                    .padding(.horizontal, AppSpacing.margin)
-                    .padding(.top, 32)
-                    .padding(.bottom, 48)
                 }
                 .onAppear {
-                    // First visit only — TabView re-fires onAppear on every tab switch,
-                    // and replaying the entrance stagger each time reads as a glitch.
+                    // fullScreenCover creates a fresh instance each time it's presented,
+                    // so this fires — and the entrance stagger replays — every open, which
+                    // is the desired feel for a modal cover (unlike the old tab-switch case).
                     guard !appeared else { return }
                     withAnimation { appeared = true }
                 }

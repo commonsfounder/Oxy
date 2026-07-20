@@ -534,6 +534,7 @@ struct BrandWordmark: View {
 private struct SwipeToDismissModifier: ViewModifier {
     @Environment(\.dismiss) private var dismiss
     @State private var offset: CGFloat = 0
+    @State private var dragStarted = false
     private let edgeWidth: CGFloat = 28
     private let dismissThreshold: CGFloat = 110
 
@@ -553,13 +554,19 @@ private struct SwipeToDismissModifier: ViewModifier {
                         DragGesture(minimumDistance: 8)
                             .onChanged { value in
                                 guard value.translation.width > 0 else { return }
+                                if !dragStarted {
+                                    dragStarted = true
+                                    HapticManager.shared.impact(.light)
+                                }
                                 offset = value.translation.width
                             }
                             .onEnded { value in
+                                dragStarted = false
                                 if value.translation.width > dismissThreshold {
+                                    HapticManager.shared.impact(.medium)
                                     dismiss()
                                 } else {
-                                    withAnimation(.easeOut(duration: 0.2)) { offset = 0 }
+                                    withAnimation(.appSpring) { offset = 0 }
                                 }
                             }
                     )
