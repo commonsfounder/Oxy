@@ -30,7 +30,7 @@ struct MoreView: View {
     private var lightMode: Bool { colorScheme == .light }
 
     enum MoreDestination: Identifiable {
-        case profile, pendant, connectors, memory, routines, settings, payments
+        case profile, pendant, connectors, memory, routines, settings, payments, vault
         var id: String { "\(self)" }
     }
 
@@ -79,6 +79,7 @@ struct MoreView: View {
                     case .routines: RoutinesListView()
                     case .settings: SettingsView()
                     case .payments: PaymentsView()
+                    case .vault: VaultView()
                     }
                 }
                 .swipeToDismiss()
@@ -191,6 +192,8 @@ struct MoreView: View {
             AppRow(title: "Connections") { destination = .connectors }
             rowDivider
             AppRow(title: "Payments") { destination = .payments }
+            rowDivider
+            AppRow(title: "Vault") { destination = .vault }
             rowDivider
             AppRow(title: "Settings") { destination = .settings }
         }

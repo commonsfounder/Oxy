@@ -37,6 +37,8 @@
 	<string>Milgrain uses Calendar to create native events when you ask.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Milgrain uses contacts to prepare native message and FaceTime handoffs.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Face ID protects the credentials you save to the Vault.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Milgrain reads basic HealthKit summaries like heart rate, sleep, and steps for proactive briefings.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>

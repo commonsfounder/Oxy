@@ -16,6 +16,7 @@
 		A10000010000000000000202 /* Routine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000202 /* Routine.swift */; };
 		A10000010000000000000203 /* RoutinesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000203 /* RoutinesService.swift */; };
 		A10000010000000000000204 /* RoutinesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000204 /* RoutinesListView.swift */; };
+		A10000010000000000000205 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000205 /* VaultView.swift */; };
 		A10000010000000000000004 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000004 /* KeychainHelper.swift */; };
 		A10000010000000000000005 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000005 /* APIClient.swift */; };
 		A10000010000000000000006 /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000006 /* AuthService.swift */; };
@@ -73,6 +74,7 @@
 		A20000010000000000000202 /* Routine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Routine.swift; sourceTree = "<group>"; };
 		A20000010000000000000203 /* RoutinesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesService.swift; sourceTree = "<group>"; };
 		A20000010000000000000204 /* RoutinesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesListView.swift; sourceTree = "<group>"; };
+		A20000010000000000000205 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
 		A20000010000000000000004 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		A20000010000000000000005 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		A20000010000000000000006 /* AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthService.swift; sourceTree = "<group>"; };
@@ -209,6 +211,7 @@
 				A50000010000000000000016 /* Onboarding */,
 				A50000010000000000000008 /* Components */,
 				A50000010000000000000017 /* Payments */,
+				A50000010000000000000019 /* Vault */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -294,6 +297,14 @@
 				A20000010000000000000048 /* PaymentsView.swift */,
 			);
 			path = Payments;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000019 /* Vault */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000205 /* VaultView.swift */,
+			);
+			path = Vault;
 			sourceTree = "<group>";
 		};
 		A50000010000000000000014 /* Settings */ = {
@@ -412,6 +423,7 @@
 				A10000010000000000000202 /* Routine.swift in Sources */,
 				A10000010000000000000203 /* RoutinesService.swift in Sources */,
 				A10000010000000000000204 /* RoutinesListView.swift in Sources */,
+				A10000010000000000000205 /* VaultView.swift in Sources */,
 				A10000010000000000000004 /* KeychainHelper.swift in Sources */,
 				A10000010000000000000005 /* APIClient.swift in Sources */,
 				A10000010000000000000006 /* AuthService.swift in Sources */,
