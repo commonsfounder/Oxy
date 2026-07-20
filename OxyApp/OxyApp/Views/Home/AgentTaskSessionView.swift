@@ -100,24 +100,45 @@ struct AgentTaskSessionView: View {
     @ViewBuilder
     private var stepContent: some View {
         if let step = session.currentStep {
-            switch step.ui {
-            case .paymentConfirm(let details):
-                PaymentConfirmStepView(details: details, ink: ink)
-            case .productDetail(let details):
-                ProductDetailStepView(details: details, ink: ink)
-            case .rideConfirm(let details):
-                RideConfirmStepView(details: details, ink: ink)
-            case .linkResult(let details):
-                LinkResultStepView(details: details, ink: ink)
-            case .assistantAsk(let text):
-                AssistantAskStepView(text: text, ink: ink, isSending: session.isWorking) { reply in
-                    Task { await session.sendReply(reply) }
+            VStack(alignment: .leading, spacing: 0) {
+                switch step.ui {
+                case .paymentConfirm(let details):
+                    PaymentConfirmStepView(details: details, ink: ink)
+                case .productDetail(let details):
+                    ProductDetailStepView(details: details, ink: ink)
+                case .rideConfirm(let details):
+                    RideConfirmStepView(details: details, ink: ink)
+                case .linkResult(let details):
+                    LinkResultStepView(details: details, ink: ink)
+                case .assistantAsk(let text):
+                    AssistantAskStepView(text: text, ink: ink, isSending: session.isWorking) { reply in
+                        Task { await session.sendReply(reply) }
+                    }
+                case .workingHero(let status):
+                    WorkingHeroStepView(title: step.title, status: status, ink: ink)
                 }
-            case .workingHero(let status):
-                WorkingHeroStepView(title: step.title, status: status, ink: ink)
+
+                if !session.liveSteps.isEmpty, isStepThatShowsTrace(step.ui) {
+                    LiveStepsTraceView(steps: session.liveSteps, ink: ink)
+                }
             }
         } else {
-            SessionDoneStepView(title: session.title, ink: ink)
+            VStack(alignment: .leading, spacing: 0) {
+                SessionDoneStepView(title: session.title, ink: ink)
+                if !session.liveSteps.isEmpty {
+                    LiveStepsTraceView(steps: session.liveSteps, ink: ink)
+                }
+            }
+        }
+    }
+
+    /// The trace reads as "how I got to this card" — show it under the
+    /// product/payment/ride/link result steps it explains, not under the working
+    /// hero (nothing to explain yet) or the assistant-ask reply field.
+    private func isStepThatShowsTrace(_ ui: StepUI) -> Bool {
+        switch ui {
+        case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
+        case .workingHero, .assistantAsk: return false
         }
     }
 

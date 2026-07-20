@@ -140,11 +140,15 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let price: String?
     let total: String?
     let colorOptions: [String]?
+    /// Backend-generated id for a completed `run_browser_task` run — a plain camelCase
+    /// key on the JS result object (not a DB row field), letting iOS fetch that task's
+    /// recorded step trace via `GET /tasks/:id/steps` after the turn has finished.
+    let taskId: String?
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction, imageUrls
-        case productName, price, total, colorOptions
+        case productName, price, total, colorOptions, taskId
     }
 
     init(
@@ -172,7 +176,8 @@ struct ActionResult: Codable, Identifiable, Equatable {
         productName: String? = nil,
         price: String? = nil,
         total: String? = nil,
-        colorOptions: [String]? = nil
+        colorOptions: [String]? = nil,
+        taskId: String? = nil
     ) {
         self.action = action
         self.success = success
@@ -199,6 +204,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.price = price
         self.total = total
         self.colorOptions = colorOptions
+        self.taskId = taskId
     }
 
     init(native result: NativeLocalActionResult) {
@@ -245,6 +251,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             price = try result.decodeIfPresent(String.self, forKey: .price)
             total = try result.decodeIfPresent(String.self, forKey: .total)
             colorOptions = try result.decodeIfPresent([String].self, forKey: .colorOptions)
+            taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
             text = try container.decodeIfPresent(String.self, forKey: .text)
@@ -270,6 +277,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             price = try container.decodeIfPresent(String.self, forKey: .price)
             total = try container.decodeIfPresent(String.self, forKey: .total)
             colorOptions = try container.decodeIfPresent([String].self, forKey: .colorOptions)
+            taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
         }
     }
 
@@ -300,6 +308,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(price, forKey: .price)
         try container.encodeIfPresent(total, forKey: .total)
         try container.encodeIfPresent(colorOptions, forKey: .colorOptions)
+        try container.encodeIfPresent(taskId, forKey: .taskId)
     }
 }
 

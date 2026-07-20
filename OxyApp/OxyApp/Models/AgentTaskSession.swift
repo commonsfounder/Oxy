@@ -48,6 +48,13 @@ final class AgentTaskSession: Identifiable {
     var currentIndex: Int
     var errorMessage: String?
     var isWorking = false
+    /// `taskId` captured off the watched action's result, once the browser-automation
+    /// turn that produced it has already finished (see `fetchLiveSteps` for why this
+    /// can never be a genuinely live, in-progress feed).
+    var liveTaskId: String?
+    /// The step trace fetched for `liveTaskId` — a historical "how I got there"
+    /// transcript, not a real-time progress meter.
+    var liveSteps: [TaskStep] = []
 
     private let userId: String
     private let chatService: ChatService
@@ -294,6 +301,7 @@ final class AgentTaskSession: Identifiable {
     }
 
     private func handle(result: ActionResult, fallbackText: String) {
+        captureLiveTaskId(result.taskId)
         if result.confirmation == "review_required" {
             let name = result.productName ?? title
             title = name
@@ -346,6 +354,7 @@ final class AgentTaskSession: Identifiable {
     /// `cardText`'s fare/ETA is Oxy's own estimate (Google Routes based), not a
     /// live Uber quote, so RideConfirmStepView labels it honestly as an estimate.
     private func handleRide(result: ActionResult) {
+        captureLiveTaskId(result.taskId)
         guard result.success else {
             errorMessage = result.error ?? result.text ?? "Couldn't get an Uber ready."
             return
@@ -365,6 +374,39 @@ final class AgentTaskSession: Identifiable {
     private func complete() {
         if steps.indices.contains(currentIndex) { steps[currentIndex].status = .done }
         currentIndex = steps.count
+    }
+
+    /// Records the finished task's id and kicks off a best-effort fetch of its step
+    /// trace. Only set once per session (the id is stable for the run that produced it).
+    private func captureLiveTaskId(_ taskId: String?) {
+        guard let taskId, !taskId.isEmpty, taskId != liveTaskId else { return }
+        liveTaskId = taskId
+        Task { await fetchLiveSteps() }
+    }
+
+    /// Fetches the recorded step trace for `liveTaskId` — always a POST-HOC transcript
+    /// of a browser-automation run that has already finished by the time this session
+    /// learns its id (the backend only attaches `taskId` to the FINAL action result of
+    /// a chat turn). This is never a live, in-progress feed; a true live feed would
+    /// require restructuring the SSE pipeline to stream step events mid-turn, which is
+    /// out of scope here. A short bounded retry (up to 3 attempts, a second apart)
+    /// covers any trailing async writes still landing right after the turn ends — it
+    /// does not poll indefinitely, since there is nothing further to observe once the
+    /// task is done. Failures are swallowed: this is a best-effort UI nicety, never
+    /// something worth surfacing as a user-facing error.
+    @MainActor
+    func fetchLiveSteps() async {
+        guard let taskId = liveTaskId else { return }
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            guard let steps = try? await TaskStepsService.fetchSteps(taskId: taskId) else { continue }
+            if !steps.isEmpty {
+                liveSteps = steps
+                return
+            }
+        }
     }
 }
 

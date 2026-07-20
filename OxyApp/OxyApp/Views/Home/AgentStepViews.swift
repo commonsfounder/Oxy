@@ -421,6 +421,41 @@ struct WorkingHeroStepView: View {
     }
 }
 
+// MARK: - Live step trace ("how I got there" — a post-hoc transcript of a
+// finished run_browser_task run, fetched once its taskId is known; never a
+// real-time progress meter for a task still in flight, see
+// AgentTaskSession.fetchLiveSteps)
+
+struct LiveStepsTraceView: View {
+    let steps: [TaskStep]
+    var ink: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("HOW I GOT THERE")
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(ink.opacity(0.45))
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(steps) { step in
+                    HStack(alignment: .top, spacing: 8) {
+                        Circle()
+                            .fill(ink.opacity(0.35))
+                            .frame(width: 5, height: 5)
+                            .padding(.top, 6)
+                        Text(step.stepName)
+                            .font(.system(size: 13))
+                            .foregroundStyle(ink.opacity(0.6))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(.top, 18)
+    }
+}
+
 // MARK: - Session done
 
 struct SessionDoneStepView: View {
