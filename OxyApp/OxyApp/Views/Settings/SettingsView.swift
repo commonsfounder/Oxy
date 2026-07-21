@@ -9,6 +9,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var settings = OxySettings()
     @State private var showBackendURLEditor = false
+    @State private var homeAddressDraft = ""
+    @State private var isSavingHomeAddress = false
+    @State private var homeAddressError: String?
     @State private var versionTapCount = 0
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
     // Light/dark/system — the single source of truth read by the app root's
@@ -68,6 +71,38 @@ struct SettingsView: View {
                                 MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
+
+                            MilgrainDivider()
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Home address")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.mgHeading)
+                                if !settings.homeAddress.isEmpty {
+                                    Text(settings.homeAddress)
+                                        .font(.system(size: 12, weight: .regular))
+                                        .foregroundStyle(Color.mgSecondary)
+                                }
+                                HStack(spacing: 10) {
+                                    AppLineField(placeholder: "e.g. 12 High Street, London", text: $homeAddressDraft)
+                                    Button {
+                                        Task { await saveHomeAddress() }
+                                    } label: {
+                                        if isSavingHomeAddress {
+                                            ProgressView().scaleEffect(0.7)
+                                        } else {
+                                            Text("Save").font(.system(size: 13, weight: .semibold))
+                                        }
+                                    }
+                                    .disabled(homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSavingHomeAddress)
+                                }
+                                if let homeAddressError {
+                                    Text(homeAddressError)
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundStyle(Color.mgDestructive)
+                                }
+                            }
+                            .padding(.vertical, 14)
                         }
 
                         settingsSection(title: "Chat") {
@@ -249,11 +284,31 @@ struct SettingsView: View {
         }
         normalizeSettings()
         UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
+        homeAddressDraft = settings.homeAddress
         // Chat effort/guard mode are also persisted server-side (chat_settings table) so
         // they survive a reinstall/new device, not just a relaunch — UserDefaults above
         // already covers relaunch. Refresh from the server on appear; local stays
         // authoritative until this resolves.
         Task { await refreshChatSettingsFromServer() }
+    }
+
+    private func saveHomeAddress() async {
+        let address = homeAddressDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else { return }
+        isSavingHomeAddress = true
+        homeAddressError = nil
+        do {
+            let data = try await APIClient.shared.request(path: "/geocode", method: "POST", body: ["address": address])
+            let result = try JSONDecoder().decode(GeocodeResponse.self, from: data)
+            settings.homeLatitude = result.lat
+            settings.homeLongitude = result.lng
+            settings.homeAddress = result.formattedAddress
+            homeAddressDraft = result.formattedAddress
+            saveSettings()
+        } catch {
+            homeAddressError = "Couldn't find that address. Try being more specific."
+        }
+        isSavingHomeAddress = false
     }
 
     private func refreshChatSettingsFromServer() async {
@@ -474,6 +529,9 @@ struct OxySettings: Codable {
     var locationReminders: Bool = true
     var homeLatitude: Double?
     var homeLongitude: Double?
+    /// Human-readable label for the saved home address (display only — homeLatitude/
+    /// homeLongitude are what the server actually uses for ride destinations).
+    var homeAddress: String = ""
     var designTemplate: String = "compact"
     var designPalette: String = "stone"
     var designMotion: String = "calm"
@@ -493,7 +551,7 @@ struct OxySettings: Codable {
 
     enum CodingKeys: String, CodingKey {
         case name, userName, autonomy, proactiveBriefings, healthAlerts, locationReminders
-        case homeLatitude, homeLongitude, designTemplate, designPalette, designMotion
+        case homeLatitude, homeLongitude, homeAddress, designTemplate, designPalette, designMotion
         case accentColor, appTheme, bubbleStyle, preferredMapsApp, preferredTransportMode, reviewBeforeOpeningApps
         case confirmSensitiveAppOpens, chatEffort, guardMode
     }
@@ -510,6 +568,7 @@ struct OxySettings: Codable {
         locationReminders = try container.decodeIfPresent(Bool.self, forKey: .locationReminders) ?? true
         homeLatitude = try container.decodeIfPresent(Double.self, forKey: .homeLatitude)
         homeLongitude = try container.decodeIfPresent(Double.self, forKey: .homeLongitude)
+        homeAddress = try container.decodeIfPresent(String.self, forKey: .homeAddress) ?? ""
         designTemplate = try container.decodeIfPresent(String.self, forKey: .designTemplate) ?? "compact"
         designPalette = try container.decodeIfPresent(String.self, forKey: .designPalette) ?? "stone"
         designMotion = try container.decodeIfPresent(String.self, forKey: .designMotion) ?? "calm"

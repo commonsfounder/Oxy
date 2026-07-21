@@ -31,7 +31,7 @@ struct ChatService {
         }
 
         if let settings {
-            body["settings"] = [
+            var settingsBody: [String: Any] = [
                 "name": settings.name,
                 "autonomy": settings.autonomy,
                 "preferredMapsApp": settings.preferredMapsApp,
@@ -41,6 +41,13 @@ struct ChatService {
                 "chatEffort": settings.chatEffort,
                 "guardMode": settings.guardMode
             ]
+            // Only present once a home address has been saved in Settings — the server
+            // treats a missing pair as "no home on file" rather than (0, 0).
+            if let lat = settings.homeLatitude, let lng = settings.homeLongitude {
+                settingsBody["homeLatitude"] = lat
+                settingsBody["homeLongitude"] = lng
+            }
+            body["settings"] = settingsBody
         }
 
         if let location {
