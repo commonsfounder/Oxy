@@ -38,6 +38,22 @@ test('text-only prompt offers the insufficient_info escape hatch', () => {
   assert.match(prompt, /insufficient_info/);
 });
 
+test('text-only prompt tags real input fields as [input] and leaves links/buttons untagged', () => {
+  const prompt = buildTextOnlyDecisionPrompt(
+    'buy a blue jumper',
+    [],
+    [
+      { id: 0, text: 'Search johnlewis.com', isInput: true },
+      { id: 1, text: 'Save £70 on selected Apple Watch. Shop now', isInput: false }
+    ],
+    '',
+    null
+  );
+  assert.match(prompt, /#0 \[input\] "Search johnlewis\.com"/);
+  assert.match(prompt, /#1 "Save £70 on selected Apple Watch\. Shop now"/);
+  assert.equal(/#1 \[input\]/.test(prompt), false);
+});
+
 test('text-only prompt lists elements by id and text, same contract as the vision prompt', () => {
   const prompt = buildTextOnlyDecisionPrompt(
     'buy a blue jumper',

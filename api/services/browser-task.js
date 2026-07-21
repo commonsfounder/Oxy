@@ -951,7 +951,7 @@ function buildDecisionPrompt(goal, history, elements, correction = '', goalConte
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
-  const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
+  const elementsText = elements.map(el => `#${el.id}${el.isInput ? ' [input]' : ''} "${el.text}"`).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
 
@@ -1013,6 +1013,10 @@ ${historyText}
 Numbered clickable elements on the current page:
 ${elementsText}
 
+Elements marked [input] are real typeable fields (search box, text box). A promo banner,
+link, or button can have text that reads like it matches your goal — it is still not typeable.
+Only use "fill" on an [input] element; anything else must be "click".
+
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
@@ -1050,7 +1054,7 @@ function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', g
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
-  const elementsText = elements.map(el => `#${el.id} "${el.text}"`).join('\n');
+  const elementsText = elements.map(el => `#${el.id}${el.isInput ? ' [input]' : ''} "${el.text}"`).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
 
@@ -1067,14 +1071,17 @@ function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', g
   return `You are controlling a real web browser to help with this goal: "${goal}"
 ${contextBlock}${correctionBlock}
 You do NOT have an image of the page — only this text list of its clickable elements,
-each with its accessible name (label, button text, or aria-label):
+each with its accessible name (label, button text, or aria-label). Elements marked [input]
+are real typeable fields; anything else — including a promo banner or link whose text reads
+like it matches your goal — is not typeable. Only use "fill" on an [input] element.
 
 ${elementsText}
 
 If that text is enough to confidently pick the next action (a clearly-labelled search box,
 button, or link that matches what the goal needs next), do so. If the labels are too vague,
-generic ("Item", "Button", numbers with no context), or you suspect the right control isn't
-text-labelled at all (an image-only product tile, an icon-only button), reply exactly:
+generic ("Item", "Button", numbers with no context), you suspect the right control isn't
+text-labelled at all (an image-only product tile, an icon-only button), or the action would be
+"fill" on an element NOT marked [input], reply exactly:
 {"action":"insufficient_info"}
 Do NOT guess an elementId when you are not confident — decline instead.
 
@@ -1272,9 +1279,20 @@ async function extractClickableElements(page) {
       const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
       if (locatorIndex === -1) continue;
       const r = el.getBoundingClientRect();
+      // Real typeable field vs. a link/button that merely has compelling text — with only a
+      // label to go on, the model has picked a promo banner ("Save £70 on... Shop now") over
+      // the actual search box before, since nothing distinguished them. A promo link and a
+      // search input can both have prominent, relevant-sounding text; only the DOM knows which
+      // one accepts typed input.
+      const inputTarget = proxyCtl || el;
+      const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
+      const isInput = (inputTarget.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has((inputTarget.type || 'text').toLowerCase()))
+        || inputTarget.tagName === 'TEXTAREA'
+        || inputTarget.getAttribute('contenteditable') === 'true'
+        || ['searchbox', 'textbox', 'combobox'].includes(inputTarget.getAttribute('role') || '');
       // box is viewport-relative so it lines up with the screenshot; off-viewport elements
       // keep their (off-screen) coords and simply get no visible badge, as before.
-      out.push({ id: out.length, text, locatorIndex, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
+      out.push({ id: out.length, text, locatorIndex, isInput, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
     }
     return out;
   }, { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS }).catch(() => []);
