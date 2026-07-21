@@ -51,22 +51,30 @@ const BROWSER_MODEL = process.env.OXY_BROWSER_MODEL || process.env.OXY_REASONING
 // (routed back in by the deterministic-resume path) continues it.
 //
 // This budget covers the WHOLE turn, including opening a brand-new browser session
-// (launch + page load + hydration) on the first call — not just the step loop — or a
-// slow first open alone could already exceed the 45s watchdog before a single step runs.
+// (launch + page load + hydration) on the first call — not just the step loop.
 const MAX_STEPS = 20;
-// Whole-turn budget, must stay under the mobile client's ~45s request watchdog. Raised
-// from 18s now that steps are cheap (see settle() below) — the old 18s + a 2.5s-per-step
-// networkidle wait left room for only ~1 real action per turn.
-const MAX_DURATION_MS = 30 * 1000;
+
+const envInt = (name, fallback) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+// Whole-turn budget. Used to be capped at 30s specifically to stay under the mobile
+// client's OLD fixed 45s request watchdog — every extra turn beyond the first forced a
+// full round trip back through the outer agent loop (a Gemini "what next" call + a fresh
+// run_browser_task call), typically costing seconds of pure overhead per turn for zero
+// browser-automation progress. The client watchdog no longer works that way (it now
+// extends on every live status event instead of hard-cutting at 45s — see
+// ChatViewModel.startSendWatchdog), so the real ceiling is Cloud Run's own request
+// timeout (300s as configured) minus headroom for the agent loop's own wrap-up. Raised
+// so a normal order can complete in one `run_browser_task` call instead of 2-4.
+// MAX_STEPS above remains the real backstop against a runaway loop, independent of time.
+const MAX_DURATION_MS = envInt('OXY_BROWSER_MAX_DURATION_MS', 180 * 1000);
 
 // --- Latency knobs (see docs/superpowers/specs/2026-07-01-browser-task-latency-design.md) ---
 // ~70% of each step is the Gemini vision call, so the screenshot we send dominates cost.
 // A smaller viewport + JPEG (not PNG) shrinks the upload and the pixels the model must read,
 // cutting per-step latency. All env-tunable so a regression is a config flip, not a redeploy.
-const envInt = (name, fallback) => {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) ? n : fallback;
-};
 const VIEWPORT = { width: envInt('OXY_BROWSER_VIEWPORT_W', 1280), height: envInt('OXY_BROWSER_VIEWPORT_H', 800) };
 const SCREENSHOT_QUALITY = envInt('OXY_BROWSER_SCREENSHOT_QUALITY', 30);
 
