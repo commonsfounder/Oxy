@@ -224,15 +224,19 @@ async function runAgentLoop({
     // when the action itself already answered "not yet, still working" was a real, silent
     // ~2-10s cost on every iteration for zero behavioral effect (reflection.nextAction is
     // logged, never consulted for control flow).
+    // Fire-and-forget, not awaited: nothing downstream branches on `reflection` (it was
+    // already dead for control flow before this change — see comment above), so blocking
+    // the response on it was pure latency with no payoff. Logged whenever it resolves,
+    // even if that's after this turn has already answered the user.
     const stillInProgress = results.some((r) => r.result?.continuesBrowsing === true);
     if (i > 0 && results.length > 0 && !stillInProgress) {
-      try {
-        const reflection = await reflectOnResults(initialMessage, actions, results);
-        if (!reflection.achieved && reflection.nextAction) {
-          logAgentStep(agentTrace, { type: 'reflection', ...reflection });
-          // Continue to next iteration with correction
-        }
-      } catch {}
+      reflectOnResults(initialMessage, actions, results)
+        .then((reflection) => {
+          if (!reflection.achieved && reflection.nextAction) {
+            logAgentStep(agentTrace, { type: 'reflection', ...reflection });
+          }
+        })
+        .catch(() => {});
     }
 
     // Safety: if many actions or high risk, may stop early in future
