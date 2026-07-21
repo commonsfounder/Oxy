@@ -108,8 +108,13 @@ async function runAgentLoop({
   let spoken = '';
   let lastToolResultsText = '';
 
-  // Cream-of-the-crop: auto plan for complex goals
-  if (initialMessage.length > 50 || /plan|book|research|find|organize|handle|arrange/i.test(initialMessage)) {
+  // Cream-of-the-crop: auto plan for complex goals. Keyword-gated only — message length
+  // alone used to also trigger this (`initialMessage.length > 50`), which fired on almost
+  // every real shopping goal ("order a macbook pro 14 inch space black 512gb from
+  // johnlewis.com" is 60+ chars) for a single-action run_browser_task request that gets no
+  // benefit from a separate planning call, costing a full hidden ~4-5s Gemini round trip
+  // before the first real turn even starts.
+  if (/plan|book|research|find|organize|handle|arrange/i.test(initialMessage)) {
     try {
       const plan = await generatePlan(userId, initialMessage, context.summary || '');
       if (plan?.steps?.length > 1) {
@@ -213,8 +218,14 @@ async function runAgentLoop({
 
     if (onStep) onStep({ phase: 'observed', results });
 
-    // Cream-of-the-crop: mid-loop reflection for self-correction
-    if (i > 0 && results.length > 0) {
+    // Cream-of-the-crop: mid-loop reflection for self-correction. Skipped when a result
+    // already tells us the goal isn't achieved yet (e.g. run_browser_task's
+    // continuesBrowsing: true) — asking a full extra model call "did we achieve the goal?"
+    // when the action itself already answered "not yet, still working" was a real, silent
+    // ~2-10s cost on every iteration for zero behavioral effect (reflection.nextAction is
+    // logged, never consulted for control flow).
+    const stillInProgress = results.some((r) => r.result?.continuesBrowsing === true);
+    if (i > 0 && results.length > 0 && !stillInProgress) {
       try {
         const reflection = await reflectOnResults(initialMessage, actions, results);
         if (!reflection.achieved && reflection.nextAction) {
