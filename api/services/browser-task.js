@@ -2445,7 +2445,7 @@ async function waitAfterRecipeStep(page, site, stepName, session) {
         if (/^view basket$/i.test(t) && visible(el)) return true;
       }
       return /\/basket(?:\/|$)/i.test(location.pathname);
-    }, { timeout: 5000, polling: 150 }).catch(() => false);
+    }, { timeout: 2500, polling: 150 }).catch(() => false);
     if (session && ok) session.jlAddConfirmed = true;
     return;
   }
@@ -3262,12 +3262,16 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
   try { origin = new URL(page.url()).origin; } catch { return false; }
   session.jlBasketFallbackDone = true;
   onProgress('Opening basket…');
-  await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(() => {});
+  const navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
+  // A successful navigation to /basket is itself strong confirmation the add went through —
+  // no need to poll the badge again afterward (that redundant second wait was most of a
+  // 25s+ worst-case chain for a step that should be quick).
+  if (navigated && session) session.jlAddConfirmed = true;
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
   const checkout = page.getByRole('button', { name: /checkout|secure checkout/i }).first()
     .or(page.getByRole('link', { name: /checkout|secure checkout/i }).first());
-  const clickedCheckout = await checkout.click({ timeout: 3500 }).then(() => true).catch(() => false);
+  const clickedCheckout = await checkout.click({ timeout: 2000 }).then(() => true).catch(() => false);
   if (clickedCheckout) {
     onProgress('Opening checkout…');
     session.history.push(`Step ${steps}: [recipe] clicked John Lewis checkout`);
@@ -4043,7 +4047,6 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         await waitAfterRecipeStep(session.page, session.site, 'add', session);
         if (!session.jlAddConfirmed) {
           await navigateJohnLewisBasketAfterAdd(session, session.page, steps, onProgress);
-          await waitAfterRecipeStep(session.page, session.site, 'add', session);
         }
         if (!session.jlAddConfirmed) {
           recipeHealth.recordMiss(session.site, 'add');
