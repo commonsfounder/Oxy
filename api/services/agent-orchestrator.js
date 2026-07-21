@@ -113,8 +113,10 @@ async function runAgentLoop({
   // every real shopping goal ("order a macbook pro 14 inch space black 512gb from
   // johnlewis.com" is 60+ chars) for a single-action run_browser_task request that gets no
   // benefit from a separate planning call, costing a full hidden ~4-5s Gemini round trip
-  // before the first real turn even starts.
-  if (/plan|book|research|find|organize|handle|arrange/i.test(initialMessage)) {
+  // before the first real turn even starts. Word-boundaried (`\b`) — the un-boundaried
+  // version matched "book" inside "MacBook", so this fired on every MacBook order anyway
+  // despite the keyword gate above.
+  if (/\b(plan|book|research|find|organize|handle|arrange)\b/i.test(initialMessage)) {
     try {
       const plan = await generatePlan(userId, initialMessage, context.summary || '');
       if (plan?.steps?.length > 1) {
