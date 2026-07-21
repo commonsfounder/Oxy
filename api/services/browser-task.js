@@ -1396,7 +1396,10 @@ const CONSENT_SELECTORS = [
 // click "Manage cookies" or "Reject all" by accident.
 const CONSENT_NAMES = [
   /^allow all cookies$/i, /^accept all cookies$/i, /^allow all$/i, /^accept all$/i,
-  /^accept cookies$/i, /^i accept$/i, /^accept$/i, /^agree$/i, /^got it$/i, /^continue$/i
+  /^accept cookies$/i, /^i accept$/i, /^accept$/i, /^agree$/i, /^got it$/i, /^continue$/i,
+  // Sainsbury's cookie banner reads "Continue and accept" — start-anchored (not fully
+  // anchored like the others above) since real sites glue accept-language onto "Continue".
+  /^continue\s+and\s+accept\b/i
 ];
 async function dismissConsentOnce(page) {
   // Fast path: the common consent frameworks expose a stable id.
