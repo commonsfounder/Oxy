@@ -319,6 +319,9 @@ struct BrowserRecoveryAction: Codable, Equatable {
     let autoContinue: Bool?
     let code: String?
     let reason: String?
+    /// Set on `reauth_login` — the site the sign-in sheet should post the typed
+    /// credential for (POST /browser-task/reauth-login).
+    let site: String?
 }
 
 struct TravelLeg: Codable, Equatable, Identifiable {

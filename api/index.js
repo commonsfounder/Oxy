@@ -2401,6 +2401,21 @@ async function executeAction(userId, action, params, context = {}) {
       }
       if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true, taskId: outcome.taskId };
       if (outcome.type === 'ask') return { success: true, text: outcome.question, taskId: outcome.taskId };
+      if (outcome.type === 'reauth') {
+        // Regression: this outcome type had no case here at all, so it fell through to the
+        // generic "Browse task failed." error below — the actual "I need to sign in" question
+        // was silently dropped and the client had no way to actually complete a sign-in
+        // in-session (saying "keep going" just re-hits the same login wall). recoveryAction
+        // type reauth_login is a new client-side case (MessageBubble) that opens a sign-in
+        // sheet posting straight to POST /browser-task/reauth-login — see fillReauthLogin.
+        return {
+          success: false,
+          error: outcome.question,
+          recoverable: true,
+          recoveryAction: { type: 'reauth_login', label: 'Sign in', site: outcome.site },
+          taskId: outcome.taskId
+        };
+      }
       return { success: false, error: outcome.error || 'Browse task failed.' };
     }
 

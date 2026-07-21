@@ -28,6 +28,7 @@
 		A10000010000000000000009 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000009 /* ChatView.swift */; };
 		A10000010000000000000010 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000010 /* ChatViewModel.swift */; };
 		A10000010000000000000011 /* MessageBubble.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000011 /* MessageBubble.swift */; };
+		6431A7CE0C10F0DE65B2F9E2 /* ReauthLoginSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */; };
 		A10000010000000000000047 /* TurnReceiptRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000047 /* TurnReceiptRow.swift */; };
 		A10000010000000000000012 /* Color+Oxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000012 /* Color+Oxy.swift */; };
 		A10000010000000000000013 /* LoadingIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000013 /* LoadingIndicator.swift */; };
@@ -89,6 +90,7 @@
 		A20000010000000000000009 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		A20000010000000000000010 /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		A20000010000000000000011 /* MessageBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBubble.swift; sourceTree = "<group>"; };
+		75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReauthLoginSheet.swift; sourceTree = "<group>"; };
 		A20000010000000000000047 /* TurnReceiptRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnReceiptRow.swift; sourceTree = "<group>"; };
 		A20000010000000000000012 /* Color+Oxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Oxy.swift"; sourceTree = "<group>"; };
 		A20000010000000000000013 /* LoadingIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingIndicator.swift; sourceTree = "<group>"; };
@@ -239,6 +241,7 @@
 				A20000010000000000000009 /* ChatView.swift */,
 				A20000010000000000000010 /* ChatViewModel.swift */,
 				A20000010000000000000011 /* MessageBubble.swift */,
+				75F1269DA3036AF0739C6106 /* ReauthLoginSheet.swift */,
 				A20000010000000000000047 /* TurnReceiptRow.swift */,
 				A20000010000000000000031 /* ChatHomeView.swift */,
 				A20000010000000000000034 /* DeviceStatusCard.swift */,
@@ -448,6 +451,7 @@
 				A10000010000000000000009 /* ChatView.swift in Sources */,
 				A10000010000000000000010 /* ChatViewModel.swift in Sources */,
 				A10000010000000000000011 /* MessageBubble.swift in Sources */,
+				6431A7CE0C10F0DE65B2F9E2 /* ReauthLoginSheet.swift in Sources */,
 				A10000010000000000000047 /* TurnReceiptRow.swift in Sources */,
 				A10000010000000000000012 /* Color+Oxy.swift in Sources */,
 				A10000010000000000000032 /* AppTheme.swift in Sources */,

@@ -14,6 +14,8 @@ struct MessageBubble: View {
     var onOpenAction: ((ActionResult) -> Void)? = nil
     var onRetryFailedTurn: (() -> Void)? = nil
 
+    @State private var showReauthSheet = false
+
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
 
@@ -51,6 +53,13 @@ struct MessageBubble: View {
             $0.recoveryAction?.type == "continue_browser_task" &&
             $0.recoveryAction?.autoContinue != true
         }
+    }
+
+    /// A task hit a login wall it can't get past on its own — offers a sign-in sheet that
+    /// posts straight to POST /browser-task/reauth-login instead of resending chat text
+    /// (which would just re-hit the same wall; see api/index.js's `reauth` case).
+    private var reauthAction: ActionResult? {
+        completedActions.first { !$0.success && $0.recoveryAction?.type == "reauth_login" }
     }
 
     /// A ride booking gets a dedicated native handoff card; suppress the
@@ -171,6 +180,34 @@ struct MessageBubble: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(recovery.recoveryAction?.label ?? "Keep going")
+                    }
+
+                    if let reauth = reauthAction, let site = reauth.recoveryAction?.site {
+                        Button {
+                            showReauthSheet = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                AppIcon(sf: "person.crop.circle", size: 14)
+                                Text(reauth.recoveryAction?.label ?? "Sign in")
+                                    .font(.appBody(13, weight: .semibold))
+                            }
+                            .foregroundStyle(Color.appAccent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.appSurface.opacity(0.84))
+                            .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                                    .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(reauth.recoveryAction?.label ?? "Sign in")
+                        .sheet(isPresented: $showReauthSheet) {
+                            ReauthLoginSheet(site: site) {
+                                onActionCommand?("keep going")
+                            }
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
