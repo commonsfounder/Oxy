@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 
-// Regression: notion.js, github.js, slack.js, and eventbrite.js all had a catch block that
+// Regression: notion.js, github.js, and slack.js all had a catch block that
 // silently reported success: true when the real API call threw — a real failure (bad token,
 // missing resource, rate limit, network error) was invisible to both the agent and the user.
 // slack.js additionally never checked Slack's own res.data.ok flag (Slack returns HTTP 200
@@ -97,15 +97,3 @@ test('slack connector reports failure when the real API call throws', async () =
   delete require.cache[require.resolve('../../connectors/slack')];
 });
 
-test('eventbrite connector reports failure when the real API call throws', async () => {
-  process.env.EVENTBRITE_TOKEN = 'test-token';
-  const eventbrite = withMockedAxios(
-    { get: async () => { throw new Error('rate limited'); }, post: async () => ({ data: {} }) },
-    () => require('../../connectors/eventbrite')
-  );
-  const result = await eventbrite.execute('user-1', 'search_eventbrite', { query: 'jazz' });
-  assert.equal(result.success, false);
-  assert.match(result.error, /rate limited/);
-  delete process.env.EVENTBRITE_TOKEN;
-  delete require.cache[require.resolve('../../connectors/eventbrite')];
-});

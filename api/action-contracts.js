@@ -379,19 +379,16 @@ const ACTION_CONTRACTS = {
     confirmation: 'review'
   },
   // New integrations
-  check_monzo_balance: { risk: 'low', required: [], inputExample: {}, successSummary: 'Monzo balance', failureSummary: 'Failed', confirmation: 'none' },
   stripe_charge: { risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
   // These move (or purport to move) real money and previously had NO contract at all, so the
   // runner treated them as direct-execute. Register them high-risk + review so they can't.
   stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review' },
   spend_from_concierge_via_stripe: { risk: 'high', required: ['amount'], inputExample: { amount: 25, description: 'concierge spend' }, successSummary: 'Spent via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
-  transfer_to_concierge_account: { risk: 'medium', required: ['amount'], inputExample: { amount: 10 }, successSummary: 'Transferred to concierge', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
   get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none' },
   search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none' },
   send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
   book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none' },
   get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none' },
-  search_eventbrite: { risk: 'low', required: ['query'], inputExample: { query: 'concert' }, successSummary: 'Events found', failureSummary: 'Failed', confirmation: 'none' },
   search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none' },
   search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none' },
   get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' },

@@ -1056,7 +1056,6 @@ final class NativeIntegrationManager {
             NativeAppShortcut(displayName: "Telegram", aliases: ["telegram"], universalLinks: ["https://t.me/"], schemes: ["tg://"], fallbackURL: "https://t.me/"),
             NativeAppShortcut(displayName: "Deliveroo", aliases: ["deliveroo"], universalLinks: ["https://deliveroo.co.uk/"], schemes: ["deliveroo://"], fallbackURL: "https://deliveroo.co.uk/"),
             NativeAppShortcut(displayName: "Trainline", aliases: ["trainline", "the trainline"], universalLinks: ["https://www.thetrainline.com/"], schemes: ["thetrainline://"], fallbackURL: "https://www.thetrainline.com/"),
-            NativeAppShortcut(displayName: "Monzo", aliases: ["monzo"], universalLinks: ["https://monzo.com/"], schemes: ["monzo://"], fallbackURL: "https://apps.apple.com/search?term=Monzo", sensitive: true),
             NativeAppShortcut(displayName: "Revolut", aliases: ["revolut"], universalLinks: ["https://www.revolut.com/"], schemes: ["revolut://"], fallbackURL: "https://apps.apple.com/search?term=Revolut", sensitive: true),
             NativeAppShortcut(displayName: "Starling", aliases: ["starling", "starling bank"], universalLinks: ["https://www.starlingbank.com/"], schemes: ["starlingbank://"], fallbackURL: "https://apps.apple.com/search?term=Starling%20Bank", sensitive: true),
             NativeAppShortcut(displayName: "Maps", aliases: ["maps", "apple maps"], universalLinks: ["https://maps.apple.com/"], schemes: ["maps://"], fallbackURL: "https://maps.apple.com/")

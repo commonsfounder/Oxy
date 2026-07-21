@@ -7,16 +7,13 @@ const maps = require('./maps');
 const spotify = require('./spotify');
 const notion = require('./notion');
 const github = require('./github');
-const monzo = require('./monzo');
 const stripe = require('./stripe');
-const plaid = require('./plaid');
 const weather = require('./weather');
 const amazon = require('./amazon');
 const slack = require('./slack');
 const lyft = require('./lyft');
 const strava = require('./strava');
 const oura = require('./oura');
-const eventbrite = require('./eventbrite');
 const flights = require('./flights');
 const hotels = require('./hotels');
 const stocks = require('./stocks');
@@ -34,22 +31,19 @@ for (const action of maps.SUPPORTED_ACTIONS) registry[action] = maps;
 for (const action of spotify.SUPPORTED_ACTIONS) registry[action] = spotify;
 for (const action of notion.SUPPORTED_ACTIONS) registry[action] = notion;
 for (const action of github.SUPPORTED_ACTIONS) registry[action] = github;
-for (const action of monzo.SUPPORTED_ACTIONS) registry[action] = monzo;
 for (const action of stripe.SUPPORTED_ACTIONS) registry[action] = stripe;
-for (const action of plaid.SUPPORTED_ACTIONS) registry[action] = plaid;
 for (const action of weather.SUPPORTED_ACTIONS) registry[action] = weather;
 for (const action of amazon.SUPPORTED_ACTIONS) registry[action] = amazon;
 for (const action of slack.SUPPORTED_ACTIONS) registry[action] = slack;
 for (const action of lyft.SUPPORTED_ACTIONS) registry[action] = lyft;
 for (const action of strava.SUPPORTED_ACTIONS) registry[action] = strava;
 for (const action of oura.SUPPORTED_ACTIONS) registry[action] = oura;
-for (const action of eventbrite.SUPPORTED_ACTIONS) registry[action] = eventbrite;
 for (const action of flights.SUPPORTED_ACTIONS) registry[action] = flights;
 for (const action of hotels.SUPPORTED_ACTIONS) registry[action] = hotels;
 for (const action of stocks.SUPPORTED_ACTIONS) registry[action] = stocks;
 
 // Real API connectors (actual server actions)
-const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'monzo', 'stripe', 'plaid', 'weather', 'slack', 'strava', 'oura', 'eventbrite', 'flights', 'hotels', 'stocks']);
+const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'stripe', 'weather', 'slack', 'strava', 'oura', 'flights', 'hotels', 'stocks']);
 
 // Handoff / convenience connectors (open apps with prefill - still useful for consumer)
 const HANDOFF_CONNECTORS = new Set(['uber', 'trainline', 'spotify', 'lyft', 'amazon']);

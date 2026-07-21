@@ -21,8 +21,7 @@ test('every money-moving action routes through human review (executionMode: revi
     'fund_opportunity',
     'stripe_charge',
     'stripe_payout_to_user',
-    'spend_from_concierge_via_stripe',
-    'transfer_to_concierge_account'
+    'spend_from_concierge_via_stripe'
   ];
   for (const type of moneyActions) {
     const contract = getActionContract(type);

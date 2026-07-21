@@ -3240,18 +3240,15 @@ function buildAvailableActions(enabled) {
     uber: ['book_uber'],
     lyft: ['book_lyft'],
     telegram: ['send_telegram', 'get_telegram_contacts'],
-    monzo: ['check_monzo_balance', 'get_monzo_transactions'],
     notion: ['create_note', 'search_notes'],
     trainline: ['search_trains', 'station_board'],
     concierge_account: ['check_concierge_balance', 'spend_from_concierge_account', 'top_up_concierge_account', 'receive_to_concierge_account', 'fund_opportunity'],
     stripe: ['stripe_charge', 'create_stripe_payment_link'],
-    plaid: ['link_bank', 'get_account_balance'],
     weather: ['get_weather', 'get_forecast'],
     amazon: ['search_amazon', 'add_to_amazon_cart'],
     slack: ['send_slack_message', 'search_slack'],
     strava: ['get_strava_activities'],
     oura: ['get_oura_sleep', 'get_oura_readiness'],
-    eventbrite: ['search_eventbrite'],
     flights: ['search_flights', 'track_flight'],
     hotels: ['search_hotels'],
     stocks: ['get_stock_price']
@@ -4251,15 +4248,9 @@ const CONNECTORS = [
   { id: 'imessage',  name: 'iMessage', icon: 'imessage', category: 'Messages', implemented: true, type: 'handoff', kind: 'functionality' },
   // Finance & Money (tied to concierge account for real spends/earns)
   { id: 'concierge_account', name: 'Concierge Account (Virtual Card)', icon: 'card', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'monzo', name: 'Monzo', icon: 'monzo', category: 'Finance', implemented: true, type: 'api', kind: 'connection' },
   // Stripe here is the app's OWN payment processor for concierge money movement, not a
   // personal Stripe account the user links — a functionality, not a connection.
   { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
-  // Plaid Link issues a real per-user access_token (see connectors/plaid.js), but the app has
-  // no client-side Plaid Link flow to actually produce one — the Connections screen's Connect
-  // button just flips a preference flag, same as any other functionality. A functionality,
-  // not a connection, until real Link is wired up.
-  { id: 'plaid', name: 'Plaid (Banking)', icon: 'plaid', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
   // Handoffs — I open the app perfectly pre-filled (easiest for you). No account is linked
   // in any of these; they're functionalities, not connections.
   { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
@@ -4275,7 +4266,6 @@ const CONNECTORS = [
   { id: 'strava', name: 'Strava', icon: 'strava', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
   { id: 'oura', name: 'Oura', icon: 'oura', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
   // Events & Info — public/server-key APIs, no personal account.
-  { id: 'eventbrite', name: 'Eventbrite', icon: 'event', category: 'Events', implemented: true, type: 'api', kind: 'functionality' },
   { id: 'weather', name: 'Weather', icon: 'weather', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
   { id: 'stocks', name: 'Stocks & Markets', icon: 'stocks', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
 ];
@@ -6480,7 +6470,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         if (isBroadMoneyGoal) {
           try {
             const plan = await generatePlan(userId, message, spoken);
-            spoken = `**Concierge Plan for "${message}":**\n${plan.title || 'Money-making strategy'}\n\nSteps:\n${(plan.steps || []).map((s, i) => `${i+1}. ${s.description}${s.actionType ? ` (use: ${s.actionType})` : ''}`).join('\n')}\n\nRisks: ${(plan.risks || []).join('; ')}\n\nAccount plan: ${plan.accountUsage || 'Use account to seed opportunities and receive earnings.'}\n\n${spoken}\n\nI've created a persistent task to monitor and advance this using the concierge account. With real API keys (e.g. STRIPE_SECRET_KEY, MONZO_ACCESS_TOKEN), I can do actual charges, bank syncs, and payouts. Check back or say "update money plan".`;
+            spoken = `**Concierge Plan for "${message}":**\n${plan.title || 'Money-making strategy'}\n\nSteps:\n${(plan.steps || []).map((s, i) => `${i+1}. ${s.description}${s.actionType ? ` (use: ${s.actionType})` : ''}`).join('\n')}\n\nRisks: ${(plan.risks || []).join('; ')}\n\nAccount plan: ${plan.accountUsage || 'Use account to seed opportunities and receive earnings.'}\n\n${spoken}\n\nI've created a persistent task to monitor and advance this using the concierge account. With real API keys (e.g. STRIPE_SECRET_KEY), I can do actual charges and payouts. Check back or say "update money plan".`;
             if (agentResult.taskId) {
               await taskManager.appendResultToTask(userId, agentResult.taskId, { action: 'money_plan', result: { plan, research: 'used web_search' } });
             }
@@ -6488,7 +6478,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             const prefs = await getPreferenceMap(userId);
             const bal = Number(prefs['concierge_account.balance'] || 0);
             if (bal >= 10) {
-              spoken += `\n\nSuggestion: I can fund a small test opportunity (~$10-20) from the concierge account to get started (real via Stripe/Monzo if keys wired).`;
+              spoken += `\n\nSuggestion: I can fund a small test opportunity (~$10-20) from the concierge account to get started (real via Stripe if keys wired).`;
             }
           } catch (planErr) {}
         }

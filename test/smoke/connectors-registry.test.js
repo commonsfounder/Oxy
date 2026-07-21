@@ -6,10 +6,7 @@ const { CONNECTORS } = require('../../api/index');
 // Regression guard: `kind` distinguishes a genuine external-account connection (real OAuth or
 // personal token) from a functionality (server-key API, deep-link handoff, in-app plumbing).
 // The Connections screen filters on this — a wrong/missing kind silently mislabels an entry.
-// Plaid moved to 'functionality' — the Connections screen's "Connect" button never drove a
-// real Plaid Link flow (oauthProviders only covers google/microsoft), so it doesn't belong
-// here even though it's a genuine external-account connection in principle.
-const REAL_CONNECTIONS = new Set(['google', 'microsoft', 'telegram', 'notion', 'github', 'slack', 'monzo', 'strava', 'oura']);
+const REAL_CONNECTIONS = new Set(['google', 'microsoft', 'telegram', 'notion', 'github', 'slack', 'strava', 'oura']);
 
 test('every CONNECTORS entry has a kind of connection or functionality', () => {
   for (const c of CONNECTORS) {

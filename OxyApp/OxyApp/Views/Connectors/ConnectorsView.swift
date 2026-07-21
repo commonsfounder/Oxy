@@ -191,7 +191,6 @@ struct ConnectorsView: View {
         case "deliveroo": return "takeoutbag.and.cup.and.straw.fill"
         case "uber":      return "car.fill"
         case "telegram":  return "paperplane.fill"
-        case "monzo":     return "banknote.fill"
         case "homekit":   return "house.fill"
         case "trainline": return "tram.fill"
         case "maps":      return "map.fill"
@@ -374,7 +373,6 @@ private struct AppIconView: View {
         // No bundled logo asset yet for these — a brand-colour wordmark chip reads as
         // intentional, unlike the generic sparkle placeholder these were falling to.
         if names.contains("slack") { return ("Slack", Color(red: 74/255, green: 21/255, blue: 75/255), .white, 11) }
-        if names.contains("plaid") { return ("Plaid", .black, .white, 11) }
         if names.contains("oura") { return ("Oura", .black, .white, 12) }
         return (nil, Color.oxySurface3, Color.oxySub, 17)
     }
