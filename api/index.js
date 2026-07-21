@@ -6429,6 +6429,18 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         agenticSendStatus = (status, label, extra = {}) => agenticSse({ type: 'status', status, label, ...extra });
       }
 
+      // The client's send watchdog extends itself on every status event it receives (see
+      // ChatViewModel.startSendWatchdog) — but a single slow step inside the agent loop
+      // (a page load, a third-party redirect) can legitimately go longer than the
+      // watchdog's window with no real onStep event to send. Without a heartbeat, the
+      // client times out a task that's still genuinely working. This fires on a fixed
+      // interval regardless of what the loop is doing internally, so the client always
+      // hears something well within its window.
+      let heartbeat = null;
+      if (agenticSendStatus) {
+        heartbeat = setInterval(() => agenticSendStatus('agent_thinking', 'Working on it'), 15000);
+      }
+
       try {
         const agentResult = await runAgenticLoop({
           userId,
@@ -6459,6 +6471,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           },
           persistTask: true // broad goals like "go make me money" get persistent tracking
         });
+        clearInterval(heartbeat);
 
         let actionResults = normalizeActionResultsForClient(agentResult.actions || []);
         let spoken = agentResult.spoken || 'Completed agent turn.';
@@ -6480,16 +6493,20 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           } catch (planErr) {}
         }
 
-        // Reflection for verification
-        try {
-          const reflection = await reflectOnResults(message, actionResults, actionResults);
-          if (reflection && !reflection.achieved && reflection.nextAction) {
-            trace && trace.log && trace.log('agent.reflection.next_action', JSON.stringify({
-              summary: String(reflection.summary || '').slice(0, 240),
-              nextAction: reflection.nextAction
-            }));
-          }
-        } catch {}
+        // Reflection for verification — fire-and-forget, not awaited: it only feeds a
+        // trace log line, nothing downstream branches on it, so blocking the response on
+        // a full extra Gemini call here was pure latency for zero payoff (same class of
+        // fix as agent-orchestrator.js's mid-loop reflection).
+        reflectOnResults(message, actionResults, actionResults)
+          .then((reflection) => {
+            if (reflection && !reflection.achieved && reflection.nextAction) {
+              trace && trace.log && trace.log('agent.reflection.next_action', JSON.stringify({
+                summary: String(reflection.summary || '').slice(0, 240),
+                nextAction: reflection.nextAction
+              }));
+            }
+          })
+          .catch(() => {});
 
         if (streaming) {
           // Headers were already sent (and any onStep progress already streamed) before
@@ -6515,6 +6532,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         postResponseTasks(userId, message, { agentic: true, agentTraceId: agentResult.traceId, taskId: agentResult.taskId });
         return;
       } catch (agentErr) {
+        clearInterval(heartbeat);
         trace && trace.log && trace.log('agent.loop.error', agentErr.message);
         // fall through to classic path
       }
