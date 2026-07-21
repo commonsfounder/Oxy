@@ -4,7 +4,7 @@
 function createCheckoutProfileSupabase() {
   const email = process.env.OXY_E2E_CHECKOUT_EMAIL || process.env.OXY_BENCH_CHECKOUT_EMAIL || '';
   const consent = process.env.OXY_E2E_CHECKOUT_CONSENT !== 'false' && process.env.OXY_BENCH_CHECKOUT_CONSENT !== 'false';
-  const name = process.env.OXY_E2E_CHECKOUT_NAME || process.env.OXY_BENCH_CHECKOUT_NAME || 'Test User';
+  const name = process.env.OXY_E2E_CHECKOUT_NAME || process.env.OXY_BENCH_CHECKOUT_NAME || 'John Doe';
   const phone = process.env.OXY_E2E_CHECKOUT_PHONE || process.env.OXY_BENCH_CHECKOUT_PHONE || '07700900123';
   const addressRaw = process.env.OXY_E2E_CHECKOUT_ADDRESS || process.env.OXY_BENCH_CHECKOUT_ADDRESS || '12 High Street, London, SW1A 1AA';
 

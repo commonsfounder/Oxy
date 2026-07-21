@@ -14,7 +14,7 @@ for (const line of fs.readFileSync('.env', 'utf8').split('\n')) {
 const runtime = require('../../runtime');
 const E2E_CHECKOUT_EMAIL = process.env.OXY_E2E_CHECKOUT_EMAIL || '';
 const E2E_CHECKOUT_CONSENT = process.env.OXY_E2E_CHECKOUT_CONSENT !== 'false';
-const E2E_CHECKOUT_NAME = process.env.OXY_E2E_CHECKOUT_NAME || 'Test User';
+const E2E_CHECKOUT_NAME = process.env.OXY_E2E_CHECKOUT_NAME || 'John Doe';
 const E2E_CHECKOUT_PHONE = process.env.OXY_E2E_CHECKOUT_PHONE || '07700900123';
 const E2E_CHECKOUT_ADDRESS = process.env.OXY_E2E_CHECKOUT_ADDRESS || '12 High Street, London, SW1A 1AA';
 

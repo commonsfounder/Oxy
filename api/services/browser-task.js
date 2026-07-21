@@ -667,6 +667,36 @@ function shouldSuppressVisionClick(session, text) {
   return false;
 }
 
+// Postcode-lookup address widgets ("Find address" + a suggestion list, or "Enter address
+// manually" to fall back to plain inputs) are a common UK checkout pattern our line1/city/
+// postcode selectors can't drive directly — there's no lookup box to type a postcode into
+// and no way to pick a suggestion. "Enter address manually" swaps in the plain form our
+// existing autoFillCheckoutDetails selectors already handle, so prefer it over the lookup.
+const MANUAL_ADDRESS_PATTERN = /enter\s+(?:your\s+|the\s+)?address\s+manually|enter\s+manually|manual(?:ly)?\s+enter\s+address|type\s+(?:your\s+)?address/i;
+
+async function tryManualAddressEntryClick(page, session, steps, onProgress) {
+  if (session.manualAddressEntryDone) return false;
+  // Regression: our own CLICKABLE_SELECTOR + document.querySelectorAll extraction reliably
+  // MISSED this control on Currys even though extractClickableElements's separate pass
+  // (same page, same tick) reported its text — ruled out timing, disabled-state, and shadow
+  // DOM via direct checks. Root cause undetermined, but Playwright's own getByText locator
+  // (a different, framework-tested text-matching path, not our hand-rolled DOM walk) is the
+  // right tool for "find this rendered text and click it" regardless of what's going on
+  // underneath, so use it here instead of extending the custom extraction further.
+  const locator = page.getByText(MANUAL_ADDRESS_PATTERN).first();
+  const visible = await locator.isVisible({ timeout: 2000 }).catch(() => false);
+  if (!visible) return false;
+  const text = await locator.innerText().catch(() => 'Enter address manually');
+  onProgress(`Clicking "${text}"…`);
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 10000, force: true }).catch(() => false);
+  await settle(page, 600);
+  session.manualAddressEntryDone = true;
+  session.history.push(`Step ${steps}: clicked "${text.replace(/\s+/g, ' ').slice(0, 80)}" (address lookup widget → plain address form)`);
+  session.lastWasRecipe = true;
+  return true;
+}
+
 // DOM-based guest click — does not rely on extractClickableElements (Wickes login-or-guest
 // often yields only 2–3 extracted nodes while the guest CTA is still in the DOM).
 async function tryGuestCheckoutClick(page, session, steps, onProgress) {
@@ -4504,6 +4534,13 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
               continue;
             }
           }
+          // This branch only ever auto-filled email above — name/phone/address were never
+          // attempted here (only inside tryPaymentReady's own payEl-found path), so a plain
+          // address form revealed by a manual-entry click (or any other mid-checkout page)
+          // sat empty and blocked progress with no diagnosis. Same fill call as tryPaymentReady.
+          if (profile.consent && (profile.phone || profile.name || profile.address)) {
+            await autoFillCheckoutDetails(session, profile, steps, onProgress).catch(() => {});
+          }
           const advanced = await tryAdvanceCheckoutStep(session, session.page, steps, onProgress, { allowSubmit: false });
           if (advanced) {
             await settle(session.page, RECIPE_SETTLE_MS);
@@ -4519,6 +4556,26 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
             session.pendingPaymentLabel = 'Pay';
             return { type: 'ready_for_payment', summary: decision.summary || 'Checkout — payment step', total: decision.total || '', ...rfpExtra };
           }
+          // Last resort before giving up: tryPaymentReady also detects an unresolved
+          // delivery-vs-collection toggle (e.g. a "fulfillment options" page) that this
+          // fallback chain otherwise has no way to get past — a real blocker, not a missing
+          // payment button.
+          const lastResort = await tryPaymentReady(session, session.page, steps, onProgress);
+          if (lastResort) return lastResort;
+          // Regression: Currys parked on .../basket?stage=fulfillmentOptions with
+          // checkoutEmailFilled=true, showing only a postcode-lookup address widget
+          // ("Find address" / "Enter address manually") — no delivery-method toggle, no
+          // continue button, so every fallback above (which only look for a "continue"-style
+          // control or a delivery/collection radio) found nothing and this reported a
+          // missing payment button for what was actually a missing address one step earlier.
+          const manualAddress = await tryManualAddressEntryClick(session.page, session, steps, onProgress);
+          if (manualAddress) {
+            await settle(session.page, RECIPE_SETTLE_MS);
+            consecutiveBadDecisions = 0;
+            continue;
+          }
+          const diagElements = await extractClickableElements(session.page).catch(() => []);
+          session.history.push(`Step ${steps}: [payment-fallback] no pay button found; guestCheckoutDone=${!!session.guestCheckoutDone} checkoutEmailFilled=${!!session.checkoutEmailFilled} checkoutEmailSubmitted=${!!session.checkoutEmailSubmitted} url=${session.page.url()} elements=${JSON.stringify(diagElements.map((el) => el.text).slice(0, 20))}`);
           return { type: 'ask', question: 'The order looks ready, but I can\'t see a payment button on screen yet — want me to keep going, or check the cart yourself?' };
         }
         session.pendingPaymentLabel = payEl.text;

@@ -35,6 +35,25 @@ const { runOrderingTurn, getSession, closeSession } = require('../../api/service
 const { classifyOutcome, LOOP_FAILURE_BUCKETS, INFRA_BUCKETS } = require('./reliability-classify');
 const FIXTURES = require('./reliability-fixtures');
 
+// Auto-reply for asks a live user would just answer, so the scorecard measures whether the
+// LOOP can complete the task, not whether the harness withheld data. Anything else (a
+// genuinely unexpected ask, e.g. the payment-button-not-found fallback) is left alone —
+// that's a real loop failure to see, not something to paper over.
+const DELIVERY_ASK_PAT = /delivered to your address|collected from a nearby|delivery or collection/i;
+const USER_DATA_ASK_PAT = /\b(e-?mail|delivery address|shipping address|postcode|post code|zip code|phone number|mobile number|card (?:number|details)|payment details|(?:full |your )?name|sign in|log ?in|create an account)\b/i;
+const BENCH_NAME = process.env.OXY_BENCH_CHECKOUT_NAME || 'John Doe';
+const BENCH_PHONE = process.env.OXY_BENCH_CHECKOUT_PHONE || '07700900123';
+const BENCH_ADDRESS = process.env.OXY_BENCH_CHECKOUT_ADDRESS || '12 High Street, London, SW1A 1AA';
+
+function autoReplyForAsk(c, question) {
+  const q = String(question || '');
+  if (DELIVERY_ASK_PAT.test(q)) return 'deliver it to my address, save my details';
+  if (c.expect === 'cart' && USER_DATA_ASK_PAT.test(q)) {
+    return `${BENCH_NAME}, ${BENCH_ADDRESS}, ${BENCH_PHONE}, ${BENCH_EMAIL}, save my details`;
+  }
+  return null;
+}
+
 const MAX_TURNS = Number(process.env.OXY_BENCH_TURNS || 8);
 const MAX_CASE_MS = Number(process.env.OXY_BENCH_MAX_MS || 10 * 60 * 1000);
 const filters = process.argv.slice(2).map(s => s.toLowerCase());
@@ -58,6 +77,7 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 async function runCase(c) {
   const user = `bench-${c.site}`;
   let outcome, turns = 0, threw = null;
+  let pendingReply = null;
   const t0 = Date.now();
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
     if (Date.now() - t0 > MAX_CASE_MS) {
@@ -65,14 +85,23 @@ async function runCase(c) {
       break;
     }
     turns = turn;
+    let goal = turn === 1 ? c.goal : '';
+    if (pendingReply) {
+      goal = pendingReply;
+      pendingReply = null;
+    }
     const args = turn === 1
-      ? { url: c.url, goal: c.goal, onProgress: () => {} }
-      : { url: null, goal: '', onProgress: () => {} };
+      ? { url: c.url, goal, onProgress: () => {} }
+      : { url: null, goal, onProgress: () => {} };
     try {
       outcome = await runOrderingTurn(user, args);
     } catch (e) {
       threw = e.message.split('\n')[0];
       break;
+    }
+    if (outcome.type === 'ask') {
+      const reply = autoReplyForAsk(c, outcome.question);
+      if (reply) { pendingReply = reply; continue; }
     }
     if (['done', 'ready_for_payment', 'ask', 'error', 'reauth'].includes(outcome.type)) break;
     // awaiting_more → auto-continue
