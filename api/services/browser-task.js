@@ -24,7 +24,7 @@ const {
   saveCheckoutEmail,
 } = require('./checkout-profile');
 const { getAgentCard } = require('./agent-card');
-const { getVaultCredential, normalizeSite } = require('./vault-credentials');
+const { getVaultCredential, saveVaultCredential, normalizeSite } = require('./vault-credentials');
 const { recordTaskStep } = require('./task-steps');
 const { recordTaskEntity } = require('./task-entities');
 const { randomUUID } = require('node:crypto');
@@ -3402,6 +3402,10 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
     const session = getSession(userId);
     if (session) session.pendingCredentialTaskId = taskId;
   }
+  if (outcome.type === 'reauth') {
+    const session = getSession(userId);
+    if (session) session.reauthTaskId = taskId;
+  }
   if (shouldRecordEntity(outcome)) {
     const site = getSession(userId)?.site || 'unknown';
     await recordTaskEntity(getSupabase(), {
@@ -5535,6 +5539,69 @@ function cancelCredentialUse(userId) {
   }
 }
 
+/**
+ * Fills a username/password the user just typed directly into the live page's login form —
+ * for a `reauth` outcome, where no vault credential exists yet (or the saved one is stale).
+ * Same safety rule as confirmCredentialUse: this is the ONLY place these values are ever
+ * used, called from a dedicated authed route (POST /browser-task/reauth-login), never routed
+ * through chat/the model — the password never appears in a prompt or gets logged anywhere.
+ * On success, optionally saves to the vault so future runs skip this step entirely, and the
+ * resulting session cookies are captured by the existing storage_state persistence with no
+ * extra work — see loadStorageState/persistStorage.
+ */
+async function fillReauthLogin(userId, { username, password, saveToVault = false, label } = {}, onProgress = () => {}) {
+  const trimmedPassword = String(password || '');
+  if (!username || !trimmedPassword) {
+    return { type: 'error', error: 'Username and password are both required.' };
+  }
+  const session = getSession(userId);
+  if (!session || !session.page) {
+    return { type: 'error', error: 'No active browser session to sign in to.' };
+  }
+  try {
+    if (!(await loginCredentialFieldsPresent(session.page))) {
+      return { type: 'error', error: "Couldn't find a sign-in form on the current page." };
+    }
+    const credential = { username: String(username), password: trimmedPassword };
+    await fillLoginCredential(session, credential, onProgress);
+    await settle(session.page, 800);
+    const clickedLabel = await findAndClickSignInButton(session.page);
+
+    const site = siteKeyFromUrl(session.page.url());
+    await recordTaskStep(getSupabase(), {
+      taskId: session.reauthTaskId || 'unknown',
+      userId,
+      stepName: `Signed in to ${site} with a freshly typed credential`,
+      phase: 'credential_use',
+      detail: { site, savedToVault: !!saveToVault }
+    });
+
+    if (saveToVault) {
+      await saveVaultCredential(getSupabase(), userId, {
+        site,
+        label: label || site,
+        username: credential.username,
+        password: credential.password
+      }).catch(() => {});
+    }
+
+    if (!clickedLabel) {
+      return { type: 'done', text: `Filled in the ${site} sign-in — the page didn't show a button to submit, so check it looks right.` };
+    }
+
+    const deadline = Date.now() + CREDENTIAL_WATCH_BUDGET_MS;
+    while (Date.now() < deadline) {
+      await settle(session.page, 1000);
+      if (!(await loginCredentialFieldsPresent(session.page))) {
+        return { type: 'done', text: `Signed in to ${site}.` };
+      }
+    }
+    return { type: 'done', text: `Signed in to ${site} — say "keep going" to continue.` };
+  } catch (error) {
+    return { type: 'error', error: error.message };
+  }
+}
+
 module.exports = {
   primeWarmBrowser,
   primeFastpaths,
@@ -5596,6 +5663,7 @@ module.exports = {
   fillLoginCredential,
   loginCredentialFieldsPresent,
   confirmCredentialUse,
+  fillReauthLogin,
   cancelCredentialUse,
   cancelPayment,
   classifyPaymentInput,

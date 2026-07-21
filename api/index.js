@@ -7607,6 +7607,22 @@ app.delete('/vault/credentials/:id', requireSessionAuth, async (req, res) => {
   }
 });
 
+// Fills a username/password the user just typed directly into the live browser-task page's
+// login form, for a `reauth` outcome — same rule as the vault routes above: credentials are
+// NEVER accepted over chat, only here, over an authed route, straight into the DOM. Never
+// logged, never in a model prompt. See browser-task.js's fillReauthLogin for the fill logic.
+app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { username, password, saveToVault, label } = req.body || {};
+    const result = await browserTask.fillReauthLogin(userId, { username, password, saveToVault, label });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Recently touched entities (Phase 3 of the aside-parity roadmap) — a light "what did the
 // agent last work on" surface, not a search UI. Reuses task_entities written by
 // api/services/browser-task.js's runOrderingTurnImpl.
