@@ -69,11 +69,22 @@ async function estimateUberFare(originLat, originLng, destLat, destLng) {
 
 const CURRENT_LOCATION_PHRASES = [
   'current location', 'current address', 'my location', 'here', 'where i am',
-  'where i\'m at', 'my current location', 'my address', 'my place', 'home'
+  'where i\'m at', 'my current location', 'my address', 'my place'
 ];
 
 function isCurrentLocation(str) {
   return CURRENT_LOCATION_PHRASES.some(p => str.trim().toLowerCase() === p);
+}
+
+// "home" is its own concept, not a synonym for "current location" — you aren't always
+// physically home when you say "home". Split out so it can resolve to the user's actual
+// saved home address (params.homeLocation) instead of either a GPS guess or a raw Places
+// text search, which previously matched "home" against unrelated stores/venues with
+// "home" in their name (e.g. "H&M HOME").
+const HOME_PHRASES = ['home', 'my home', 'back home', "my house", "back to my house"];
+
+function isHomePhrase(str) {
+  return HOME_PHRASES.some(p => str.trim().toLowerCase() === p);
 }
 
 function shortAddress(address) {
@@ -125,12 +136,26 @@ async function execute(userId, action, params) {
         }
 
         const enc = encodeURIComponent;
+        const homeLat = Number(params.homeLocation?.lat);
+        const homeLng = Number(params.homeLocation?.lng);
+        const hasHomeLocation = Number.isFinite(homeLat) && Number.isFinite(homeLng);
+
         let destCoords;
-        try {
-          destCoords = await resolvePlaceDestination(destination, { location: params.location });
-        } catch (err) {
-          if (isPlacesSetupError(err)) return fallbackUberLink(destination);
-          throw err;
+        if (isHomePhrase(destination)) {
+          if (!hasHomeLocation) {
+            return {
+              success: false,
+              error: "I don't have your home address saved yet — add it in Settings, or tell me the address directly."
+            };
+          }
+          destCoords = { lat: homeLat, lng: homeLng, name: 'Home', formattedAddress: 'Home' };
+        } else {
+          try {
+            destCoords = await resolvePlaceDestination(destination, { location: params.location });
+          } catch (err) {
+            if (isPlacesSetupError(err)) return fallbackUberLink(destination);
+            throw err;
+          }
         }
 
         // URLSearchParams percent-encodes brackets, breaking Uber's deep link format.
@@ -144,7 +169,17 @@ async function execute(userId, action, params) {
 
         let fromLabel;
         let originCoords = null;
-        if (!pickup || isCurrentLocation(pickup)) {
+        if (pickup && isHomePhrase(pickup) && hasHomeLocation) {
+          // A real saved home address beats guessing device GPS — "pick me up from
+          // home" should use the actual address, not wherever the phone happens to be.
+          queryParts.splice(1, 0,
+            `pickup[latitude]=${homeLat}`,
+            `pickup[longitude]=${homeLng}`,
+            `pickup[formatted_address]=${enc('Home')}`
+          );
+          fromLabel = 'home';
+          originCoords = { lat: homeLat, lng: homeLng };
+        } else if (!pickup || isCurrentLocation(pickup) || isHomePhrase(pickup)) {
           // Let Uber use device GPS for pickup
           queryParts.splice(1, 0, 'pickup=my_location');
           fromLabel = 'your location';

@@ -92,6 +92,7 @@ const { createRoutine, listRoutines, deleteRoutine, listDueRoutines, markRoutine
 const { resolveEntityReference } = require('./services/entity-recall');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
+const { geocodeLocation } = require('./geocoding');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -2246,7 +2247,8 @@ async function executeAction(userId, action, params, context = {}) {
 
   const enrichedParams = {
     ...(params || {}),
-    ...(context.location ? { location: context.location } : {})
+    ...(context.location ? { location: context.location } : {}),
+    ...(context.homeLocation ? { homeLocation: context.homeLocation } : {})
   };
   switch (action) {
     case 'send_message': {
@@ -6083,6 +6085,11 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     const { message, userId, settings = {}, location = null, nativeHints = null, chatStartedAt = null } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
     const wantsTTS = req.query.tts === 'true';
+    // Real saved home address (set in iOS Settings), not device GPS — "book a ride home"
+    // needs the actual address, since the user isn't necessarily home when they ask.
+    const homeLocation = (Number.isFinite(settings.homeLatitude) && Number.isFinite(settings.homeLongitude))
+      ? { lat: settings.homeLatitude, lng: settings.homeLongitude }
+      : null;
 
     if (!message?.trim()) {
       return res.status(400).json({ error: 'message is required.' });
@@ -6285,6 +6292,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }, () => executeActions(userId, deterministicAction.actions, {
           userMessage: message,
           location,
+          homeLocation,
           nativeHints,
           trace,
           sequential: deterministicAction.actions.length > 1,
@@ -6333,6 +6341,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       }, () => executeActions(userId, deterministicAction.actions, {
         userMessage: message,
         location,
+        homeLocation,
         nativeHints,
         trace,
         sequential: deterministicAction.actions.length > 1,
@@ -6638,7 +6647,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           actionResults = await timedDev('chat', 'action_execution', {
             actionCount: actions.length,
             actions: actions.map(action => action.type)
-          }, () => executeActions(userId, actions, { userMessage: message, location, nativeHints, trace, guardMode: settings.guardMode }, trace, {
+          }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, trace, guardMode: settings.guardMode }, trace, {
             onActionStart: action => sendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type }),
             onActionComplete: (action, result) => sendStatus('action_complete', getActionStatusLabel(action.type, actionCompletionPhase(result)), {
               action: action.type,
@@ -6781,7 +6790,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       actionResults = await timedDev('chat', 'action_execution', {
         actionCount: actions.length,
         actions: actions.map(action => action.type)
-      }, () => executeActions(userId, actions, { userMessage: message, location, nativeHints, trace, guardMode: settings.guardMode }, trace));
+      }, () => executeActions(userId, actions, { userMessage: message, location, homeLocation, nativeHints, trace, guardMode: settings.guardMode }, trace));
       dataResults = getStructuredDataResults(actionResults, message);
       actionResults = normalizeActionResultsForClient(actionResults);
     }
@@ -7619,6 +7628,21 @@ app.put('/chat-settings', requireSessionAuth, async (req, res) => {
   const { effort, guardMode } = req.body || {};
   const result = await saveChatSettings(supabase, userId, { effort, guardMode });
   res.json(result);
+});
+
+// One-off address -> lat/lng lookup, used by the iOS Settings "Home address" field so a
+// saved home location can be resolved once (not repeated per ride/route request).
+app.post('/geocode', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const address = String(req.body?.address || '').trim();
+  if (!address) return res.status(400).json({ error: 'address is required.' });
+  try {
+    const result = await geocodeLocation(address);
+    res.json({ lat: result.lat, lng: result.lng, formattedAddress: result.formattedAddress });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 app.get('/connectors/stripe/payment-action', requireSessionAuth, async (req, res) => {
