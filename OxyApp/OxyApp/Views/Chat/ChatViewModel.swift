@@ -368,6 +368,10 @@ final class ChatViewModel {
 
                 case .status(let status, let label):
                     await MainActor.run {
+                        // A live status event is proof the backend is still working — extend
+                        // the watchdog instead of letting a fixed 45s cutoff kill a task that's
+                        // actively making progress (e.g. a slow multi-step order flow).
+                        startSendWatchdog(assistantID: assistantID)
                         setStatus(status, label)
                         updateActivity(status: status, label: label)
                     }
@@ -599,6 +603,7 @@ final class ChatViewModel {
                         openDeepLinks(results)
                     }
                 case .status(let status, let label):
+                    startSendWatchdog(assistantID: assistantID)
                     setStatus(status, label)
                 case .error(let error):
                     networkError = friendlyNetworkError(error)
