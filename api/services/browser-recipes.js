@@ -757,7 +757,7 @@ function selectStep(recipe, phase, ctx, health, host) {
 // fetch when the host doesn't expose one without opening the mini-cart — Wickes). `flyoutOpen`:
 // some sites (Wickes) reveal the checkout link only inside a mini-cart overlay that a click
 // toggles open; a distinct step opens it before the checkout step can fire.
-async function readCtx(page, recipe) {
+async function readCtx(page, recipe, session) {
   const size = recipe.size;
   const ctx = await page.evaluate(({ probe, size }) => {
     void probe;
@@ -780,11 +780,12 @@ async function readCtx(page, recipe) {
           if (m) { basketCount = parseInt(m[0], 10) || 0; break; }
         } catch { /* keep scanning other selectors */ }
       }
-      // JL often shows a post-add "View basket" interstitial before the header badge ticks up.
+      // Some sites show a post-add "View basket/bag/cart/trolley" interstitial before the
+      // header badge ticks up — generic across all of them, not just JL's "View basket".
       if (basketCount === 0) {
         for (const el of document.querySelectorAll('a, button')) {
           const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
-          if (!/^view basket$/i.test(t)) continue;
+          if (!/^(?:view|go to)\s+(?:your\s+)?(?:basket|bag|cart|trolley)$/i.test(t)) continue;
           if (!visible(el)) continue;
           basketCount = 1;
           break;
@@ -853,6 +854,16 @@ async function readCtx(page, recipe) {
       } catch { return 0; }
     }, { probe: 'basketCountFetch', url: size.basketCountUrl, field: size.basketCountField || 'totalItems' });
   }
+  // Regression: each recipe hand-writes its own `basketBadge` CSS selectors to detect a
+  // non-empty cart, and they bit-rot independently of the site's actual markup (Nike's
+  // recipe still looked for `[data-qa="cart-count"]`, which doesn't exist on the live site
+  // any more, so ctx.basketCount stayed 0 forever and the recipe kept re-triggering `add` in
+  // a loop even after the item was genuinely added). browser-task.js already maintains one
+  // generic, actively-verified `session.cartAddConfirmed` flag for exactly this signal — an
+  // out-of-band DOM-scan poll that isn't tied to any one site's selectors. Treat it as
+  // authoritative here too instead of trusting only this recipe's own (possibly stale)
+  // badge selectors, so a recipe can never disagree with the thing that actually clicked add.
+  if (session?.cartAddConfirmed && ctx) ctx.basketCount = Math.max(ctx.basketCount || 0, 1);
   return ctx || {
     hasUnsatisfiedSize: false, basketCount: 0, flyoutOpen: false, dialogOpen: false,
     needsCollectionPostcode: false, needsScrewfixFulfillment: false, upsellModalOpen: false,
@@ -865,10 +876,10 @@ async function readCtx(page, recipe) {
 // null if none match. `text` lets the loop apply the payment guardrail + write history without a
 // re-read. CLICKABLE_SELECTOR must match browser-task.js's constant — passed in so there's one source.
 async function resolveSelectorIndex(page, selectorAny, clickableSelector, tag) {
-  return page.evaluate(({ probe, selectorAny, clickableSelector }) => {
+  const evalOnce = () => page.evaluate(({ probe, selectorAny, clickableSelector }) => {
     void probe;
     const all = Array.from(document.querySelectorAll(clickableSelector));
-    const visible = (el) => {
+    const isEnabled = (el) => {
       const s = window.getComputedStyle(el);
       if (s.visibility === 'hidden' || s.display === 'none') return false;
       if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
@@ -877,26 +888,50 @@ async function resolveSelectorIndex(page, selectorAny, clickableSelector, tag) {
     };
     for (const sel of selectorAny) {
       let node = null;
+      let disabledMatch = null;
       if (sel.startsWith('text=')) {
         // Native exact-text candidate (case-insensitive, trimmed). Replaces Playwright's
         // :has-text pseudo — which document.querySelector cannot parse — and exact-matches so
         // "Add to basket" never picks a carousel "Add to basket , <product>" recommendation.
         const want = sel.slice(5).trim().toLowerCase();
-        node = all.find((el) => visible(el) && (el.innerText || '').trim().toLowerCase() === want) || null;
+        const candidates = all.filter((el) => (el.innerText || '').trim().toLowerCase() === want);
+        node = candidates.find(isEnabled) || null;
+        if (!node) disabledMatch = candidates[0] || null;
       } else {
         let match;
         try { match = document.querySelector(sel); } catch { continue; }
-        if (match && visible(match)) node = match.closest(clickableSelector) || match;
+        if (match) {
+          if (isEnabled(match)) node = match.closest(clickableSelector) || match;
+          else disabledMatch = match;
+        }
       }
-      if (!node) continue;
-      const idx = all.indexOf(node);
-      if (idx !== -1) {
-        const text = (node.innerText || node.getAttribute('aria-label') || node.value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-        return { locatorIndex: idx, text };
+      if (node) {
+        const idx = all.indexOf(node);
+        if (idx !== -1) {
+          const text = (node.innerText || node.getAttribute('aria-label') || node.value || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+          return { locatorIndex: idx, text };
+        }
       }
+      if (disabledMatch) return { disabled: true };
     }
     return null;
   }, { probe: tag, selectorAny, clickableSelector });
+  const first = await evalOnce();
+  if (first && !first.disabled) return first;
+  if (!first) return null;
+  // Regression: Nike's Checkout button exists in the DOM the instant the cart page loads,
+  // but stays disabled for a beat while the page fetches the cart's actual contents — one
+  // check right after navigation caught it mid-load and gave up (recorded a miss, fell back
+  // to vision, which then wandered off into cross-sell products instead of waiting). The
+  // matched-but-disabled case is a real, different signal from "not found at all": worth a
+  // short poll for it to become interactive before conceding, on any site's checkout-style
+  // button, not just Nike's.
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(300);
+    const retry = await evalOnce();
+    if (retry && !retry.disabled) return retry;
+  }
+  return null;
 }
 
 // Ship-from-store JL PDPs expose only express checkout — no standard add-to-basket CTA.
@@ -926,6 +961,34 @@ async function resolveNavigateBasket({ page, session, recipe, ctx }) {
     const cur = new URL(page.url());
     if (cur.pathname.replace(/\/+$/, '') === new URL(dest).pathname.replace(/\/+$/, '')) return null;
   } catch { /* keep going */ }
+  // Regression: a hard page.goto() is a full reload — for SPAs whose cart lives only in
+  // client-side state until it syncs server-side (Nike), reloading can race that sync and
+  // land on a basket page that reads as empty even though the add genuinely went through,
+  // sending the loop back to square one. A same-origin client-side route change (clicking the
+  // page's own "View Bag/Basket/Cart/Trolley" control) doesn't reload the JS bundle and so
+  // can't lose that in-memory state — prefer it, and only fall back to the hard navigation
+  // when no such control is visible.
+  const beforeUrl = page.url();
+  const clicked = await page.evaluate(() => {
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    for (const el of document.querySelectorAll('a, button')) {
+      const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+      if (!/^(?:view|go to)\s+(?:your\s+)?(?:basket|bag|cart|trolley)$/i.test(t)) continue;
+      if (!visible(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }).catch(() => false);
+  if (clicked) {
+    await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: 4000 }).catch(() => {});
+    return { action: 'navigate', url: page.url(), text: 'Basket page', stepName: 'go-to-basket' };
+  }
   await page.goto(dest, { waitUntil: 'domcontentloaded', timeout: 12000 }).catch(() => {});
   return { action: 'navigate', url: dest, text: 'Basket page', stepName: 'go-to-basket' };
 }
@@ -1087,7 +1150,7 @@ function selectRecipeForHost(host) {
 
 async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   const host = hostOfRecipe(recipe, (session && session.site) || 'unknown');
-  const ctx = await readCtx(page, recipe);
+  const ctx = await readCtx(page, recipe, session);
   const wantSize = parseSizeFromGoal(`${session?.goal || ''} ${(session?.history || []).join(' ')}`, session?.goalContext);
   if (wantSize && !ctx.basketCount) {
     const phaseNow = phaseFromUrl(recipe, page.url());

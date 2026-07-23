@@ -420,20 +420,11 @@ function isCheckoutPaymentUrl(url) {
 }
 
 const AUTO_NAV_BASKET_SITES = new Set(['asos.com', 'currys.co.uk', 'marksandspencer.com', 'nike.com', 'screwfix.com']);
-const ADD_PROBE_SITES = new Set(['johnlewis.com', 'nike.com', 'marksandspencer.com', 'asos.com', 'screwfix.com', 'currys.co.uk']);
 
+// One generic flag, set by the generic cart-signal detector in waitAfterRecipeStep — replaces
+// what used to be seven site-specific "XAddConfirmed" booleans read here by site name.
 function isRecipeAddConfirmed(session) {
-  if (!session) return false;
-  const site = session.site;
-  if (site === 'johnlewis.com') return !!session.jlAddConfirmed;
-  if (site === 'nike.com') return !!session.nikeAddConfirmed;
-  if (site === 'marksandspencer.com') return !!session.msAddConfirmed;
-  if (site === 'asos.com') return !!session.asosAddConfirmed;
-  if (site === 'screwfix.com') return !!session.screwfixAddConfirmed;
-  if (site === 'currys.co.uk') return !!session.currysAddConfirmed;
-  if (site === 'waitrose.com') return !!session.waitroseAddConfirmed;
-  if (!RECIPES[site] && !isDeliveryHost(site)) return !!session.convAddConfirmed;
-  return false;
+  return !!session?.cartAddConfirmed;
 }
 
 // A question we must NEVER surface to the user: a real assistant doesn't ask for a
@@ -664,6 +655,14 @@ function shouldSuppressVisionClick(session, text) {
     if (session._widgetCloseHits > 2) return true;
   }
   if (session?.cartEverNonzero && /\bsearch products?\b/i.test(t)) return true;
+  // Regression: once an item is confirmed in the cart, "you may also like" / cross-sell
+  // product tiles are still in the extracted clickable elements and read as plausible
+  // next-actions to the vision model (Nike's cart/bag page suggested an unrelated shoe and
+  // it took the bait, wandering off to a different product instead of finding Checkout).
+  // A tile advertising another product almost always carries a price — genuine checkout/
+  // basket controls ("Checkout", "Continue", "Go to basket") don't. Cheap, generic signal
+  // that doesn't need to know what any specific site's upsell carousel looks like.
+  if (session?.cartEverNonzero && /[£$€]\s?\d+(?:[.,]\d{2})?/.test(t) && !/\bcheckout|basket|bag|cart|trolley|continue|delivery|payment\b/i.test(t)) return true;
   return false;
 }
 
@@ -702,7 +701,14 @@ async function tryManualAddressEntryClick(page, session, steps, onProgress) {
 async function tryGuestCheckoutClick(page, session, steps, onProgress) {
   if (session.guestCheckoutDone) return false;
   if (await isGuestEmailSubmitStep(page)) return false;
-  const hit = await page.evaluate((sel, patSource, patFlags) => {
+  // Regression (found live, 2026-07-22): this call used the old multi-positional-arg
+  // page.evaluate(fn, a, b, c) form, which the installed Playwright version (1.61) rejects
+  // outright with "Too many arguments" — every call silently threw and was swallowed by the
+  // .catch(() => null) below, so this function has been returning false unconditionally for
+  // as long as that mismatch existed. That's the actual reason Selfridges, M&S, and any other
+  // site's "Continue as guest" / "Guest Checkout" link never got clicked and the loop fell
+  // back to asking the user to sign in. Single object-arg form fixes it.
+  const hit = await page.evaluate(({ sel, patSource, patFlags }) => {
     const pat = new RegExp(patSource, patFlags);
     const all = [...document.querySelectorAll(sel)];
     const visible = (el) => {
@@ -720,8 +726,27 @@ async function tryGuestCheckoutClick(page, session, steps, onProgress) {
       const idx = all.indexOf(node);
       if (idx >= 0) return { idx, text: t.replace(/\s+/g, ' ').slice(0, 80) };
     }
+    // Regression: Selfridges' sign-in page has a "Continue as guest" HEADING (plain text,
+    // not clickable) next to a generically-labelled "Checkout now" button — the pattern
+    // above only matches a clickable element's own text, so it misses this layout entirely.
+    // Fall back to finding any heading/paragraph whose text matches, then use the nearest
+    // clickable descendant within the same section (the guest column's own CTA, not the
+    // sign-in form's "Sign in" button).
+    const headingHit = [...document.querySelectorAll('h1,h2,h3,h4,legend')].find((h) => pat.test((h.innerText || '').trim()));
+    if (headingHit) {
+      let section = headingHit.closest('section,div,fieldset') || headingHit.parentElement;
+      for (let hops = 0; hops < 4 && section; hops++) {
+        const btn = [...section.querySelectorAll(sel)].find(visible);
+        if (btn) {
+          const node = btn.closest(sel) || btn;
+          const idx = all.indexOf(node);
+          if (idx >= 0) return { idx, text: (btn.innerText || btn.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ').slice(0, 80) };
+        }
+        section = section.parentElement;
+      }
+    }
     return null;
-  }, CLICKABLE_SELECTOR, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => null);
+  }, { sel: CLICKABLE_SELECTOR, patSource: GUEST_CHECKOUT_PATTERN.source, patFlags: GUEST_CHECKOUT_PATTERN.flags }).catch(() => null);
   if (!hit) return false;
   const locator = await page.evaluateHandle(
     ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
@@ -806,7 +831,10 @@ async function tryAuth0GuestCheckout(page, session, steps, onProgress) {
 // Live-page wrapper: gather the signals looksLikeLoginWall needs. Best-effort — any probe
 // failure degrades to "not a wall" so a flaky read never blocks a legitimate order.
 async function pageHasGuestCheckoutCta(page) {
-  return page.evaluate((sel, patSource, patFlags) => {
+  // Regression: multi-positional-arg page.evaluate(fn, a, b, c) throws "Too many arguments"
+  // on the installed Playwright version — this silently returned false (via the .catch)
+  // every single call. Single object-arg form fixes it (see tryGuestCheckoutClick above).
+  return page.evaluate(({ sel, patSource, patFlags }) => {
     const pat = new RegExp(patSource, patFlags);
     const visible = (el) => {
       const s = window.getComputedStyle(el);
@@ -819,7 +847,7 @@ async function pageHasGuestCheckoutCta(page) {
       const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
       return visible(el) && pat.test(t);
     });
-  }, CLICKABLE_SELECTOR, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => false);
+  }, { sel: CLICKABLE_SELECTOR, patSource: GUEST_CHECKOUT_PATTERN.source, patFlags: GUEST_CHECKOUT_PATTERN.flags }).catch(() => false);
 }
 
 async function detectLoginWall(page, goal) {
@@ -1423,7 +1451,32 @@ async function dismissConsentOnce(page) {
       }
     }
   }
-  return false;
+  // Shadow-DOM fallback: TrustArc (screwfix.com and others) renders its consent widget
+  // inside an OPEN shadow root. Chromium's computed accessibility tree doesn't surface that
+  // shadow content the way it does regular DOM, so both the role-based scan above and
+  // Playwright's own getByRole miss it — the banner silently sits on top of the page,
+  // swallowing every click meant for the real "Add to basket" button underneath. Walk
+  // shadow roots directly and click by innerText instead of relying on accessible role/name.
+  const shadowClicked = await page.evaluate((patterns) => {
+    const regexes = patterns.map((p) => new RegExp(p, 'i'));
+    const walk = (root) => {
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) {
+          const hit = walk(el.shadowRoot);
+          if (hit) return hit;
+        }
+      }
+      for (const el of root.querySelectorAll('button, a, [role="button"]')) {
+        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+        if (regexes.some((re) => re.test(t))) return el;
+      }
+      return null;
+    };
+    const btn = walk(document);
+    if (btn) { btn.click(); return true; }
+    return false;
+  }, CONSENT_NAMES.map((re) => re.source)).catch(() => false);
+  return shadowClicked;
 }
 
 // Regression: a live John Lewis run showed the consent banner ("Personalise your shopping
@@ -2081,26 +2134,29 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
     } catch { return false; }
   };
 
-  // If this is a sign-in form (password field visible) AND a guest checkout CTA is also present,
-  // skip filling — the guest CTA should be clicked first (M&S, Selfridges sign-in gate).
-  // Setting checkoutEmailFilled here would block the guest-checkout click guard.
-  const pwVisible = await session.page.locator('input[type="password"]:visible').first().isVisible({ timeout: 400 }).catch(() => false);
-  if (pwVisible) {
-    const hasGuestCta = await session.page.evaluate((patSrc, patFlags) => {
-      const pat = new RegExp(patSrc, patFlags);
-      const all = document.querySelectorAll('button, a, input[type="submit"]');
-      for (const el of all) {
-        const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
-        if (pat.test(t)) {
-          const s = window.getComputedStyle(el);
-          const r = el.getBoundingClientRect();
-          if (s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0) return true;
-        }
+  // If a guest checkout CTA is visible on the page, skip filling — the guest CTA should be
+  // clicked first (M&S, Selfridges sign-in gate). Setting checkoutEmailFilled here would
+  // block the guest-checkout click guard. Previously gated behind a 400ms password-field
+  // visibility check, which raced a just-navigated page (checkout-securely click →
+  // sign-in page not yet settled) and let this fall through to filling the SIGN-IN form's
+  // email field instead — check the guest CTA unconditionally, it's a strong enough signal
+  // on its own regardless of whether the password field has rendered yet.
+  // Regression: same multi-positional-arg page.evaluate bug as tryGuestCheckoutClick — this
+  // always threw and returned false via the .catch, so the guard above never actually fired.
+  const hasGuestCta = await session.page.evaluate(({ patSrc, patFlags }) => {
+    const pat = new RegExp(patSrc, patFlags);
+    const all = document.querySelectorAll('button, a, input[type="submit"]');
+    for (const el of all) {
+      const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+      if (pat.test(t)) {
+        const s = window.getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        if (s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0) return true;
       }
-      return false;
-    }, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => false);
-    if (hasGuestCta) return false;
-  }
+    }
+    return false;
+  }, { patSrc: GUEST_CHECKOUT_PATTERN.source, patFlags: GUEST_CHECKOUT_PATTERN.flags }).catch(() => false);
+  if (hasGuestCta) return false;
 
   const selectors = [
     'input[type="email"]:visible',
@@ -2193,7 +2249,8 @@ async function autoFillCheckoutField(session, elements, value, steps, onProgress
   if (actionIndex == null) {
     const predSrc = fieldPredicate instanceof RegExp ? fieldPredicate.source : '';
     const predFlags = fieldPredicate instanceof RegExp ? fieldPredicate.flags : 'i';
-    const idx = await session.page.evaluate((selector, predSrc, predFlags) => {
+    // Regression: same multi-positional-arg page.evaluate bug — always threw, always -1.
+    const idx = await session.page.evaluate(({ selector, predSrc, predFlags }) => {
       const pat = new RegExp(predSrc, predFlags);
       const nodes = document.querySelectorAll(selector);
       for (let i = 0; i < nodes.length; i++) {
@@ -2206,7 +2263,7 @@ async function autoFillCheckoutField(session, elements, value, steps, onProgress
         if (type === 'email' || pat.test(hint)) return i;
       }
       return -1;
-    }, CLICKABLE_SELECTOR, predSrc, predFlags).catch(() => -1);
+    }, { selector: CLICKABLE_SELECTOR, predSrc, predFlags }).catch(() => -1);
     if (idx >= 0) {
       actionIndex = idx;
       target = { text: labelText, locatorIndex: idx };
@@ -2284,7 +2341,10 @@ async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
   const values = buildCheckoutFieldValues(profile);
   let filled = 0;
 
-  const candidates = await session.page.evaluate((paymentPatSrc, paymentPatFlags) => {
+  // Regression: same multi-positional-arg page.evaluate bug as elsewhere in this file —
+  // always threw and returned [] via the .catch, so name/phone/address never got filled
+  // via this DOM-scan path.
+  const candidates = await session.page.evaluate(({ paymentPatSrc, paymentPatFlags }) => {
     const payPat = new RegExp(paymentPatSrc, paymentPatFlags);
     const nodes = document.querySelectorAll('input, select, textarea');
     const results = [];
@@ -2310,10 +2370,10 @@ async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
       results.push({ idx: i, hint: hint.toLowerCase(), tag: tag.toLowerCase() });
     }
     return results;
-  },
-    /\b(card\s*(?:number|details)?|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number)\b/.source,
-    'i'
-  ).catch(() => []);
+  }, {
+    paymentPatSrc: /\b(card\s*(?:number|details)?|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number)\b/.source,
+    paymentPatFlags: 'i',
+  }).catch(() => []);
 
   filled = 0;
   // Fields that look like search/finder inputs (restaurant finder, store locator, etc.)
@@ -2433,24 +2493,76 @@ async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
 // After a recipe click, wait for the DOM/URL state the NEXT recipe gate reads — stops the
 // Wickes basket/checkout double-fire (flyout not open yet → checkout invisible → spin).
 async function waitAfterRecipeStep(page, site, stepName, session) {
-  if (stepName === 'add' && !RECIPES[site] && !isDeliveryHost(site)) {
+  // Generic "did the add actually land in the cart" detector — one implementation for every
+  // site instead of a hand-written badge-selector function per site (jl/nike/asos/m&s/
+  // screwfix/currys/waitrose used to each have their own copy of this same three-signal
+  // check: a cart/basket/bag/trolley indicator carrying a count, "added to X" confirmation
+  // copy, or a "view basket"-style control/URL). New sites get this for free; no new
+  // per-site function needed. Delivery hosts (Uber Eats/Deliveroo/Just Eat) use their own
+  // modal-add check below since their UX pattern (a modal that must close) is genuinely
+  // different, not just a different selector for the same signal.
+  if (stepName === 'add' && !isDeliveryHost(site)) {
+    // Some sites (Screwfix) show a "Continue shopping" interstitial after add that sits on
+    // top of the basket count — harmless to click blind on any site, so do it universally
+    // rather than as a Screwfix-only special case.
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+        if (/^continue shopping$/i.test(t)) { el.click(); return; }
+      }
+    }).catch(() => {});
     const ok = await page.waitForFunction(() => {
-      const sels = ['[data-testid*="basket" i]', '[data-testid*="cart" i]', '[data-testid*="bag" i]', 'a[aria-label*="bag" i]', 'a[aria-label*="basket" i]'];
-      for (const s of sels) {
-        const el = document.querySelector(s);
-        if (!el) continue;
-        const text = `${el.innerText || ''} ${el.getAttribute('aria-label') || ''}`;
-        if (/\d+/.test(text)) return true;
-      }
-      for (const el of document.querySelectorAll('a, button')) {
-        const t = (el.innerText || '').trim();
-        if (!/^view (?:basket|bag)$/i.test(t)) continue;
+      const visible = (el) => {
+        const s = window.getComputedStyle(el);
+        if (s.visibility === 'hidden' || s.display === 'none') return false;
         const r = el.getBoundingClientRect();
-        if (r.width > 0 && r.height > 0) return true;
+        return r.width > 0 && r.height > 0;
+      };
+      const CART_WORD = /cart|basket|bag|trolley/i;
+      // Regression: John Lewis's price element carries class "product:basket:price" —
+      // "basket" in the class refers to the checkout FLOW, not a cart-count badge, and its
+      // text ("£17.50") matched the old bare /\d+/ scan as a non-zero count on the very
+      // first page read, before any add click. A price is unambiguous: a currency symbol,
+      // or a decimal amount — exclude both explicitly rather than trust the digit alone.
+      const COUNT_PATTERN = /(?<![£$€\d.])\d+(?!\.\d)/;
+      // Signal 1: any element hinting it's a cart/basket/bag/trolley indicator, carrying a
+      // count > 0 (covers data-testid, aria-label, id, and class-based badges alike).
+      for (const el of document.querySelectorAll('[class], [data-testid], [aria-label], [id]')) {
+        const hint = `${el.className || ''} ${el.getAttribute('data-testid') || ''} ${el.getAttribute('aria-label') || ''} ${el.id || ''}`;
+        if (!CART_WORD.test(hint)) continue;
+        const text = (el.textContent || el.getAttribute('aria-label') || '').trim();
+        if (text.length >= 40) continue; // a badge is short; a long match is unrelated copy
+        if (/[£$€]/.test(text)) continue; // a price tag, not a count badge, regardless of hint
+        const m = text.match(COUNT_PATTERN);
+        if (m && parseInt(m[0], 10) > 0) return true;
       }
-      return false;
-    }, { timeout: 3500, polling: 200 }).catch(() => false);
-    if (session && ok) session.convAddConfirmed = true;
+      // Signal 2: explicit "added to basket/bag/cart/trolley" confirmation copy — but only
+      // inside an actual notification-style region (toast/alert/status/snackbar), not a
+      // whole-body text scan. Regression: John Lewis's product page has this exact phrase
+      // in static returns-policy copy, present whether or not anything was ever added, so a
+      // body-wide match was true from the moment the page loaded, before any click.
+      const NOTICE_PATTERN = /added to (?:your )?(?:basket|bag|cart|trolley)|item(?:s)? added/i;
+      for (const el of document.querySelectorAll('[role="alert"], [role="status"], [aria-live], [class*="toast" i], [class*="snackbar" i], [class*="notification" i]')) {
+        if (!visible(el)) continue;
+        if (NOTICE_PATTERN.test((el.innerText || '').trim())) return true;
+      }
+      // Signal 3: a visible "View basket/bag/cart/trolley" control just appeared.
+      for (const el of document.querySelectorAll('a, button')) {
+        if (!visible(el)) continue;
+        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+        if (/^(?:view|go to)\s+(?:your\s+)?(?:basket|bag|cart|trolley)$/i.test(t)) return true;
+      }
+      // Signal 4: the URL itself moved to a cart-ish route.
+      return /\/(?:basket|cart|bag|trolley)(?:\/|$)/i.test(location.pathname);
+    }, { timeout: 5000, polling: 200 }).catch(() => false);
+    // Regression: cartEverNonzero (gates the cross-sell-click suppression in
+    // shouldSuppressVisionClick) used to only get set by the caller that ran the *same*
+    // step as the add click — a confirmation caught late, one step afterward via the
+    // re-fire-prevention retry path, never set it, so vision was free to click "you may
+    // also like" tiles right after a genuinely successful add. Set both flags together,
+    // here, wherever confirmation actually happens, so nothing can catch this signal without
+    // the suppression guard also arming.
+    if (session && ok) { session.cartAddConfirmed = true; session.cartEverNonzero = true; }
     return;
   }
   if (stepName === 'search-pick') {
@@ -2487,113 +2599,22 @@ async function waitAfterRecipeStep(page, site, stepName, session) {
     ), { timeout: 3500, polling: 150 }).catch(() => {});
     return;
   }
-  if (site === 'johnlewis.com' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      const visible = (el) => {
-        if (!el) return false;
+  if (stepName === 'size') {
+    // Regression: Nike's size grid is a <label for="..."> tied to a hidden radio input —
+    // clicking it toggles the radio, but the React state that "Add to Bag" reads doesn't
+    // always commit within the default ~50ms recipe settle, so the very next click (add)
+    // landed on stale state and silently no-opped (no error, no validation message — the
+    // add button just did nothing). Generic across sites: poll for ANY of the common
+    // "this option is now selected" signals — a checked radio/checkbox, or an
+    // aria-current/aria-selected/aria-pressed flag — before moving on to the next step,
+    // rather than assuming a settle delay tuned for navigation is enough for state commit.
+    await page.waitForFunction(() => {
+      for (const el of document.querySelectorAll('input[type="radio"]:checked, input[type="checkbox"]:checked')) {
         const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      };
-      const badge = document.querySelector('[data-testid="basket-amount"]');
-      if (badge) {
-        const m = (badge.innerText || badge.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
+        if (r.width > 0 || r.height > 0 || el.labels?.length) return true; // visually hidden inputs (label-driven) still count
       }
-      for (const el of document.querySelectorAll('a, button')) {
-        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
-        if (/^view basket$/i.test(t) && visible(el)) return true;
-      }
-      return /\/basket(?:\/|$)/i.test(location.pathname);
-    }, { timeout: 2500, polling: 150 }).catch(() => false);
-    if (session && ok) session.jlAddConfirmed = true;
-    return;
-  }
-  if (site === 'nike.com' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      const badge = document.querySelector('[data-qa="cart-count"], [class*="cart-count" i]');
-      if (badge) {
-        const m = (badge.textContent || badge.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/cart/i.test(location.pathname);
-    }, { timeout: 5000, polling: 200 }).catch(() => false);
-    if (session && ok) session.nikeAddConfirmed = true;
-    return;
-  }
-  if (site === 'asos.com' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      for (const el of document.querySelectorAll('[data-testid="bag-item-count"], a[href*="/bag"]')) {
-        const m = (el.textContent || el.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/bag/i.test(location.pathname);
-    }, { timeout: 5000, polling: 200 }).catch(() => false);
-    if (session && ok) session.asosAddConfirmed = true;
-    return;
-  }
-  if (site === 'marksandspencer.com' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      for (const el of document.querySelectorAll('a[aria-label*="Shopping bag" i]')) {
-        const m = (el.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/basket/i.test(location.pathname);
-    }, { timeout: 4000, polling: 200 }).catch(() => false);
-    if (session && ok) session.msAddConfirmed = true;
-    return;
-  }
-  if (site === 'screwfix.com' && stepName === 'add') {
-    await page.evaluate(() => {
-      for (const el of document.querySelectorAll('button, a, [role="button"]')) {
-        const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
-        if (/^continue shopping$/i.test(t)) { el.click(); return; }
-      }
-    }).catch(() => {});
-    const ok = await page.waitForFunction(() => {
-      const body = document.body?.innerText || '';
-      if (/added to (?:your )?basket|item(?:s)? added/i.test(body)) return true;
-      for (const el of document.querySelectorAll(
-        '[class*="basket-count" i], [id*="basket" i], [id*="BasketQty" i], #headerBasketCount, a[href*="/basket"], [data-qaid*="basket" i]'
-      )) {
-        const m = (el.textContent || el.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/basket/i.test(location.pathname);
-    }, { timeout: 6000, polling: 200 }).catch(() => false);
-    if (session && ok) { session.screwfixAddConfirmed = true; return; }
-    const basketOk = await page.evaluate(async () => {
-      try {
-        const r = await fetch('/basket', { credentials: 'same-origin' });
-        const html = await r.text();
-        if (/your basket is empty|basket\s*:\s*0|no items in your basket/i.test(html)) return false;
-        return /(?:basket-item|product-row|line-item|data-qaid="product|class="product)/i.test(html);
-      } catch { return false; }
-    }).catch(() => false);
-    if (session && basketOk) session.screwfixAddConfirmed = true;
-    return;
-  }
-  if (site === 'currys.co.uk' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      for (const el of document.querySelectorAll('[data-test*="basket" i], a[href*="/basket"]')) {
-        const m = (el.textContent || el.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/basket/i.test(location.pathname);
-    }, { timeout: 5000, polling: 200 }).catch(() => false);
-    if (session && ok) session.currysAddConfirmed = true;
-    return;
-  }
-  if (site === 'waitrose.com' && stepName === 'add') {
-    const ok = await page.waitForFunction(() => {
-      const body = document.body?.innerText || '';
-      if (/added to (?:your )?trolley|item(?:s)? added/i.test(body)) return true;
-      for (const el of document.querySelectorAll('a[href*="/trolley"], [aria-label*="trolley" i], [class*="trolley" i]')) {
-        const m = (el.textContent || el.getAttribute('aria-label') || '').match(/\d+/);
-        if (m && parseInt(m[0], 10) > 0) return true;
-      }
-      return /\/trolley/i.test(location.pathname);
-    }, { timeout: 5000, polling: 200 }).catch(() => false);
-    if (session && ok) session.waitroseAddConfirmed = true;
+      return !!document.querySelector('[aria-current="true"], [aria-selected="true"], [aria-pressed="true"]');
+    }, { timeout: 3000, polling: 150 }).catch(() => {});
     return;
   }
   if (stepName === 'fill-email') {
@@ -2911,7 +2932,12 @@ async function tryAdvanceCheckoutStep(session, page, steps, onProgress, { allowS
   // Only treat a VISIBLE guest fork as blocking before email is on the page — Wickes keeps
   // the guest CTA in the DOM beside the email form.
   if (!emailFilled) {
-    const guestFork = await page.evaluate((sel, patSource, patFlags) => {
+    // Regression: multi-positional-arg page.evaluate(fn, a, b, c) throws "Too many arguments"
+    // on the installed Playwright version — this always threw and returned false via the
+    // .catch, so a visible guest fork never actually blocked the advance-click below; the
+    // loop would click straight past "Continue as guest" / "Guest Checkout" onto whatever
+    // sign-in button happened to also match. Single object-arg form fixes it.
+    const guestFork = await page.evaluate(({ sel, patSource, patFlags }) => {
       const pat = new RegExp(patSource, patFlags);
       const visible = (el) => {
         const s = window.getComputedStyle(el);
@@ -2920,13 +2946,16 @@ async function tryAdvanceCheckoutStep(session, page, steps, onProgress, { allowS
         return r.width > 0 && r.height > 0;
       };
       return [...document.querySelectorAll(sel)].some((el) => visible(el) && pat.test((el.innerText || '').trim()));
-    }, CLICKABLE_SELECTOR, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags).catch(() => false);
+    }, { sel: CLICKABLE_SELECTOR, patSource: GUEST_CHECKOUT_PATTERN.source, patFlags: GUEST_CHECKOUT_PATTERN.flags }).catch(() => false);
     if (guestFork) return false;
   }
 
-  const hit = await page.evaluate((sel, allowSubmit, guestPatSource, guestPatFlags, emailFilled, skipGuest) => {
+  const hit = await page.evaluate(({ sel, allowSubmit, guestPatSource, guestPatFlags, emailFilled, skipGuest }) => {
     const guestPat = new RegExp(guestPatSource, guestPatFlags);
-    const wants = /^(continue|next|proceed|submit|save|confirm|deliver)(\s|$| to\b| &)/i;
+    // Regression: M&S's basket→checkout button reads "Checkout securely" — starts with
+    // "checkout", which none of the other leading words cover, so this always fell through
+    // to the payment-fallback dead end ("no pay button found") one step too early.
+    const wants = /^(continue|next|proceed|submit|save|confirm|deliver|checkout)(\s|$| to\b| &)/i;
     const all = [...document.querySelectorAll(sel)];
     const hasEmailValue = () => {
       for (const inp of document.querySelectorAll('input[type="email"], input[name*="email" i]')) {
@@ -2959,7 +2988,7 @@ async function tryAdvanceCheckoutStep(session, page, steps, onProgress, { allowS
       }
     }
     return null;
-  }, CLICKABLE_SELECTOR, allowSubmit, GUEST_CHECKOUT_PATTERN.source, GUEST_CHECKOUT_PATTERN.flags, emailFilled, skipGuest).catch(() => null);
+  }, { sel: CLICKABLE_SELECTOR, allowSubmit, guestPatSource: GUEST_CHECKOUT_PATTERN.source, guestPatFlags: GUEST_CHECKOUT_PATTERN.flags, emailFilled, skipGuest }).catch(() => null);
   if (hit) {
     session.checkoutAdvanceClicked = session.checkoutAdvanceClicked || new Set();
     const advanceKey = `${page.url()}::${hit.text}`;
@@ -2988,7 +3017,7 @@ async function tryAdvanceCheckoutStep(session, page, steps, onProgress, { allowS
 
   const playwrightCandidates = [
     page.getByRole('button', { name: /continue to (?:delivery|payment|billing|checkout)|save (?:and )?continue|go to payment/i }),
-    page.getByRole('button', { name: /^(continue|next|proceed)(\s|$| to\b)/i }),
+    page.getByRole('button', { name: /^(continue|next|proceed|checkout)(\s|$| to\b)/i }),
     ...(emailFilled ? [page.getByRole('button', { name: /continue as guest|guest checkout/i })] : []),
     ...(allowSubmit ? [page.locator('button[type="submit"]:visible'), page.locator('input[type="submit"]:visible')] : []),
   ];
@@ -3321,11 +3350,37 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
   try { origin = new URL(page.url()).origin; } catch { return false; }
   session.jlBasketFallbackDone = true;
   onProgress('Opening basket…');
-  const navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
+  // Regression: a hard page.goto('/basket') is a full reload — same class of bug fixed in
+  // resolveNavigateBasket for Nike (client-side-only cart state can lose the race against a
+  // full reload and read back as empty). Prefer clicking the page's own basket link/icon
+  // (client-side route change) before falling back to the hard navigation.
+  const clickedLink = await page.evaluate(() => {
+    const visible = (el) => {
+      const s = window.getComputedStyle(el);
+      if (s.visibility === 'hidden' || s.display === 'none') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    for (const el of document.querySelectorAll('a, button')) {
+      const t = (el.innerText || el.getAttribute('aria-label') || '').trim();
+      if (!/basket/i.test(t) || t.length > 40) continue;
+      if (!visible(el)) continue;
+      el.click();
+      return true;
+    }
+    return false;
+  }).catch(() => false);
+  let navigated = false;
+  if (clickedLink) {
+    await page.waitForURL((u) => /\/basket/i.test(u.toString()), { timeout: 4000 }).then(() => { navigated = true; }).catch(() => {});
+  }
+  if (!navigated) {
+    navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
+  }
   // A successful navigation to /basket is itself strong confirmation the add went through —
   // no need to poll the badge again afterward (that redundant second wait was most of a
   // 25s+ worst-case chain for a step that should be quick).
-  if (navigated && session) session.jlAddConfirmed = true;
+  if (navigated && session) { session.cartAddConfirmed = true; session.cartEverNonzero = true; }
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
   const checkout = page.getByRole('button', { name: /checkout|secure checkout/i }).first()
@@ -3782,6 +3837,22 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
       if (session.isOrder && isCheckoutLoginWallUrl(currentUrl)
         && session.history.some(h => /checkout|proceed to checkout|register \/ login/i.test(h))) {
+        // Regression: M&S and Selfridges both land on this exact URL shape with a "Guest
+        // Checkout" / "Continue as guest" link sitting right next to the sign-in form — the
+        // check below used to ask the user before ever looking for it, even though the
+        // guest-checkout click logic a few lines down (tryGuestCheckoutClick) would have
+        // handled it fine. Try that first; only ask if there's genuinely no guest option.
+        if (!session.guestCheckoutDone) {
+          const guestClicked = await tryGuestCheckoutClick(session.page, session, steps, onProgress);
+          if (guestClicked) {
+            await settle(session.page, RECIPE_SETTLE_MS);
+            consecutiveBadDecisions = 0;
+            consecutiveWaits = 0;
+            touchSession(userId);
+            await persistStorage(userId, session);
+            continue;
+          }
+        }
         return {
           type: 'ask',
           question: 'I added it to the cart and reached checkout, but the site wants a login or signup before I can continue. Want to sign in and then say "keep going"?',
@@ -4097,67 +4168,27 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       const recipe = RECIPES_ENABLED ? (learnedRecipe || shopifyRecipe || selectRecipeForHost(session.site)) : null;
       let recipeMove = !searchPick && recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
 
-      // Convention recipe: poll basket badge before re-firing add (Selfridges etc).
-      if (!RECIPES[session.site] && !isDeliveryHost(session.site) && session.convAddSent && !session.convAddConfirmed) {
+      // Poll for cart confirmation before re-firing "add" — an unconfirmed add would
+      // otherwise get clicked again, risking a duplicate item in the basket. One generic
+      // block, using the generic cartAddSent/cartAddConfirmed flags, replaces what used to
+      // be seven near-identical per-site copies of this same two-step pattern (poll, then
+      // re-derive the next recipe move once confirmed or given up on).
+      if (!isDeliveryHost(session.site) && session.cartAddSent && !session.cartAddConfirmed) {
         await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.convAddSent && !RECIPES[session.site]) {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      // John Lewis: add click may lag — poll basket badge before re-firing add.
-      if (session.site === 'johnlewis.com' && session.jlAddSent && !session.jlAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        if (!session.jlAddConfirmed) {
+        if (!session.cartAddConfirmed && session.site === 'johnlewis.com') {
+          // John Lewis specifically: a direct /basket nav is itself strong confirmation and
+          // also gets the order further along, so it's worth the extra round-trip here in a
+          // way that isn't true for every site.
           await navigateJohnLewisBasketAfterAdd(session, session.page, steps, onProgress);
         }
-        if (!session.jlAddConfirmed) {
+        if (!session.cartAddConfirmed) {
           recipeHealth.recordMiss(session.site, 'add');
-          session.jlAddGiveUp = true;
+          session.cartAddGiveUp = true;
         }
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
-      if (session.jlAddGiveUp && recipeMove?.stepName === 'add') recipeMove = null;
-      if (session.site === 'nike.com' && session.nikeAddSent && !session.nikeAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.nikeAddSent && session.site === 'nike.com') {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (session.site === 'marksandspencer.com' && session.msAddSent && !session.msAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.msAddSent && session.site === 'marksandspencer.com') {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (session.site === 'asos.com' && session.asosAddSent && !session.asosAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.asosAddSent && session.site === 'asos.com') {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (session.site === 'screwfix.com' && session.screwfixAddSent && !session.screwfixAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.screwfixAddSent && session.site === 'screwfix.com') {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (session.site === 'currys.co.uk' && session.currysAddSent && !session.currysAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.currysAddSent && session.site === 'currys.co.uk') {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (session.site === 'waitrose.com' && session.waitroseAddSent && !session.waitroseAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.waitroseAddSent && session.site === 'waitrose.com') {
+      if (session.cartAddGiveUp && recipeMove?.stepName === 'add') recipeMove = null;
+      if (recipeMove?.stepName === 'add' && session.cartAddSent && !isDeliveryHost(session.site)) {
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
       // Delivery: modal-add must register in the cart before re-clicking Add.
@@ -4166,9 +4197,6 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
       if (recipeMove?.stepName === 'modal-add' && session.deliveryAddSent && session.deliveryAddConfirmed) {
-        recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
-      }
-      if (recipeMove?.stepName === 'add' && session.jlAddSent && session.site === 'johnlewis.com') {
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
       // Guest fork: recipe guest step beats a ~2s vision call on login-or-guest pages.
@@ -4989,14 +5017,17 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
             if (!stillGuest) session.guestCheckoutDone = true;
           }
           if (recipeStepName === 'fill-email') session.checkoutEmailFilled = true;
-          if (recipeStepName === 'add' && session.site === 'johnlewis.com') session.jlAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'nike.com') session.nikeAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'marksandspencer.com') session.msAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'asos.com') session.asosAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'screwfix.com') session.screwfixAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'currys.co.uk') session.currysAddSent = true;
-          if (recipeStepName === 'add' && session.site === 'waitrose.com') session.waitroseAddSent = true;
-          if (recipeStepName === 'add' && !RECIPES[session.site] && !isDeliveryHost(session.site)) session.convAddSent = true;
+          // Regression: a real order can legitimately fire "add" more than once — Nike's own
+          // recipe clicks "Add to Bag" once before size is even chosen (fails confirmation,
+          // understandably) and again after (the real, successful one). cartAddGiveUp used to
+          // latch permanently on that first failure and silently suppress every later add for
+          // the rest of the session, even a genuinely successful retry. Reset it on every
+          // fresh add click so a later success isn't shadowed by an earlier failure.
+          if (recipeStepName === 'add' && !isDeliveryHost(session.site)) {
+            session.cartAddSent = true;
+            session.cartAddGiveUp = false;
+            session.cartAddConfirmed = false;
+          }
           if (recipeStepName === 'modal-add' && isDeliveryHost(session.site)) session.deliveryAddSent = true;
           const sameStep = session.lastRecipeStep === recipeStepName;
           session.lastRecipeStep = recipeStepName;
@@ -5026,8 +5057,11 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           session.lastWasRecipe = true;
           await waitAfterRecipeStep(session.page, session.site, recipeStepName, session);
           if (recipeStepName === 'add') {
-            const probed = ADD_PROBE_SITES.has(session.site);
-            const confirmed = !probed || isRecipeAddConfirmed(session);
+            // Always verify now that the detector is generic and cheap — the old allowlist
+            // (probe only on 6 named sites, trust everyone else blind) was itself part of
+            // the per-site patchwork; waitrose had a confirm function that was never actually
+            // gated on anything because it wasn't on that list.
+            const confirmed = isRecipeAddConfirmed(session);
             if (confirmed) {
               session.addClicked = true;
               session.cartEverNonzero = true;

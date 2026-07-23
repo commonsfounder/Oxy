@@ -105,6 +105,7 @@ async function runSite(fixture, idx, total) {
   const siteStart = Date.now();
   let outcome = null;
   let turnCount = 0;
+  let pendingReply = ''; // auto-answer for the delivery/collection ask, see below
 
   for (let turn = 1; turn <= MAX_TURNS; turn++) {
     turnCount = turn;
@@ -118,7 +119,8 @@ async function runSite(fixture, idx, total) {
 
     const args = turn === 1
       ? { url, goal, onProgress: (msg) => process.stdout.write(`    · [${stamp()}] ${msg}\n`) }
-      : { url: null, goal: '', onProgress: (msg) => process.stdout.write(`    · [${stamp()}] ${msg}\n`) };
+      : { url: null, goal: pendingReply, onProgress: (msg) => process.stdout.write(`    · [${stamp()}] ${msg}\n`) };
+    pendingReply = '';
 
     try {
       outcome = await runOrderingTurn(userId, args);
@@ -143,6 +145,15 @@ async function runSite(fixture, idx, total) {
     if (sess?.page) {
       const shot = path.join(shotDir, `turn-${String(turn).padStart(2, '0')}.png`);
       await sess.page.screenshot({ path: shot, fullPage: false }).catch(() => {});
+    }
+
+    // Auto-answer only the delivery-vs-collection ask so the benchmark can reach
+    // ready_for_payment on sites that gate checkout behind this question; any other
+    // question still counts as a failure, same as before.
+    if (outcome.type === 'ask' && /delivered to your address on file|collected from a nearby store/i.test(outcome.question || '')) {
+      console.log(`    ⏸️  auto-answering "deliver it to my address"`);
+      pendingReply = 'deliver it to my address';
+      continue;
     }
 
     const done = ['ready_for_payment', 'done', 'ask', 'reauth', 'error', 'threw', 'timeout'].includes(outcome.type);
