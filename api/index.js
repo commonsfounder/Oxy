@@ -24,6 +24,7 @@ const axios = require('axios');
 const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
 const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const { extractIncoming } = require('./services/incoming');
+const { isNonEmptyString, isValidCalendarDate } = require('./services/request-validation');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
@@ -31,6 +32,7 @@ const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/reta
 const browserTask = require('./services/browser-task');
 const { createActionRunner } = require('./services/action-runner');
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
+const { detectCurrency } = require('./services/money-guard');
 const {
   isPendingCancelMessage,
   isPendingConfirmMessage,
@@ -2367,7 +2369,11 @@ async function executeAction(userId, action, params, context = {}) {
       if (outcome.type === 'ready_for_payment') {
         const total = parsePrice(outcome.total || '');
         if (total) {
-          const guard = await guardConciergeSpend(userId, total);
+          // parsePrice strips the currency symbol, so recover it from the raw total and pass it
+          // through — a UK £-checkout must be converted before it hits the (USD) spend cap, not
+          // compared naked. No symbol on a UK-first app → assume GBP, the stricter side.
+          const currency = detectCurrency(outcome.total || '') || 'GBP';
+          const guard = await guardConciergeSpend(userId, total, currency);
           if (!guard.ok) return { success: false, error: guard.error };
         }
         // Tell the user up front which card the checkout will be paid with — or that
@@ -3158,8 +3164,8 @@ async function getPreferenceMap(userId) {
 // balance or any real payment API. Shared with connectors/stripe.js (spend_from_concierge_via_stripe,
 // stripe_payout_to_user) via concierge-spend-guard.js so every money-out path gets the same
 // per-txn + rolling-daily cap, not just the ones originally written with it in mind.
-async function guardConciergeSpend(userId, amount) {
-  return sharedGuardConciergeSpend(supabase, userId, amount);
+async function guardConciergeSpend(userId, amount, currency = null) {
+  return sharedGuardConciergeSpend(supabase, userId, amount, currency);
 }
 
 async function setPreferenceValue(userId, key, value) {
@@ -3939,7 +3945,7 @@ app.post('/images/generate', imageRateLimiter, upload.single('image'), async (re
   try {
     const { userId, prompt } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
-    if (!prompt?.trim()) return res.status(400).json({ error: 'prompt is required.' });
+    if (!isNonEmptyString(prompt)) return res.status(400).json({ error: 'prompt is required.' });
 
     const result = await generateImage(prompt, req.file || null);
     const imageUrl = `data:${result.mimeType || 'image/png'};base64,${result.image}`;
@@ -4070,7 +4076,7 @@ app.post('/memory', async (req, res) => {
   try {
     const { userId, content } = req.body;
     if (!requireMatchingUser(req, res, userId)) return;
-    if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
+    if (!isNonEmptyString(content)) return res.status(400).json({ error: 'content is required.' });
     if (!isUsefulMemoryContent(content)) return res.status(400).json({ error: 'memory is too short or unclear.' });
     await saveMemory(userId, content.trim(), 'manual');
 
@@ -4127,7 +4133,7 @@ app.put('/memory/:userId/items/:id', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
     const { content } = req.body;
-    if (!content?.trim()) return res.status(400).json({ error: 'content is required.' });
+    if (!isNonEmptyString(content)) return res.status(400).json({ error: 'content is required.' });
     const { data, error } = await supabase
       .from('memories')
       .update({ content: content.trim() })
@@ -4700,7 +4706,7 @@ app.get('/history/:userId/around', async (req, res) => {
 app.get('/history/:userId/date', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   const date = req.query.date;
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
+  if (!isValidCalendarDate(date)) return res.status(400).json({ error: 'Invalid date' });
   try {
     const start = new Date(date + 'T00:00:00.000Z').toISOString();
     const end   = new Date(date + 'T23:59:59.999Z').toISOString();
@@ -6096,7 +6102,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       ? { lat: settings.homeLatitude, lng: settings.homeLongitude }
       : null;
 
-    if (!message?.trim()) {
+    if (!isNonEmptyString(message)) {
       return res.status(400).json({ error: 'message is required.' });
     }
 

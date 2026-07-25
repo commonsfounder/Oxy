@@ -71,3 +71,28 @@ test('guardConciergeSpend resets the tally on a new day', async () => {
   const verdict = await guardConciergeSpend(supabase, 'user-3', 30);
   assert.equal(verdict.ok, true);
 });
+
+// Regression: the browser-checkout path passed a UK store's £-price against a $-cap. A GBP
+// amount must be converted to the cap currency (USD) before the cap math, and the rolling
+// tally must be stored in that same cap currency so repeated foreign spends accumulate right.
+test('guardConciergeSpend converts a GBP amount to the cap currency for both cap and tally', async () => {
+  const supabase = fakeSupabase();
+  // £85 ~= $107.95 at the default rate -> over the $100 per-transaction cap.
+  const rejected = await guardConciergeSpend(supabase, 'user-gbp', 85, 'GBP');
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /per-transaction cap/);
+  assert.equal(supabase._rows.length, 0, 'a rejected spend must not write a tally entry');
+
+  // £70 ~= $88.90 -> allowed; the tally must record the converted USD figure, not the raw 70.
+  const allowed = await guardConciergeSpend(supabase, 'user-gbp', 70, 'GBP');
+  assert.equal(allowed.ok, true);
+  const row = supabase._rows.find(r => r.user_id === 'user-gbp' && r.key === SPEND_DAY_KEY);
+  assert.equal(JSON.parse(row.value).total, 88.9);
+});
+
+test('guardConciergeSpend fails closed on an unconvertible currency', async () => {
+  const supabase = fakeSupabase();
+  const verdict = await guardConciergeSpend(supabase, 'user-x', 10, 'ZZZ');
+  assert.equal(verdict.ok, false);
+  assert.equal(supabase._rows.length, 0);
+});
