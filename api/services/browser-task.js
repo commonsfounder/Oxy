@@ -38,7 +38,26 @@ chromium.use(stealth);
 // helper call — the flash-lite tier hallucinated out-of-range element ids on cluttered
 // commercial pages (john lewis etc.) and the loop had no way to recover. Default this
 // loop to the primary reasoning model; OXY_BROWSER_MODEL overrides if you want to A/B.
-const BROWSER_MODEL = process.env.OXY_BROWSER_MODEL || process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+//
+// The default is now provider-aware. It used to chain straight through to
+// OXY_REASONING_MODEL/GEMINI_MODEL, which is a trap once the provider defaults to OpenAI:
+// prod sets OXY_REASONING_MODEL=gemini-3-flash-preview for the chat tier, so unsetting
+// OXY_BROWSER_MODEL would have posted the model name "gemini-3-flash-preview" to OpenAI's
+// endpoint and 404'd every step. Only inherit the Gemini-tier vars when we're on Gemini.
+const BROWSER_DEFAULT_MODEL_BY_PROVIDER = {
+  openai: 'gpt-5.6-luna',
+  claude: 'claude-opus-4-8',
+  anthropic: 'claude-opus-4-8',
+  grok: 'grok-4.3',
+};
+const BROWSER_MODEL = process.env.OXY_BROWSER_MODEL
+  || BROWSER_DEFAULT_MODEL_BY_PROVIDER[(process.env.OXY_BROWSER_PROVIDER || 'openai').toLowerCase()]
+  || process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
+
+// The Gemini fallback path (see decideNextAction) must never be handed a non-Gemini model
+// name — BROWSER_MODEL is Luna by default now, so the fallback resolves its own.
+const BROWSER_GEMINI_MODEL = process.env.OXY_BROWSER_GEMINI_MODEL
+  || process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
 
 // For cheap/fast providers (Groq, Together, Fireworks, OpenRouter etc.) you can set:
 // OXY_BROWSER_PROVIDER=openai-compatible
@@ -1503,8 +1522,28 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
-async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null, { textOnly = false } = {}) {
-  const provider = (process.env.OXY_BROWSER_PROVIDER || 'gemini').toLowerCase();
+// Default provider. Luna beat Gemini on the live price-lookup A/B (2026-08-01) at a lower
+// price per step, so it's the primary loop model; OXY_BROWSER_PROVIDER still overrides for
+// an A/B. Kept in code rather than living only in the Cloud Run env, because an env-only
+// switch silently breaks the moment someone unsets the var (see BROWSER_MODEL above).
+const BROWSER_PROVIDER = (process.env.OXY_BROWSER_PROVIDER || 'openai').toLowerCase();
+
+// Every non-Gemini provider path below throws on a bad key/HTTP error, and nothing upstream
+// catches it (see the decideNextAction call in the step loop) — so one misconfigured provider
+// takes down the whole task rather than one step. The Gemini path, by contrast, degrades to
+// {action:'invalid'}. Fall back to Gemini for the step instead of dying: a step on the
+// second-best model beats a failed order. OXY_BROWSER_PROVIDER_FALLBACK=false to disable.
+async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null, opts = {}) {
+  try {
+    return await decideNextActionVia(BROWSER_PROVIDER, goal, history, elements, screenshotB64, correction, goalContext, opts);
+  } catch (err) {
+    if (BROWSER_PROVIDER === 'gemini' || process.env.OXY_BROWSER_PROVIDER_FALLBACK === 'false') throw err;
+    console.warn(`[browser-task] ${BROWSER_PROVIDER} decide failed (${String(err && err.message || err).split('\n')[0].slice(0, 160)}) — falling back to gemini for this step`);
+    return decideNextActionVia('gemini', goal, history, elements, screenshotB64, correction, goalContext, opts);
+  }
+}
+
+async function decideNextActionVia(provider, goal, history, elements, screenshotB64, correction = '', goalContext = null, { textOnly = false } = {}) {
   const promptText = textOnly
     ? buildTextOnlyDecisionPrompt(goal, history, elements, correction, goalContext)
     : buildDecisionPrompt(goal, history, elements, correction, goalContext);
@@ -1521,13 +1560,52 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     console.warn(`[cost] ~${estInputTokens} tokens → $${stepCost.toFixed(5)} (using $${pricePerM}/M input)`);
   }
 
+  // Real OpenAI API — the DEFAULT path as of 2026-08-01. For GPT-5.x models (e.g.
+  // gpt-5.6-luna) that need OpenAI's own endpoint, auth, and the newer
+  // max_completion_tokens/reasoning_effort params (the legacy max_tokens field errors on
+  // current reasoning-tier models). Requires OPENAI_API_KEY (or OXY_BROWSER_API_KEY to
+  // scope a separate key to this loop); set OXY_BROWSER_PROVIDER=gemini to switch back.
+  // OXY_BROWSER_REASONING_EFFORT tunes speed/quality like BROWSER_THINKING_BUDGET does for
+  // Gemini; defaults to 'low' since this loop is latency-sensitive (see MAX_DURATION_MS).
+  if (provider === 'openai') {
+    const apiKey = process.env.OXY_BROWSER_API_KEY || process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new Error('OPENAI_API_KEY (or OXY_BROWSER_API_KEY) required for browser OpenAI provider');
+
+    const baseURL = process.env.OXY_BROWSER_BASE_URL || 'https://api.openai.com/v1';
+    const model = BROWSER_MODEL;
+    const reasoningEffort = process.env.OXY_BROWSER_REASONING_EFFORT || 'low';
+
+    const content = [{ type: 'text', text: promptText }];
+    if (effectiveScreenshot) content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${effectiveScreenshot}` } });
+
+    const timeoutMs = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+    const resP = fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content }],
+        response_format: { type: 'json_object' },
+        max_completion_tokens: 600,
+        reasoning_effort: reasoningEffort
+        // No `temperature` field: reasoning-tier models (gpt-5.x) reject any value
+        // other than the default (1) — "Unsupported value: 'temperature' does not
+        // support 0.1 with this model" — confirmed live during the Luna A/B test.
+      })
+    });
+    const res = await Promise.race([resP, new Promise((_, r) => setTimeout(() => r(new Error('provider timeout')), timeoutMs))]);
+    if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0,300)}`);
+    const j = await res.json();
+    return parseModelDecision(j.choices?.[0]?.message?.content || '');
+  }
+
   // Generic OpenAI-compatible path (Groq, Together, Fireworks, OpenRouter, etc.)
   // Set:
-  //   OXY_BROWSER_PROVIDER=openai
+  //   OXY_BROWSER_PROVIDER=groq   (or together / fireworks)
   //   OXY_BROWSER_BASE_URL=https://api.groq.com/openai/v1
   //   OXY_BROWSER_API_KEY=...
   //   OXY_BROWSER_MODEL=meta-llama/llama-4-scout-...   (any vision model they host)
-  if (provider === 'openai' || provider === 'groq' || provider === 'together' || provider === 'fireworks') {
+  if (provider === 'groq' || provider === 'together' || provider === 'fireworks') {
     const apiKey = process.env.OXY_BROWSER_API_KEY || process.env.XAI_API_KEY || process.env.GROQ_API_KEY;
     if (!apiKey) throw new Error('OXY_BROWSER_API_KEY required for openai-compatible browser provider');
 
@@ -1613,8 +1691,9 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
     return parseModelDecision(j.choices?.[0]?.message?.content || '');
   }
 
-  // Gemini default path
-  const model = getGemini().getGenerativeModel({ model: BROWSER_MODEL });
+  // Gemini path — now the fallback rather than the default, so it resolves its own model
+  // name (BROWSER_MODEL is Luna unless overridden).
+  const model = getGemini().getGenerativeModel({ model: BROWSER_GEMINI_MODEL });
   const parts = [{ text: promptText }];
   if (effectiveScreenshot) parts.push({ inlineData: { mimeType: 'image/jpeg', data: effectiveScreenshot } });
   const request = {
@@ -1867,7 +1946,76 @@ async function tryTier0SearchGrounding(url, goal, searchTerm) {
   }
 }
 
+const TIER0_OPENAI_SEARCH_TIMEOUT_MS = envInt('OXY_TIER0_OPENAI_SEARCH_TIMEOUT_MS', 15000);
+const TIER0_OPENAI_SEARCH_MODEL = process.env.OXY_TIER0_OPENAI_SEARCH_MODEL || 'gpt-5.6-luna';
+
+/**
+ * Tier-0 fallback #2: OpenAI's web_search tool (Responses API), tried only when Gemini's
+ * search grounding above misses. A-B'd live against tier0SearchGrounding on 5 real price
+ * queries (2026-08-01): matched Gemini exactly on 1, and — notably — succeeded on 2 sites
+ * where Gemini's grounding missed and the browser fallback either cost 8s+ or hit a CAPTCHA
+ * outright (waterstones.com). Typical latency 3.6-10.2s, so this adds real time when it's
+ * the one that ends up firing — acceptable because it only runs after Gemini has already
+ * failed, i.e. the alternative was the much slower/less reliable browser path anyway.
+ * No-ops (returns null) if OPENAI_API_KEY isn't configured, same best-effort contract as
+ * tryTier0SearchGrounding.
+ */
+async function tryTier0OpenAISearchGrounding(url, goal, searchTerm) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+
+  let host = '';
+  try { host = new URL(url).hostname.replace(/^www\./, ''); } catch {}
+
+  const prompt = host
+    ? `What is the current price of "${searchTerm}" on ${host}? Give the exact product name and price in GBP only. If you cannot find it on that specific site, say so — do not guess.`
+    : `What is the current price of "${searchTerm}" in the UK? Give the exact product name, retailer, and price in GBP. Do not guess.`;
+
+  try {
+    const res = await withTimeout(
+      fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: TIER0_OPENAI_SEARCH_MODEL,
+          input: prompt,
+          tools: [{ type: 'web_search' }],
+          reasoning: { effort: 'low' },
+        }),
+      }),
+      TIER0_OPENAI_SEARCH_TIMEOUT_MS,
+      'tier0 openai search grounding'
+    );
+    if (!res.ok) return null;
+    const j = await res.json();
+    const text = (j.output || [])
+      .filter((item) => item.type === 'message')
+      .flatMap((item) => item.content || [])
+      .filter((c) => c.type === 'output_text')
+      .map((c) => c.text)
+      .join('')
+      .trim();
+    if (!text) return null;
+
+    const hasPrice = /£\s*[\d]|[\d]+\s*(?:pounds?|gbp)/i.test(text);
+    const admitsUnknown = /(?:couldn'?t|can'?t|don'?t|unable|not (?:able|find|found|available|listed|show)|no (?:price|result|listing)|sorry)/i.test(text);
+    if (!hasPrice || admitsUnknown) return null;
+    if (TIER0_GENERIC_NAME.test(text)) return null;
+    if (!tier0NameMatchesGoal(text, searchTerm)) return null;
+
+    return { type: 'done', text };
+  } catch {
+    return null;
+  }
+}
+
+// Kill switch: tier-0's first two lookups always use hardcoded Gemini clients (see
+// getTier0GenAI), independent of OXY_BROWSER_PROVIDER — so an info/price goal can never
+// exercise a different configured provider while they fire first. Set OXY_BROWSER_TIER0=false
+// to force those goals through the normal decideNextAction() path for an apples-to-apples
+// provider comparison (or to A/B tier-0 itself against the full vision loop).
 async function tryTier0PriceLookup(url, goal) {
+  if (process.env.OXY_BROWSER_TIER0 === 'false') return null;
   if (!url || !goal || isOrderGoal(goal)) return null;
 
   const searchTerm = deriveSearchTerm(goal, null) || goal;
@@ -1875,7 +2023,10 @@ async function tryTier0PriceLookup(url, goal) {
   const httpHit = await tryTier0HttpLookup(url, goal, searchTerm);
   if (httpHit) return httpHit;
 
-  return tryTier0SearchGrounding(url, goal, searchTerm);
+  const groundingHit = await tryTier0SearchGrounding(url, goal, searchTerm);
+  if (groundingHit) return groundingHit;
+
+  return tryTier0OpenAISearchGrounding(url, goal, searchTerm);
 }
 
 // Score a product name against the goal for candidate ranking.
@@ -5672,6 +5823,7 @@ module.exports = {
   isTextOnlyDeclined,
   buildDecisionPrompt,
   buildTextOnlyDecisionPrompt,
+  decideNextAction,
   parseModelDecision,
   scoreSearchResultText,
   pickBestSearchResult,
