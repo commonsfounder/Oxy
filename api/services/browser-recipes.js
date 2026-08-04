@@ -1137,7 +1137,7 @@ async function resolveSizeMove({ page, session, recipe, clickable }) {
 
 // CLICKABLE_SELECTOR is owned by browser-task.js; keep one copy here that MUST equal it.
 // (Task 5 asserts they're identical so a future edit to one can't silently diverge.)
-const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, select, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
 const recipeHealth = createRecipeHealth();
 

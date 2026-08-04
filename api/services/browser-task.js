@@ -1064,11 +1064,22 @@ function isTextOnlyDeclined(decision) {
   return !decision || decision.action === 'insufficient_info' || decision.action === 'invalid';
 }
 
+// [dropdown] carries its options inline so the model can pick a "select" value it has
+// actually seen — the alternative (a bare [dropdown] tag with options listed nowhere)
+// would just make the model guess text, which the exact-match-first selectOption call
+// (see the "select" action branch) would then fail on.
+function renderElementLine(el) {
+  const tag = el.isSelect
+    ? ` [dropdown, options: ${(el.options || []).map((o) => `"${o}"`).join(', ')}]`
+    : (el.isInput ? ' [input]' : '');
+  return `#${el.id}${tag} "${el.text}"`;
+}
+
 function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
-  const elementsText = elements.map(el => `#${el.id}${el.isInput ? ' [input]' : ''} "${el.text}"`).join('\n');
+  const elementsText = elements.map(renderElementLine).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
 
@@ -1132,11 +1143,15 @@ ${elementsText}
 
 Elements marked [input] are real typeable fields (search box, text box). A promo banner,
 link, or button can have text that reads like it matches your goal — it is still not typeable.
-Only use "fill" on an [input] element; anything else must be "click".
+Only use "fill" on an [input] element; anything else must be "click". Elements marked
+[dropdown, options: ...] are native dropdown pickers (often a size/colour selector) — use
+"select" with "value" set to ONE of the exact option strings listed for it, copied verbatim;
+never "click" or "fill" a [dropdown] element.
 ${correctionBlock}
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"select","elementId":<number>,"value":"<exact option text from its options list>"}
 {"action":"back","note":"<why, e.g. UK 10 unavailable on this product>"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
@@ -1171,7 +1186,7 @@ function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', g
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
-  const elementsText = elements.map(el => `#${el.id}${el.isInput ? ' [input]' : ''} "${el.text}"`).join('\n');
+  const elementsText = elements.map(renderElementLine).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
 
@@ -1190,7 +1205,9 @@ ${contextBlock}
 You do NOT have an image of the page — only this text list of its clickable elements,
 each with its accessible name (label, button text, or aria-label). Elements marked [input]
 are real typeable fields; anything else — including a promo banner or link whose text reads
-like it matches your goal — is not typeable. Only use "fill" on an [input] element.
+like it matches your goal — is not typeable. Only use "fill" on an [input] element. Elements
+marked [dropdown, options: ...] are native dropdown pickers — use "select" with "value" set to
+ONE of the exact option strings listed for it, copied verbatim; never "click" or "fill" one.
 
 ${elementsText}
 
@@ -1214,6 +1231,7 @@ ${correctionBlock}
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
+{"action":"select","elementId":<number>,"value":"<exact option text from its options list>"}
 {"action":"back","note":"<why>"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
@@ -1246,7 +1264,7 @@ function parseModelDecision(rawText) {
       return { action: 'invalid', error: 'Could not parse model response as JSON.' };
     }
   }
-  const validActions = new Set(['click', 'fill', 'back', 'wait', 'ask', 'done', 'ready_for_payment']);
+  const validActions = new Set(['click', 'fill', 'select', 'back', 'wait', 'ask', 'done', 'ready_for_payment']);
   if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
@@ -1279,7 +1297,12 @@ function findElementByText(elements, text) {
 // `label` is here for styled radio/checkbox chips (M&S/Nike sizes: a <label> fronting a
 // visually-hidden input) — extraction only keeps labels whose control is hidden, so plain
 // form labels don't double every field.
-const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
+// `select` is here for native dropdown pickers (e.g. ASOS's size selector: a real
+// <select id="variantSelector"> with 25 <option>s, no role="combobox" — confirmed via a
+// live DOM probe 2026-08-04, correcting an earlier session's guess that it was a bare
+// non-semantic div). It needs the dedicated "select" action, not click/fill — see
+// extractClickableElements's isSelect/options handling and the "select" action branch below.
+const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, select, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
 async function extractClickableElements(page) {
   // One round-trip, not ~6 per element. The old per-element loop (isVisible + innerText +
@@ -1381,7 +1404,22 @@ async function extractClickableElements(page) {
         const lab = (el.labels && el.labels[0]) || el.closest('label');
         if (lab && visible(lab) && softHidden(el)) continue;
       }
-      const raw = (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+      // A native <select>'s innerText concatenates EVERY option's text (verified: a 3-option
+      // select's innerText is "Please select\nW24 L30 - UK 4\nW25 L30 - UK 6" — the whole
+      // option list, not the visible/selected one), so it needs its own text source: the
+      // currently-selected option only, plus a separate capped options list the model can
+      // pick an exact value from via the "select" action.
+      const isSelect = el.tagName === 'SELECT';
+      let options = null;
+      if (isSelect) {
+        options = Array.from(el.options)
+          .map((o) => (o.text || '').trim().replace(/\s+/g, ' ').slice(0, 40))
+          .filter(Boolean)
+          .slice(0, 30);
+      }
+      const raw = isSelect
+        ? ((el.options[el.selectedIndex] && el.options[el.selectedIndex].text) || el.getAttribute('aria-label') || '')
+        : (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
       let text = raw.trim().replace(/\s+/g, ' ').slice(0, 80);
       if (!text) continue;
       // Skip accessibility skip-links (Skip to main content, Skip to navigation, etc.) —
@@ -1409,7 +1447,9 @@ async function extractClickableElements(page) {
         || ['searchbox', 'textbox', 'combobox'].includes(inputTarget.getAttribute('role') || '');
       // box is viewport-relative so it lines up with the screenshot; off-viewport elements
       // keep their (off-screen) coords and simply get no visible badge, as before.
-      out.push({ id: out.length, text, locatorIndex, isInput, box: { x: r.x, y: r.y, width: r.width, height: r.height } });
+      const item = { id: out.length, text, locatorIndex, isInput, box: { x: r.x, y: r.y, width: r.width, height: r.height } };
+      if (isSelect) { item.isSelect = true; item.options = options; }
+      out.push(item);
     }
     return out;
   }, { selector: CLICKABLE_SELECTOR, max: MAX_ELEMENTS }).catch(() => []);
@@ -5049,7 +5089,13 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           const r = el.getBoundingClientRect();
           const s = window.getComputedStyle(el);
           if (!r.width || !r.height || s.visibility === 'hidden' || s.display === 'none') return true;
-          const label = ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+          // A <select>'s innerText concatenates every option, not just the selected one —
+          // mirror extractClickableElements' special case so a select never false-flags as
+          // drifted purely because its generic-path label differs from the selected-option text.
+          const labelRaw = el.tagName === 'SELECT'
+            ? ((el.options[el.selectedIndex] && el.options[el.selectedIndex].text) || el.getAttribute('aria-label') || '')
+            : (el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('value') || '';
+          const label = labelRaw.trim().replace(/\s+/g, ' ').slice(0, 80);
           return label !== want;
         }, { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex, want: target.text }).catch(() => false);
         if (drifted) {
@@ -5164,6 +5210,29 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           if (isDeliveryHost(session.site) && /\b(address|postcode|post code|delivery)\b/i.test(String(target.text || ''))) {
             await tryPickDeliveryAddressSuggestion(session, steps, onProgress);
           }
+        } else if (decision.action === 'select') {
+          onProgress(`Selecting "${decision.value}"…`);
+          const value = String(decision.value || '');
+          await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+          try {
+            await locator.selectOption({ label: value }, { timeout: 8000 });
+          } catch (selectErr) {
+            // The model is instructed to copy an option's text verbatim, but reasoning
+            // models occasionally paraphrase or drop punctuation. Recover with a case-
+            // insensitive exact match, then a substring match, on the SAME live option
+            // list (not the possibly-stale extraction) before giving up.
+            const matchedValue = await locator.evaluate((sel, want) => {
+              const w = String(want || '').trim().toLowerCase();
+              if (!w || !sel.options) return null;
+              const opts = Array.from(sel.options);
+              const exact = opts.find((o) => (o.text || '').trim().toLowerCase() === w);
+              const partial = exact || opts.find((o) => (o.text || '').trim().toLowerCase().includes(w));
+              return partial ? partial.value : null;
+            }, value).catch(() => null);
+            if (matchedValue === null) throw selectErr;
+            await locator.selectOption({ value: matchedValue }, { timeout: 8000 });
+          }
+          session.history.push(`Step ${steps}: ${recipeStepName ? `[recipe:${recipeStepName}] ` : ''}selected "${value}" in "${target.text}"`);
         }
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0; // a real action broke the wait streak
@@ -5171,7 +5240,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         // repeats are legitimate (a "+" quantity button), so we don't block — we nudge after
         // a few, then count toward "stuck" if it keeps going. value is included so re-typing
         // the same field counts but a different value doesn't.
-        const sig = `${decision.action}:${target.locatorIndex}:${decision.action === 'fill' ? String(decision.value || '') : ''}`;
+        const sig = `${decision.action}:${target.locatorIndex}:${(decision.action === 'fill' || decision.action === 'select') ? String(decision.value || '') : ''}`;
         if (sig === lastActionSig) {
           repeatActionCount += 1;
           if (repeatActionCount >= 2) {
@@ -5182,8 +5251,15 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
               // Repeated every retry, not just once: a single mention was tried first and the
               // model ignored it in favour of a visually similar but wrong/suppressed element
               // (asos.com repro, 2026-08-04) — keep it in front of the model every retry,
-              // worded as a direct instruction rather than a suggestion.
-              if (hint) hintText = ` Click the "${hint}" control now — do not click "${target.text}" again until you have.`;
+              // worded as a direct instruction rather than a suggestion. A [dropdown] hint
+              // (e.g. the asos.com "Please select" native <select>) needs "select" wording,
+              // not "click" — clicking a closed native select just opens/closes it.
+              if (hint) {
+                const hintEl = els.find((e) => e.text === hint);
+                hintText = hintEl && hintEl.isSelect
+                  ? ` Use "select" on the "${hint}" dropdown now — pick one of its listed options — do not click "${target.text}" again until you have.`
+                  : ` Click the "${hint}" control now — do not click "${target.text}" again until you have.`;
+              }
             }
             pendingCorrection = `You have just done the SAME action ("${decision.action}" on "${target.text}") ${repeatActionCount + 1} times and the page isn't advancing. It is not working — do something DIFFERENT: pick another element, scroll to reveal a control (like an "Add"/"Save"/"Continue" button often at the bottom of a dialog), or choose a required option first.${hintText}`;
           }
