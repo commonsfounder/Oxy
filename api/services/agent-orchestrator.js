@@ -95,7 +95,8 @@ async function runAgentLoop({
   trace = null,
   onStep = null,
   persistTask = false,
-  existingTaskId = null
+  existingTaskId = null,
+  resumeNote = null
 }) {
   const agentTrace = createAgentTrace(userId, initialMessage);
   let persistedTask = null;
@@ -130,6 +131,9 @@ async function runAgentLoop({
 
   if (resumeFrom) {
     logAgentStep(agentTrace, { type: 'resumed', fromIteration: startIteration, actionsAlready: executedActions.length });
+    // The checkpoint ends on a tool result saying "waiting for approval". Without this the
+    // model reads that as still-blocked and asks for the same approval again.
+    if (resumeNote) contents.push({ role: 'user', parts: [{ text: resumeNote }] });
     if (resumeFrom.truncated) {
       // The checkpoint had to drop history to fit. Say so in-band rather than letting the
       // model infer a gap it can't see.
@@ -240,7 +244,15 @@ async function runAgentLoop({
     let results = [];
     if (typeof executeActionsFn === 'function') {
       try {
-        results = await executeActionsFn(userId, actions, { ...context, agentIteration: i, sequential: true }, trace);
+        // persistedTaskId travels with the context so a review-gated action can record
+        // which run it belongs to. Without it, approving the action later executes it in
+        // isolation and the run that asked for it never continues.
+        results = await executeActionsFn(userId, actions, {
+          ...context,
+          agentIteration: i,
+          sequential: true,
+          persistedTaskId: persistedTask?.id || null
+        }, trace);
       } catch (e) {
         results = actions.map(a => ({ action: a.type, result: { success: false, error: e.message } }));
       }
@@ -295,6 +307,16 @@ async function runAgentLoop({
     // crash between iterations resumes at the next one rather than repeating this one.
     await checkpoint(i);
 
+    // A review-gated action parks the run instead of ending it. Burning the remaining
+    // iterations here would be worse than useless: the model would re-plan around an action
+    // it believes failed, and the approval — when it arrives — would have nothing to
+    // continue. The checkpoint above is what the approval resumes from.
+    if (results.some((r) => r.result?.pending === true)) {
+      logAgentStep(agentTrace, { type: 'awaiting_approval', iteration: i });
+      agentTrace.status = 'awaiting_approval';
+      break;
+    }
+
     // Safety: if many actions or high risk, may stop early in future
   }
 
@@ -305,6 +327,7 @@ async function runAgentLoop({
   if (persistedTask) {
     try {
       const finished = agentTrace.status === 'completed';
+      const awaitingApproval = agentTrace.status === 'awaiting_approval';
       const updates = {
         // A run that stops without completing is 'paused', not left at 'running'. Anything
         // still marked running with a live heartbeat means an instance is working on it,
@@ -314,7 +337,11 @@ async function runAgentLoop({
         plan: agentTrace.plan,
         completed_at: finished ? new Date().toISOString() : null,
         heartbeat_at: null,
-        last_error: finished ? null : (agentTrace.lastError || 'Run stopped before the goal was complete.')
+        // Waiting on the user is not a failure, so it must not be reported as one.
+        last_error: finished || awaitingApproval
+          ? null
+          : (agentTrace.lastError || 'Run stopped before the goal was complete.'),
+        metadata: { ...(persistedTask.metadata || {}), awaitingApproval }
       };
       // Clear the checkpoint only once the goal is done, so a later resume can't replay
       // finished work. An unfinished run keeps its checkpoint — that is what makes it

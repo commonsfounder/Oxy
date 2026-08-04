@@ -3560,10 +3560,72 @@ async function setPendingAction(userId, action, context = {}) {
     action,
     createdAt: new Date().toISOString(),
     userMessage: context.userMessage || '',
-    nativeHints: context.nativeHints || null
+    nativeHints: context.nativeHints || null,
+    // Which background run asked for this, so approving it continues that run from its
+    // checkpoint rather than executing the action on its own and abandoning the goal.
+    taskId: context.persistedTaskId || null
   };
   await setPreferenceValue(userId, PENDING_ACTION_PREF, JSON.stringify(payload));
   return payload;
+}
+
+/*
+ * Continue the background run that was waiting on this approval.
+ *
+ * A review-gated action inside an agent run used to be terminal: the loop stopped, the user
+ * confirmed, the action ran on its own, and the goal it belonged to was never picked back
+ * up. The run is parked with its checkpoint instead, and this restarts it from there.
+ *
+ * Best-effort by design — the approval itself has already succeeded by the time this runs,
+ * so a resume failure must not turn a completed action into an error for the user.
+ */
+async function resumeRunAfterApproval(userId, pendingAction, actionResults, trace = null) {
+  const taskId = pendingAction?.taskId;
+  if (!taskId) return false;
+  try {
+    const task = await taskManager.getTask(userId, taskId);
+    // Only a parked run with a checkpoint can continue. A run already finished, cancelled,
+    // or picked up by another instance must not be restarted underneath it.
+    if (!task || !task.checkpoint || taskManager.isRunActive(task)) return false;
+    if (!['paused', 'pending', 'failed'].includes(String(task.status || '').toLowerCase())) return false;
+
+    const outcome = (actionResults || [])
+      .map(entry => entry?.result?.actionSummary || entry?.result?.text || entry?.result?.error)
+      .filter(Boolean)
+      .join('; ')
+      .slice(0, 400);
+
+    await taskManager.updateTask(userId, taskId, {
+      status: 'running',
+      heartbeat_at: new Date().toISOString(),
+      attempt: (task.attempt || 0) + 1,
+      metadata: { ...(task.metadata || {}), awaitingApproval: false }
+    });
+    trace?.log?.('agent.run.resume_after_approval', taskId);
+
+    runAgenticLoop({
+      userId,
+      initialMessage: task.goal,
+      dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+      maxIterations: 6,
+      context: { autonomy: task.autonomy, guardMode: task.metadata?.guardMode === true },
+      executeActionsFn: executeActions,
+      persistTask: true,
+      existingTaskId: taskId,
+      resumeNote: `The user approved "${pendingAction.action?.type}" and it has now been executed${outcome ? `: ${outcome}` : ''}. Continue the goal from here; do not ask for that approval again.`
+    }).catch(async (e) => {
+      try {
+        await taskManager.updateTask(userId, taskId, {
+          status: 'paused',
+          heartbeat_at: null,
+          last_error: String(e?.message || e).slice(0, 500)
+        });
+      } catch {}
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function clearPendingAction(userId) {
@@ -6037,6 +6099,9 @@ function safeAgentTaskSummary(task) {
     // can carry a provider error containing a URL.
     last_error: task?.last_error ? sanitizeAgentTaskText(task.last_error, 'Stopped before finishing') : null,
     resumable: Boolean(task?.checkpoint),
+    // Parked on the user rather than stalled. Distinct from last_error, because waiting for
+    // an approval is not a failure and must not read like one.
+    awaiting_approval: task?.metadata?.awaitingApproval === true,
     created_at: task?.created_at || null,
     updated_at: task?.updated_at || null,
     completed_at: task?.completed_at || null,
@@ -6659,9 +6724,16 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             trace
           }, trace);
           actionResults = normalizeActionResultsForClient(actionResults);
-          const spoken = summarizeFinishedActionsForUser(actionResults) ||
-            actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
-            'Done.';
+          // If a background run was parked waiting on this approval, continue it from its
+          // checkpoint. Executing the action alone would satisfy the confirmation prompt and
+          // silently abandon the goal that asked for it.
+          const resumedRun = await resumeRunAfterApproval(userId, pendingAction, actionResults, trace);
+          const spoken = [
+            summarizeFinishedActionsForUser(actionResults) ||
+              actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
+              'Done.',
+            resumedRun ? 'Picking that task back up now.' : ''
+          ].filter(Boolean).join(' ');
           await respondWithResult({
             res,
             streaming,

@@ -18,6 +18,8 @@ struct AgentTask: Codable, Identifiable, Equatable {
     let lastError: String?
     /// A checkpoint survived, so this run can continue rather than start over.
     let resumable: Bool
+    /// Parked on the user, not stalled — an action needs approving before it continues.
+    let awaitingApproval: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, goal, status, autonomy, resumable
@@ -28,6 +30,7 @@ struct AgentTask: Codable, Identifiable, Equatable {
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
         case lastError = "last_error"
+        case awaitingApproval = "awaiting_approval"
     }
 
     init(from decoder: Decoder) throws {
@@ -44,6 +47,7 @@ struct AgentTask: Codable, Identifiable, Equatable {
         completedAt = try values.decodeIfPresent(String.self, forKey: .completedAt)
         lastError = try values.decodeIfPresent(String.self, forKey: .lastError)
         resumable = try values.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
+        awaitingApproval = try values.decodeIfPresent(Bool.self, forKey: .awaitingApproval) ?? false
     }
 
     var isActive: Bool {
@@ -53,7 +57,7 @@ struct AgentTask: Codable, Identifiable, Equatable {
     var statusLabel: String {
         switch status.lowercased() {
         case "running": return "Working"
-        case "paused": return "Paused"
+        case "paused": return awaitingApproval ? "Needs approval" : "Paused"
         case "failed": return "Needs you"
         case "completed": return "Done"
         case "cancelled": return "Cancelled"
