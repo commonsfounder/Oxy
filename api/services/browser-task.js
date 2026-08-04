@@ -681,8 +681,40 @@ function shouldSuppressVisionClick(session, text) {
   // A tile advertising another product almost always carries a price — genuine checkout/
   // basket controls ("Checkout", "Continue", "Go to basket") don't. Cheap, generic signal
   // that doesn't need to know what any specific site's upsell carousel looks like.
-  if (session?.cartEverNonzero && /[£$€]\s?\d+(?:[.,]\d{2})?/.test(t) && !/\bcheckout|basket|bag|cart|trolley|continue|delivery|payment\b/i.test(t)) return true;
+  if (session?.cartEverNonzero && /[£$€]\s?\d+(?:[.,]\d{2})?/.test(t) && !/\bcheckout|basket|bag|cart|trolley|continue|delivery|payment|order\b/i.test(t)) return true;
   return false;
+}
+
+// When a repeat-action nudge fires on an order goal with an empty cart, the model often
+// keeps retrying the same button because it doesn't realise a size/variant control exists
+// elsewhere on the page — surfacing one by name (if present and not itself suppressed) gives
+// it something concrete to try instead of blindly retrying.
+function findVariantSelectionHint(session, elements) {
+  const els = elements || [];
+  // Tier 1: an unfilled dropdown placeholder ("Please select") is the strongest signal a
+  // required size/colour control hasn't been chosen yet — confirmed via a real asos.com
+  // screenshot 2026-08-04, where the actual size <select> read "Please select" and never
+  // mentioned the word "size" in its own text at all, so a text-only "size" match can't find
+  // it without this tier.
+  const placeholder = els.find((e) => {
+    const t = String(e.text || '').trim();
+    if (!t || t.length >= 30) return false;
+    if (shouldSuppressVisionClick(session, t)) return false;
+    return /^please select$|^select\b|^choose\b/i.test(t);
+  });
+  if (placeholder) return placeholder.text;
+  // Tier 2: text that names size/colour directly, but excluding informational accordions/
+  // links ("Size & Fit", "Size Guide") that describe sizing rather than let you pick one —
+  // that same asos.com repro first matched "Size & Fit" here (an unrelated info panel) and
+  // the model never acted on the hint, which is what motivated tier 1 above.
+  const named = els.find((e) => {
+    const t = String(e.text || '').trim();
+    if (!t || t.length >= 40) return false;
+    if (shouldSuppressVisionClick(session, t)) return false;
+    if (/size\s*&\s*fit|size\s*guide/i.test(t)) return false;
+    return /\b(size|colou?r)\b/i.test(t);
+  });
+  return named ? named.text : null;
 }
 
 // Postcode-lookup address widgets ("Find address" + a suggestion list, or "Enter address
@@ -1051,7 +1083,7 @@ function buildDecisionPrompt(goal, history, elements, correction = '', goalConte
   }
 
   return `You are controlling a real web browser to help with this goal: "${goal}"
-${contextBlock}${correctionBlock}
+${contextBlock}
 You can SEE the current page in the attached screenshot. Every clickable element has a
 small numbered badge drawn on it; the number is its element id and matches the list
 below. LOOK at the screenshot first — find the thing you need (search box, address
@@ -1101,7 +1133,7 @@ ${elementsText}
 Elements marked [input] are real typeable fields (search box, text box). A promo banner,
 link, or button can have text that reads like it matches your goal — it is still not typeable.
 Only use "fill" on an [input] element; anything else must be "click".
-
+${correctionBlock}
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
@@ -1154,7 +1186,7 @@ function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', g
   }
 
   return `You are controlling a real web browser to help with this goal: "${goal}"
-${contextBlock}${correctionBlock}
+${contextBlock}
 You do NOT have an image of the page — only this text list of its clickable elements,
 each with its accessible name (label, button text, or aria-label). Elements marked [input]
 are real typeable fields; anything else — including a promo banner or link whose text reads
@@ -1178,7 +1210,7 @@ CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT
 
 What's happened so far:
 ${historyText}
-
+${correctionBlock}
 Reply with ONLY one JSON object, one of these shapes:
 {"action":"click","elementId":<number>}
 {"action":"fill","elementId":<number>,"value":"<text>"}
@@ -5143,7 +5175,17 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         if (sig === lastActionSig) {
           repeatActionCount += 1;
           if (repeatActionCount >= 2) {
-            pendingCorrection = `You have just done the SAME action ("${decision.action}" on "${target.text}") ${repeatActionCount + 1} times and the page isn't advancing. It is not working — do something DIFFERENT: pick another element, scroll to reveal a control (like an "Add"/"Save"/"Continue" button often at the bottom of a dialog), or choose a required option first.`;
+            let hintText = '';
+            if (session.isOrder && !session.cartEverNonzero) {
+              const els = await extractClickableElements(session.page).catch(() => []);
+              const hint = findVariantSelectionHint(session, els);
+              // Repeated every retry, not just once: a single mention was tried first and the
+              // model ignored it in favour of a visually similar but wrong/suppressed element
+              // (asos.com repro, 2026-08-04) — keep it in front of the model every retry,
+              // worded as a direct instruction rather than a suggestion.
+              if (hint) hintText = ` Click the "${hint}" control now — do not click "${target.text}" again until you have.`;
+            }
+            pendingCorrection = `You have just done the SAME action ("${decision.action}" on "${target.text}") ${repeatActionCount + 1} times and the page isn't advancing. It is not working — do something DIFFERENT: pick another element, scroll to reveal a control (like an "Add"/"Save"/"Continue" button often at the bottom of a dialog), or choose a required option first.${hintText}`;
           }
           if (repeatActionCount >= 4) {
             consecutiveBadDecisions += 1;
@@ -5837,6 +5879,8 @@ module.exports = {
   closeSession,
   closeWarmPool,
   extractClickableElements,
+  shouldSuppressVisionClick,
+  findVariantSelectionHint,
   CLICKABLE_SELECTOR,
   runOrderingTurn,
   siteKeyFromUrl,
