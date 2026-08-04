@@ -8,11 +8,13 @@
  * unchanged regardless of provider. generateBrain() mirrors the non-streaming
  * generateContent() shape ({ text }).
  *
- *   OXY_BRAIN_PROVIDER = openai (default) | gemini | groq
+ *   OXY_BRAIN_PROVIDER = openai (default) | anthropic | gemini | groq | local
  *   OXY_CHAT_REASONING_EFFORT = low (default) | medium | high
  *   OPENAI_API_KEY     = required for the default path
  *   GEMINI_API_KEY     = required only when provider=gemini
  *   GROQ_API_KEY       = required only when provider=groq
+ *   ANTHROPIC_API_KEY  = required only when provider=anthropic
+ *   OXY_LOCAL_MODEL_BASE_URL = required only when provider=local (OpenAI-compatible)
  *
  * OpenAI became the default on 2026-08-04, after Google billing dunning denied the
  * Gemini project outright and took chat down. There is deliberately NO automatic
@@ -21,8 +23,13 @@
  *
  * Search grounding differs by provider and is NOT apples-to-apples: Gemini uses the
  * native googleSearch tool inline, while OpenAI grounds through a separate
- * Responses-API call (see webSearchBrain). Groq has no grounding at all — config.tools
- * is silently dropped there.
+ * Responses-API call (see webSearchBrain). Anthropic/Groq/local have no grounding of
+ * their own and borrow Gemini for that ONE lookup — never for the conversation itself.
+ *
+ * No dispatcher falls through to another vendor. openai/groq/local share the OpenAI
+ * /chat/completions transport (different base URL, key, and request fields); anthropic and
+ * gemini have their own. An unrecognised provider throws rather than quietly landing on
+ * whichever client happens to be last in the chain.
  */
 
 const { GoogleGenAI } = require('@google/genai');
@@ -38,6 +45,10 @@ let _gemini = null;
 function geminiClient() {
   if (!_gemini) _gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
   return _gemini;
+}
+
+function geminiConfigured() {
+  return Boolean(String(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '').trim());
 }
 
 function getBrainProvider() {
@@ -88,11 +99,11 @@ function openAIRequestFromConfig(config = {}) {
 }
 
 // Stream Groq (OpenAI-compatible SSE), re-shaped to look like a Gemini stream.
-async function* groqStream({ contents, config }) {
+async function* groqStream({ model, contents, config }) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new Error('GROQ_API_KEY is not set (needed for OXY_BRAIN_PROVIDER=groq)');
   const body = {
-    model: process.env.OXY_GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: model || process.env.OXY_GROQ_MODEL || 'llama-3.3-70b-versatile',
     messages: toOpenAIMessages(contents, config?.systemInstruction),
     temperature: config?.temperature ?? 0.2,
     stream: true,
@@ -144,34 +155,187 @@ function openAIBaseURL() {
   return process.env.OXY_CHAT_BASE_URL || 'https://api.openai.com/v1';
 }
 
-async function* openaiStream({ model, contents, config }) {
-  const res = await fetch(`${openAIBaseURL()}/chat/completions`, {
+// Providers that speak OpenAI's /chat/completions shape. Everything in this set goes
+// through the same transport; only the base URL, key, and request fields differ.
+const OPENAI_COMPATIBLE = new Set(['openai', 'groq', 'local']);
+
+function compatibleBaseURL(provider) {
+  if (provider === 'groq') return 'https://api.groq.com/openai/v1';
+  if (provider === 'local') {
+    const base = String(process.env.OXY_LOCAL_MODEL_BASE_URL || '').trim().replace(/\/$/, '');
+    if (!base) throw new Error('OXY_LOCAL_MODEL_BASE_URL is not set (needed for provider=local)');
+    return base;
+  }
+  return openAIBaseURL();
+}
+
+function compatibleApiKey(provider) {
+  if (provider === 'groq') {
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error('GROQ_API_KEY is not set (needed for provider=groq)');
+    return apiKey;
+  }
+  if (provider === 'local') return process.env.OXY_LOCAL_MODEL_API_KEY || 'local';
+  return openAIKey();
+}
+
+function compatibleModel(provider, model) {
+  if (provider === 'groq') return model || process.env.OXY_GROQ_MODEL || 'llama-3.3-70b-versatile';
+  if (provider === 'local') return model || process.env.OXY_LOCAL_MODEL || 'llama3.2';
+  return model;
+}
+
+function compatibleHeaders(provider) {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${compatibleApiKey(provider)}`
+  };
+}
+
+// Only OpenAI's reasoning tier renames max_tokens -> max_completion_tokens and takes
+// reasoning_effort. Groq and local OpenAI-compatible hosts reject both, so they must NOT
+// inherit the reasoning-tier body shape just because they share the endpoint path.
+function compatibleRequestFromConfig(provider, config = {}) {
+  if (provider === 'openai') return openAIRequestFromConfig(config);
+  const body = { max_tokens: Math.max(config?.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS) };
+  if (typeof config?.temperature === 'number') body.temperature = config.temperature;
+  return body;
+}
+
+async function* compatibleStream({ provider, model, contents, config }) {
+  const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
+    headers: compatibleHeaders(provider),
     body: JSON.stringify({
-      model,
+      model: compatibleModel(provider, model),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
       stream: true,
-      ...openAIRequestFromConfig(config)
+      ...compatibleRequestFromConfig(provider, config)
     })
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   yield* streamChatCompletionSSE(res);
 }
 
-async function openaiGenerate({ model, contents, config }) {
-  const res = await fetch(`${openAIBaseURL()}/chat/completions`, {
+async function compatibleGenerate({ provider, model, contents, config }) {
+  const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
+    headers: compatibleHeaders(provider),
     body: JSON.stringify({
-      model,
+      model: compatibleModel(provider, model),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
-      ...openAIRequestFromConfig(config)
+      ...compatibleRequestFromConfig(provider, config)
     })
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
   return { text: json.choices?.[0]?.message?.content || '' };
+}
+
+function toAnthropicMessages(contents) {
+  const messages = [];
+  for (const c of contents || []) {
+    const blocks = [];
+    for (const part of c.parts || []) {
+      if (part.text) blocks.push({ type: 'text', text: part.text });
+      if (part.functionCall) {
+        blocks.push({
+          type: 'tool_use',
+          id: part.functionCall.id || toolCallId(part.functionCall.name, blocks.length),
+          name: part.functionCall.name,
+          input: part.functionCall.args || {}
+        });
+      }
+      if (part.functionResponse) {
+        const value = part.functionResponse.response?.result ?? part.functionResponse.response ?? {};
+        blocks.push({
+          type: 'tool_result',
+          tool_use_id: part.functionResponse.id || toolCallId(part.functionResponse.name, blocks.length),
+          content: typeof value === 'string' ? value : JSON.stringify(value)
+        });
+      }
+    }
+    if (!blocks.length) continue;
+    const role = c.role === 'model' ? 'assistant' : 'user';
+    const previous = messages[messages.length - 1];
+    if (previous?.role === role && role === 'user') previous.content.push(...blocks);
+    else messages.push({ role, content: blocks });
+  }
+  return messages;
+}
+
+function anthropicHeaders() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not set (needed for provider=anthropic)');
+  return {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': '2023-06-01'
+  };
+}
+
+function anthropicRequestBody({ model, contents, config, stream = false, tools = [] }) {
+  const body = {
+    model: model || process.env.OXY_ANTHROPIC_MODEL || 'claude-sonnet-5',
+    max_tokens: Math.max(config?.maxOutputTokens || 0, 768),
+    messages: toAnthropicMessages(contents),
+    stream
+  };
+  if (config?.systemInstruction) body.system = config.systemInstruction;
+  if (tools.length) body.tools = tools;
+  return body;
+}
+
+async function* anthropicStream({ model, contents, config }) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: anthropicHeaders(),
+    body: JSON.stringify(anthropicRequestBody({ model, contents, config, stream: true }))
+  });
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index;
+    while ((index = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 1);
+      if (!line.startsWith('data:')) continue;
+      try {
+        const event = JSON.parse(line.slice(5).trim());
+        const text = event.delta?.type === 'text_delta' ? event.delta.text : '';
+        if (text) yield { text, candidates: [] };
+      } catch { /* ignore keepalive and partial frames */ }
+    }
+  }
+}
+
+function anthropicResponseToGeminiShape(json) {
+  const parts = (json.content || []).flatMap(block => {
+    if (block.type === 'text') return [{ text: block.text || '' }];
+    if (block.type === 'tool_use') return [{ functionCall: { id: block.id, name: block.name, args: block.input || {} } }];
+    return [];
+  });
+  const functionCalls = parts.filter(part => part.functionCall).map(part => part.functionCall);
+  return {
+    text: parts.filter(part => part.text).map(part => part.text).join(''),
+    functionCalls,
+    candidates: [{ content: { parts, role: 'model' } }]
+  };
+}
+
+async function anthropicGenerate({ model, contents, config, tools = [] }) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: anthropicHeaders(),
+    body: JSON.stringify(anthropicRequestBody({ model, contents, config, tools }))
+  });
+  if (!res.ok) throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  return anthropicResponseToGeminiShape(await res.json());
 }
 
 /*
@@ -181,9 +345,11 @@ async function openaiGenerate({ model, contents, config }) {
  */
 function streamBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
-  if (p === 'groq') return groqStream({ contents, config });
-  if (p === 'openai') return openaiStream({ model, contents, config });
-  return geminiClient().models.generateContentStream({ model, contents, config });
+  if (p === 'groq') return groqStream({ model, contents, config });
+  if (p === 'openai' || p === 'local') return compatibleStream({ provider: p, model, contents, config });
+  if (p === 'anthropic') return anthropicStream({ model, contents, config });
+  if (p === 'gemini') return geminiClient().models.generateContentStream({ model, contents, config });
+  throw new Error(`Unknown brain provider: ${p}`);
 }
 
 /*
@@ -192,9 +358,13 @@ function streamBrain({ provider, model, contents, config }) {
  */
 async function generateBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
-  if (p === 'openai') return openaiGenerate({ model, contents, config });
-  const res = await geminiClient().models.generateContent({ model, contents, config });
-  return { text: res.text || '' };
+  if (OPENAI_COMPATIBLE.has(p)) return compatibleGenerate({ provider: p, model, contents, config });
+  if (p === 'anthropic') return anthropicGenerate({ model, contents, config });
+  if (p === 'gemini') {
+    const res = await geminiClient().models.generateContent({ model, contents, config });
+    return { text: res.text || '' };
+  }
+  throw new Error(`Unknown brain provider: ${p}`);
 }
 
 /*
@@ -231,8 +401,16 @@ async function webSearchBrain({ model, prompt, provider }) {
       .trim();
     return text;
   }
+  // Only OpenAI and Gemini ground natively. An Anthropic/Groq/local route has no grounding
+  // of its own, so search falls to Gemini AS A TOOL — deliberate and narrow (one lookup,
+  // never the conversational brain). This branch used to be reached by fallthrough and
+  // forwarded the *other* provider's model id to Gemini, which 404s every time; pick a real
+  // Gemini model instead, and return '' when there is no Gemini key to fall back to so the
+  // caller surfaces its own "no results" wording.
+  if (!geminiConfigured()) return '';
+  const groundingModel = p === 'gemini' ? model : (process.env.OXY_GEMINI_MODEL || 'gemini-2.5-flash');
   const res = await geminiClient().models.generateContent({
-    model,
+    model: groundingModel,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { tools: [{ googleSearch: {} }] }
   });
@@ -265,6 +443,15 @@ function geminiToolsToOpenAI(tools = []) {
       description: d.description,
       parameters: toJsonSchemaTypes(d.parameters || { type: 'object', properties: {} })
     }
+  }));
+}
+
+function geminiToolsToAnthropic(tools = []) {
+  const decls = (tools || []).flatMap((t) => t.functionDeclarations || []);
+  return decls.map((d) => ({
+    name: d.name,
+    description: d.description,
+    input_schema: toJsonSchemaTypes(d.parameters || { type: 'object', properties: {} })
   }));
 }
 
@@ -354,11 +541,28 @@ function openAIResponseToGeminiShape(json) {
  */
 async function callToolsBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
-  if (p !== 'openai') {
+  if (p === 'anthropic') {
+    return anthropicGenerate({
+      model,
+      contents,
+      config,
+      tools: geminiToolsToAnthropic(config?.tools)
+    });
+  }
+  if (p === 'gemini') {
     return geminiClient().models.generateContent({ model, contents, config });
   }
+  // Anything left must speak the OpenAI tool-calling shape. Falling through to the Gemini
+  // SDK here used to send e.g. a Groq model id to generativelanguage.googleapis.com — a
+  // silent cross-provider hop that contradicts this module's no-fallback contract.
+  if (!OPENAI_COMPATIBLE.has(p)) throw new Error(`Unknown brain provider: ${p}`);
+
   const tools = geminiToolsToOpenAI(config?.tools);
-  const body = { model, messages: toOpenAIToolMessages(contents, config?.systemInstruction), ...openAIRequestFromConfig(config) };
+  const body = {
+    model: compatibleModel(p, model),
+    messages: toOpenAIToolMessages(contents, config?.systemInstruction),
+    ...compatibleRequestFromConfig(p, config)
+  };
   if (tools.length) {
     body.tools = tools;
     body.tool_choice = 'auto';
@@ -367,15 +571,15 @@ async function callToolsBrain({ provider, model, contents, config }) {
     // /v1/responses or set reasoning_effort to 'none'." Taking the 'none' branch keeps this
     // one request shape for every call; moving tool turns to /v1/responses would mean a
     // second, differently-shaped transport for no behavioural gain in a loop already tuned
-    // for latency.
-    body.reasoning_effort = 'none';
+    // for latency. Only the reasoning tier needs it; Groq/local reject the field.
+    if (p === 'openai') body.reasoning_effort = 'none';
   }
-  const res = await fetch(`${openAIBaseURL()}/chat/completions`, {
+  const res = await fetch(`${compatibleBaseURL(p)}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAIKey()}` },
+    headers: compatibleHeaders(p),
     body: JSON.stringify(body)
   });
-  if (!res.ok) throw new Error(`OpenAI ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  if (!res.ok) throw new Error(`${p} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   return openAIResponseToGeminiShape(await res.json());
 }
 
@@ -386,8 +590,10 @@ module.exports = {
   callToolsBrain,
   getBrainProvider,
   toOpenAIMessages,
+  toAnthropicMessages,
   toOpenAIToolMessages,
   geminiToolsToOpenAI,
+  geminiToolsToAnthropic,
   openAIResponseToGeminiShape,
   openAIRequestFromConfig
 };

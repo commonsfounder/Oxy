@@ -54,6 +54,8 @@ struct AgenticHomeView: View {
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
+    @State private var agentTasks: [AgentTask] = []
+    @State private var isAgentWorkPresented = false
     /// "Recently touched" strip (Phase 3 of the aside-parity roadmap) — entities the
     /// agent itself touched while running a task, not a search UI. Empty array hides
     /// the strip entirely rather than showing an empty-state placeholder.
@@ -306,6 +308,10 @@ struct AgenticHomeView: View {
                 }
             )
         }
+        .fullScreenCover(isPresented: $isAgentWorkPresented) {
+            AgentWorkView()
+                .swipeToDismiss()
+        }
     }
 
     // MARK: - Greeting (video: date + large serif over pastel)
@@ -529,7 +535,8 @@ struct AgenticHomeView: View {
     // MARK: - Data
 
     private var missions: [HomeMission] {
-        (sessionMissions + localMissions + HomeMissionBuilder.build(from: briefings)).compactMap { mission in
+        let briefingMissions = HomeMissionBuilder.build(from: briefings).filter { $0.kind != .agent }
+        return (persistentTaskMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
             guard mission.kind == .mailGroup else {
                 return dismissedMissionIDs.contains(mission.id) ? nil : mission
             }
@@ -567,6 +574,35 @@ struct AgenticHomeView: View {
             }
     }
 
+    private var persistentTaskMissions: [HomeMission] {
+        agentTasks
+            .filter { $0.isActive && $0.status.lowercased() != "recipe" }
+            .prefix(3)
+            .map { task in
+                let lower = task.status.lowercased()
+                let eyebrow: String
+                let cta: String?
+                switch lower {
+                case "running": eyebrow = "Working"; cta = "Open"
+                case "failed": eyebrow = "Needs you"; cta = "Review"
+                case "paused": eyebrow = "Paused"; cta = "Resume"
+                default: eyebrow = "Ready"; cta = "Run"
+                }
+                return HomeMission(
+                    id: "persistent-task-\(task.id)",
+                    kind: .agent,
+                    eyebrow: eyebrow,
+                    title: task.goal,
+                    detail: "\(task.autonomy) autonomy · \(task.currentStep == 0 ? "Not started" : "Step \(task.currentStep)")",
+                    cta: cta,
+                    prompt: nil,
+                    symbol: "circle.dotted",
+                    isPrimary: lower != "running",
+                    taskID: task.id
+                )
+            }
+    }
+
     private func sessionMissionID(_ session: AgentTaskSession) -> String { "session-\(session.id)" }
 
     // MARK: - Actions
@@ -580,6 +616,11 @@ struct AgenticHomeView: View {
     }
 
     private func handleMissionCTA(_ mission: HomeMission) {
+        if mission.taskID != nil {
+            HapticManager.shared.impact(.light)
+            isAgentWorkPresented = true
+            return
+        }
         if let session = backgroundSessions.first(where: { sessionMissionID($0) == mission.id }) {
             HapticManager.shared.impact(.medium)
             activeSession = session
@@ -745,6 +786,12 @@ struct AgenticHomeView: View {
             errorMessage = error.localizedDescription
         }
 
+        // Durable goals are the continuity layer between chat turns. Preserve the
+        // previous snapshot if this ambient fetch fails; Work has its own retry path.
+        if let fetchedTasks = try? await AgentTasksService.fetchTasks() {
+            agentTasks = fetchedTasks
+        }
+
         #if DEBUG
         // Seed a representative card mix when running against a backend with no
         // data (Simulator/demo) so the Home surface can be seen and iterated on.
@@ -893,6 +940,7 @@ struct HomeMission: Identifiable, Equatable {
     let prompt: String?
     let symbol: String
     let isPrimary: Bool
+    var taskID: String? = nil
     /// Structured payload for bespoke (Gleb-style) card rendering. All optional so
     /// existing call sites are unaffected and cards degrade gracefully.
     var deliveryStage: Int? = nil

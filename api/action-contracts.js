@@ -280,6 +280,41 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calculation failed',
     confirmation: 'none'
   },
+  // The agent's own scratch space. Without these the workspace is storage the user can
+  // browse and the agent can never touch — notes, drafts and findings die with the turn
+  // that produced them.
+  workspace_write: {
+    risk: 'low',
+    required: ['path', 'content'],
+    optional: ['kind'],
+    inputExample: { path: 'notes/laptop-research.md', content: 'what I found so far', kind: 'file' },
+    guidance: 'Save working notes, drafts, research or findings that should outlive this turn. Use a descriptive path with folders, e.g. research/laptops.md. Overwrites the file at that path.',
+    successSummary: 'Saved to workspace',
+    failureSummary: 'Workspace save failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  workspace_read: {
+    risk: 'low',
+    required: ['path'],
+    inputExample: { path: 'notes/laptop-research.md' },
+    guidance: 'Read back something previously saved to the workspace. Use workspace_list first if unsure of the exact path.',
+    successSummary: 'Read from workspace',
+    failureSummary: 'Workspace file not found',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  workspace_list: {
+    risk: 'low',
+    required: [],
+    optional: ['prefix'],
+    inputExample: { prefix: 'research/' },
+    guidance: 'List what is already in the workspace. Cheap — prefer this over guessing a path.',
+    successSummary: 'Listed workspace',
+    failureSummary: 'Workspace list failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   create_agent_task: {
     risk: 'medium',
     required: ['goal'],

@@ -8,7 +8,7 @@ process.env.SUPABASE_KEY = process.env.SUPABASE_KEY || 'test-key';
 process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test-key';
 process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-secret';
 
-const { isUserFacingMemory, isUsefulMemoryContent } = require('../../api/index.js');
+const { isUserFacingMemory, isUsefulMemoryContent, isDurableProfileFact } = require('../../api/index.js');
 
 test('excludes internal agent_episodic rows', () => {
   assert.equal(isUserFacingMemory({ source: 'agent_episodic', content: 'Booked the train' }), false);
@@ -38,4 +38,19 @@ test('excludes low-signal memory garbage', () => {
 
 test('excludes malformed quote snippets', () => {
   assert.equal(isUsefulMemoryContent('Calls a loved one "pookie'), false);
+});
+
+test('classifies identity/work/relationship/goal statements as durable profile facts', () => {
+  assert.equal(isDurableProfileFact('My name is Chizi'), true);
+  assert.equal(isDurableProfileFact('I work at KPMG'), true);
+  assert.equal(isDurableProfileFact('I live in Birmingham'), true);
+  assert.equal(isDurableProfileFact('My wife is called Sam'), true);
+  assert.equal(isDurableProfileFact("I'm building a startup called Milgrain"), true);
+  assert.equal(isDurableProfileFact('Working on the auth flow this week'), true);
+});
+
+test('does not classify transient statements as durable profile facts', () => {
+  assert.equal(isDurableProfileFact('I hate mornings'), false);
+  assert.equal(isDurableProfileFact('I want a coffee'), false);
+  assert.equal(isDurableProfileFact('Book me a train to Leeds'), false);
 });

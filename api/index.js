@@ -90,6 +90,9 @@ const {
   reflectOnResults
 } = require('./services/agent-orchestrator');
 const taskManager = require('./services/task-manager');
+const { loadAgentContext } = require('./services/agent-context');
+const agentWorkspace = require('./services/agent-workspace');
+const agentContinuity = require('./services/agent-continuity');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
@@ -105,6 +108,12 @@ const { createRoutine, listRoutines, deleteRoutine, listDueRoutines, markRoutine
 const { resolveEntityReference } = require('./services/entity-recall');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
+const {
+  ROUTE_KEYS,
+  resolveModelRoute,
+  publicModelRouting,
+  validateModelRouteInput
+} = require('./services/model-routing');
 const { geocodeLocation } = require('./geocoding');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
 
@@ -255,7 +264,17 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
   }
 });
 
-app.use(express.json());
+// Only the continuity endpoints take a whole vendor export. Raising the limit globally to
+// suit them would hand every other route — /chat included — a 40x larger body to absorb.
+// The global parser must SKIP those paths rather than run first: body-parser marks the
+// request as read, so a default-limit parser in front would 413 the upload before the
+// larger one ever saw it.
+const continuityBodyParser = express.json({ limit: '12mb' });
+const defaultBodyParser = express.json();
+app.use((req, res, next) => {
+  if (req.path.startsWith('/agent/continuity/')) return next();
+  return defaultBodyParser(req, res, next);
+});
 app.use((req, res, next) => {
   res.setHeader('X-Oxy-Commit', getRuntimeVersion().gitCommit);
   res.setHeader('Vary', 'Origin');
@@ -1750,7 +1769,7 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   };
 }
 
-async function recoverEmptyModelResponse({ model, initialRequest, message, trace = null }) {
+async function recoverEmptyModelResponse({ provider = null, model, initialRequest, message, trace = null }) {
   const recoveryRequest = {
     config: {
       ...initialRequest.config,
@@ -1778,11 +1797,13 @@ async function recoverEmptyModelResponse({ model, initialRequest, message, trace
   try {
     const response = trace
       ? await trace.run('brain.generate.empty_recovery', () => generateBrain({
+        provider,
         model,
         contents: recoveryRequest.contents,
         config: recoveryRequest.config
       }))
       : await generateBrain({
+        provider,
         model,
         contents: recoveryRequest.contents,
         config: recoveryRequest.config
@@ -2570,11 +2591,69 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: true, text: `I interpreted "${expr}" but used LLM fallback. Result: approx computation done.`, result: expr };
       }
     }
+    // Workspace tools. Path traversal, size and kind are all enforced inside
+    // agent-workspace.js, and every query is scoped to this user's workspace row, so a
+    // model-authored path cannot reach another user's files or escape the workspace.
+    case 'workspace_write': {
+      const filePath = String(params?.path || '').trim();
+      const content = params?.content;
+      if (!filePath) return { success: false, error: 'workspace_write requires path' };
+      if (typeof content !== 'string') return { success: false, error: 'workspace_write requires content as text' };
+      try {
+        const file = await agentWorkspace.writeWorkspaceFile(supabase, userId, filePath, content, params?.kind);
+        return {
+          success: true,
+          text: `Saved ${file.path} (v${file.version}).`,
+          actionSummary: `Saved ${file.path}`,
+          path: file.path,
+          version: file.version
+        };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+    case 'workspace_read': {
+      const filePath = String(params?.path || '').trim();
+      if (!filePath) return { success: false, error: 'workspace_read requires path' };
+      try {
+        const file = await agentWorkspace.readWorkspaceFile(supabase, userId, filePath);
+        if (!file) return { success: false, error: `No workspace file at ${filePath}.` };
+        return {
+          success: true,
+          text: file.content,
+          actionSummary: `Read ${file.path}`,
+          path: file.path,
+          version: file.version
+        };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+    case 'workspace_list': {
+      try {
+        const { files } = await agentWorkspace.listWorkspaceFiles(supabase, userId, params?.prefix || '');
+        // Paths and sizes only — the agent asks for content it actually needs via
+        // workspace_read, rather than every file being replayed into the next prompt.
+        const listed = files.map(file => ({ path: file.path, kind: file.kind, bytes: file.size_bytes, updatedAt: file.updated_at }));
+        return {
+          success: true,
+          text: listed.length ? listed.map(f => `${f.path} (${f.bytes} bytes)`).join('\n') : 'The workspace is empty.',
+          actionSummary: `${listed.length} file${listed.length === 1 ? '' : 's'} in workspace`,
+          files: listed
+        };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
     case 'create_agent_task': {
       const goal = String(params?.goal || '').trim();
       if (!goal) return { success: false, error: 'create_agent_task requires goal' };
       try {
-        const task = await taskManager.createTask(userId, goal, { autonomy: params.autonomy, plan: params.plan });
+        const task = await taskManager.createTask(userId, goal, {
+          autonomy: params.autonomy,
+          plan: params.plan,
+          metadata: typeof params.guardMode === 'boolean' ? { guardMode: params.guardMode } : undefined
+        });
         return { success: true, text: `Persistent agent task created: "${goal}". ID: ${task.id}. I will work on it in background where possible.`, taskId: task.id };
       } catch (e) {
         return { success: false, error: e.message };
@@ -3056,6 +3135,36 @@ function isMemoryDeletionRequest(text) {
     || /\bforget that\b/i.test(String(text || ''));
 }
 
+const DURABLE_PROFILE_PATTERN = /\b(my name|i work at|i work for|i'm a |i am a |i live in|lives in|my job|my wife|my husband|my partner|my kids|my boss|working on|trying to|my goal|i'm building|i am building|my company|my startup)\b/i;
+
+function isDurableProfileFact(text) {
+  return DURABLE_PROFILE_PATTERN.test(String(text || ''));
+}
+
+// Keeps the single manual_profile row (identity/work/relationships/goals) up to
+// date instead of letting durable facts compete with transient ones in the
+// flat, decaying fact stream getMemory() scores by keyword+recency.
+async function mergeIntoProfile(userId, newFact) {
+  try {
+    const { data } = await supabase
+      .from('memories')
+      .select('content')
+      .eq('user_id', userId)
+      .eq('source', 'manual_profile')
+      .limit(1);
+    const existing = data?.[0]?.content || '';
+
+    const result = await generateBrain({
+      model: FAST_MODEL,
+      contents: [{ role: 'user', parts: [{ text: `Update this user profile with the new fact. Keep it as short bullet lines grouped loosely by identity, work, relationships, and goals. Merge duplicates, drop anything the new fact contradicts or supersedes. Return only the updated profile text, no explanation.\n\nCurrent profile:\n${existing || '(empty)'}\n\nNew fact: "${newFact}"` }] }],
+      config: {}
+    });
+    const merged = (result.text || '').trim();
+    if (!merged || !isUsefulMemoryContent(merged)) return;
+    await saveMemory(userId, merged, 'manual_profile');
+  } catch {}
+}
+
 function parseClientTimestamp(value) {
   if (!value) return null;
   const parsed = new Date(String(value));
@@ -3382,6 +3491,13 @@ async function getUserAccountByEmail(email) {
 }
 
 const USER_DATA_TABLES = [
+  'agent_traces',
+  'simulation_runs',
+  'agent_tasks',
+  'agent_workspace_files',
+  'agent_workspace_sessions',
+  'agent_workspaces',
+  'agent_imports',
   'briefings',
   'native_context',
   'devices',
@@ -3431,7 +3547,16 @@ async function buildUserExport(userId) {
     preferences: data.preferences || [],
     devices: data.devices || [],
     nativeContext: data.native_context || [],
-    briefings: data.briefings || []
+    briefings: data.briefings || [],
+    agentTasks: data.agent_tasks || [],
+    agentTraces: data.agent_traces || [],
+    simulationRuns: data.simulation_runs || [],
+    workspace: {
+      workspaces: data.agent_workspaces || [],
+      files: data.agent_workspace_files || [],
+      sessions: data.agent_workspace_sessions || []
+    },
+    continuityImports: data.agent_imports || []
   };
 }
 
@@ -3442,16 +3567,18 @@ async function getUserContext(userId, trace = null) {
     return cached.context;
   }
 
-  const [connectors, memories, actionLog] = trace
+  const [connectors, memories, actionLog, delegatedTasks] = trace
     ? await Promise.all([
       trace.run('supabase.user_context.connectors', () => supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true)),
       trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)),
-      trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8))
+      trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)),
+      trace.run('supabase.user_context.agent_tasks', () => supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6))
     ])
     : await Promise.all([
       supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
       supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
-      supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)
+      supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8),
+      supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6)
     ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
@@ -3487,12 +3614,19 @@ async function getUserContext(userId, trace = null) {
 
   const memoryLines = (memories.data || []).map(m => m.content).join('; ') || 'none';
   const recentActions = recentActionLines.join(' | ') || 'none yet';
+  const activeGoals = (delegatedTasks.data || [])
+    .map(task => String(task.status || 'pending') + ': ' + String(task.goal || '').trim())
+    .filter(line => line.length > 10)
+    .join(' | ') || 'none';
 
-  const context = `LIVE USER CONTEXT:
-Active connectors: ${active}
-Messaging patterns: ${patterns}
-Key facts: ${memoryLines}
-Recent action outcomes: ${recentActions}`.slice(0, 2200);
+  const context = [
+    "LIVE USER CONTEXT:",
+    "Active connectors: " + active,
+    "Messaging patterns: " + patterns,
+    "Key facts: " + memoryLines,
+    "Active delegated goals: " + activeGoals,
+    "Recent action outcomes: " + recentActions
+  ].join("\n").slice(0, 2200);
 
   if (contextCache.size >= CONTEXT_CACHE_MAX) {
     const oldest = contextCache.keys().next().value;
@@ -3875,12 +4009,13 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
 
     // Step 2: Send transcribed text to the main model (with full system prompt + history)
     // Rebuild model with search if the transcribed text needs it
-    let { history, useSearch, dynamicSystemPrompt, cachedContentName } = context;
+    let { history, useSearch, dynamicSystemPrompt, cachedContentName, modelRoute } = context;
     if (needsSearch(userText)) {
       const refreshed = await buildChatContext(userId, userText, null, STREAMING_CHAT_MODEL);
       useSearch = refreshed.useSearch;
       dynamicSystemPrompt = refreshed.dynamicSystemPrompt;
       cachedContentName = refreshed.cachedContentName;
+      modelRoute = refreshed.modelRoute;
     }
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({
@@ -3893,7 +4028,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
     });
 
     const stream = await streamBrain({
-      model: STREAMING_CHAT_MODEL,
+      provider: modelRoute.provider,
+      model: modelRoute.model,
       contents: initialRequest.contents,
       config: initialRequest.config
     });
@@ -3934,7 +4070,8 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
         { role: 'user', parts: [{ text: synthesisPromptForDataResults(userText, dataResults) }] }
       );
       const followUp = await generateBrain({
-        model: PRIMARY_CHAT_MODEL,
+        provider: modelRoute.provider,
+        model: modelRoute.model,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       });
@@ -4038,7 +4175,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       ? `The user attached an image or screenshot. Use it as context when helpful.\n\n${message}`
       : `The user attached a file (${req.file.originalname || 'document'}, type: ${req.file.mimetype}). Use its content to answer their question.\n\n${message}`;
 
-    const [{ history, useSearch, dynamicSystemPrompt, cachedContentName }] = await Promise.all([
+    const [{ history, useSearch, dynamicSystemPrompt, cachedContentName, modelRoute }] = await Promise.all([
       buildChatContext(userId, message, null, PRIMARY_CHAT_MODEL, { chatStartedAt }),
       saveMessage(userId, 'user', `${message}\n\n[Attached ${fileLabel}: ${req.file.originalname || fileLabel}]`)
     ]);
@@ -4058,7 +4195,8 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
     });
 
     const brainRes = await generateBrain({
-      model: PRIMARY_CHAT_MODEL,
+      provider: modelRoute.provider,
+      model: modelRoute.model,
       contents: initialRequest.contents,
       config: initialRequest.config
     });
@@ -4094,7 +4232,8 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
         { role: 'user', parts: [{ text: `${synthesisPromptForDataResults(message, dataResults)}\nYou may also use the attached ${fileLabel} context.` }] }
       );
       const followUp = await generateBrain({
-        model: PRIMARY_CHAT_MODEL,
+        provider: modelRoute.provider,
+        model: modelRoute.model,
         contents: followUpRequest.contents,
         config: followUpRequest.config
       });
@@ -4791,15 +4930,18 @@ app.get('/history/:userId/date', async (req, res) => {
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
   const historyOptions = { since: requestContext.chatStartedAt };
-  const [memory, history, preferences, enabledConnectors, userContext, cachedContentName, recentActions] = await Promise.all([
+  const [memory, history, preferences, preferenceMap, enabledConnectors, userContext, recentActions] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace, message || ''),
     getHistory(userId, trace, 12, historyOptions),
     getPreferences(userId, trace),
+    getPreferenceMap(userId),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
-    getPromptCacheName(trace, modelName),
     quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions)
   ]);
+  const requestedRoute = resolveModelRoute(preferenceMap);
+  const modelRoute = requestedRoute.configured ? requestedRoute : (requestedRoute.fallback || requestedRoute);
+  const cachedContentName = await getPromptCacheName(trace, modelRoute.model);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
   const statedContext = [
     ...extractAlreadyStatedContext(history),
@@ -4848,7 +4990,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     cachedContentName,
     quickTurn,
     statedContext,
-    resolvedContext
+    resolvedContext,
+    modelRoute
   };
 }
 
@@ -5448,6 +5591,7 @@ function emptyProactiveSummary() {
     failureFollowUps: 0,
     healthAlerts: 0,
     locationReminders: 0,
+    recoveredRuns: 0,
     failures: 0
   };
 }
@@ -5551,6 +5695,19 @@ async function runProactiveSweep(logger = console) {
   const startedAt = Date.now();
   const summary = emptyProactiveSummary();
 
+  // Hand back runs abandoned by a dead instance before doing anything else. They are marked
+  // 'paused' with their checkpoint intact, so the user (or a later sweep) can resume them
+  // instead of finding a task stuck at 'running' with no explanation.
+  try {
+    const recovered = await taskManager.recoverStaleRuns(new Date());
+    if (recovered.length) {
+      summary.recoveredRuns = recovered.length;
+      logger.log?.(`[sweep] recovered ${recovered.length} interrupted agent run(s): ${recovered.map(t => t.id).join(', ')}`);
+    }
+  } catch (e) {
+    logger.error?.('[sweep] stale-run recovery failed', e.message);
+  }
+
   const { data: users, error } = await supabase
     .from('users')
     .select('user_id');
@@ -5630,6 +5787,74 @@ function normalizeActionResultsForClient(actionResults) {
     out.push(normalizedEntry);
   }
   return out;
+}
+
+const AGENT_AUTONOMY_LEVELS = new Set([
+  'Reactive', 'Reserved', 'Balanced', 'Proactive', 'Autonomous',
+  'Quiet', 'Low', 'Medium', 'Active', 'Medium-High', 'High', 'Bold', 'Assertive'
+]);
+
+function sanitizeAgentTaskText(value, fallback) {
+  const text = String(value || '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return fallback;
+  return text.length > 180 ? text.slice(0, 177) + '…' : text;
+}
+
+function safeAgentTaskSummary(task) {
+  const rawResults = Array.isArray(task?.results) ? task.results : [];
+  const results = rawResults.slice(-20).map((entry, index) => {
+    const result = entry?.result || {};
+    const pending = result.pending === true;
+    const success = !pending && result.success !== false && !result.error;
+    const summarySource = pending
+      ? result.text || result.actionSummary
+      : success
+        ? result.actionSummary || result.cardText || result.text
+        : result.actionSummary || result.error || result.text;
+    return {
+      id: index + '-' + String(entry?.action || 'step'),
+      action: sanitizeAgentTaskText(entry?.action, 'Agent step'),
+      success,
+      pending,
+      summary: sanitizeAgentTaskText(
+        summarySource,
+        pending ? 'Waiting for your approval' : success ? 'Completed' : 'Could not complete this step'
+      )
+    };
+  });
+
+  const plan = Array.isArray(task?.plan)
+    ? task.plan.slice(0, 12).map((step, index) => ({
+      id: String(index),
+      description: sanitizeAgentTaskText(
+        typeof step === 'string' ? step : step?.description || step?.action || step?.type,
+        'Step ' + (index + 1)
+      )
+    }))
+    : [];
+
+  return {
+    id: task?.id,
+    goal: sanitizeAgentTaskText(task?.goal, 'Untitled goal'),
+    status: task?.status || 'pending',
+    current_step: Number.isFinite(task?.current_step) ? task.current_step : 0,
+    autonomy: task?.autonomy || 'Balanced',
+    guard_mode: task?.metadata?.guardMode === true,
+    // Why a run stopped. A paused task with no explanation is the state this whole
+    // durability pass exists to eliminate. Sanitised like every other field, since the text
+    // can carry a provider error containing a URL.
+    last_error: task?.last_error ? sanitizeAgentTaskText(task.last_error, 'Stopped before finishing') : null,
+    resumable: Boolean(task?.checkpoint),
+    created_at: task?.created_at || null,
+    updated_at: task?.updated_at || null,
+    completed_at: task?.completed_at || null,
+    plan,
+    results
+  };
 }
 
 // Enrich actions with presentation fields so the browser UI can render "tasks"
@@ -6085,7 +6310,12 @@ function getStructuredDataResults(actionResults, message = '') {
 function postResponseTasks(userId, message, extra = {}) {
   if (shouldSaveMemory(message)) {
     extractMemoryFact(userId, message).then(fact => {
-      if (fact) saveMemory(userId, fact, 'fact');
+      if (!fact) return;
+      if (isDurableProfileFact(message)) {
+        mergeIntoProfile(userId, fact).catch(() => {});
+      } else {
+        saveMemory(userId, fact, 'fact');
+      }
     }).catch(() => {});
   }
   const styleCues = [
@@ -6448,14 +6678,23 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return;
     }
 
-    const chatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
+    const requestedChatModel = streaming ? STREAMING_CHAT_MODEL : PRIMARY_CHAT_MODEL;
     const requestContext = {
       location,
       nativeHints,
       chatStartedAt,
       pendingAction: pendingAction && isPendingRevisionMessage(message) ? pendingAction : null
     };
-    const { history, useSearch, dynamicSystemPrompt, cachedContentName, quickTurn } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, chatModel, requestContext));
+    const {
+      history,
+      useSearch,
+      dynamicSystemPrompt,
+      cachedContentName,
+      quickTurn,
+      modelRoute
+    } = await trace.run('buildChatContext', () => buildChatContext(userId, message, trace, requestedChatModel, requestContext));
+    const chatModel = modelRoute.model;
+    const chatProvider = modelRoute.provider;
     const baseHistory = normalizeGeminiHistory(history);
     const initialRequest = buildModernGenerateRequest({
       dynamicSystemPrompt,
@@ -6517,6 +6756,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           dynamicSystemPrompt: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
           baseHistory,
           useSearch: isBroadMoneyGoal || useSearch, // force real-time research for money goals
+          provider: chatProvider,
           modelName: chatModel,
           maxIterations: isBroadMoneyGoal || autonomyLevel === 'High' || autonomyLevel === 'Bold' ? 10 : 6,
           context: { userMessage: message, location, nativeHints, autonomy: autonomyLevel },
@@ -6548,7 +6788,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // For broad goals like making money, force a solid plan + research summary + persistent tracking
         if (isBroadMoneyGoal) {
           try {
-            const plan = await generatePlan(userId, message, spoken);
+            const plan = await generatePlan(userId, message, spoken, chatModel, chatProvider);
             spoken = `**Concierge Plan for "${message}":**\n${plan.title || 'Money-making strategy'}\n\nSteps:\n${(plan.steps || []).map((s, i) => `${i+1}. ${s.description}${s.actionType ? ` (use: ${s.actionType})` : ''}`).join('\n')}\n\nRisks: ${(plan.risks || []).join('; ')}\n\nAccount plan: ${plan.accountUsage || 'Use account to seed opportunities and receive earnings.'}\n\n${spoken}\n\nI've created a persistent task to monitor and advance this using the concierge account. With real API keys (e.g. STRIPE_SECRET_KEY), I can do actual charges and payouts. Check back or say "update money plan".`;
             if (agentResult.taskId) {
               await taskManager.appendResultToTask(userId, agentResult.taskId, { action: 'money_plan', result: { plan, research: 'used web_search' } });
@@ -6566,7 +6806,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         // trace log line, nothing downstream branches on it, so blocking the response on
         // a full extra Gemini call here was pure latency for zero payoff (same class of
         // fix as agent-orchestrator.js's mid-loop reflection).
-        reflectOnResults(message, actionResults, actionResults)
+        reflectOnResults(message, actionResults, actionResults, chatModel, chatProvider)
           .then((reflection) => {
             if (reflection && !reflection.achieved && reflection.nextAction) {
               trace && trace.log && trace.log('agent.reflection.next_action', JSON.stringify({
@@ -6630,6 +6870,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         sendStatus('thinking_start', 'Thinking');
         // Stream the model response token-by-token (provider per OXY_BRAIN_PROVIDER)
         const stream = await trace.run('brain.stream.initial', () => streamBrain({
+          provider: chatProvider,
           model: chatModel,
           contents: initialRequest.contents,
           config: initialRequest.config
@@ -6694,7 +6935,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         flushSafeDisplayText();
         trace.log('brain.initial_complete');
         if (!fullText.trim()) {
-          fullText = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+          fullText = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
           if (fullText) trace.log('brain.empty_recovery_success');
         }
 
@@ -6707,7 +6948,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         }
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
-          const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+          const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
           if (recovered) {
             fullText = recovered;
             ({ spoken, actions, parseError } = parseActions(fullText));
@@ -6768,6 +7009,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           );
           const compositionStarted = Date.now();
           const followUp = await trace.run('brain.stream.followup', () => streamBrain({
+            provider: chatProvider,
             model: chatModel,
             contents: followUpRequest.contents,
             config: followUpRequest.config
@@ -6844,6 +7086,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     // ── Non-streaming mode (JSON — backward compatible) ─────────────────
     const brainRes = await trace.run('brain.generate.nonstream', () => generateBrain({
+      provider: chatProvider,
       model: chatModel,
       contents: initialRequest.contents,
       config: initialRequest.config
@@ -6858,7 +7101,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       actions = [];
     }
     if (!rawText.trim() || (!spoken && !actions.length)) {
-      const recovered = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
+      const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions, parseError } = parseActions(recovered));
         if (parseError) trace.log('parse_actions.malformed_block', 'recovery text also had a malformed <action> block');
@@ -6900,6 +7143,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       );
       const compositionStarted = Date.now();
       const followUp = await trace.run('brain.generate.followup_nonstream', () => generateBrain({
+        provider: chatProvider,
         model: chatModel,
         contents: followUpRequest.contents,
         config: followUpRequest.config
@@ -7451,14 +7695,245 @@ if (process.env.SENTRY_DSN) {
 }
 
 // === AGENTIC TASKS API (persistent goals, plans, background agency) ===
+app.get('/agent/workspace', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const [{ workspace, files }, { sessions }] = await Promise.all([
+      agentWorkspace.listWorkspaceFiles(supabase, userId),
+      agentWorkspace.listWorkspaceSessions(supabase, userId)
+    ]);
+    res.json({
+      workspace,
+      files,
+      sessions,
+      capabilities: ['text_files', 'project_folders', 'persistent_sessions', 'task_history']
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load workspace.' });
+  }
+});
+
+app.get('/agent/workspace/files', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await agentWorkspace.listWorkspaceFiles(supabase, userId, req.query.prefix || '');
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/agent/workspace/files/content', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const file = await agentWorkspace.readWorkspaceFile(supabase, userId, req.query.path);
+    if (!file) return res.status(404).json({ error: 'Workspace file not found.' });
+    res.json({ file });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/agent/workspace/files', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { path: filePath, content, kind } = req.body || {};
+    const file = await agentWorkspace.writeWorkspaceFile(supabase, userId, filePath, content, kind);
+    res.json({ file });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/agent/workspace/sessions', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json(await agentWorkspace.listWorkspaceSessions(supabase, userId));
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load workspace sessions.' });
+  }
+});
+
+app.post('/agent/workspace/sessions', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const session = await agentWorkspace.createWorkspaceSession(supabase, userId, req.body || {});
+    res.json({ session });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/agent/continuity', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { data, error } = await supabase.from('agent_imports')
+      .select('id, source, status, conversation_count, message_count, project_count, document_count, memory_count, metadata, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    res.json({ imports: data || [], supportedSources: ['chatgpt', 'claude', 'gemini', 'generic'] });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load continuity history.' });
+  }
+});
+
+// Dry run. An export whose instructions and memory silently didn't parse looks identical to
+// a clean import from the outside, so the coverage report is shown BEFORE anything is
+// written and the user confirms against it.
+app.post('/agent/continuity/preview', requireSessionAuth, continuityBodyParser, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json(agentContinuity.previewContinuity(req.body || {}));
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not read that export.' });
+  }
+});
+
+app.post('/agent/continuity/import', requireSessionAuth, continuityBodyParser, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await agentContinuity.importContinuity(supabase, userId, req.body || {});
+    invalidateUserContextCache(userId);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Could not import continuity.' });
+  }
+});
+
+app.get('/agent/context', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json({ context: await loadAgentContext(supabase, userId) });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load agent context.' });
+  }
+});
+
+app.get('/agent/tools', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const enabled = new Set(await getEnabledConnectors(userId));
+    const tools = Object.entries(ACTION_CONTRACTS).map(([id, contract]) => ({
+      id,
+      risk: contract.risk || 'low',
+      executionMode: contract.executionMode || 'direct',
+      confirmation: contract.confirmation || 'none',
+      required: contract.required || [],
+      available: !contract.connector || enabled.has(contract.connector)
+    }));
+    res.json({
+      tools,
+      connectors: CONNECTORS.map(connector => ({
+        id: connector.id,
+        name: connector.name,
+        category: connector.category,
+        kind: connector.kind,
+        implemented: connector.implemented,
+        connected: enabled.has(connector.id)
+      })),
+      capabilities: ['communication', 'productivity', 'development', 'travel', 'shopping', 'health', 'finance']
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load tool catalog.' });
+  }
+});
+
+app.get('/agent/browser', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { data, error } = await supabase.from('browser_sessions')
+      .select('site, last_url, goal, updated_at')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    res.json({
+      sessions: (data || []).map(session => ({
+        site: session.site,
+        lastUrl: session.last_url,
+        goal: session.goal,
+        updatedAt: session.updated_at
+      })),
+      capabilities: ['persistent_sessions', 'login_state', 'website_understanding', 'form_filling', 'checkout_review']
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load browser sessions.' });
+  }
+});
+
+app.get('/agent/permissions', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const settings = await getChatSettings(supabase, userId);
+  res.json({
+    guardMode: settings.guardMode === true,
+    read: { default: 'automatic', description: 'Read-only context and lookups can run automatically.' },
+    write: { default: settings.guardMode ? 'approval' : 'contract', description: settings.guardMode ? 'Every write waits for approval.' : 'Writes follow their action contract.' },
+    payment: { default: 'approval', description: 'Money movement always waits for approval or an explicit spend guard.' },
+    audit: { enabled: true, undo: 'connector-dependent' }
+  });
+});
+
+app.get('/agent/audit', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { data, error } = await supabase.from('action_log')
+      .select('action, status, error, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    const entries = (data || []).map(row => {
+      const action = typeof row.action === 'string' ? safeParseJSON(row.action) : row.action;
+      const type = String(action?.type || 'unknown');
+      const contract = ACTION_CONTRACTS[type] || {};
+      return {
+        type,
+        status: row.status || 'unknown',
+        error: row.error || null,
+        createdAt: row.created_at,
+        risk: contract.risk || 'unknown',
+        executionMode: contract.executionMode || 'direct',
+        reviewRequired: contract.confirmation === 'review_required' || contract.executionMode === 'review',
+        undo: null
+      };
+    });
+    res.json({ entries });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load the action history.' });
+  }
+});
+
 app.post('/agent/tasks', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  const { goal, autonomy, plan } = req.body || {};
+  const { goal, autonomy, plan, guardMode } = req.body || {};
   if (!goal) return res.status(400).json({ error: 'goal required' });
+  if (guardMode !== undefined && typeof guardMode !== 'boolean') {
+    return res.status(400).json({ error: 'guardMode must be a boolean' });
+  }
   try {
-    const task = await taskManager.createTask(userId, goal, { autonomy, plan });
-    res.json({ task });
+    const task = await taskManager.createTask(userId, goal, {
+      autonomy,
+      plan,
+      metadata: typeof guardMode === 'boolean' ? { guardMode } : undefined
+    });
+    res.json({ task: safeAgentTaskSummary(task) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -7468,7 +7943,7 @@ app.get('/agent/tasks', requireSessionAuth, async (req, res) => {
   const status = req.query.status;
   try {
     const tasks = await taskManager.listTasks(userId, status || null);
-    res.json({ tasks });
+    res.json({ tasks: tasks.map(safeAgentTaskSummary) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -7478,7 +7953,33 @@ app.get('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
   try {
     const task = await taskManager.getTask(userId, req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
-    res.json({ task });
+    res.json({ task: safeAgentTaskSummary(task) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.patch('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const { autonomy, guardMode } = req.body || {};
+  if (autonomy !== undefined && (!AGENT_AUTONOMY_LEVELS.has(autonomy) || autonomy.length > 32)) {
+    return res.status(400).json({ error: 'Unsupported autonomy level' });
+  }
+  if (guardMode !== undefined && typeof guardMode !== 'boolean') {
+    return res.status(400).json({ error: 'guardMode must be a boolean' });
+  }
+  if (autonomy === undefined && guardMode === undefined) {
+    return res.status(400).json({ error: 'No task controls supplied' });
+  }
+  try {
+    const task = await taskManager.getTask(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    const updates = {};
+    if (autonomy !== undefined) updates.autonomy = autonomy;
+    if (guardMode !== undefined) {
+      updates.metadata = { ...(task.metadata || {}), guardMode };
+    }
+    const updated = await taskManager.updateTask(userId, task.id, updates);
+    res.json({ task: safeAgentTaskSummary(updated) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -7487,18 +7988,45 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const task = await taskManager.getTask(userId, req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
-  // Kick a background agent run for the goal (fire and forget)
+  // A run with a live heartbeat is already being worked on by another instance. Starting a
+  // second one would duplicate every action the first is mid-way through performing.
+  if (taskManager.isRunActive(task)) {
+    return res.status(409).json({ error: 'That task is already running.', taskId: task.id });
+  }
+
+  const resuming = Boolean(task.checkpoint);
+  // Mark it running before handing off to the background loop. Otherwise a very
+  // fast run can complete and write `completed`, then this request writes the
+  // stale `running` state over it. The heartbeat is set here too, so the task is
+  // never briefly 'running' with no heartbeat (which the sweep would read as stale).
+  await taskManager.updateTask(userId, task.id, {
+    status: 'running',
+    heartbeat_at: new Date().toISOString(),
+    attempt: (task.attempt || 0) + 1,
+    last_error: null
+  });
+
   runAgenticLoop({
     userId,
     initialMessage: task.goal,
     dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
     maxIterations: 6,
-    context: { autonomy: task.autonomy },
+    context: { autonomy: task.autonomy, guardMode: task.metadata?.guardMode === true },
     executeActionsFn: executeActions,
-    persistTask: true
-  }).catch(() => {});
-  await taskManager.updateTask(userId, task.id, { status: 'running' });
-  res.json({ started: true, taskId: task.id });
+    persistTask: true,
+    existingTaskId: task.id
+  }).catch(async (e) => {
+    // Swallowing this left the task stranded at 'running' forever with nothing to explain
+    // it. Record the failure and keep the checkpoint so it stays resumable.
+    try {
+      await taskManager.updateTask(userId, task.id, {
+        status: 'paused',
+        heartbeat_at: null,
+        last_error: String(e?.message || e).slice(0, 500)
+      });
+    } catch {}
+  });
+  res.json({ started: true, resumed: resuming, taskId: task.id });
 });
 
 app.post('/agent/simulate', requireSessionAuth, async (req, res) => {
@@ -7733,6 +8261,31 @@ app.put('/chat-settings', requireSessionAuth, async (req, res) => {
   res.json(result);
 });
 
+// Model independence: the relationship is owned by the user, while credentials stay
+// server-side. A route can be selected before its provider is configured; chat keeps the
+// current route active until then and the response makes the unavailable state explicit.
+app.get('/model-routing', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  res.json(publicModelRouting(await getPreferenceMap(userId)));
+});
+
+app.put('/model-routing', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const route = validateModelRouteInput(req.body || {});
+  if (route.error) return res.status(400).json({ error: route.error });
+  await Promise.all([
+    setPreferenceValue(userId, ROUTE_KEYS.provider, route.provider),
+    setPreferenceValue(userId, ROUTE_KEYS.model, route.model)
+  ]);
+  res.json(publicModelRouting({
+    ...(await getPreferenceMap(userId)),
+    [ROUTE_KEYS.provider]: route.provider,
+    [ROUTE_KEYS.model]: route.model
+  }));
+});
+
 // One-off address -> lat/lng lookup, used by the iOS Settings "Home address" field so a
 // saved home location can be resolved once (not repeated per ride/route request).
 app.post('/geocode', requireSessionAuth, async (req, res) => {
@@ -7840,9 +8393,12 @@ module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActio
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
+module.exports.safeAgentTaskSummary = safeAgentTaskSummary;
+module.exports.executeAction = executeAction;
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;
 module.exports.isUserFacingMemory = isUserFacingMemory;
 module.exports.isUsefulMemoryContent = isUsefulMemoryContent;
+module.exports.isDurableProfileFact = isDurableProfileFact;
 module.exports.CONNECTORS = CONNECTORS;
 module.exports.getWavDurationMs = getWavDurationMs;
 module.exports.isImplausibleTranscript = isImplausibleTranscript;

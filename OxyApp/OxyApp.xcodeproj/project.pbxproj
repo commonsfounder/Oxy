@@ -16,6 +16,21 @@
 		A10000010000000000000202 /* Routine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000202 /* Routine.swift */; };
 		A10000010000000000000203 /* RoutinesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000203 /* RoutinesService.swift */; };
 		A10000010000000000000204 /* RoutinesListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000204 /* RoutinesListView.swift */; };
+		A10000010000000000000209 /* AgentTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000209 /* AgentTask.swift */; };
+		A1000001000000000000020A /* AgentTasksService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020A /* AgentTasksService.swift */; };
+		A1000001000000000000020B /* AgentWorkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020B /* AgentWorkView.swift */; };
+		A1000001000000000000020C /* AgentContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020C /* AgentContext.swift */; };
+		A1000001000000000000020D /* AgentContextService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020D /* AgentContextService.swift */; };
+		A1000001000000000000020E /* AgentOSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020E /* AgentOSView.swift */; };
+		A1000001000000000000020F /* AgentWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001000000000000020F /* AgentWorkspace.swift */; };
+		A10000010000000000000210 /* AgentWorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000210 /* AgentWorkspaceService.swift */; };
+		A10000010000000000000211 /* AgentWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000211 /* AgentWorkspaceView.swift */; };
+		A10000010000000000000212 /* ModelRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000212 /* ModelRouting.swift */; };
+		A10000010000000000000213 /* ModelRoutingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000213 /* ModelRoutingService.swift */; };
+		A10000010000000000000214 /* ModelRoutingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000214 /* ModelRoutingView.swift */; };
+		A10000010000000000000215 /* AgentContinuity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000215 /* AgentContinuity.swift */; };
+		A10000010000000000000216 /* AgentContinuityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000216 /* AgentContinuityService.swift */; };
+		A10000010000000000000217 /* AgentContinuityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000217 /* AgentContinuityView.swift */; };
 		A10000010000000000000205 /* VaultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000205 /* VaultView.swift */; };
 		A10000010000000000000206 /* RecentEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000206 /* RecentEntity.swift */; };
 		A10000010000000000000207 /* ChatSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000207 /* ChatSettings.swift */; };
@@ -78,6 +93,21 @@
 		A20000010000000000000202 /* Routine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Routine.swift; sourceTree = "<group>"; };
 		A20000010000000000000203 /* RoutinesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesService.swift; sourceTree = "<group>"; };
 		A20000010000000000000204 /* RoutinesListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesListView.swift; sourceTree = "<group>"; };
+		A20000010000000000000209 /* AgentTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTask.swift; sourceTree = "<group>"; };
+		A2000001000000000000020A /* AgentTasksService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTasksService.swift; sourceTree = "<group>"; };
+		A2000001000000000000020B /* AgentWorkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkView.swift; sourceTree = "<group>"; };
+		A2000001000000000000020C /* AgentContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContext.swift; sourceTree = "<group>"; };
+		A2000001000000000000020D /* AgentContextService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContextService.swift; sourceTree = "<group>"; };
+		A2000001000000000000020E /* AgentOSView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentOSView.swift; sourceTree = "<group>"; };
+		A2000001000000000000020F /* AgentWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkspace.swift; sourceTree = "<group>"; };
+		A20000010000000000000210 /* AgentWorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkspaceService.swift; sourceTree = "<group>"; };
+		A20000010000000000000211 /* AgentWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkspaceView.swift; sourceTree = "<group>"; };
+		A20000010000000000000212 /* ModelRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouting.swift; sourceTree = "<group>"; };
+		A20000010000000000000213 /* ModelRoutingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRoutingService.swift; sourceTree = "<group>"; };
+		A20000010000000000000214 /* ModelRoutingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRoutingView.swift; sourceTree = "<group>"; };
+		A20000010000000000000215 /* AgentContinuity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContinuity.swift; sourceTree = "<group>"; };
+		A20000010000000000000216 /* AgentContinuityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContinuityService.swift; sourceTree = "<group>"; };
+		A20000010000000000000217 /* AgentContinuityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentContinuityView.swift; sourceTree = "<group>"; };
 		A20000010000000000000205 /* VaultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultView.swift; sourceTree = "<group>"; };
 		A20000010000000000000206 /* RecentEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecentEntity.swift; sourceTree = "<group>"; };
 		A20000010000000000000207 /* ChatSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSettings.swift; sourceTree = "<group>"; };
@@ -174,11 +204,16 @@
 				A20000010000000000000002 /* AppState.swift */,
 				A20000010000000000000003 /* Message.swift */,
 				A20000010000000000000101 /* AgentTaskSession.swift */,
+				A20000010000000000000209 /* AgentTask.swift */,
 				A20000010000000000000200 /* TaskStep.swift */,
 				A20000010000000000000202 /* Routine.swift */,
 				A20000010000000000000206 /* RecentEntity.swift */,
 				A20000010000000000000207 /* ChatSettings.swift */,
 				A20000010000000000000208 /* GeocodeResponse.swift */,
+				A2000001000000000000020C /* AgentContext.swift */,
+				A2000001000000000000020F /* AgentWorkspace.swift */,
+				A20000010000000000000212 /* ModelRouting.swift */,
+				A20000010000000000000215 /* AgentContinuity.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -192,6 +227,11 @@
 				A20000010000000000000007 /* ChatService.swift */,
 				A20000010000000000000201 /* TaskStepsService.swift */,
 				A20000010000000000000203 /* RoutinesService.swift */,
+				A2000001000000000000020A /* AgentTasksService.swift */,
+				A2000001000000000000020D /* AgentContextService.swift */,
+				A20000010000000000000210 /* AgentWorkspaceService.swift */,
+				A20000010000000000000213 /* ModelRoutingService.swift */,
+				A20000010000000000000216 /* AgentContinuityService.swift */,
 				A20000010000000000000041 /* OxyShortcuts.swift */,
 				A20000010000000000000042 /* WeatherService.swift */,
 				A20000010000000000000043 /* PendantLiveActivity.swift */,
@@ -217,6 +257,9 @@
 				A50000010000000000000100 /* Home */,
 				A50000010000000000000012 /* Memory */,
 				A50000010000000000000018 /* Routines */,
+				A5000001000000000000020B /* Work */,
+				A5000001000000000000020C /* Agent */,
+				A50000010000000000000211 /* Workspace */,
 				A50000010000000000000013 /* Connectors */,
 				A50000010000000000000014 /* Settings */,
 				A50000010000000000000016 /* Onboarding */,
@@ -327,6 +370,32 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
+		A5000001000000000000020B /* Work */ = {
+			isa = PBXGroup;
+			children = (
+				A2000001000000000000020B /* AgentWorkView.swift */,
+			);
+			path = Work;
+			sourceTree = "<group>";
+		};
+		A5000001000000000000020C /* Agent */ = {
+			isa = PBXGroup;
+			children = (
+				A2000001000000000000020E /* AgentOSView.swift */,
+				A20000010000000000000214 /* ModelRoutingView.swift */,
+				A20000010000000000000217 /* AgentContinuityView.swift */,
+			);
+			path = Agent;
+			sourceTree = "<group>";
+		};
+		A50000010000000000000211 /* Workspace */ = {
+			isa = PBXGroup;
+			children = (
+				A20000010000000000000211 /* AgentWorkspaceView.swift */,
+			);
+			path = Workspace;
+			sourceTree = "<group>";
+		};
 		A50000010000000000000100 /* Home */ = {
 			isa = PBXGroup;
 			children = (
@@ -435,6 +504,21 @@
 				A10000010000000000000202 /* Routine.swift in Sources */,
 				A10000010000000000000203 /* RoutinesService.swift in Sources */,
 				A10000010000000000000204 /* RoutinesListView.swift in Sources */,
+				A10000010000000000000209 /* AgentTask.swift in Sources */,
+				A1000001000000000000020A /* AgentTasksService.swift in Sources */,
+				A1000001000000000000020B /* AgentWorkView.swift in Sources */,
+				A1000001000000000000020C /* AgentContext.swift in Sources */,
+				A1000001000000000000020D /* AgentContextService.swift in Sources */,
+				A1000001000000000000020E /* AgentOSView.swift in Sources */,
+				A1000001000000000000020F /* AgentWorkspace.swift in Sources */,
+				A10000010000000000000210 /* AgentWorkspaceService.swift in Sources */,
+				A10000010000000000000211 /* AgentWorkspaceView.swift in Sources */,
+				A10000010000000000000212 /* ModelRouting.swift in Sources */,
+				A10000010000000000000213 /* ModelRoutingService.swift in Sources */,
+				A10000010000000000000214 /* ModelRoutingView.swift in Sources */,
+				A10000010000000000000215 /* AgentContinuity.swift in Sources */,
+				A10000010000000000000216 /* AgentContinuityService.swift in Sources */,
+				A10000010000000000000217 /* AgentContinuityView.swift in Sources */,
 				A10000010000000000000205 /* VaultView.swift in Sources */,
 				A10000010000000000000206 /* RecentEntity.swift in Sources */,
 				A10000010000000000000207 /* ChatSettings.swift in Sources */,

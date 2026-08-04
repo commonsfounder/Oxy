@@ -219,10 +219,23 @@ private struct RoutineRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(routine.name)
-                .font(.appBody(15))
-                .foregroundStyle(Color.mgHeading)
-                .lineLimit(1)
+            HStack(spacing: 8) {
+                Text(routine.name)
+                    .font(.appBody(15))
+                    .foregroundStyle(routine.isEnabled ? Color.mgHeading : Color.mgSecondary)
+                    .lineLimit(1)
+                // An imported routine that isn't running must never read as if it is — the
+                // original is still live wherever it came from.
+                if !routine.isEnabled {
+                    Text(routine.isImported ? "Off · imported" : "Off")
+                        .font(.appBody(10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.mgSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.mgSecondary.opacity(0.12), in: Capsule())
+                }
+            }
             Text(routine.prompt)
                 .font(.appBody(12))
                 .foregroundStyle(Color.mgSecondary)

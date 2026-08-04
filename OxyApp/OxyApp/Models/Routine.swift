@@ -10,10 +10,21 @@ struct Routine: Codable, Identifiable, Equatable {
     /// convention (see `TaskStep.createdAt`, `HistoryEntry.createdAt`) rather than fighting
     /// `JSONDecoder`'s date-decoding strategy against Postgres's `timestamptz` format.
     let createdAt: String?
+    /// Imported automations arrive switched off — the original is still live at its source,
+    /// and enabling the copy before retiring it double-fires every action. Optional because
+    /// routines created before the provenance migration have no value stored.
+    let enabled: Bool?
+    /// Where an imported routine came from ("zapier"); nil for one the user wrote here.
+    let source: String?
+    let intervalMinutes: Int?
+
+    var isEnabled: Bool { enabled ?? true }
+    var isImported: Bool { !(source ?? "").isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, prompt
+        case id, name, prompt, enabled, source
         case createdAt = "created_at"
+        case intervalMinutes = "interval_minutes"
     }
 }
 

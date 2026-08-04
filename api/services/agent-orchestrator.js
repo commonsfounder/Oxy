@@ -3,7 +3,10 @@
 // OXY_BRAIN_PROVIDER selects (OpenAI by default) without knowing which provider it is.
 let PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || 'gpt-5.6-luna';
 
-const { callToolsBrain } = require('./brain-provider');
+// Held as the module object, not destructured: the loop's behaviour around a failing or
+// slow model (retries, checkpointing, resume) is only testable if the brain call can be
+// swapped, and a destructured binding freezes it at import time.
+const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
 const taskManager = require('./task-manager');
 
@@ -19,10 +22,14 @@ const runTraces = new Map();
 // regression is unit-testable without a real Gemini client.
 function extractToolCalls(resp) {
   if (resp?.functionCalls?.length) {
-    return resp.functionCalls.map(fc => ({ name: fc.name, args: fc.args || {} }));
+    return resp.functionCalls.map(fc => ({ name: fc.name, args: fc.args || {}, id: fc.id || null }));
   }
   const parts = resp?.candidates?.[0]?.content?.parts || [];
-  return parts.filter(p => p.functionCall).map(p => ({ name: p.functionCall.name, args: p.functionCall.args || {} }));
+  return parts.filter(p => p.functionCall).map((p, index) => ({
+    name: p.functionCall.name,
+    args: p.functionCall.args || {},
+    id: p.functionCall.id || `call_${String(p.functionCall.name || 'fn').slice(0, 32)}_${index}`
+  }));
 }
 
 function extractSpokenFromResponseSafe(resp) {
@@ -61,11 +68,11 @@ function logAgentStep(trace, step) {
   console.log(`[agent:${trace.id}] ${step.type || 'step'}: ${JSON.stringify(step).slice(0, 200)}`);
 }
 
-async function callGeminiWithTools(modelName, contents, config, trace = null) {
-  const req = { model: modelName, contents, config };
+async function callGeminiWithTools(modelName, contents, config, trace = null, provider = null) {
+  const req = { provider, model: modelName, contents, config };
   const resp = trace
-    ? await trace.run?.('brain.agent.generate', () => callToolsBrain(req)) || await callToolsBrain(req)
-    : await callToolsBrain(req);
+    ? await trace.run?.('brain.agent.generate', () => brainProvider.callToolsBrain(req)) || await brainProvider.callToolsBrain(req)
+    : await brainProvider.callToolsBrain(req);
   return resp;
 }
 
@@ -81,26 +88,70 @@ async function runAgentLoop({
   baseHistory = [],
   useSearch = false,
   modelName = PRIMARY_CHAT_MODEL || 'gemini-3-flash-preview',
+  provider = null,
   maxIterations = 6,
   context = {},
   executeActionsFn,
   trace = null,
   onStep = null,
-  persistTask = false
+  persistTask = false,
+  existingTaskId = null
 }) {
   const agentTrace = createAgentTrace(userId, initialMessage);
   let persistedTask = null;
   if (persistTask) {
     try {
-      persistedTask = await taskManager.createTask(userId, initialMessage, { autonomy: context.autonomy || 'Active' });
+      // A task started from the persistent-work surface already has an identity.
+      // Reusing it keeps the run, results, and later history attached to the same
+      // user-visible goal instead of silently creating a duplicate row.
+      persistedTask = existingTaskId
+        ? await taskManager.getTask(userId, existingTaskId)
+        : await taskManager.createTask(userId, initialMessage, { autonomy: context.autonomy || 'Active' });
+      if (!persistedTask) throw new Error('Persistent task not found');
       agentTrace.persistedTaskId = persistedTask.id;
-    } catch (e) {}
+    } catch (e) {
+      // Background/scheduled work can still run without persistence if the
+      // optional task table is unavailable. A user explicitly resuming a known
+      // task is different: silently detaching that run would break continuity.
+      if (existingTaskId) throw e;
+    }
   }
 
-  const contents = [...baseHistory, { role: 'user', parts: [{ text: initialMessage }] }];
-  const executedActions = [];
-  let spoken = '';
+  // Resume from where a dead instance left off. Without this a recycled run restarted the
+  // goal from scratch — re-executing every action it had already performed.
+  const resumeFrom = (persistedTask && persistedTask.checkpoint) || null;
+  const contents = resumeFrom?.contents?.length
+    ? [...resumeFrom.contents]
+    : [...baseHistory, { role: 'user', parts: [{ text: initialMessage }] }];
+  const executedActions = [...(resumeFrom?.executedActions || [])];
+  const startIteration = Number.isFinite(resumeFrom?.iteration) ? resumeFrom.iteration + 1 : 0;
+  let spoken = resumeFrom?.spoken || '';
   let lastToolResultsText = '';
+
+  if (resumeFrom) {
+    logAgentStep(agentTrace, { type: 'resumed', fromIteration: startIteration, actionsAlready: executedActions.length });
+    if (resumeFrom.truncated) {
+      // The checkpoint had to drop history to fit. Say so in-band rather than letting the
+      // model infer a gap it can't see.
+      contents.push({ role: 'user', parts: [{ text: `Continuing an interrupted run of: ${initialMessage}. Earlier steps are summarised in the results already recorded; do not repeat completed work.` }] });
+    }
+  }
+
+  async function checkpoint(iteration) {
+    if (!persistedTask) return;
+    try {
+      await taskManager.saveCheckpoint(userId, persistedTask.id, {
+        iteration,
+        contents,
+        executedActions,
+        spoken,
+        goal: initialMessage
+      });
+    } catch {
+      // A checkpoint write failing must not kill a run that is otherwise working; the
+      // stale-run sweep is the backstop if this keeps failing.
+    }
+  }
 
   // Cream-of-the-crop: auto plan for complex goals. Keyword-gated only — message length
   // alone used to also trigger this (`initialMessage.length > 50`), which fired on almost
@@ -112,7 +163,7 @@ async function runAgentLoop({
   // despite the keyword gate above.
   if (/\b(plan|book|research|find|organize|handle|arrange)\b/i.test(initialMessage)) {
     try {
-      const plan = await generatePlan(userId, initialMessage, context.summary || '');
+      const plan = await generatePlan(userId, initialMessage, context.summary || '', modelName, provider);
       if (plan?.steps?.length > 1) {
         logAgentStep(agentTrace, { type: 'auto_plan', plan: plan.title });
         // Inject plan into context for agent
@@ -131,28 +182,33 @@ async function runAgentLoop({
     toolConfig: { functionCallingConfig: { mode: 'AUTO' }, ...(useSearch ? { includeServerSideToolInvocations: true } : {}) }
   };
 
-  for (let i = 0; i < maxIterations; i++) {
+  await checkpoint(startIteration - 1);
+
+  for (let i = startIteration; i < maxIterations; i++) {
     logAgentStep(agentTrace, { type: 'think', iteration: i + 1 });
 
     if (onStep) onStep({ phase: 'thinking', iteration: i + 1 });
 
     let resp;
     try {
-      resp = await callGeminiWithTools(modelName, contents, baseConfig, trace);
+      resp = await callGeminiWithTools(modelName, contents, baseConfig, trace, provider);
     } catch (err) {
       logAgentStep(agentTrace, { type: 'error', error: err.message });
       // Retry once on transient error for cream-of-crop reliability
       if (i < maxIterations - 1) {
         await new Promise(r => setTimeout(r, 500));
         try {
-          resp = await callGeminiWithTools(modelName, contents, baseConfig, trace);
+          resp = await callGeminiWithTools(modelName, contents, baseConfig, trace, provider);
         } catch (e2) {
           logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
           agentTrace.status = 'error';
+          // Recorded on the task so a paused run explains itself instead of just stopping.
+          agentTrace.lastError = e2.message;
           break;
         }
       } else {
         agentTrace.status = 'error';
+        agentTrace.lastError = err.message;
         break;
       }
     }
@@ -173,7 +229,7 @@ async function runAgentLoop({
     }
 
     // Convert to internal action shape
-    const actions = toolCalls.map(tc => ({ type: tc.name, input: tc.args || {} }));
+    const actions = toolCalls.map(tc => ({ type: tc.name, input: tc.args || {}, _toolCallId: tc.id }));
 
     logAgentStep(agentTrace, { type: 'tool_calls', actions: actions.map(a => a.type) });
 
@@ -201,7 +257,7 @@ async function runAgentLoop({
       const resultText = JSON.stringify(r.result || r || {});
       functionResponses.push({
         role: 'function',
-        parts: [{ functionResponse: { name: action.type || 'unknown', response: { result: resultText } } }]
+        parts: [{ functionResponse: { id: action._toolCallId, name: action.type || 'unknown', response: { result: resultText } } }]
       });
       lastToolResultsText += `\n[${action.type || 'action'} result]: ${resultText.slice(0, 300)}`;
     });
@@ -226,7 +282,7 @@ async function runAgentLoop({
     // even if that's after this turn has already answered the user.
     const stillInProgress = results.some((r) => r.result?.continuesBrowsing === true);
     if (i > 0 && results.length > 0 && !stillInProgress) {
-      reflectOnResults(initialMessage, actions, results)
+      reflectOnResults(initialMessage, actions, results, modelName, provider)
         .then((reflection) => {
           if (!reflection.achieved && reflection.nextAction) {
             logAgentStep(agentTrace, { type: 'reflection', ...reflection });
@@ -234,6 +290,10 @@ async function runAgentLoop({
         })
         .catch(() => {});
     }
+
+    // Written after the actions of this iteration have been executed and recorded, so a
+    // crash between iterations resumes at the next one rather than repeating this one.
+    await checkpoint(i);
 
     // Safety: if many actions or high risk, may stop early in future
   }
@@ -244,11 +304,23 @@ async function runAgentLoop({
 
   if (persistedTask) {
     try {
-      await taskManager.updateTask(userId, persistedTask.id, {
-        status: agentTrace.status === 'completed' ? 'completed' : 'running',
+      const finished = agentTrace.status === 'completed';
+      const updates = {
+        // A run that stops without completing is 'paused', not left at 'running'. Anything
+        // still marked running with a live heartbeat means an instance is working on it,
+        // and this one is about to return.
+        status: finished ? 'completed' : 'paused',
         results: executedActions,
-        plan: agentTrace.plan
-      });
+        plan: agentTrace.plan,
+        completed_at: finished ? new Date().toISOString() : null,
+        heartbeat_at: null,
+        last_error: finished ? null : (agentTrace.lastError || 'Run stopped before the goal was complete.')
+      };
+      // Clear the checkpoint only once the goal is done, so a later resume can't replay
+      // finished work. An unfinished run keeps its checkpoint — that is what makes it
+      // resumable — so the key is omitted rather than set to undefined.
+      if (finished) updates.checkpoint = null;
+      await taskManager.updateTask(userId, persistedTask.id, updates);
       await taskManager.saveTrace(persistedTask.id, userId, agentTrace.steps.length, 'agent_run_complete', { spoken, actions: executedActions.length });
     } catch (e) {}
   }
@@ -269,7 +341,7 @@ async function runAgentLoop({
 }
 
 // Simple planner: ask model to output a structured plan first
-async function generatePlan(userId, goal, contextSummary = '', modelName = PRIMARY_CHAT_MODEL) {
+async function generatePlan(userId, goal, contextSummary = '', modelName = PRIMARY_CHAT_MODEL, provider = null) {
   // For broad/open-ended goals like "make money", first research current opportunities using available tools/knowledge
   let researchContext = contextSummary;
   const broadGoalKeywords = /money|earn|income|side hustle|monetize|profit|cash|freelance|gig/i;
@@ -299,7 +371,8 @@ Return ONLY a JSON object:
 
 Keep steps actionable and minimal. For broad goals like making money, prioritize low-risk, quick-start steps using available tools (web research, profile setup, persistent task creation, account for funding). Focus on legitimate, user-skill-aligned ideas. Include account usage for seeding or receiving.`;
 
-  const resp = await callToolsBrain({
+  const resp = await brainProvider.callToolsBrain({
+    provider,
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: planPrompt }] }],
     config: { maxOutputTokens: 800 }
@@ -315,10 +388,11 @@ Keep steps actionable and minimal. For broad goals like making money, prioritize
 }
 
 // Reflection step: after execution, reflect and suggest next or correction
-async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY_CHAT_MODEL) {
+async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY_CHAT_MODEL, provider = null) {
   const summary = `Goal: ${goal}\nActions: ${JSON.stringify(actionsTaken.map(a => a.action))}\nResults summary: ${JSON.stringify(results.map(r => ({a: r.action, ok: r.result?.success !== false})))}`;
   const prompt = `You are the assistant's reflection module. Analyze if the goal was achieved. Output JSON: { "achieved": boolean, "summary": "one sentence", "nextAction" : "null or suggested follow up action type", "issues": [] }`;
-  const resp = await callToolsBrain({
+  const resp = await brainProvider.callToolsBrain({
+    provider,
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: prompt + '\n\n' + summary }] }],
     config: {}

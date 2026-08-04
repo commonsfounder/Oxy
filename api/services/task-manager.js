@@ -70,7 +70,74 @@ async function saveTrace(taskId, userId, step, type, data) {
 }
 
 async function completeTask(userId, taskId, finalStatus = 'completed') {
-  return updateTask(userId, taskId, { status: finalStatus, completed_at: new Date().toISOString() });
+  return updateTask(userId, taskId, {
+    status: finalStatus,
+    completed_at: new Date().toISOString(),
+    heartbeat_at: null,
+    // A finished run has nothing to resume. Leaving the checkpoint behind would let a
+    // later resume replay a completed goal.
+    checkpoint: null
+  });
+}
+
+// A run whose heartbeat is older than this is treated as dead. Comfortably longer than the
+// slowest single iteration (a browser task can hold one open for minutes) so a busy run is
+// never mistaken for a stalled one.
+const STALE_RUN_MS = 15 * 60 * 1000;
+
+/*
+ * Checkpoints are written after every iteration, so they must stay small enough that the
+ * write is never the slow part of the loop. Oldest turns are dropped first: the most recent
+ * exchange is what the next iteration actually needs, and the goal is re-stated on resume.
+ */
+const MAX_CHECKPOINT_BYTES = 256 * 1024;
+
+function trimCheckpoint(checkpoint) {
+  const trimmed = { ...checkpoint, contents: [...(checkpoint.contents || [])] };
+  while (trimmed.contents.length > 2 && Buffer.byteLength(JSON.stringify(trimmed), 'utf8') > MAX_CHECKPOINT_BYTES) {
+    trimmed.contents.shift();
+  }
+  if (Buffer.byteLength(JSON.stringify(trimmed), 'utf8') > MAX_CHECKPOINT_BYTES) {
+    // Even two turns can exceed the cap if a tool returned something huge. Keep the shape
+    // valid and resumable rather than failing the write.
+    trimmed.contents = trimmed.contents.slice(-1);
+    trimmed.truncated = true;
+  }
+  return trimmed;
+}
+
+async function saveCheckpoint(userId, taskId, checkpoint) {
+  return updateTask(userId, taskId, {
+    checkpoint: trimCheckpoint(checkpoint),
+    heartbeat_at: new Date().toISOString()
+  });
+}
+
+/*
+ * Hand back runs abandoned by a dead instance. They become 'paused', not 'failed': the
+ * checkpoint is intact, so the work is resumable and calling it a failure would throw away
+ * everything already done.
+ */
+async function recoverStaleRuns(now = new Date(), staleMs = STALE_RUN_MS) {
+  const sb = getSupabase();
+  const cutoff = new Date(now.getTime() - staleMs).toISOString();
+  const { data, error } = await sb.from('agent_tasks')
+    .update({
+      status: 'paused',
+      last_error: 'Run was interrupted before it finished. Resume to continue where it stopped.',
+      updated_at: now.toISOString()
+    })
+    .eq('status', 'running')
+    .lt('heartbeat_at', cutoff)
+    .select('id, user_id, goal');
+  if (error) return [];
+  return data || [];
+}
+
+function isRunActive(task, now = new Date(), staleMs = STALE_RUN_MS) {
+  if (task?.status !== 'running') return false;
+  if (!task.heartbeat_at) return false;
+  return now.getTime() - new Date(task.heartbeat_at).getTime() < staleMs;
 }
 
 // Simple simulation store (in-memory fallback + DB)
@@ -144,6 +211,11 @@ module.exports = {
   appendResultToTask,
   saveTrace,
   completeTask,
+  saveCheckpoint,
+  recoverStaleRuns,
+  isRunActive,
+  trimCheckpoint,
+  STALE_RUN_MS,
   recordSimulation,
   getRecentSimulations,
   saveRecipe,
