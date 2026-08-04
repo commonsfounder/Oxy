@@ -1,15 +1,9 @@
 // Agent orchestrator - no circular deps. Client and model injected or required carefully.
-let modernGenAI;
-let PRIMARY_CHAT_MODEL = 'gemini-3-flash-preview';
+// The model call goes through the brain-provider seam, so this loop follows whatever
+// OXY_BRAIN_PROVIDER selects (OpenAI by default) without knowing which provider it is.
+let PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || 'gpt-5.6-luna';
 
-try {
-  const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
-  modernGenAI = new ModernGoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
-  PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || PRIMARY_CHAT_MODEL;
-} catch (e) {
-  console.warn('[agent-orchestrator] Gemini client init warning:', e.message);
-}
-
+const { callToolsBrain } = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
 const taskManager = require('./task-manager');
 
@@ -70,8 +64,8 @@ function logAgentStep(trace, step) {
 async function callGeminiWithTools(modelName, contents, config, trace = null) {
   const req = { model: modelName, contents, config };
   const resp = trace
-    ? await trace.run?.('gemini.agent.generate', () => modernGenAI.models.generateContent(req)) || await modernGenAI.models.generateContent(req)
-    : await modernGenAI.models.generateContent(req);
+    ? await trace.run?.('brain.agent.generate', () => callToolsBrain(req)) || await callToolsBrain(req)
+    : await callToolsBrain(req);
   return resp;
 }
 
@@ -305,10 +299,10 @@ Return ONLY a JSON object:
 
 Keep steps actionable and minimal. For broad goals like making money, prioritize low-risk, quick-start steps using available tools (web research, profile setup, persistent task creation, account for funding). Focus on legitimate, user-skill-aligned ideas. Include account usage for seeding or receiving.`;
 
-  const resp = await modernGenAI.models.generateContent({
+  const resp = await callToolsBrain({
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: planPrompt }] }],
-    config: { temperature: 0.1, maxOutputTokens: 800 }
+    config: { maxOutputTokens: 800 }
   });
 
   const text = extractSpokenFromResponseSafe(resp);
@@ -324,10 +318,10 @@ Keep steps actionable and minimal. For broad goals like making money, prioritize
 async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY_CHAT_MODEL) {
   const summary = `Goal: ${goal}\nActions: ${JSON.stringify(actionsTaken.map(a => a.action))}\nResults summary: ${JSON.stringify(results.map(r => ({a: r.action, ok: r.result?.success !== false})))}`;
   const prompt = `You are the assistant's reflection module. Analyze if the goal was achieved. Output JSON: { "achieved": boolean, "summary": "one sentence", "nextAction" : "null or suggested follow up action type", "issues": [] }`;
-  const resp = await modernGenAI.models.generateContent({
+  const resp = await callToolsBrain({
     model: modelName,
     contents: [{ role: 'user', parts: [{ text: prompt + '\n\n' + summary }] }],
-    config: { temperature: 0.2 }
+    config: {}
   });
   const t = extractSpokenFromResponseSafe(resp);
   try { return JSON.parse(t.replace(/```/g,'').trim()); } catch { return { achieved: true, summary: 'Completed.', nextAction: null, issues: [] }; }

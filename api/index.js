@@ -52,6 +52,12 @@ const {
   getMissingRuntimeEnv,
   logMissingRuntimeEnvOnce
 } = require('../runtime');
+const {
+  streamBrain,
+  generateBrain,
+  webSearchBrain,
+  getBrainProvider
+} = require('./services/brain-provider');
 const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
   buildCalendarReadAction,
@@ -398,11 +404,19 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-// Agentic reasoning keeps the capable model; ordinary streaming chat uses the fast
-// model so text starts in under a second instead of waiting on the planner-grade path.
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || process.env.GEMINI_MODEL || 'gemini-3-flash-preview';
-const FAST_MODEL = process.env.OXY_FAST_MODEL || process.env.GEMINI_FAST_MODEL || 'gemini-3.1-flash-lite';
+// Chat runs on OpenAI (gpt-5.6-luna) as of 2026-08-04 — smarter and cheaper than the
+// Gemini tier it replaced, and Google billing dunning had denied the Gemini project
+// outright, taking chat down. Provider is selected by OXY_BRAIN_PROVIDER in
+// brain-provider.js; these ids must belong to whichever provider that names.
+// The GEMINI_MODEL/GEMINI_FAST_MODEL overrides are gone on purpose: leaving them would
+// let a stale env var post a Gemini model id to OpenAI's endpoint and 404 at runtime.
+const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || 'gpt-5.6-luna';
+const FAST_MODEL = process.env.OXY_FAST_MODEL || 'gpt-5.6-luna';
 const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
+// Voice in/out never moved off Google: transcription takes raw audio and generateSpeech
+// uses Gemini's own prebuilt voices, neither of which the text/vision brain seam covers.
+// They keep their own Gemini model ids so a chat-model change can't silently retarget them.
+const GEMINI_AUDIO_MODEL = process.env.OXY_GEMINI_AUDIO_MODEL || 'gemini-3.1-flash-lite';
 if ([PRIMARY_CHAT_MODEL, FAST_MODEL, STREAMING_CHAT_MODEL].some(m => m.includes('3.5'))) {
   throw new Error(`[models] BANNED: a model config contains "3.5". Remove it.`);
 }
@@ -915,7 +929,11 @@ function isImplausibleTranscript(text, durationMs) {
 async function transcribeAudio(buffer) {
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-  const transcribeModel = genAI.getGenerativeModel({ model: FAST_MODEL });
+  // Still Gemini: transcription feeds raw audio to a multimodal model, which the chat
+  // brain's text/vision seam does not cover. Pinned to an explicit Gemini id rather than
+  // FAST_MODEL — FAST_MODEL is an OpenAI model now, and posting that id to the Gemini SDK
+  // would fail with a confusing "model not found" instead of a clear config error.
+  const transcribeModel = genAI.getGenerativeModel({ model: GEMINI_AUDIO_MODEL });
   const durationMs = getWavDurationMs(buffer);
 
   const prompts = [
@@ -959,13 +977,12 @@ function firstSentences(text, max = 2) {
 }
 
 async function generateStructuredObject(prompt, fallback = null, imageFile = null) {
-  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
   const parts = [{ text: `${prompt}\n\nReturn JSON only. No markdown fences.` }];
   if (imageFile?.buffer && imageFile?.mimetype?.startsWith('image/')) {
     parts.push({ inlineData: { mimeType: imageFile.mimetype, data: imageFile.buffer.toString('base64') } });
   }
-  const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
-  return parseLooseJson(result.response.text()) || fallback;
+  const result = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts }], config: {} });
+  return parseLooseJson(result.text) || fallback;
 }
 
 function stripActionMarkupForDisplay(text) {
@@ -1344,7 +1361,14 @@ function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, auton
   return explicitAutonomousGoal || directToolIntent || personalDataIntent;
 }
 
+// Actions authored by the cheap streaming model were unreliable enough to discard while
+// FAST_MODEL was a genuinely weaker tier (gemini-3.1-flash-lite). The guard is about that
+// downgrade, not about model identity: once FAST_MODEL and PRIMARY_CHAT_MODEL are the same
+// id — as they are on the OpenAI path — an identity-only check matches the MAIN chat model
+// and silently discards every action the text path parses. Gate on the tiers actually
+// differing so the guard re-arms by itself if a cheaper fast tier is configured again.
 function shouldIgnoreModelAuthoredActions(modelName = '') {
+  if (FAST_MODEL === PRIMARY_CHAT_MODEL) return false;
   return String(modelName || '') === FAST_MODEL;
 }
 
@@ -1598,6 +1622,10 @@ function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
 }
 
 async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MODEL) {
+  // Explicit cache objects are a Gemini concept. OpenAI caches repeated prompt prefixes
+  // server-side with no API call, so on that path this is a no-op and callers get the
+  // empty cache name they already treat as "uncached".
+  if (getBrainProvider() !== 'gemini') return '';
   const cacheState = getPromptCacheState(modelName);
   if (cacheState.name && Date.now() < cacheState.expireAt) {
     if (trace) trace.log('prompt_cache.hit', cacheState.name);
@@ -1641,6 +1669,7 @@ async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MO
 }
 
 function getPromptCacheName(trace = null, modelName = STREAMING_CHAT_MODEL) {
+  if (getBrainProvider() !== 'gemini') return '';
   const cacheState = getPromptCacheState(modelName);
   if (cacheState.name && Date.now() < cacheState.expireAt) {
     if (trace) trace.log('prompt_cache.hit', cacheState.name);
@@ -1728,19 +1757,19 @@ async function recoverEmptyModelResponse({ model, initialRequest, message, trace
   };
   try {
     const response = trace
-      ? await trace.run('gemini.generateContent.empty_recovery', () => modernGenAI.models.generateContent({
+      ? await trace.run('brain.generate.empty_recovery', () => generateBrain({
         model,
         contents: recoveryRequest.contents,
         config: recoveryRequest.config
       }))
-      : await modernGenAI.models.generateContent({
+      : await generateBrain({
         model,
         contents: recoveryRequest.contents,
         config: recoveryRequest.config
       });
     return (response.text || '').trim();
   } catch (error) {
-    if (trace) trace.log('gemini.empty_recovery_fail', error.message);
+    if (trace) trace.log('brain.empty_recovery_fail', error.message);
     return '';
   }
 }
@@ -2072,20 +2101,21 @@ async function analyzeImage(prompt, imageFile) {
     throw new Error('Only image uploads are supported.');
   }
 
-  const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-  const result = await model.generateContent({
+  const result = await generateBrain({
+    model: FAST_MODEL,
     contents: [{
       role: 'user',
       parts: [
         { text: prompt?.trim() || 'Describe this image clearly and practically.' },
         { inlineData: { mimeType: imageFile.mimetype, data: imageFile.buffer.toString('base64') } }
       ]
-    }]
+    }],
+    config: {}
   });
 
   return {
     success: true,
-    text: result.response.text()?.trim() || 'I looked through the image.',
+    text: result.text?.trim() || 'I looked through the image.',
     artifact: {
       type: 'image_analysis',
       image: imageFile.buffer.toString('base64'),
@@ -2467,10 +2497,13 @@ async function executeAction(userId, action, params, context = {}) {
         
         // Concierge-grade: if query, use fast model to extract/answer specifically (makes it useful for real tasks)
         if (query) {
-          const model = genAI.getGenerativeModel({ model: FAST_MODEL });
           const prompt = `You are a helpful concierge assistant. From this page content, answer or extract exactly what is needed for: "${query}". Be concise, factual, list key details or steps. Page: ${text.slice(0, 3000)}`;
-          const llmRes = await model.generateContent(prompt);
-          const answer = (llmRes.response.text() || '').trim();
+          const llmRes = await generateBrain({
+            model: FAST_MODEL,
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {}
+          });
+          const answer = (llmRes.text || '').trim();
           return { success: true, text: answer || 'No specific info found.', url, contentPreview: text.slice(0, 400), query };
         }
         
@@ -2485,12 +2518,10 @@ async function executeAction(userId, action, params, context = {}) {
       const q = String(params?.query || '').trim();
       if (!q) return { success: false, error: 'web_search requires query' };
       try {
-        const res = await modernGenAI.models.generateContent({
+        const answer = await webSearchBrain({
           model: FAST_MODEL,
-          contents: [{ role: 'user', parts: [{ text: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Include key options, prices, and links where available. Only report what the search results support — if results look older than today, say so instead of guessing. Plain prose, no markdown headings or asterisks.` }] }],
-          config: { tools: [{ googleSearch: {} }] }
+          prompt: `Today's date is ${getLocalDateKey()}. Search the web and answer concisely for: "${q}". Include key options, prices, and links where available. Only report what the search results support — if results look older than today, say so instead of guessing. Plain prose, no markdown headings or asterisks.`
         });
-        const answer = (res.text || '').trim();
         if (!answer) return { success: false, error: `Search for "${q}" returned no results.` };
         return { success: true, text: answer, query: q };
       } catch (e) {
@@ -2957,11 +2988,12 @@ async function getMemorySummary(userId) {
 
 async function extractMemoryFact(userId, text) {
   try {
-    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-    const result = await model.generateContent(
-      `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"`
-    );
-    const fact = result.response.text().trim().replace(/^["']|["']$/g, '');
+    const result = await generateBrain({
+      model: FAST_MODEL,
+      contents: [{ role: 'user', parts: [{ text: `Extract one short personal fact worth remembering from this message. Write it as a concise note (e.g. "Works at KPMG", "Has a dog named Biscuit", "Hates mornings", "Lives in Birmingham"). Return only the fact with no explanation. If there is nothing personal worth remembering, return an empty string.\n\nMessage: "${text}"` }] }],
+      config: {}
+    });
+    const fact = (result.text || '').trim().replace(/^["']|["']$/g, '');
     if (!isUsefulMemoryContent(fact)) return null;
 
     // Skip if we already know this
@@ -3831,7 +3863,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       useAgentTools: false
     });
 
-    const stream = await modernGenAI.models.generateContentStream({
+    const stream = await streamBrain({
       model: STREAMING_CHAT_MODEL,
       contents: initialRequest.contents,
       config: initialRequest.config
@@ -3872,7 +3904,7 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
         { role: 'model', parts: [{ text: spoken || '...' }] },
         { role: 'user', parts: [{ text: synthesisPromptForDataResults(userText, dataResults) }] }
       );
-      const followUp = await modernGenAI.models.generateContent({
+      const followUp = await generateBrain({
         model: PRIMARY_CHAT_MODEL,
         contents: followUpRequest.contents,
         config: followUpRequest.config
@@ -3996,12 +4028,12 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
       }
     });
 
-    const geminiRes = await modernGenAI.models.generateContent({
+    const brainRes = await generateBrain({
       model: PRIMARY_CHAT_MODEL,
       contents: initialRequest.contents,
       config: initialRequest.config
     });
-    let { spoken, actions, parseError } = parseActions(geminiRes.text || '');
+    let { spoken, actions, parseError } = parseActions(brainRes.text || '');
     if (parseError) console.warn('[chat-with-image] one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
     let actionResults = [];
@@ -4032,7 +4064,7 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
         { role: 'model', parts: [{ text: spoken || '...' }] },
         { role: 'user', parts: [{ text: `${synthesisPromptForDataResults(message, dataResults)}\nYou may also use the attached ${fileLabel} context.` }] }
       );
-      const followUp = await modernGenAI.models.generateContent({
+      const followUp = await generateBrain({
         model: PRIMARY_CHAT_MODEL,
         contents: followUpRequest.contents,
         config: followUpRequest.config
@@ -4817,12 +4849,12 @@ Give a brief morning-style update. Keep it natural and friendly — not a corpor
 
 The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
 
-  const model = genAI.getGenerativeModel({
+  const briefingRes = await generateBrain({
     model: PRIMARY_CHAT_MODEL,
-    systemInstruction: systemPrompt
+    contents: [{ role: 'user', parts: [{ text: 'whats going on today?' }] }],
+    config: { systemInstruction: systemPrompt }
   });
-  const geminiRes = await model.generateContent('whats going on today?');
-  return parseActions(geminiRes.response.text());
+  return parseActions(briefingRes.text || '');
 }
 
 async function maybeCreateMorningBriefing(userId, now = new Date()) {
@@ -4980,7 +5012,6 @@ function isPromotionalOrBulk(email = {}) {
 async function summarizeEmails(emails) {
   if (!emails.length) return emails;
   try {
-    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const listing = emails.map((e, i) =>
       `${i}. From: ${e.from}\nSubject: ${e.subject}\nSnippet: ${(e.snippet || '').slice(0, 300)}`
     ).join('\n\n');
@@ -5010,8 +5041,8 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
 [{"summary":"Capital One suspended your card after a missed payment — pay £22.80 today to unblock it","cta":"Pay it","promotional":false},
 {"summary":"Amazon order shipped, arrives Thursday, nothing needed","cta":"Track it","promotional":false},
 {"summary":"Product newsletter — nothing needed","cta":"Ignore","promotional":true}]`;
-    const res = await model.generateContent(prompt);
-    const match = (res.response.text() || '').match(/\[[\s\S]*\]/);
+    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
+    const match = (res.text || '').match(/\[[\s\S]*\]/);
     if (!match) return emails;
     const judged = JSON.parse(match[0]);
     return emails.map((e, i) => ({
@@ -5046,7 +5077,6 @@ async function buildEmailActionPlan(userId, { provider, messageId }) {
   if (!body && !links.length) return { success: false, error: 'That email has nothing to go on.' };
 
   try {
-    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
     const linkListing = links.map((l, i) => `${i}. "${l.label}" -> ${l.url}`).join('\n') || '(no links found)';
     const prompt = `An email needs the user's attention. Here is its full text and every real link it contained.
 
@@ -5061,8 +5091,8 @@ Write:
 2. links: pick up to 3 of the links listed above that are genuinely useful for handling this (skip unsubscribe/legal/tracking-pixel links). For each, give a short clean label (2-4 words) and copy its url EXACTLY as given above, character for character — never alter, shorten, or invent a URL. If none of the links are useful, return an empty array.
 
 Respond with ONLY JSON, shape {"steps":["...","..."],"links":[{"label":"...","url":"..."}]}.`;
-    const res = await model.generateContent(prompt);
-    const match = (res.response.text() || '').match(/\{[\s\S]*\}/);
+    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
+    const match = (res.text || '').match(/\{[\s\S]*\}/);
     if (!match) return { success: true, steps: [], links: links.slice(0, 3) };
     const parsed = JSON.parse(match[0]);
     const steps = Array.isArray(parsed.steps)
@@ -5114,12 +5144,12 @@ Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
 Keep it under 70 words. Include only useful items.
 Write plain flowing prose only — no markdown, no headers (###), no bold (**), no bullet or numbered lists.`;
 
-  const model = genAI.getGenerativeModel({
+  const windowRes = await generateBrain({
     model: PRIMARY_CHAT_MODEL,
-    systemInstruction: systemPrompt
+    contents: [{ role: 'user', parts: [{ text: `${window.label} now` }] }],
+    config: { systemInstruction: systemPrompt }
   });
-  const geminiRes = await model.generateContent(`${window.label} now`);
-  const text = stripActionMarkupForDisplay(geminiRes.response.text() || '').trim();
+  const text = stripActionMarkupForDisplay(windowRes.text || '').trim();
   return stripMarkdownFormatting(text);
 }
 
@@ -5317,9 +5347,8 @@ async function maybeCreateEmailNudges(userId, now = new Date()) {
     // Use fast model to find actionables
     const prompt = `Analyze these recent emails for actionable items that need the user's attention today (replies, decisions, deadlines, meetings to confirm). List 0-3 short nudges max. Be concise. If nothing urgent, say "no urgent actions".\n\n${emailSummary}`;
 
-    const model = genAI.getGenerativeModel({ model: FAST_MODEL });
-    const res = await model.generateContent(prompt);
-    const text = (res.response.text() || '').trim();
+    const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
+    const text = (res.text || '').trim();
     if (!text || /no urgent|nothing|none/i.test(text)) {
       await setPreferenceValue(userId, key, 'sent');
       return null;
@@ -6570,8 +6599,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
       try {
         sendStatus('thinking_start', 'Thinking');
-        // Stream Gemini response token-by-token
-        const stream = await trace.run('gemini.generateContentStream.initial', () => modernGenAI.models.generateContentStream({
+        // Stream the model response token-by-token (provider per OXY_BRAIN_PROVIDER)
+        const stream = await trace.run('brain.stream.initial', () => streamBrain({
           model: chatModel,
           contents: initialRequest.contents,
           config: initialRequest.config
@@ -6626,7 +6655,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         for await (const chunk of stream) {
           const text = chunk.text || '';
           if (text) {
-            if (firstChunk) { trace.log('gemini.first_token'); firstChunk = false; }
+            if (firstChunk) { trace.log('brain.first_token'); firstChunk = false; }
             fullText += text;
             emitSafeDisplayText(text);
             // Kick off TTS for complete sentences as they arrive, not after full generation
@@ -6634,10 +6663,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           }
         }
         flushSafeDisplayText();
-        trace.log('gemini.initial_complete');
+        trace.log('brain.initial_complete');
         if (!fullText.trim()) {
           fullText = await recoverEmptyModelResponse({ model: chatModel, initialRequest, message, trace });
-          if (fullText) trace.log('gemini.empty_recovery_success');
+          if (fullText) trace.log('brain.empty_recovery_success');
         }
 
         let { spoken, actions, parseError } = parseActions(fullText);
@@ -6709,7 +6738,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
           );
           const compositionStarted = Date.now();
-          const followUp = await trace.run('gemini.generateContentStream.followup', () => modernGenAI.models.generateContentStream({
+          const followUp = await trace.run('brain.stream.followup', () => streamBrain({
             model: chatModel,
             contents: followUpRequest.contents,
             config: followUpRequest.config
@@ -6785,13 +6814,13 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     // ── Non-streaming mode (JSON — backward compatible) ─────────────────
-    const geminiRes = await trace.run('gemini.generateContent.nonstream', () => modernGenAI.models.generateContent({
+    const brainRes = await trace.run('brain.generate.nonstream', () => generateBrain({
       model: chatModel,
       contents: initialRequest.contents,
       config: initialRequest.config
     }));
 
-    const rawText = geminiRes.text || '';
+    const rawText = brainRes.text || '';
     let { spoken, actions, parseError } = parseActions(rawText);
     if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
     actions = guardCalendarActionsForUserMessage(actions, message);
@@ -6841,7 +6870,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         { role: 'user', parts: [{ text: synthesisPromptForDataResults(message, dataResults) }] }
       );
       const compositionStarted = Date.now();
-      const followUp = await trace.run('gemini.generateContent.followup_nonstream', () => modernGenAI.models.generateContent({
+      const followUp = await trace.run('brain.generate.followup_nonstream', () => generateBrain({
         model: chatModel,
         contents: followUpRequest.contents,
         config: followUpRequest.config

@@ -99,9 +99,12 @@ test('plain factual search prompts stay on the fast streaming path', () => {
   }), false);
 });
 
-test('flash-lite model authored actions are ignored', () => {
-  assert.equal(shouldIgnoreModelAuthoredActions('gemini-3.1-flash-lite'), true);
-  assert.equal(shouldIgnoreModelAuthoredActions('gemini-3-flash-preview'), false);
+// The guard discards actions authored by a WEAKER fast tier. When the fast and primary
+// models are the same id (the OpenAI path), an identity-only check would match the main
+// chat model and silently drop every parsed action — so it must disarm instead.
+test('model-authored actions are trusted when fast and primary tiers are the same model', () => {
+  assert.equal(shouldIgnoreModelAuthoredActions('gpt-5.6-luna'), false);
+  assert.equal(shouldIgnoreModelAuthoredActions('anything-else'), false);
 });
 
 test('parseActions captures multiple action blocks, not just the first', () => {
