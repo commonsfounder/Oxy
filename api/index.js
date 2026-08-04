@@ -58,6 +58,11 @@ const {
   webSearchBrain,
   getBrainProvider
 } = require('./services/brain-provider');
+const {
+  getVoiceProvider,
+  synthesizeSpeechOpenAI,
+  transcribeSpeechOpenAI
+} = require('./services/voice-provider');
 const { getSearchReason, needsSearch } = require('./services/search-intent');
 const {
   buildCalendarReadAction,
@@ -903,7 +908,14 @@ function getWavDurationMs(buffer) {
     if (!buffer || buffer.length < 44) return null;
     const sampleRate = buffer.readUInt32LE(24);
     const byteRate = buffer.readUInt32LE(28);
-    const dataSize = buffer.readUInt32LE(40);
+    const declaredDataSize = buffer.readUInt32LE(40);
+    // Streamed WAVs are written before the length is known, so the data-chunk size is the
+    // 0xFFFFFFFF "unknown" placeholder (OpenAI's TTS does this). Taken literally that is a
+    // ~24-hour clip, which drives words-per-second to ~0 and makes isImplausibleTranscript
+    // accept anything — the hallucination guard fails open instead of firing. Trust the
+    // bytes actually present over the header's claim.
+    const actualDataSize = Math.max(buffer.length - 44, 0);
+    const dataSize = Math.min(declaredDataSize || actualDataSize, actualDataSize);
     if (!sampleRate || !byteRate || !dataSize) return null;
     return Math.round((dataSize / byteRate) * 1000);
   } catch {
@@ -927,6 +939,14 @@ function isImplausibleTranscript(text, durationMs) {
 }
 
 async function transcribeAudio(buffer) {
+  if (getVoiceProvider() === 'openai') {
+    const transcript = normalizeTranscript(await transcribeSpeechOpenAI(buffer, 'audio/wav'));
+    // Keep the plausibility guard: a transcript with far more words than the clip could
+    // hold means the model hallucinated rather than heard, and passing that through as the
+    // user's words is worse than returning nothing.
+    if (transcript && !isImplausibleTranscript(transcript, getWavDurationMs(buffer))) return transcript;
+    return '';
+  }
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
   // Still Gemini: transcription feeds raw audio to a multimodal model, which the chat
@@ -1815,6 +1835,7 @@ function buildVoiceExcerpt(text) {
 
 async function generateSpeech(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return null;
+  if (getVoiceProvider() === 'openai') return synthesizeSpeechOpenAI(text, voiceName);
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
   console.log(`[tts] generateSpeech start voice=${safeVoiceName} chars=${text.trim().length}`);
   const failures = [];
@@ -1890,6 +1911,14 @@ function actionCompletionPhase(result) {
 
 async function* generateSpeechStream(text, voiceName = 'Aoede') {
   if (!text || !text.trim()) return;
+  // The caller already splits on sentence boundaries and invokes this per sentence, so a
+  // single complete WAV per call is the same granularity the Gemini SSE path delivered —
+  // one whole short clip rather than partial audio the client would have to stitch.
+  if (getVoiceProvider() === 'openai') {
+    const audio = await synthesizeSpeechOpenAI(text, voiceName);
+    if (audio) yield audio;
+    return;
+  }
   const safeVoiceName = GEMINI_TTS_VOICES.has(voiceName) ? voiceName : 'Aoede';
   console.log(`[tts] generateSpeechStream start voice=${safeVoiceName} chars=${text.trim().length}`);
   const failures = [];
@@ -6088,7 +6117,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
     sse({ type: 'replace', text: spoken });
     if (wantsTTS) {
       try {
-        const audio = await trace.run('gemini.tts.generateSpeech.short_response', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+        const audio = await trace.run('voice.tts.generateSpeech.short_response', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
         if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
       } catch (ttsErr) {
         console.error('[tts error]', ttsErr.message);
@@ -6103,7 +6132,7 @@ async function respondWithResult({ res, streaming, wantsTTS, settings, trace, us
   const result = { text: spoken, actions: browserActions, tasks: browserActions };
   if (wantsTTS) {
     try {
-      const audio = await trace.run('gemini.tts.generateSpeech.short_response_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+      const audio = await trace.run('voice.tts.generateSpeech.short_response_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
       if (audio) {
         result.audio = audio;
         result.audioFormat = 'wav';
@@ -6258,7 +6287,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         sse({ type: 'text', chunk: deterministicQuickReply });
         if (wantsTTS) {
           try {
-            const audio = await trace.run('gemini.tts.generateSpeech.quick', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
+            const audio = await trace.run('voice.tts.generateSpeech.quick', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
             if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
@@ -6273,7 +6302,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       const result = { text: deterministicQuickReply, actions: [] };
       if (wantsTTS) {
         try {
-          const audio = await trace.run('gemini.tts.generateSpeech.quick_nonstream', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
+          const audio = await trace.run('voice.tts.generateSpeech.quick_nonstream', () => generateSpeech(buildVoiceExcerpt(deterministicQuickReply), settings.voice));
           if (audio) {
             result.audio = audio;
             result.audioMimeType = 'audio/wav';
@@ -6359,7 +6388,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         sse({ type: 'replace', text: spoken });
         if (wantsTTS) {
           try {
-            const audio = await trace.run('gemini.tts.generateSpeech.intent_router', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+            const audio = await trace.run('voice.tts.generateSpeech.intent_router', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
             if (audio) sse({ type: 'audio', data: audio, format: 'wav', mimeType: 'audio/wav', seq: 0, chunk: 0 });
           } catch (ttsErr) {
             console.error('[tts error]', ttsErr.message);
@@ -6403,7 +6432,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       const result = { text: spoken, actions: actionResults };
       if (wantsTTS) {
         try {
-          const audio = await trace.run('gemini.tts.generateSpeech.intent_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+          const audio = await trace.run('voice.tts.generateSpeech.intent_nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
           if (audio) {
             result.audio = audio;
             result.audioFormat = 'wav';
@@ -6784,7 +6813,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
         if (wantsTTS && ttsStreamer) {
           try {
-            await trace.run('gemini.tts.generateSpeech.streamed', async () => {
+            await trace.run('voice.tts.generateSpeech.streamed', async () => {
               await ttsStreamer.flushRemainder(spoken);
               await ttsStreamer.waitForAll();
             });
@@ -6899,7 +6928,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     if (wantsTTS) {
       try {
-        const audio = await trace.run('gemini.tts.generateSpeech.nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
+        const audio = await trace.run('voice.tts.generateSpeech.nonstream', () => generateSpeech(buildVoiceExcerpt(spoken), settings.voice));
         if (audio) {
           console.log(`[audio][backend:chat-json] returning tts audio bytes=${Buffer.from(audio, 'base64').length} mime=audio/wav`);
           result.audio = audio;
@@ -7815,3 +7844,5 @@ module.exports.validatePendantTranscriptionUpload = validatePendantTranscription
 module.exports.isUserFacingMemory = isUserFacingMemory;
 module.exports.isUsefulMemoryContent = isUsefulMemoryContent;
 module.exports.CONNECTORS = CONNECTORS;
+module.exports.getWavDurationMs = getWavDurationMs;
+module.exports.isImplausibleTranscript = isImplausibleTranscript;
