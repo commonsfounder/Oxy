@@ -779,7 +779,8 @@ private struct ActionReviewSheet: View {
     }
 
     private var confirmLabel: String {
-        isPayment ? "Confirm & Place Order" : "Confirm"
+        if action.action == "book_appointment" { return "Book" }
+        return isPayment ? "Confirm & Place Order" : "Confirm"
     }
 
     private var detail: String {

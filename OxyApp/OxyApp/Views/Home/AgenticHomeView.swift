@@ -575,7 +575,7 @@ struct AgenticHomeView: View {
     }
 
     private var persistentTaskMissions: [HomeMission] {
-        agentTasks
+        let active = agentTasks
             .filter { $0.isActive && $0.status.lowercased() != "recipe" }
             .prefix(3)
             .map { task in
@@ -601,6 +601,26 @@ struct AgenticHomeView: View {
                     taskID: task.id
                 )
             }
+        let completedBookings = agentTasks
+            .filter { task in
+                task.status.lowercased() == "completed" &&
+                task.activities.contains { $0.action == "book_appointment" && $0.success }
+            }
+            .prefix(1)
+            .map { task in
+                HomeMission(
+                    id: "completed-booking-\(task.id)",
+                    kind: .status,
+                    eyebrow: "Booked",
+                    title: task.goal,
+                    detail: nil,
+                    cta: nil,
+                    prompt: nil,
+                    symbol: "checkmark.circle.fill",
+                    isPrimary: false
+                )
+            }
+        return Array(completedBookings) + active
     }
 
     private func sessionMissionID(_ session: AgentTaskSession) -> String { "session-\(session.id)" }

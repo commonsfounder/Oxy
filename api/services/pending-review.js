@@ -63,6 +63,7 @@ function reviewTitleForAction(action) {
     case 'book_uber': return 'Review Uber';
     case 'make_call': return 'Review call';
     case 'create_calendar_event': return 'Review calendar event';
+    case 'book_appointment': return 'Appointment ready to book';
     case 'send_outlook_email': return 'Review email';
     case 'create_github_issue': return 'Review GitHub issue';
     case 'comment_github_issue': return 'Review GitHub comment';
@@ -164,6 +165,8 @@ function reviewDetailForAction(action, cardInfo = null) {
       return input.destination ? `Destination: ${input.destination}` : '';
     case 'create_calendar_event':
       return reviewCalendarDetail(input);
+    case 'book_appointment':
+      return [input.choice_label, input.service].filter(Boolean).join('\n') || 'Appointment choice';
     case 'make_call':
       return input.contact ? `Contact: ${input.contact}` : '';
     case 'stripe_charge':
@@ -181,6 +184,8 @@ function buildPendingReviewResult(action, cardInfo = null) {
     ? 'Check this, then send when ready.'
     : action?.type === 'send_email'
       ? 'Check this draft, then send when ready.'
+      : action?.type === 'book_appointment'
+        ? 'Check the time, then tap Book.'
       : `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`;
   return applyActionContractResultMetadata(action, {
     success: true,

@@ -116,8 +116,107 @@ const {
 } = require('./services/model-routing');
 const { geocodeLocation } = require('./geocoding');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
+const {
+  createAppointmentBookingService,
+  createSandboxAppointmentProvider,
+  createSandboxCalendar
+} = require('./services/appointment-booking');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
+
+// Appointment booking is deliberately limited to the in-memory sandbox. This lets the
+// whole flow be proved without contacting a practice or changing a real calendar.
+let appointmentSandbox = null;
+function getAppointmentBookingService() {
+  if (process.env.OXY_APPOINTMENT_PROVIDER !== 'sandbox') return null;
+  if (!appointmentSandbox) {
+    const provider = createSandboxAppointmentProvider();
+    const calendar = createSandboxCalendar();
+    appointmentSandbox = { provider, calendar, service: createAppointmentBookingService({ provider, calendar }) };
+  }
+  return appointmentSandbox.service;
+}
+
+function appointmentTaskGoal(service, preference) {
+  return `Book a ${service} appointment ${preference?.label || ''}`.replace(/\s+/g, ' ').trim();
+}
+
+function appointmentChoicesText(service, choices = []) {
+  const list = choices.map((choice, index) => `${index + 1}. ${choice.label}`).join('\n');
+  return `I found these ${service} times:\n${list}\n\nTell me which one you want, for example “book option 1”.`;
+}
+
+function appointmentCheckpoint(booking) {
+  return {
+    type: 'appointment_booking',
+    phase: booking.phase,
+    request: booking.request,
+    service: booking.service,
+    choiceCount: Array.isArray(booking.choices) ? booking.choices.length : 0
+  };
+}
+
+async function saveAppointmentTask(userId, existingTaskId, booking, updates = {}) {
+  let task = existingTaskId ? await taskManager.getTask(userId, existingTaskId) : null;
+  if (!task) {
+    task = await taskManager.createTask(userId, appointmentTaskGoal(booking.service, booking.preference), {
+      autonomy: 'Balanced',
+      metadata: { appointmentBooking: booking }
+    });
+  }
+  return taskManager.updateTask(userId, task.id, {
+    status: updates.status || 'paused',
+    checkpoint: updates.checkpoint === false ? null : appointmentCheckpoint(booking),
+    last_error: updates.lastError || null,
+    results: updates.results || task.results || [],
+    completed_at: updates.completedAt || null,
+    heartbeat_at: null,
+    metadata: { ...(task.metadata || {}), appointmentBooking: booking }
+  });
+}
+
+function appointmentChoiceIndex(message) {
+  const text = String(message || '').toLowerCase();
+  if (/\b(?:option|choice)\s*1\b|\bfirst\s+(?:one|option|choice)\b/.test(text)) return 0;
+  if (/\b(?:option|choice)\s*2\b|\bsecond\s+(?:one|option|choice)\b/.test(text)) return 1;
+  if (/\b(?:option|choice)\s*3\b|\bthird\s+(?:one|option|choice)\b/.test(text)) return 2;
+  return null;
+}
+
+async function inferAppointmentBookingTurn(userId, message) {
+  let tasks;
+  try {
+    tasks = await taskManager.listTasks(userId, null);
+  } catch {
+    return null;
+  }
+  const task = tasks.find(candidate => ['choosing', 'calendar_retry'].includes(candidate?.metadata?.appointmentBooking?.phase));
+  if (!task) return null;
+  const booking = task.metadata.appointmentBooking;
+  if (booking.phase === 'calendar_retry' && /\b(try|add|calendar|again|resume)\b/i.test(message)) {
+    const choice = booking.booking?.choice || booking.choices?.[0];
+    if (!choice) return null;
+    return {
+      reason: 'appointment_calendar_retry',
+      spoken: "I'll get that ready for your OK.",
+      actions: [{ type: 'book_appointment', input: { task_id: task.id, choice_id: choice.id, choice_label: choice.label, service: booking.service, calendar_retry: true } }]
+    };
+  }
+  const choiceIndex = appointmentChoiceIndex(message);
+  if (choiceIndex != null) {
+    const choice = booking.choices?.[choiceIndex];
+    if (!choice) return { reason: 'appointment_choice_missing', spokenOnly: true, spoken: appointmentChoicesText(booking.service, booking.choices) };
+    return {
+      reason: 'appointment_choice_selected',
+      spoken: "I'll get that ready for your OK.",
+      actions: [{ type: 'book_appointment', input: { task_id: task.id, choice_id: choice.id, choice_label: choice.label, service: booking.service } }]
+    };
+  }
+  if (/\b(book|choose|pick)\s+(?:it|that|one|an?\s+(?:appointment|option|choice))\b/i.test(message)) {
+    return { reason: 'appointment_choice_needed', spokenOnly: true, spoken: appointmentChoicesText(booking.service, booking.choices) };
+  }
+  return null;
+}
 
 function devTimingEnabled() {
   return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
@@ -1551,6 +1650,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   const normalized = text.toLowerCase();
   const historyOptions = { since: options.since };
 
+  const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
+  if (appointmentTurn) return appointmentTurn;
+
   if (isContextualReference(text)) {
     const [history, recentActions, memory] = await Promise.all([
       getHistory(userId, trace, 12, historyOptions),
@@ -2899,6 +3001,92 @@ async function executeAction(userId, action, params, context = {}) {
         cardText: `To ${resolvedContact.label} · ${message}`,
         deepLink: `sms:${encodeURIComponent(resolvedContact.value)}?&body=${encodeURIComponent(message)}`
       };
+    }
+
+    case 'find_appointment_options': {
+      const request = String(params?.request || '').trim();
+      const service = getAppointmentBookingService();
+      if (!service) {
+        const booking = { request, service: 'appointment', preference: { label: '' }, choices: [], phase: 'needs_connection' };
+        const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: 'Appointment booking is not connected yet.' });
+        return {
+          success: false,
+          error: "I need an appointment booking connection before I can look for times. I've kept this open so we can continue when it is ready.",
+          taskId: task.id,
+          actionSummary: 'Appointment saved'
+        };
+      }
+      try {
+        const found = await service.findChoices({
+          request,
+          calendarEvents: Array.isArray(context.appointmentCalendarEvents) ? context.appointmentCalendarEvents : []
+        });
+        if (found.kind === 'missing_details') {
+          return { success: true, text: found.text, actionSummary: 'Appointment details needed' };
+        }
+        const booking = {
+          request,
+          service: found.service || 'appointment',
+          preference: found.preference || { label: '' },
+          provider: found.provider || 'sandbox',
+          choices: found.choices || [],
+          phase: found.ok ? 'choosing' : 'no_choices'
+        };
+        const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: found.ok ? null : found.text });
+        if (!found.ok) return { success: false, error: found.text, taskId: task.id, actionSummary: 'Appointment search paused' };
+        return {
+          success: true,
+          text: appointmentChoicesText(found.service, found.choices),
+          cardText: found.choices.map(choice => choice.label).join('\n'),
+          actionSummary: 'Appointment options found',
+          taskId: task.id,
+          choices: found.choices
+        };
+      } catch {
+        const booking = { request, service: 'appointment', preference: { label: '' }, choices: [], phase: 'paused' };
+        const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: 'Appointment search paused.' });
+        return { success: false, error: "I couldn't look for appointment times right now. I've kept this open so we can try again.", taskId: task.id };
+      }
+    }
+
+    case 'book_appointment': {
+      const task = await taskManager.getTask(userId, params?.task_id);
+      const booking = task?.metadata?.appointmentBooking;
+      const choice = booking?.choices?.find(item => item.id === params?.choice_id);
+      if (!task || !booking || !choice) return { success: false, error: "I couldn't find that appointment choice. Please ask me to look again." };
+      const service = getAppointmentBookingService();
+      if (!service || booking.provider !== 'sandbox') {
+        await saveAppointmentTask(userId, task.id, { ...booking, phase: 'needs_connection' }, { lastError: 'Appointment booking is not connected yet.' });
+        return { success: false, error: "I couldn't book that yet because the appointment connection is not ready. I've kept the choice open." };
+      }
+      try {
+        const committed = booking.phase === 'calendar_retry' && booking.booking
+          ? await service.addBookingToCalendar({ booking: booking.booking })
+          : await service.commitChoice({ choice, approved: true });
+        if (!committed.ok) {
+          await saveAppointmentTask(userId, task.id, { ...booking, phase: committed.kind === 'calendar_failed' ? 'calendar_retry' : 'choosing', booking: committed.booking || null }, {
+            lastError: committed.text || 'Appointment was not confirmed.'
+          });
+          return { success: false, error: committed.text || "I couldn't confirm that appointment. I've kept it open." };
+        }
+        const completedBooking = { ...booking, phase: 'confirmed', booking: committed.booking };
+        await saveAppointmentTask(userId, task.id, completedBooking, {
+          status: 'completed',
+          checkpoint: false,
+          completedAt: new Date().toISOString(),
+          results: [{ action: 'book_appointment', result: { success: true, actionSummary: 'Appointment confirmed', text: `Booked ${choice.service} appointment for ${choice.label}.` } }]
+        });
+        return {
+          success: true,
+          text: `Booked your ${choice.service} appointment for ${choice.label} and added it to your calendar.`,
+          cardText: choice.label,
+          actionSummary: 'Appointment confirmed',
+          taskId: task.id
+        };
+      } catch {
+        await saveAppointmentTask(userId, task.id, { ...booking, phase: 'choosing' }, { lastError: 'Appointment booking paused.' });
+        return { success: false, error: "I couldn't confirm that appointment. I've kept it open so we can try again." };
+      }
     }
 
     default:

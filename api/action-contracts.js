@@ -62,6 +62,26 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calendar failed',
     confirmation: 'none'
   },
+  find_appointment_options: {
+    risk: 'low',
+    required: ['request'],
+    optional: ['task_id'],
+    inputExample: { request: 'dentist appointment next week after work' },
+    successSummary: 'Appointment options found',
+    failureSummary: 'Appointment search paused',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  book_appointment: {
+    risk: 'high',
+    required: ['task_id', 'choice_id'],
+    optional: ['choice_label'],
+    inputExample: { task_id: 'saved appointment task', choice_id: 'chosen slot', choice_label: 'Tue 11 Aug at 6:00 pm' },
+    successSummary: 'Appointment confirmed',
+    failureSummary: 'Appointment not confirmed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
   send_email: {
     risk: 'high',
     required: ['to', 'body'],

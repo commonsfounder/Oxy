@@ -3,6 +3,15 @@ const test = require('node:test');
 
 const { inferDeterministicAction } = require('../../api/intent-router');
 
+test('an appointment request starts the appointment flow', () => {
+  const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');
+  assert.equal(routed.reason, 'appointment_booking');
+  assert.deepEqual(routed.actions, [{
+    type: 'find_appointment_options',
+    input: { request: 'Millie, get me a dentist appointment next week after work' }
+  }]);
+});
+
 test('nearest McDonald’s routes to find_place, not Uber', () => {
   const routed = inferDeterministicAction("nearest McDonald's");
   assert.equal(routed.reason, 'find_local_place');

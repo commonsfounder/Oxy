@@ -25,6 +25,24 @@ test('action runner parks high-risk actions for review', async () => {
   assert.equal(logs[0].result.pending, true);
 });
 
+test('appointment booking waits for an explicit OK before it runs', async () => {
+  const pending = [];
+  let executed = false;
+  const executeActions = createActionRunner({
+    executeAction: async () => { executed = true; return { success: true }; },
+    setPendingAction: async (userId, action) => pending.push({ userId, action }),
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+  const result = await executeActions('user-1', [{ type: 'book_appointment', input: {
+    task_id: 'appointment-task-1', choice_id: 'slot-1', choice_label: 'Tue 11 Aug, 6:30 pm', service: 'dentist'
+  } }], { userMessage: 'book option 1' });
+  assert.equal(executed, false);
+  assert.equal(pending.length, 1);
+  assert.equal(result[0].result.pending, true);
+  assert.equal(result[0].result.actionSummary, 'Appointment ready to book');
+});
+
 test('action runner parks high-risk actions for review even inside an agent loop iteration', async () => {
   // Regression guard: agentIteration:true routes through the sequential execution
   // path (action-runner.js), which is a separate code path from the parallel one.

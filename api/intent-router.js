@@ -207,6 +207,14 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
+  if (/\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
+    return {
+      reason: 'appointment_booking',
+      spoken: "I'll look for a time that fits.",
+      actions: [{ type: 'find_appointment_options', input: { request: text } }]
+    };
+  }
+
   if (/\b(train|trains|rail|platforms?|departures?|station board|arrival board)\b/i.test(text) &&
       !/\b(bus|buses|what bus|which bus|drive|driving|walk|walking)\b/i.test(text) &&
       (LIVE_RAIL_TERMS.test(text) || RAIL_TRIP_TERMS.test(text) || /\bfrom\b.+\bto\b/i.test(text))) {
