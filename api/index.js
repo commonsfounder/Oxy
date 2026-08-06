@@ -1593,6 +1593,18 @@ function shouldIgnoreModelAuthoredActions(modelName = '') {
   return String(modelName || '') === FAST_MODEL;
 }
 
+// Native tool calls become internal actions and LEAD the list the legacy <action> text path
+// produces, so every downstream guard, review gate, status event and result handler applies to
+// them unchanged. Kept as one function because three routes (streaming chat, non-streaming
+// chat, voice) must agree on the shape exactly.
+function mergeNativeToolCalls(toolCalls = [], textActions = []) {
+  if (!toolCalls?.length) return textActions;
+  return [
+    ...toolCalls.map(fc => ({ type: fc.name, input: fc.args || {} })),
+    ...textActions
+  ];
+}
+
 function formatLondonYMD(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
@@ -1977,6 +1989,11 @@ async function recoverEmptyModelResponse({ provider = null, model, initialReques
   const recoveryRequest = {
     config: {
       ...initialRequest.config,
+      // Recovery asks for TEXT after an empty turn. Leaving tools attached would let it
+      // answer with another tool call whose text is empty — i.e. recover into the same
+      // empty-looking response it is meant to rescue.
+      tools: undefined,
+      toolConfig: undefined,
       temperature: 0.2,
       maxOutputTokens: Math.max(initialRequest.config.maxOutputTokens || 0, 512)
     },
@@ -4884,7 +4901,9 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       cachedContentName,
       baseHistory,
       userContent: { role: 'user', parts: [{ text: userText }] },
-      useAgentTools: false
+      // Voice turns get the same native tools as text chat — this path carried the identical
+      // tools-disabled hole, so spoken requests to act were answered but never performed.
+      useAgentTools: true
     });
 
     const stream = await streamBrain({
@@ -4894,18 +4913,23 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
       config: initialRequest.config
     });
     let fullText = '';
+    let streamedToolCalls = [];
     for await (const chunk of stream) {
       const text = chunk.text || '';
       if (text) fullText += text;
+      if (chunk.functionCalls?.length) streamedToolCalls = chunk.functionCalls;
     }
 
     let { spoken, actions, parseError } = parseActions(fullText);
     if (parseError) console.warn('[process-audio] one or more <action> blocks failed to parse; some actions may be missing');
-    actions = guardCalendarActionsForUserMessage(actions, userText);
+    // Applied to text-authored actions only; native tool calls are structured output from the
+    // main chat model and are merged in afterwards. Mirrors the /chat streaming path.
     if (shouldIgnoreModelAuthoredActions(STREAMING_CHAT_MODEL) && actions.length) {
       console.warn(`[process-audio] ignored ${actions.length} fast-model authored action(s)`);
       actions = [];
     }
+    actions = mergeNativeToolCalls(streamedToolCalls, actions);
+    actions = guardCalendarActionsForUserMessage(actions, userText);
 
     let actionResults = [];
     let audioBase64 = null;
@@ -4923,7 +4947,11 @@ app.post('/process-audio', upload.single('audio'), async (req, res) => {
         useSearch,
         cachedContentName,
         baseHistory,
-        userContent: { role: 'user', parts: [{ text: userText }] }
+        userContent: { role: 'user', parts: [{ text: userText }] },
+        // Synthesis-only turn: it writes prose about results that already came back, so it
+        // must not be able to start more work. Was implicitly tool-free before tools were
+        // forwarded at all; now stated explicitly.
+        useAgentTools: false
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '...' }] },
@@ -5051,7 +5079,11 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
           { text: fileContextHint },
           { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
         ]
-      }
+      },
+      // Out of scope for this phase: /chat-with-image keeps the <action> text path it has
+      // today. Stated explicitly so forwarding tools in the provider does not silently
+      // change this route's behaviour.
+      useAgentTools: false
     });
 
     const brainRes = await generateBrain({
@@ -5085,7 +5117,8 @@ app.post('/chat-with-image', imageRateLimiter, upload.single('image'), async (re
             { text: fileContextHint },
             { inlineData: { mimeType: req.file.mimetype, data: req.file.buffer.toString('base64') } }
           ]
-        }
+        },
+        useAgentTools: false
       });
       followUpRequest.contents.push(
         { role: 'model', parts: [{ text: spoken || '...' }] },
@@ -7875,7 +7908,11 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       cachedContentName,
       baseHistory,
       userContent: { role: 'user', parts: [{ text: message }] },
-      useAgentTools: false
+      // Native function declarations travel with every plain-chat turn. They were disabled
+      // here in 78823773 (2026-07-07) to cut TTFT while the <action> TEXT fallback still
+      // worked on Gemini; on gpt-5.6-luna that fallback emits nothing, so the classic path
+      // was left claiming actions it never performed ("Playing Steve Lacy." with no music).
+      useAgentTools: true
     });
 
     // === AGENTIC UPGRADE: Use ReAct loop for non-deterministic turns (fixes loop, orchestration, planning foundation) ===
@@ -8142,6 +8179,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           config: initialRequest.config
         }));
         let fullText = '';
+        let streamedToolCalls = [];
         let firstChunk = true;
         let hasStreamedText = false;
         let emittedTextEvents = 0;
@@ -8197,21 +8235,33 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             // Kick off TTS for complete sentences as they arrive, not after full generation
             if (ttsStreamer && !actionMarkupStarted) ttsStreamer.ingest(fullText);
           }
+          // The provider emits accumulated tool calls as one terminal chunk, so this
+          // assigns rather than appends. Text and tool calls can both be present.
+          if (chunk.functionCalls?.length) {
+            streamedToolCalls = chunk.functionCalls;
+            trace.log('brain.native_tool_calls', streamedToolCalls.map(fc => fc.name).join(','));
+          }
         }
         flushSafeDisplayText();
         trace.log('brain.initial_complete');
-        if (!fullText.trim()) {
+        // A turn that called a tool legitimately has no text yet — the reply is composed from
+        // the results below. Only an empty turn with nothing at all is a failed generation.
+        if (!fullText.trim() && !streamedToolCalls.length) {
           fullText = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
           if (fullText) trace.log('brain.empty_recovery_success');
         }
 
         let { spoken, actions, parseError } = parseActions(fullText);
         if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
-        actions = guardCalendarActionsForUserMessage(actions, message);
+        // This guard exists for actions a weak fast tier AUTHORED AS TEXT, so it is applied to
+        // the parsed <action> blocks only — native tool calls are structured output from the
+        // main chat model and must not be swept up by it.
         if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
           trace.log('fast_model.actions_ignored', `count=${actions.length}`);
           actions = [];
         }
+        actions = mergeNativeToolCalls(streamedToolCalls, actions);
+        actions = guardCalendarActionsForUserMessage(actions, message);
         spoken = stripActionMarkupForDisplay(spoken).trim();
         if (!spoken && !actions.length) {
           const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
@@ -8359,14 +8409,17 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }));
 
     const rawText = brainRes.text || '';
+    const nonStreamToolCalls = brainRes.functionCalls || [];
     let { spoken, actions, parseError } = parseActions(rawText);
     if (parseError) trace.log('parse_actions.malformed_block', 'one or more <action> blocks failed to parse; some actions may be missing');
-    actions = guardCalendarActionsForUserMessage(actions, message);
     if (shouldIgnoreModelAuthoredActions(chatModel) && actions.length) {
       trace.log('fast_model.actions_ignored', `count=${actions.length}`);
       actions = [];
     }
-    if (!rawText.trim() || (!spoken && !actions.length)) {
+    if (nonStreamToolCalls.length) trace.log('brain.native_tool_calls', nonStreamToolCalls.map(fc => fc.name).join(','));
+    actions = mergeNativeToolCalls(nonStreamToolCalls, actions);
+    actions = guardCalendarActionsForUserMessage(actions, message);
+    if ((!rawText.trim() && !nonStreamToolCalls.length) || (!spoken && !actions.length)) {
       const recovered = await recoverEmptyModelResponse({ provider: chatProvider, model: chatModel, initialRequest, message, trace });
       if (recovered) {
         ({ spoken, actions, parseError } = parseActions(recovered));
@@ -9774,6 +9827,8 @@ module.exports.getStructuredDataResults = getStructuredDataResults;
 module.exports.guardVisibleDataResponse = guardVisibleDataResponse;
 module.exports.buildConciseDataAnswer = buildConciseDataAnswer;
 module.exports.isPureContentGenerationTurn = isPureContentGenerationTurn;
+module.exports.mergeNativeToolCalls = mergeNativeToolCalls;
+module.exports.buildModernGenerateRequest = buildModernGenerateRequest;
 module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
 module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActions;
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;

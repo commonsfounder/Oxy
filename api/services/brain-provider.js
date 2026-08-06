@@ -95,14 +95,32 @@ function toOpenAIMessages(contents, systemInstruction) {
 
 // Gemini config -> OpenAI request fields. Reasoning-tier models reject `temperature`
 // (any non-default value errors) and renamed max_tokens -> max_completion_tokens, so
-// neither Gemini's temperature/topP/topK nor its tool declarations carry over. Tool
-// declarations are intentionally dropped: the chat path parses actions out of the
-// model's TEXT (<action> blocks), never from native tool calls.
+// Gemini's temperature/topP/topK do not carry over.
+//
+// Tool declarations DO carry over. They used to be dropped here on the theory that the chat
+// path parses actions out of the model's TEXT (<action> blocks) — but that fallback stopped
+// working when the provider moved to OpenAI: gpt-5.6-luna does not emit <action> markup, so
+// the plain-chat path had no working action mechanism at all and answered "I can't set
+// reminders directly here" for tools the user has connected.
+//
+// reasoning_effort MUST be 'none' whenever tools are attached. Verified live on 2026-08-06:
+// tools + effort 'low' AND tools + effort omitted entirely both return
+//   400 "Function tools with reasoning_effort are not supported for gpt-5.6-luna in
+//        /v1/chat/completions. To use function tools, use /v1/responses or set
+//        reasoning_effort to 'none'."
+// so the field has to be set explicitly rather than left off. Same workaround, same reason,
+// as the agent loop's tool path in callToolsBrain below.
 function openAIRequestFromConfig(config = {}) {
   const body = {
     max_completion_tokens: Math.max(config.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS),
     reasoning_effort: process.env.OXY_CHAT_REASONING_EFFORT || 'low'
   };
+  const tools = geminiToolsToOpenAI(config.tools);
+  if (tools.length) {
+    body.tools = tools;
+    body.tool_choice = 'auto';
+    body.reasoning_effort = 'none';
+  }
   return body;
 }
 
@@ -129,10 +147,55 @@ async function* groqStream({ model, contents, config }) {
 
 // Shared OpenAI-style SSE reader (OpenAI proper, Groq, and any OpenAI-compatible host).
 // Yields Gemini-shaped chunks so the consumer's `for await` loop never changes.
+//
+// Tool calls arrive fragmented and interleaved with content: each frame carries a
+// delta.tool_calls array whose entries are identified by `index`, the function NAME is
+// usually whole on the first frame for an index but is appended defensively, and the JSON
+// `arguments` string almost never arrives in one piece. They are accumulated per index and
+// emitted as ONE final Gemini-shaped chunk after the stream ends, so a consumer sees a
+// complete call rather than a dozen partial ones. Before this, delta.tool_calls was never
+// read at all — a tool call would be requested by the model and silently discarded here.
 async function* streamChatCompletionSSE(res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  const pending = [];
+
+  const collectToolCalls = (deltaToolCalls) => {
+    for (const tc of deltaToolCalls || []) {
+      const i = Number.isInteger(tc.index) ? tc.index : pending.length;
+      const slot = pending[i] || (pending[i] = { id: '', name: '', args: '' });
+      if (tc.id) slot.id = tc.id;
+      if (tc.function?.name) slot.name += tc.function.name;
+      if (typeof tc.function?.arguments === 'string') slot.args += tc.function.arguments;
+    }
+  };
+
+  // Malformed argument JSON degrades to {} rather than dropping the call, matching
+  // openAIResponseToGeminiShape on the agent path so both tool routes fail identically.
+  // The action runner's own required-parameter validation is what rejects it downstream.
+  const finalToolCallChunk = () => {
+    const calls = pending
+      .filter((slot) => slot && slot.name)
+      .map((slot, idx) => {
+        let args = {};
+        if (slot.args) {
+          try {
+            args = JSON.parse(slot.args);
+          } catch {
+            console.warn(`[brain] tool call ${slot.name} had unparseable arguments; passing {}`);
+          }
+        }
+        return { id: slot.id || toolCallId(slot.name, idx), name: slot.name, args };
+      });
+    if (!calls.length) return null;
+    return {
+      text: '',
+      functionCalls: calls,
+      candidates: [{ content: { role: 'model', parts: calls.map((fc) => ({ functionCall: fc })) } }]
+    };
+  };
+
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -143,14 +206,21 @@ async function* streamChatCompletionSSE(res) {
       buf = buf.slice(idx + 1);
       if (!line.startsWith('data:')) continue;
       const data = line.slice(5).trim();
-      if (data === '[DONE]') return;
+      if (data === '[DONE]') {
+        const tail = finalToolCallChunk();
+        if (tail) yield tail;
+        return;
+      }
       try {
         const json = JSON.parse(data);
-        const delta = json.choices?.[0]?.delta?.content || '';
-        if (delta) yield { text: delta, candidates: [] };
+        const delta = json.choices?.[0]?.delta || {};
+        if (delta.content) yield { text: delta.content, candidates: [] };
+        if (delta.tool_calls) collectToolCalls(delta.tool_calls);
       } catch { /* keepalive / partial frame */ }
     }
   }
+  const tail = finalToolCallChunk();
+  if (tail) yield tail;
 }
 
 function openAIKey() {
@@ -239,7 +309,11 @@ async function compatibleGenerate({ provider, model, contents, config }) {
   });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
-  return { text: json.choices?.[0]?.message?.content || '' };
+  // Returns the full Gemini shape, not just { text }: once tools can be attached here, a
+  // reply carrying tool_calls has EMPTY content, and returning only the text would discard
+  // the call silently — the exact failure this phase exists to remove. `.text` is unchanged
+  // for the many callers that only read it.
+  return openAIResponseToGeminiShape(json);
 }
 
 function toAnthropicMessages(contents) {
@@ -597,6 +671,7 @@ async function callToolsBrain({ provider, model, contents, config }) {
 }
 
 module.exports = {
+  streamChatCompletionSSE,
   streamBrain,
   generateBrain,
   webSearchBrain,
