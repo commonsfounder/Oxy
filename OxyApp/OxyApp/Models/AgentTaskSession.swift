@@ -501,39 +501,3 @@ struct ProductDetails: Equatable {
     }
 }
 
-// MARK: - Intent match (keyword scaffold — only decides which real pipeline a
-// prompt should drive, and as which job kind; all data for the job itself comes
-// from the real backend, never from here)
-
-enum AgentPlanGenerator {
-    /// Which native job, if any, this prompt should open. Order matters: food
-    /// delivery and ride keywords are checked before the broader buy check, since
-    /// "order me a" alone would otherwise also satisfy matchesBuy. Restaurant
-    /// reservations ("book a table", "dinner") aren't matched at all — there's no
-    /// real backend for that yet, so those fall through to real chat same as any
-    /// unmatched message.
-    static func jobKind(for prompt: String) -> AgentJobKind? {
-        let lower = prompt.lowercased()
-        if containsFoodKeyword(lower) { return .shopping }
-        if containsRideKeyword(lower) { return .ride }
-        if matchesBuy(prompt) { return .shopping }
-        return nil
-    }
-
-    private static func containsRideKeyword(_ lower: String) -> Bool {
-        ["uber", "taxi", "cab", "ride home", "book a ride", "book me a ride"].contains { lower.contains($0) }
-    }
-
-    private static func containsFoodKeyword(_ lower: String) -> Bool {
-        lower.contains("order") && (lower.contains("food") || lower.contains("takeout") || lower.contains("delivery"))
-    }
-
-    /// Word-anchored so "card", "care", "scary", "cargo" don't trigger a buy job
-    /// (an earlier substring match on "car"/"buy a" hijacked unrelated intents).
-    private static func matchesBuy(_ prompt: String) -> Bool {
-        let lower = prompt.lowercased()
-        let words = Set(lower.split { !$0.isLetter }.map(String.init))
-        if words.contains("buy") || words.contains("buying") || words.contains("purchase") { return true }
-        return lower.contains("order me a") || lower.contains("i want to buy")
-    }
-}

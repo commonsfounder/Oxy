@@ -861,24 +861,13 @@ struct AgenticHomeView: View {
         return "\(action) — email from \(email.cleanFrom): \(context)"
     }
 
-    /// Generated-UI-for-the-job path: a native step session, wired to the real
-    /// backend pipeline, when the intent is a buy, food order, or ride — restaurant
-    /// bookings and anything else unmatched fall through to real chat, same as any
-    /// unmatched message.
+    /// Every composer submission goes to the same conversation — whether it turns
+    /// into a durable task is decided per-turn by the backend, not by a client-side
+    /// guess at the user's first message. (The one other AgentTaskSession entry
+    /// point, the inbox "handle it" CTA, is a separate explicit tap and unaffected.)
     private func handleIntent(_ text: String) {
         HapticManager.shared.impact(.medium)
-        if let kind = AgentPlanGenerator.jobKind(for: text) {
-            startSession(AgentTaskSession(
-                title: text,
-                originalPrompt: text,
-                kind: kind,
-                userId: appState.userId,
-                chatService: service,
-                location: LocationManager.shared.locationDict
-            ))
-        } else {
-            openChat(autoSend: text, startFresh: true)
-        }
+        openChat(autoSend: text, startFresh: true)
     }
 
     private func openChat(autoSend: String?, startFresh: Bool, review: ActionResult? = nil) {
