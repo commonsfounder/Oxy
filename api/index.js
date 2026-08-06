@@ -3916,6 +3916,30 @@ async function saveMessage(userId, role, content, trace = null) {
   invalidateUserContextCache(userId);
 }
 
+// Phase 4 (2026-08-06) — the `preferences` table is a general key/value store shared by
+// operational bookkeeping and the handful of rows that describe how someone likes to be
+// talked to, and nothing used to separate those before they reached the model. Rendered live
+// for a real user, the "HOW THE USER LIKES THINGS" block this fed was 12.7KB: ~90
+// `_stitle_<uuid>` rows (every past conversation's title), ~40 `proactive.briefing.*`/dedup
+// markers, a concierge balance, pending-action JSON, a travel-workflow blob — and, buried in
+// all of it, three real style rows written by the old postResponseTasks style-cue matcher as
+// `User said "<raw message>" — adapt accordingly`. That writer turned one-off phrasing (a
+// demo asking for headings/bullets/bold; a garbled voice transcript) into a standing
+// instruction that silently reshaped every later reply. Full detail in the Millie voice
+// audit (2026-08-06).
+//
+// ALLOWLISTED_STYLE_PREFERENCE_KEYS is the only gate between that table and the prompt now.
+// It is deliberately empty: the writer that populated it is disabled below (see
+// postResponseTasks), and a real typed/decaying style layer (verbosity, formality, emoji,
+// …) is future work, not this phase. An honestly empty style block beats a corrupted one.
+const ALLOWLISTED_STYLE_PREFERENCE_KEYS = new Set([
+  // intentionally empty — see comment above
+]);
+
+function filterStylePreferenceRows(rows = []) {
+  return (rows || []).filter(row => ALLOWLISTED_STYLE_PREFERENCE_KEYS.has(row?.key));
+}
+
 async function getPreferences(userId, trace = null) {
   const fetchPreferences = () => supabase
     .from('preferences')
@@ -3925,7 +3949,11 @@ async function getPreferences(userId, trace = null) {
     ? await trace.run('supabase.preferences.fetch', fetchPreferences)
     : await fetchPreferences();
   if (error || !data) return '';
-  return data.map(p => `${p.key}: ${p.value}`).join('\n');
+  // Filtered for the MODEL-FACING string only. getPreferenceEntries/getPreferenceMap below
+  // are untouched and still return every row — routing (resolveModelRoute), the concierge
+  // account, pending-action state, and proactive dedup all read the table directly through
+  // those and must keep seeing every key.
+  return filterStylePreferenceRows(data).map(p => `${p.key}: ${p.value}`).join('\n');
 }
 
 async function getPreferenceEntries(userId) {
@@ -4339,6 +4367,9 @@ I can remember things, find places, play music, make visuals, plan, book, draft,
 I also have a dev concierge account for approved spends and money flows when real payment keys are wired in.`;
 }
 
+// Currently unused: its one caller, the raw-quote style-cue writer in postResponseTasks, was
+// disabled in Phase 4 (2026-08-06). Left in place for a future typed style-preference layer
+// to write through, rather than deleted and re-added.
 async function savePreference(userId, key, value) {
   await supabase
     .from('preferences')
@@ -5863,10 +5894,18 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const modelRoute = requestedRoute.configured ? requestedRoute : (requestedRoute.fallback || requestedRoute);
   const cachedContentName = await getPromptCacheName(trace, modelRoute.model);
   const availableActions = quickTurn ? '' : buildAvailableActions(enabledConnectors);
-  const statedContext = [
-    ...extractAlreadyStatedContext(history),
-    ...extractShoppingContextHints(history)
-  ];
+  // extractShoppingContextHints is a genuinely derived hint (retailer/domain inferred from the
+  // conversation), not a repeat of anything sent verbatim elsewhere, so it's kept on both paths.
+  const shoppingContext = extractShoppingContextHints(history);
+  // extractAlreadyStatedContext re-pastes recent ASSISTANT SENTENCES into the prompt. On the
+  // full path below, `history` (unsliced) is also sent as contents[] via baseHistory, so those
+  // same sentences would appear twice in one request. It is kept ONLY for quickTurn, whose
+  // returned `history` is trimmed to the last 2 turns (see the return statement) — there the
+  // recap is the only way the model sees what it said 3+ turns back, a real dependency rather
+  // than incidental duplication. Phase 4, 2026-08-06.
+  const statedContext = quickTurn
+    ? [...extractAlreadyStatedContext(history), ...shoppingContext]
+    : shoppingContext;
   const resolvedContext = requestContext.resolvedContext || (!quickTurn && isContextualReference(message)
     ? buildResolvedContext(history, recentActions)
     : null);
@@ -7421,16 +7460,13 @@ function postResponseTasks(userId, message, extra = {}) {
       }
     }).catch(() => {});
   }
-  const styleCues = [
-    { pattern: /too long|tl;dr|too short|not enough|be brief|be concise|more detail|explain more|less detail|shut up|stop rambling/i, key: 'response_length' },
-    { pattern: /be direct|be blunt|be nice|be polite|don't be rude|don't be sarcastic|more casual|more formal/i, key: 'tone_preference' },
-    { pattern: /use bullet|use numbers|no bullet|no numbers|bullet points|step by step/i, key: 'format_preference' },
-  ];
-  for (const cue of styleCues) {
-    if (cue.pattern.test(message)) {
-      savePreference(userId, cue.key, `User said "${message}" — adapt accordingly`);
-    }
-  }
+  // Style-preference learning is disabled (Phase 4, 2026-08-06). This used to regex-match a
+  // message and write `User said "<raw message>" — adapt accordingly` into `preferences` on
+  // one occurrence, permanently — see the comment on ALLOWLISTED_STYLE_PREFERENCE_KEYS above
+  // for what that produced live. filterStylePreferenceRows() also blocks any such rows
+  // already in the table from reaching the prompt, so removing this write is a genuine
+  // no-op today, not just a stop to future corruption. A typed, corroborated, decaying
+  // replacement is future work, not this phase.
   // (agent trace episodes are no longer written to user memories — see Memory trust plan)
 }
 
@@ -9847,3 +9883,9 @@ module.exports.findRecentEmailTarget = findRecentEmailTarget;
 module.exports.CONNECTORS = CONNECTORS;
 module.exports.getWavDurationMs = getWavDurationMs;
 module.exports.isImplausibleTranscript = isImplausibleTranscript;
+module.exports.ALLOWLISTED_STYLE_PREFERENCE_KEYS = ALLOWLISTED_STYLE_PREFERENCE_KEYS;
+module.exports.filterStylePreferenceRows = filterStylePreferenceRows;
+module.exports.extractAlreadyStatedContext = extractAlreadyStatedContext;
+module.exports.extractShoppingContextHints = extractShoppingContextHints;
+module.exports.buildDynamicSystemPrompt = buildDynamicSystemPrompt;
+module.exports.buildQuickTurnContext = buildQuickTurnContext;
