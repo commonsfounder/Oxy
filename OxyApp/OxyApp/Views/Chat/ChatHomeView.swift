@@ -4,6 +4,7 @@ import SwiftUI
 /// (Claude/ChatGPT style): New Chat, search, and date-grouped recent chats.
 /// Opens via the top-left menu button or a swipe from the left edge.
 struct ChatHomeView: View {
+    var showHistoryOnAppear = false
     @Environment(AppState.self) private var appState
 
     // Drawer
@@ -89,6 +90,7 @@ struct ChatHomeView: View {
         .onChange(of: searchQuery) { _, q in handleSearch(q) }
         .onAppear {
             setupPendantBridge()
+            if showHistoryOnAppear { sidebarOpen = true }
         }
     }
 

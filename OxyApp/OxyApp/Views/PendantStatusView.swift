@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// The pendant's home: pairing, live status, and hardware configuration, all in
-/// one place. Pairing (scan / connect / unpair) used to live in Settings, which
-/// is why "pendant settings weren't under Pendant" — it's here now.
+/// The home device's home: pairing, live status, and hardware configuration, all
+/// in one place. The implementation names stay compatible with the current BLE
+/// firmware while the product surface speaks in household-device terms.
 struct PendantStatusView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -26,7 +26,7 @@ struct PendantStatusView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Pendant", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Home device", onBack: { dismiss() })
                     ScrollView {
                         VStack(alignment: .leading, spacing: 36) {
                             // Pairing — the primary action: get a device connected.
@@ -43,11 +43,11 @@ struct PendantStatusView: View {
                                 }
                             }
 
-                            // Hardware behaviour — only relevant once a pendant is paired.
+                            // Hardware behaviour — only relevant once the device is paired.
                             if pendant.isConnected {
                                 hardwareConfig
                             } else {
-                                Text("Pair your pendant to configure it and see live status.")
+                                Text("Connect your home device to configure it and see live status.")
                                     .font(.rowSecondary)
                                     .foregroundStyle(Color.appMuted)
                             }
@@ -81,7 +81,7 @@ struct PendantStatusView: View {
 
     private var hardwareConfig: some View {
         VStack(alignment: .leading, spacing: 20) {
-            AppSectionHeader(title: "Pendant behaviour")
+            AppSectionHeader(title: "Home device behaviour")
             configControl(title: "Wake gesture",
                           options: ["CHIN TILT", "TAP"], labels: ["Chin tilt", "Tap"], selection: $wakeword)
             configControl(title: "Audio",
@@ -102,7 +102,7 @@ struct PendantStatusView: View {
 // MARK: - Pairing
 
 /// BLE pairing controls — status, paired device name, and scan / unpair / cancel.
-/// Moved here from Settings so the whole pendant lifecycle lives on one screen.
+/// Moved here from Settings so the whole device lifecycle lives on one screen.
 private struct PendantPairingSection: View {
     var pendant: PendantBLEManager
     @State private var showUnpairConfirm = false
@@ -133,7 +133,7 @@ private struct PendantPairingSection: View {
                 .padding(.vertical, 16)
 
                 if pendant.connectionState == .scanning || pendant.connectionState == .connecting {
-                    Text("Hold the pendant close to your phone.")
+                    Text("Keep the home device close to your phone.")
                         .font(.rowSecondary)
                         .foregroundStyle(Color.appMuted)
                         .padding(.bottom, 12)
@@ -183,7 +183,7 @@ private struct PendantPairingSection: View {
                         .foregroundStyle(Color.appInk)
                         .transition(.opacity)
                     } else {
-                        Button("Scan for pendant") {
+                        Button("Scan for home device") {
                             pendant.startScan()
                         }
                         .font(.system(size: 14, weight: .semibold))
@@ -197,11 +197,11 @@ private struct PendantPairingSection: View {
             }
         }
         .animation(.appSpring, value: pendant.connectionState)
-        .alert("Unpair Pendant", isPresented: $showUnpairConfirm) {
+        .alert("Forget home device", isPresented: $showUnpairConfirm) {
             Button("Unpair", role: .destructive) { pendant.unpair() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will disconnect and forget the paired pendant. You can pair again later.")
+            Text("This will disconnect and forget the paired home device. You can pair again later.")
         }
     }
 

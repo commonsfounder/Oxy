@@ -465,6 +465,131 @@ struct Briefing: Codable, Identifiable, Equatable {
     var wellbeing: String? { metadata?.wellbeing?.nonEmpty }
 }
 
+/// A bounded, ranked answer to the ambient question "what matters?". It is deliberately
+/// smaller than the underlying inbox, calendar, or task payloads so Home can lead with a
+/// useful human summary and let Chat handle the follow-up.
+struct LifeBriefing: Codable, Equatable {
+    let headline: String
+    let items: [LifeBriefingItem]
+    let empty: Bool
+    let generatedAt: String?
+    let coverage: LifeBriefingCoverage?
+}
+
+struct LifeBriefingItem: Codable, Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let title: String
+    let detail: String
+    let urgency: String
+    let prompt: String?
+    let taskId: String?
+    let approvalId: String?
+    let review: LifeBriefingReview?
+
+    init(
+        id: String,
+        kind: String,
+        title: String,
+        detail: String,
+        urgency: String,
+        prompt: String?,
+        taskId: String?,
+        approvalId: String?,
+        review: LifeBriefingReview? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.urgency = urgency
+        self.prompt = prompt
+        self.taskId = taskId
+        self.approvalId = approvalId
+        self.review = review
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, title, detail, urgency, prompt, taskId, approvalId, review
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.kind = try container.decode(String.self, forKey: .kind)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.detail = try container.decode(String.self, forKey: .detail)
+        self.urgency = try container.decode(String.self, forKey: .urgency)
+        self.prompt = try container.decodeIfPresent(String.self, forKey: .prompt)
+        self.taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
+        self.approvalId = try container.decodeIfPresent(String.self, forKey: .approvalId)
+        self.review = try container.decodeIfPresent(LifeBriefingReview.self, forKey: .review)
+    }
+
+    var iconName: String {
+        switch kind.lowercased() {
+        case "calendar": return "calendar"
+        case "message": return "envelope"
+        case "approval": return "shield-check"
+        case "goal": return "bolt"
+        case "watch": return "clock"
+        default: return "sparkles"
+        }
+    }
+
+    var reviewAction: ActionResult? {
+        guard kind.caseInsensitiveCompare("approval") == .orderedSame,
+              let review else { return nil }
+        let detail = [review.recipient, review.subject, review.body, review.detail]
+            .compactMap { value -> String? in
+                guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " · ")
+        let isEmail = ["send_email", "send_outlook_email"].contains(review.action)
+        return ActionResult(
+            action: review.action,
+            success: true,
+            text: isEmail ? "Check the email, then tap Send." : "Check the details, then choose what to do.",
+            cardText: detail.isEmpty ? nil : detail,
+            actionSummary: isEmail ? "Email ready to send" : nil,
+            risk: "high",
+            confirmation: "review_required",
+            pending: true
+        )
+    }
+}
+
+struct LifeBriefingReview: Codable, Equatable {
+    let action: String
+    let recipient: String?
+    let subject: String?
+    let body: String?
+    let detail: String?
+
+    init(
+        action: String,
+        recipient: String? = nil,
+        subject: String? = nil,
+        body: String? = nil,
+        detail: String? = nil
+    ) {
+        self.action = action
+        self.recipient = recipient
+        self.subject = subject
+        self.body = body
+        self.detail = detail
+    }
+}
+
+struct LifeBriefingCoverage: Codable, Equatable {
+    let goals: Bool
+    let approvals: Bool
+    let messages: Bool
+    let calendar: Bool
+    let watches: Bool
+}
+
 struct BriefingMetadata: Codable, Equatable {
     let emails: [BriefingEmail]?
     let incoming: [BriefingIncoming]?

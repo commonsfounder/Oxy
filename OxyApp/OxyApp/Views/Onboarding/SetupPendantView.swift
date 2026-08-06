@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Pairing screen: a mono sub-header, a high-contrast pendant glyph standing in
+/// Pairing screen: a mono sub-header, a quiet tabletop-device glyph standing in
 /// for real artwork, a single line of instruction, and a thin rotating silver
 /// arc at the foot — quiet, expensive, patient.
 struct SetupPendantView: View {
@@ -16,11 +16,11 @@ struct SetupPendantView: View {
                     .tracking(2.4)
                     .foregroundStyle(Color.appMuted)
 
-                PendantGlyph()
-                    .frame(width: 120, height: 168)
+                HomeDeviceGlyph()
+                    .frame(width: 168, height: 126)
                     .padding(.top, 56)
 
-                Text("Connect your pendant to the charger to begin pairing.")
+                Text("Place your home device on its charger to begin pairing.")
                     .font(.system(size: 15, weight: .light))
                     .foregroundStyle(Color.appMuted)
                     .multilineTextAlignment(.center)
@@ -38,30 +38,28 @@ struct SetupPendantView: View {
     }
 }
 
-/// A minimal, high-contrast pendant stand-in: the Core disc on its bail loop,
-/// drawn in thin titanium strokes. Placeholder until real artwork lands.
-private struct PendantGlyph: View {
+/// A minimal tabletop-device stand-in, drawn in thin titanium strokes.
+/// Placeholder until the physical industrial design artwork lands.
+private struct HomeDeviceGlyph: View {
     var body: some View {
         VStack(spacing: 0) {
-            // Bail loop
-            Circle()
-                .strokeBorder(Color.appTitanium, lineWidth: 1)
-                .frame(width: 22, height: 22)
-                .zIndex(1)
-
-            // Core disc
-            Circle()
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(Color.appTitanium, lineWidth: 1)
                 .background(
-                    Circle().fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.03))
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .fill(Color.appAdaptive(dark: .white, light: .black).opacity(0.03))
                 )
-                .frame(width: 116, height: 116)
+                .frame(width: 142, height: 88)
                 .overlay(
-                    Circle()
-                        .strokeBorder(Color.appAdaptive(dark: .white, light: .black).opacity(0.12), lineWidth: 0.5)
-                        .padding(16)
+                    Capsule()
+                        .fill(Color.appTitanium.opacity(0.35))
+                        .frame(width: 24, height: 3)
+                        .offset(y: 28)
                 )
-                .offset(y: -8)
+            Capsule()
+                .strokeBorder(Color.appTitanium, lineWidth: 1)
+                .frame(width: 166, height: 14)
+                .offset(y: -3)
         }
     }
 }

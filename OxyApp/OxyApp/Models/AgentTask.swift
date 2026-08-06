@@ -20,6 +20,8 @@ struct AgentTask: Codable, Identifiable, Equatable {
     let resumable: Bool
     /// Parked on the user, not stalled — an action needs approving before it continues.
     let awaitingApproval: Bool
+    /// The durable execution identity behind this goal, when one has been started.
+    var runtime: AgentRuntimeSnapshot?
 
     enum CodingKeys: String, CodingKey {
         case id, goal, status, autonomy, resumable
@@ -31,6 +33,7 @@ struct AgentTask: Codable, Identifiable, Equatable {
         case completedAt = "completed_at"
         case lastError = "last_error"
         case awaitingApproval = "awaiting_approval"
+        case runtime
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +51,7 @@ struct AgentTask: Codable, Identifiable, Equatable {
         lastError = try values.decodeIfPresent(String.self, forKey: .lastError)
         resumable = try values.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         awaitingApproval = try values.decodeIfPresent(Bool.self, forKey: .awaitingApproval) ?? false
+        runtime = try values.decodeIfPresent(AgentRuntimeSnapshot.self, forKey: .runtime)
     }
 
     var isActive: Bool {
@@ -56,8 +60,8 @@ struct AgentTask: Codable, Identifiable, Equatable {
 
     var statusLabel: String {
         switch status.lowercased() {
-        case "running": return "Working"
-        case "paused": return awaitingApproval ? "Needs approval" : "Paused"
+        case "running": return "Handling"
+        case "paused": return awaitingApproval ? "Needs your OK" : "Paused"
         case "failed": return "Needs you"
         case "completed": return "Done"
         case "cancelled": return "Cancelled"
@@ -67,6 +71,55 @@ struct AgentTask: Codable, Identifiable, Equatable {
     }
 
     var updatedDate: Date? { Date.oxyParse(updatedAt ?? createdAt) }
+}
+
+struct AgentRuntimeSnapshot: Codable, Equatable {
+    let id: String
+    let taskId: String
+    let deviceId: String?
+    let deviceType: String
+    let kind: String
+    let projectRef: String?
+    let title: String
+    let state: String
+    let createdAt: String?
+    let updatedAt: String?
+    let heartbeatAt: String?
+    let completedAt: String?
+    let artifacts: [AgentRuntimeArtifact]
+
+    enum CodingKeys: String, CodingKey {
+        case id, deviceId, deviceType, kind, projectRef, title, state, artifacts
+        case taskId = "taskId"
+        case createdAt, updatedAt, heartbeatAt, completedAt
+    }
+
+    var stateLabel: String {
+        switch state.lowercased() {
+        case "running": return "Handling"
+        case "waiting_approval": return "Needs your OK"
+        case "completed": return "Complete"
+        case "failed": return "Needs attention"
+        case "paused": return "Paused"
+        case "cancelled": return "Cancelled"
+        default: return "Ready"
+        }
+    }
+}
+
+struct AgentRuntimeArtifact: Codable, Identifiable, Equatable {
+    let id: String
+    let kind: String
+    let path: String?
+    let title: String
+    let summary: String
+    let status: String
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, kind, path, title, summary, status
+        case createdAt
+    }
 }
 
 struct AgentTaskActivity: Codable, Identifiable, Equatable {
@@ -79,4 +132,82 @@ struct AgentTaskActivity: Codable, Identifiable, Equatable {
 
 struct AgentTasksResponse: Codable {
     let tasks: [AgentTask]
+}
+
+/// A user-created background watch. The app receives only the safe description
+/// needed to understand and stop it; the private instruction stays server-side.
+struct AgentWatch: Codable, Identifiable, Equatable {
+    let id: String
+    let title: String
+    let recurrence: String
+    let nextRunAt: String?
+    let condition: String?
+    let intervalMinutes: Int?
+    let expiresAt: String?
+    let active: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, recurrence, condition, active
+        case nextRunAt, intervalMinutes, expiresAt
+    }
+
+    var cadenceLabel: String {
+        switch recurrence.lowercased() {
+        case "poll":
+            if let condition, !condition.isEmpty { return "Until \(condition)" }
+            if let intervalMinutes { return "Every \(intervalMinutes) minutes" }
+            return "Watching for an update"
+        case "daily": return "Every day"
+        case "weekly": return "Every week"
+        default: return "One check"
+        }
+    }
+
+    var nextCheckLabel: String? {
+        guard let nextRunAt, let date = Date.oxyParse(nextRunAt) else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return "Next check \(formatter.string(from: date))"
+    }
+}
+
+struct AgentPermissionPolicy: Codable, Equatable {
+    let guardMode: Bool
+    let read: AgentPermissionRule
+    let write: AgentPermissionRule
+    let payment: AgentPermissionRule
+    let audit: AgentAuditPolicy
+}
+
+struct AgentPermissionRule: Codable, Equatable {
+    let defaultRule: String
+    let description: String
+
+    enum CodingKeys: String, CodingKey {
+        case defaultRule = "default"
+        case description
+    }
+}
+
+struct AgentAuditPolicy: Codable, Equatable {
+    let enabled: Bool
+    let undo: String
+}
+
+struct AgentAuditEntry: Codable, Identifiable, Equatable {
+    let type: String
+    let status: String
+    let error: String?
+    let createdAt: String?
+    let risk: String
+    let executionMode: String
+    let reviewRequired: Bool
+    let undo: String?
+
+    var id: String { [createdAt ?? "", type, status].joined(separator: "-") }
+}
+
+struct AgentAuditResponse: Codable {
+    let entries: [AgentAuditEntry]
 }

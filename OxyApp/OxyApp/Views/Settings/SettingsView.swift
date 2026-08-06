@@ -13,7 +13,13 @@ struct SettingsView: View {
     @State private var isSavingHomeAddress = false
     @State private var homeAddressError: String?
     @State private var versionTapCount = 0
+    @State private var moreDestination: MoreSettingsDestination?
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
+
+    enum MoreSettingsDestination: Identifiable {
+        case payments, savedLogins, continuity, trust
+        var id: String { "\(self)" }
+    }
     // Light/dark/system — the single source of truth read by the app root's
     // preferredColorScheme. Writing it re-themes the whole app live.
 
@@ -124,6 +130,16 @@ struct SettingsView: View {
                             }
                         }
 
+                        settingsSection(title: "More") {
+                            navRow(label: "Payments") { moreDestination = .payments }
+                            MilgrainDivider()
+                            navRow(label: "Saved Logins") { moreDestination = .savedLogins }
+                            MilgrainDivider()
+                            navRow(label: "Continuity") { moreDestination = .continuity }
+                            MilgrainDivider()
+                            navRow(label: "Trust") { moreDestination = .trust }
+                        }
+
                         settingsSection(title: "About") {
                             legalLink(label: "Support", path: "/support")
                             MilgrainDivider()
@@ -162,6 +178,18 @@ struct SettingsView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            }
+            .fullScreenCover(item: $moreDestination) { dest in
+                Group {
+                    switch dest {
+                    case .payments: PaymentsView()
+                    case .savedLogins: VaultView()
+                    case .continuity: AgentContinuityView()
+                    case .trust: TrustCenterView()
+                    }
+                }
+                .swipeToDismiss()
+                .environment(\.colorScheme, lightMode ? .light : .dark)
             }
             .onAppear {
                 loadSettings()
@@ -235,6 +263,24 @@ struct SettingsView: View {
         }
         .padding(.vertical, 16)
         .onChange(of: selection.wrappedValue) { _, _ in saveSettings() }
+    }
+
+    private func navRow(label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            HapticManager.shared.impact(.light)
+            action()
+        } label: {
+            HStack {
+                Text(label)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.mgHeading)
+                Spacer()
+                AppIcon("chevron-right", size: 13)
+                    .foregroundStyle(Color.mgSecondary)
+            }
+            .padding(.vertical, 16)
+        }
+        .buttonStyle(.appScale(0.98))
     }
 
     private func settingRow<Accessory: View>(

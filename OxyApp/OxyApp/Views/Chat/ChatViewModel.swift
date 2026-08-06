@@ -1081,6 +1081,11 @@ final class ChatViewModel {
 
     private func friendlyNetworkError(_ error: String) -> String {
         let lower = error.lowercased()
+        if lower.contains("millie is unavailable") ||
+            lower.contains("millie needs a model connection") ||
+            lower.contains("millie could not answer") {
+            return error
+        }
         if lower.contains("network") || lower.contains("internet") || lower.contains("lost") || lower.contains("offline") {
             return "Network connection was lost. Try again."
         }

@@ -46,8 +46,7 @@ struct DeviceStatusCard: View {
     private var metrics: some View {
         HStack(spacing: 12) {
             metric(String(format: "%.1fMS", telemetry.routingLatencyMillis))
-            metric("CORE \(telemetry.coreBatteryPercent)%")
-            metric("CLASP \(telemetry.claspBatteryPercent)%")
+            metric("BATTERY \(telemetry.coreBatteryPercent)%")
         }
     }
 

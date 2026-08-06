@@ -18,6 +18,12 @@ struct ProfileView: View {
     @State private var isSigningOutAll = false
     @State private var accountStatusText: String?
     @State private var sharePayload: SharePayload?
+    @State private var profileDestination: ProfileDestination?
+
+    enum ProfileDestination: Identifiable {
+        case aboutYou, memory
+        var id: String { "\(self)" }
+    }
 
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
@@ -69,6 +75,12 @@ struct ProfileView: View {
                                 MilgrainDivider()
 
                                 identityRow(label: "Account ID", value: appState.userId)
+                            }
+
+                            section(title: "Millie") {
+                                actionRow(label: "About You", action: { profileDestination = .aboutYou })
+                                MilgrainDivider()
+                                actionRow(label: "Memory", action: { profileDestination = .memory })
                             }
 
                             // Benign data action, kept clear of the destructive group below.
@@ -146,6 +158,16 @@ struct ProfileView: View {
             }
             .sheet(item: $sharePayload) { payload in
                 ShareSheet(activityItems: [payload.url])
+            }
+            .fullScreenCover(item: $profileDestination) { dest in
+                Group {
+                    switch dest {
+                    case .aboutYou: AgentOSView()
+                    case .memory: MemoryView()
+                    }
+                }
+                .swipeToDismiss()
+                .environment(\.colorScheme, colorScheme)
             }
             // Edge-swipe-to-dismiss comes from `.swipeToDismiss()` on the presenting
             // fullScreenCover (MoreView); no per-screen recognizer needed.

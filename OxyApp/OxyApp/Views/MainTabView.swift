@@ -25,12 +25,11 @@ struct MoreView: View {
     @State private var destination: MoreDestination?
     @State private var appeared = false
 
-    private var pendant: PendantBLEManager { NativeIntegrationManager.shared.pendant }
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
 
     enum MoreDestination: Identifiable {
-        case profile, agent, models, continuity, pendant, connectors, memory, routines, work, workspace, settings, payments, vault
+        case profile, history, connectors, settings
         var id: String { "\(self)" }
     }
 
@@ -73,18 +72,9 @@ struct MoreView: View {
                 Group {
                     switch dest {
                     case .profile: ProfileView()
-                    case .agent: AgentOSView()
-                    case .models: ModelRoutingView()
-                    case .continuity: AgentContinuityView()
-                    case .pendant: PendantStatusView()
+                    case .history: ChatHomeView(showHistoryOnAppear: true)
                     case .connectors: ConnectorsView()
-                    case .memory: MemoryView()
-                    case .routines: RoutinesListView()
-                    case .work: AgentWorkView()
-                    case .workspace: AgentWorkspaceView()
                     case .settings: SettingsView()
-                    case .payments: PaymentsView()
-                    case .vault: VaultView()
                     }
                 }
                 .swipeToDismiss()
@@ -158,57 +148,15 @@ struct MoreView: View {
         return id.contains("@") ? id : ""
     }
 
-    private var pendantStatusText: String? {
-        switch pendant.connectionState {
-        case .connected:              return pendant.peripheralName ?? "Connected"
-        case .disconnected, .error:   return "Not connected"
-        case .scanning, .connecting:  return "Pairing"
-        }
-    }
-
-    private var pendantDot: AppStatusDot.Kind {
-        switch pendant.connectionState {
-        case .connected: return .live
-        case .scanning, .connecting: return .degraded
-        case .disconnected: return .off
-        case .error: return .error
-        }
-    }
-
-    // MARK: - Menu (flat list, ordered: account, device, memory, routines, connections, payments, settings)
+    // MARK: - Menu
 
     private var menuSection: some View {
         VStack(spacing: 0) {
             AppRow(title: "Account") { destination = .profile }
             rowDivider
-            AppRow(title: "Millie") { destination = .agent }
-            rowDivider
-            AppRow(title: "Models") { destination = .models }
-            rowDivider
-            AppRow(title: "Continuity") { destination = .continuity }
-            rowDivider
-            AppRow(title: "Pendant", onTap: { destination = .pendant }) {
-                HStack(spacing: 8) {
-                    AppStatusDot(kind: pendantDot, diameter: 5)
-                    if let s = pendantStatusText {
-                        Text(s).font(.rowSecondary).foregroundStyle(Color.appMuted)
-                    }
-                }
-            }
-            rowDivider
-            AppRow(title: "Memory") { destination = .memory }
-            rowDivider
-            AppRow(title: "Routines") { destination = .routines }
-            rowDivider
-            AppRow(title: "Work") { destination = .work }
-            rowDivider
-            AppRow(title: "Workspace") { destination = .workspace }
+            AppRow(title: "History") { destination = .history }
             rowDivider
             AppRow(title: "Connections") { destination = .connectors }
-            rowDivider
-            AppRow(title: "Payments") { destination = .payments }
-            rowDivider
-            AppRow(title: "Vault") { destination = .vault }
             rowDivider
             AppRow(title: "Settings") { destination = .settings }
         }

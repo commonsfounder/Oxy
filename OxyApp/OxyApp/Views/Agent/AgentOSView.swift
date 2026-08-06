@@ -3,6 +3,7 @@ import SwiftUI
 /// The durable identity layer: a readable view of what Millie knows and what she
 /// is currently carrying forward between conversations.
 struct AgentOSView: View {
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @State private var context: AgentContextSnapshot?
     @State private var isLoading = true
@@ -15,7 +16,7 @@ struct AgentOSView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "Millie", onBack: { dismiss() })
+                        ScreenHeaderView(title: "About you", onBack: { dismiss() })
 
                         if let errorMessage {
                             ErrorBanner(message: errorMessage, onRetry: {
@@ -56,15 +57,8 @@ struct AgentOSView: View {
                     Text(agent.name)
                         .font(.appBody(20, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                    Text(agent.role.capitalized + " · " + agent.continuity)
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
                 }
             }
-            Text("One identity across your conversations, memory, and delegated work.")
-                .font(.appBody(13))
-                .foregroundStyle(Color.appMuted)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .background { MissionGlassPlate() }
@@ -73,17 +67,17 @@ struct AgentOSView: View {
     @ViewBuilder
     private func profileSection(_ profile: AgentProfile) -> some View {
         let groups: [(String, [String])] = [
-            ("Identity", profile.identity),
-            ("Work", profile.work),
-            ("Relationships", profile.relationships),
+            ("Basics", profile.identity),
+            ("Right now", profile.work),
+            ("People", profile.relationships),
             ("Goals", profile.goals),
-            ("Context", profile.context)
+            ("Life", profile.context)
         ]
         let visible = groups.filter { !$0.1.isEmpty }
 
         if !visible.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Profile")
+                Text("What Millie knows")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 VStack(alignment: .leading, spacing: 0) {
@@ -110,7 +104,7 @@ struct AgentOSView: View {
                 .background { MissionGlassPlate() }
             }
         } else {
-            emptySection(title: "Profile", text: "Nothing saved yet.")
+            emptySection(title: "What Millie knows")
         }
     }
 
@@ -147,7 +141,7 @@ struct AgentOSView: View {
         let active = goals.filter { ["pending", "running", "paused", "failed"].contains($0.status.lowercased()) }
         if !active.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Carried forward")
+                Text("Millie is handling")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 VStack(alignment: .leading, spacing: 0) {
@@ -160,7 +154,7 @@ struct AgentOSView: View {
                                 Text(goal.goal)
                                     .font(.appBody(14, weight: .medium))
                                     .foregroundStyle(Color.appInk)
-                                Text(goal.status.capitalized + " · " + goal.autonomy + " autonomy")
+                                Text(goalStatus(goal.status))
                                     .font(.appBody(12))
                                     .foregroundStyle(Color.appMuted)
                             }
@@ -191,14 +185,11 @@ struct AgentOSView: View {
         }
     }
 
-    private func emptySection(title: String, text: String) -> some View {
+    private func emptySection(title: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.appBody(18, weight: .semibold))
                 .foregroundStyle(Color.appInk)
-            Text(text)
-                .font(.appBody(14))
-                .foregroundStyle(Color.appMuted)
         }
     }
 
@@ -206,7 +197,26 @@ struct AgentOSView: View {
         key.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
+    private func goalStatus(_ status: String) -> String {
+        switch status.lowercased() {
+        case "running": return "Millie is handling this"
+        case "paused": return "Paused"
+        case "failed": return "Needs your attention"
+        default: return "Ready to continue"
+        }
+    }
+
     private func load() async {
+#if DEBUG
+        if appState.isDemoSession {
+            await MainActor.run {
+                context = Self.demoContext
+                isLoading = false
+                errorMessage = nil
+            }
+            return
+        }
+#endif
         do {
             let fetched = try await AgentContextService.fetch()
             await MainActor.run {
@@ -223,6 +233,37 @@ struct AgentOSView: View {
             }
         }
     }
+
+#if DEBUG
+    private static let demoContext = AgentContextSnapshot(
+        agent: AgentIdentity(name: "Millie", role: "personal companion", continuity: "always here"),
+        profile: AgentProfile(
+            text: "",
+            sections: [
+                "identity": ["Based in Birmingham"],
+                "work": ["Building Milgrain"],
+                "relationships": ["Your supplier"],
+                "goals": ["A calmer home and more time back"],
+                "context": ["You prefer direct communication"]
+            ]
+        ),
+        preferences: ["communication_style": "Direct"],
+        memories: ["You prefer direct communication"],
+        goals: [
+            AgentContextGoal(
+                id: "demo-watch",
+                goal: "Flight prices to Turkey",
+                status: "running",
+                autonomy: "active",
+                guardMode: false,
+                currentStep: 1,
+                updatedAt: nil
+            )
+        ],
+        connectedApps: ["Gmail", "Calendar", "Reminders"],
+        generatedAt: nil
+    )
+#endif
 }
 
 #Preview {

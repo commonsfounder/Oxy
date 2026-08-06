@@ -13,7 +13,7 @@ struct ModelRoutingView: View {
         ZStack {
             GlebChrome.pastelBlob.ignoresSafeArea()
             VStack(spacing: 0) {
-                ScreenHeaderView(title: "Models", onBack: { dismiss() })
+                ScreenHeaderView(title: "AI choices", onBack: { dismiss() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if let snapshot {
@@ -40,19 +40,15 @@ struct ModelRoutingView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 AppIcon("sparkles", size: 16).foregroundStyle(Color.appAccent)
-                Text("Active brain")
+                Text("Millie's AI")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(Color.mgHeading)
             }
-            Text("\(providerName(snapshot.active.provider)) · \(snapshot.active.model)")
+            Text(providerName(snapshot.active.provider))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(Color.mgHeading)
-            if snapshot.selected.configured {
-                Text("Your selected route is active.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.mgSecondary)
-            } else {
-                Text("Selected route is waiting for its connection.")
+            if !snapshot.selected.configured {
+                Text("This choice is not set up yet.")
                     .font(.system(size: 12))
                     .foregroundStyle(Color.mgSecondary)
             }
@@ -64,7 +60,7 @@ struct ModelRoutingView: View {
 
     private func routeEditor(_ snapshot: ModelRoutingSnapshot) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionTitle("Choose a route", size: 20)
+            AppSectionTitle("Choose Millie's AI", size: 20)
             Picker("Provider", selection: $selectedProvider) {
                 ForEach(snapshot.providers) { provider in
                     Text(provider.name).tag(provider.id)
@@ -72,14 +68,11 @@ struct ModelRoutingView: View {
             }
             .pickerStyle(.menu)
             .tint(Color.appAccent)
-            AppLineField(placeholder: selectedDefaultModel(snapshot), text: $selectedModel)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
             Button {
                 Task { await save() }
             } label: {
                 HStack {
-                    Text(isSaving ? "Saving…" : "Use this model")
+                    Text(isSaving ? "Saving…" : "Use \(providerName(selectedProvider))")
                     Spacer()
                     AppIcon("arrow-up-right", size: 13)
                 }
@@ -98,20 +91,20 @@ struct ModelRoutingView: View {
 
     private func providerList(_ providers: [ModelProvider]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            AppSectionTitle("Connections", size: 20)
+            AppSectionTitle("Available AI", size: 20)
             ForEach(providers) { provider in
                 HStack(spacing: 12) {
                     AppIcon(provider.configured ? "bolt" : "dotted", size: 14)
                         .foregroundStyle(provider.configured ? Color.appAccent : Color.mgSecondary)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(provider.name).font(.system(size: 14, weight: .semibold))
-                        Text(provider.configured ? provider.defaultModel : "Not connected")
+                        Text(provider.configured ? "Ready" : "Not set up")
                             .font(.system(size: 12))
                             .foregroundStyle(Color.mgSecondary)
                     }
                     Spacer()
                     if provider.id == selectedProvider {
-                        Text("Selected")
+                        Text("In use")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Color.appAccent)
                     }
@@ -123,7 +116,7 @@ struct ModelRoutingView: View {
 
     private func errorState(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Models unavailable").font(.system(size: 18, weight: .semibold))
+            Text("AI choices unavailable").font(.system(size: 18, weight: .semibold))
             Text(message).font(.system(size: 13)).foregroundStyle(Color.mgSecondary)
             Button("Try again") { Task { await load() } }
                 .font(.system(size: 14, weight: .semibold))
@@ -149,7 +142,7 @@ struct ModelRoutingView: View {
             selectedProvider = loaded.selected.provider
             selectedModel = loaded.selected.model
         } catch {
-            errorMessage = "Couldn't load model connections."
+            errorMessage = "Could not load AI choices."
         }
         isLoading = false
     }
@@ -160,10 +153,10 @@ struct ModelRoutingView: View {
         do {
             snapshot = try await ModelRoutingService.save(
                 provider: selectedProvider,
-                model: selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+                model: ""
             )
         } catch {
-            errorMessage = "Couldn't save that model route."
+            errorMessage = "Could not save that choice."
         }
         isSaving = false
     }

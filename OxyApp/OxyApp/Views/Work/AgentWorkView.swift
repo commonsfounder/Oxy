@@ -5,9 +5,11 @@ import SwiftUI
 struct AgentWorkView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tasks: [AgentTask] = []
+    @State private var watches: [AgentWatch] = []
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var runningIDs = Set<String>()
+    @State private var cancellingWatchIDs = Set<String>()
     @State private var selectedTask: AgentTask?
     @State private var isShowingComposer = false
 
@@ -26,12 +28,12 @@ struct AgentWorkView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "Work", onBack: { dismiss() })
+                        ScreenHeaderView(title: "What Millie is handling", onBack: { dismiss() })
 
                         Button(action: { isShowingComposer = true }) {
                             HStack(spacing: 8) {
                                 AppIcon("plus", size: 14)
-                                Text("New goal")
+                                Text("New request")
                                     .font(.appBody(13, weight: .semibold))
                                 Spacer(minLength: 0)
                                 AppIcon("arrow-right", size: 13)
@@ -53,12 +55,17 @@ struct AgentWorkView: View {
                             ForEach(0..<3, id: \.self) { _ in
                                 OxySkeletonCard(height: 112, cornerRadius: 20)
                             }
-                        } else if tasks.isEmpty {
-                            emptyState
                         } else {
-                            taskSection(title: "In progress", tasks: activeTasks)
-                            if !historyTasks.isEmpty {
-                                taskSection(title: "History", tasks: Array(historyTasks.prefix(12)))
+                            if !watches.isEmpty {
+                                backgroundWatchesSection
+                            }
+                            if tasks.isEmpty {
+                                emptyState
+                            } else {
+                                taskSection(title: "Ongoing", tasks: activeTasks)
+                                if !historyTasks.isEmpty {
+                                    taskSection(title: "Updates", tasks: Array(historyTasks.prefix(12)))
+                                }
                             }
                         }
                     }
@@ -97,10 +104,10 @@ struct AgentWorkView: View {
         VStack(alignment: .leading, spacing: 10) {
             AppIcon("dotted", size: 18)
                 .foregroundStyle(Color.appAccent)
-            Text("Nothing is running")
+            Text("Nothing needs handling right now")
                 .font(.appBody(18, weight: .semibold))
                 .foregroundStyle(Color.appInk)
-            Text("Ask in chat to keep a goal moving in the background.")
+            Text("Ask Millie to keep something moving while you get on with your day.")
                 .font(.appBody(14))
                 .foregroundStyle(Color.appMuted)
         }
@@ -126,6 +133,28 @@ struct AgentWorkView: View {
         }
     }
 
+    private var backgroundWatchesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Millie is watching")
+                    .font(.appBody(18, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Spacer(minLength: 0)
+                Text("\(watches.count)")
+                    .font(.appBody(12, weight: .semibold))
+                    .foregroundStyle(Color.appMuted)
+            }
+
+            ForEach(watches) { watch in
+                AgentWatchRow(
+                    watch: watch,
+                    isCancelling: cancellingWatchIDs.contains(watch.id),
+                    onCancel: { Task { await cancelWatch(watch) } }
+                )
+            }
+        }
+    }
+
     private func load() async {
         do {
             let fetched = try await AgentTasksService.fetchTasks()
@@ -137,7 +166,29 @@ struct AgentWorkView: View {
         } catch {
             await MainActor.run {
                 isLoading = false
-                if tasks.isEmpty { errorMessage = "Could not load agent work." }
+                if tasks.isEmpty { errorMessage = "Could not load what Millie is handling." }
+            }
+        }
+
+        if let fetchedWatches = try? await AgentTasksService.fetchWatches() {
+            await MainActor.run { watches = fetchedWatches }
+        }
+    }
+
+    private func cancelWatch(_ watch: AgentWatch) async {
+        guard !cancellingWatchIDs.contains(watch.id) else { return }
+        _ = await MainActor.run { cancellingWatchIDs.insert(watch.id) }
+        do {
+            try await AgentTasksService.cancelWatch(id: watch.id)
+            await MainActor.run {
+                watches.removeAll { $0.id == watch.id }
+                cancellingWatchIDs.remove(watch.id)
+                HapticManager.shared.impact(.light)
+            }
+        } catch {
+            await MainActor.run {
+                cancellingWatchIDs.remove(watch.id)
+                errorMessage = "Could not stop that watch."
             }
         }
     }
@@ -167,6 +218,56 @@ struct AgentWorkView: View {
     }
 }
 
+private struct AgentWatchRow: View {
+    let watch: AgentWatch
+    let isCancelling: Bool
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            AppIcon("clock", size: 16)
+                .foregroundStyle(Color.appAccent)
+                .frame(width: 36, height: 36)
+                .background(Color.appAccent.opacity(0.12), in: Circle())
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(watch.title)
+                    .font(.appBody(16, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(watch.cadenceLabel)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+                if let nextCheckLabel = watch.nextCheckLabel {
+                    Text(nextCheckLabel)
+                        .font(.appBody(11))
+                        .foregroundStyle(Color.appMuted.opacity(0.82))
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: onCancel) {
+                if isCancelling {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(Color.appInk)
+                } else {
+                    AppIcon("xmark", size: 12)
+                }
+            }
+            .foregroundStyle(Color.appMuted)
+            .frame(width: 30, height: 30)
+            .background(Color.appInk.opacity(0.06), in: Circle())
+            .buttonStyle(.appScale)
+            .disabled(isCancelling)
+            .accessibilityLabel("Stop watching \(watch.title)")
+        }
+        .padding(16)
+        .background { MissionGlassPlate() }
+    }
+}
+
 private struct AgentGoalComposerView: View {
     @Environment(\.dismiss) private var dismiss
     let onCreated: (AgentTask) -> Void
@@ -185,13 +286,13 @@ private struct AgentGoalComposerView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "New goal", onBack: { dismiss() })
+                        ScreenHeaderView(title: "New request", onBack: { dismiss() })
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Goal")
+                            Text("What should Millie handle?")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
-                            TextField("What should Millie keep moving?", text: $goal, axis: .vertical)
+                            TextField("Tell Millie what to handle", text: $goal, axis: .vertical)
                                 .font(.appBody(16))
                                 .foregroundStyle(Color.appInk)
                                 .lineLimit(3...7)
@@ -205,7 +306,7 @@ private struct AgentGoalComposerView: View {
                                     Text("Ask before each action")
                                         .font(.appBody(15, weight: .medium))
                                         .foregroundStyle(Color.appInk)
-                                    Text("Recommended for a new goal.")
+                                    Text("Millie will ask before each action.")
                                         .font(.appBody(12))
                                         .foregroundStyle(Color.appMuted)
                                 }
@@ -232,7 +333,7 @@ private struct AgentGoalComposerView: View {
                         Button(action: create) {
                             HStack(spacing: 8) {
                                 if isSaving { ProgressView().scaleEffect(0.7).tint(Color.appInk) }
-                                Text(isSaving ? "Creating" : "Create goal")
+                                Text(isSaving ? "Starting" : "Start")
                                     .font(.appBody(14, weight: .semibold))
                             }
                             .foregroundStyle(Color.appInk)
@@ -338,7 +439,7 @@ private struct AgentTaskRow: View {
                     Button(action: onRun) {
                         HStack(spacing: 7) {
                             if isRunning { ProgressView().scaleEffect(0.65).tint(Color.appInk) }
-                            Text(isRunning ? "Starting" : task.status.lowercased() == "running" ? "Working" : "Run")
+                            Text(isRunning ? "Starting" : task.awaitingApproval ? "Needs your OK" : task.status.lowercased() == "running" ? "Handling" : "Continue")
                                 .font(.appBody(12, weight: .semibold))
                         }
                         .foregroundStyle(Color.appInk)
@@ -347,7 +448,7 @@ private struct AgentTaskRow: View {
                         .background(Color.appAccent.opacity(0.16), in: Capsule())
                     }
                     .buttonStyle(.appScale)
-                    .disabled(isRunning || task.status.lowercased() == "running")
+                    .disabled(isRunning || task.status.lowercased() == "running" || task.awaitingApproval)
                 }
             }
         }
@@ -362,6 +463,8 @@ private struct AgentTaskDetailView: View {
     let onUpdated: (AgentTask) -> Void
     @State private var autonomy: String
     @State private var guardMode: Bool
+    @State private var runtime: AgentRuntimeSnapshot?
+    @State private var isLoadingRuntime = true
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -372,6 +475,7 @@ private struct AgentTaskDetailView: View {
         self.onUpdated = onUpdated
         _autonomy = State(initialValue: OxySettings.normalizedAutonomy(task.autonomy))
         _guardMode = State(initialValue: task.guardMode)
+        _runtime = State(initialValue: task.runtime)
     }
 
     var body: some View {
@@ -381,20 +485,22 @@ private struct AgentTaskDetailView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "Goal controls", onBack: { dismiss() })
+                        ScreenHeaderView(title: "Details", onBack: { dismiss() })
 
                         VStack(alignment: .leading, spacing: 8) {
                             Text(task.goal)
                                 .font(.appBody(20, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(task.statusLabel + " · " + task.autonomy + " autonomy")
+                            Text(task.statusLabel)
                                 .font(.appBody(13))
                                 .foregroundStyle(Color.appMuted)
                         }
 
+                        runtimeSection
+
                         VStack(alignment: .leading, spacing: 15) {
-                            Text("Permission")
+                            Text("Your OK")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                             Toggle(isOn: $guardMode) {
@@ -402,7 +508,7 @@ private struct AgentTaskDetailView: View {
                                     Text("Ask before each action")
                                         .font(.appBody(15, weight: .medium))
                                         .foregroundStyle(Color.appInk)
-                                    Text("Keep this goal behind the approval gate.")
+                                    Text("Millie will ask before each action.")
                                         .font(.appBody(12))
                                         .foregroundStyle(Color.appMuted)
                                 }
@@ -413,7 +519,7 @@ private struct AgentTaskDetailView: View {
                         .background { MissionGlassPlate() }
 
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Proactivity")
+                            Text("How much Millie should take on")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                             Picker("Proactivity", selection: $autonomy) {
@@ -438,7 +544,7 @@ private struct AgentTaskDetailView: View {
                         Button(action: save) {
                             HStack(spacing: 8) {
                                 if isSaving { ProgressView().scaleEffect(0.7).tint(Color.appInk) }
-                                Text(isSaving ? "Saving" : "Save controls")
+                                        Text(isSaving ? "Saving" : "Save")
                                     .font(.appBody(14, weight: .semibold))
                             }
                             .foregroundStyle(Color.appInk)
@@ -454,6 +560,58 @@ private struct AgentTaskDetailView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            .task { await loadRuntime() }
+        }
+    }
+
+    @ViewBuilder
+    private var runtimeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Updates")
+                .font(.appBody(16, weight: .semibold))
+                .foregroundStyle(Color.appInk)
+
+            if isLoadingRuntime {
+                OxySkeletonCard(height: 88, cornerRadius: 18)
+            } else if let runtime {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 8) {
+                        AppIcon("dotted", size: 14)
+                            .foregroundStyle(Color.appAccent)
+                        Text(runtime.stateLabel)
+                            .font(.appBody(13, weight: .semibold))
+                            .foregroundStyle(Color.appInk)
+                        Spacer(minLength: 0)
+                        Text(runtime.deviceType == "ambient_home" ? "Home device" : "Companion")
+                            .font(.appBody(11))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    if !runtime.artifacts.isEmpty {
+                        Text("\(runtime.artifacts.count) update\(runtime.artifacts.count == 1 ? "" : "s") saved")
+                            .font(.appBody(12))
+                            .foregroundStyle(Color.appMuted)
+                    }
+                }
+                .padding(16)
+                .background { MissionGlassPlate() }
+            } else {
+                Text("Millie has not started this yet.")
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func loadRuntime() async {
+        do {
+            let fetched = try await AgentTasksService.fetchRuntime(taskID: task.id)
+            await MainActor.run {
+                runtime = fetched
+                isLoadingRuntime = false
+            }
+        } catch {
+            await MainActor.run { isLoadingRuntime = false }
         }
     }
 
@@ -464,7 +622,7 @@ private struct AgentTaskDetailView: View {
                 .font(.appBody(16, weight: .semibold))
                 .foregroundStyle(Color.appInk)
             if task.activities.isEmpty {
-                Text("No actions recorded yet.")
+                Text("No updates yet.")
                     .font(.appBody(13))
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 4)
@@ -516,6 +674,164 @@ private struct AgentTaskDetailView: View {
                     isSaving = false
                     errorMessage = "Could not save these controls."
                 }
+            }
+        }
+    }
+}
+
+struct TrustCenterView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var policy: AgentPermissionPolicy?
+    @State private var entries: [AgentAuditEntry] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.appBackground.ignoresSafeArea()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 24) {
+                        ScreenHeaderView(title: "Trust", onBack: { dismiss() })
+
+                        if let errorMessage {
+                            ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
+                        }
+
+                        if isLoading {
+                            OxySkeletonCard(height: 170, cornerRadius: 20)
+                            OxySkeletonCard(height: 250, cornerRadius: 20)
+                        } else if let policy {
+                            policySection(policy)
+                            auditSection(policy)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
+                }
+                .refreshable { await load() }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .task { await load() }
+        }
+    }
+
+    private func policySection(_ policy: AgentPermissionPolicy) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Permission policy")
+                .font(.appBody(18, weight: .semibold))
+                .foregroundStyle(Color.appInk)
+
+            VStack(spacing: 0) {
+                policyRow("Read", policy.read.defaultRule, policy.read.description)
+                divider
+                policyRow("Write", policy.write.defaultRule, policy.write.description)
+                divider
+                policyRow("Payments", policy.payment.defaultRule, policy.payment.description)
+            }
+            .padding(.horizontal, 16)
+            .background { MissionGlassPlate() }
+        }
+    }
+
+    private func auditSection(_ policy: AgentPermissionPolicy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Action history")
+                    .font(.appBody(18, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Spacer(minLength: 0)
+                Text(policy.audit.enabled ? "Enabled" : "Off")
+                    .font(.appBody(12, weight: .medium))
+                    .foregroundStyle(policy.audit.enabled ? Color.appSuccess : Color.appMuted)
+            }
+
+            if entries.isEmpty {
+                Text("No actions recorded yet.")
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.vertical, 8)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(entries) { entry in
+                        auditRow(entry)
+                        if entry.id != entries.last?.id { divider }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .background { MissionGlassPlate() }
+            }
+
+            Text("Undo is available where the connected service supports it.")
+                .font(.appBody(12))
+                .foregroundStyle(Color.appMuted)
+        }
+    }
+
+    private func policyRow(_ title: String, _ rule: String, _ description: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Text(description)
+                    .font(.appBody(12))
+                    .foregroundStyle(Color.appMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 10)
+            Text(rule.capitalized)
+                .font(.appBody(11, weight: .semibold))
+                .foregroundStyle(Color.appAccent)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(Color.appAccent.opacity(0.12), in: Capsule())
+        }
+        .padding(.vertical, 13)
+    }
+
+    private func auditRow(_ entry: AgentAuditEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            AppIcon(entry.status.lowercased() == "executed" ? "check-circle" : "alert-circle", size: 15)
+                .foregroundStyle(entry.status.lowercased() == "executed" ? Color.appSuccess : Color.appAccent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.type.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.appBody(13, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
+                Text(entry.error ?? entry.status.capitalized)
+                    .font(.appBody(12))
+                    .foregroundStyle(entry.error == nil ? Color.appMuted : Color.mgDestructive)
+            }
+            Spacer(minLength: 0)
+            Text(entry.risk.capitalized)
+                .font(.appBody(10, weight: .medium))
+                .foregroundStyle(Color.appMuted)
+        }
+        .padding(.vertical, 12)
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Color.appHairline)
+            .frame(height: 0.5)
+    }
+
+    private func load() async {
+        do {
+            async let fetchedPolicy = AgentTasksService.fetchPermissionPolicy()
+            async let fetchedAudit = AgentTasksService.fetchAudit()
+            let (nextPolicy, nextEntries) = try await (fetchedPolicy, fetchedAudit)
+            await MainActor.run {
+                policy = nextPolicy
+                entries = nextEntries
+                isLoading = false
+                errorMessage = nil
+            }
+        } catch {
+            await MainActor.run {
+                isLoading = false
+                errorMessage = "Could not load trust details."
             }
         }
     }

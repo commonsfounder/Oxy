@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     var initialSession: ChatSessionSummary? = nil
     var autoSendTranscript: String? = nil
+    var initialReviewAction: ActionResult? = nil
     /// Start a brand-new empty chat instead of resuming the current one.
     var startFresh: Bool = false
     /// When set, the top-left toolbar shows a sidebar/menu button instead of a back chevron.
@@ -428,6 +429,9 @@ struct ChatView: View {
             } else {
                 await viewModel.prepareChat(userId: appState.userId)
             }
+            if let initialReviewAction {
+                pendingReviewAction = initialReviewAction
+            }
             if let transcript = autoSendTranscript, !transcript.isEmpty {
                 injectVoiceMessage(transcript)
             }
@@ -765,22 +769,25 @@ private struct ActionReviewSheet: View {
         }
         return action.actionSummary ?? {
             switch action.action {
-            case "send_email": return "Review email"
-            case "send_message": return "Review message"
-            case "send_telegram": return "Review Telegram"
-            case "make_call": return "Review call"
-            default: return "Review"
+            case "send_email", "send_outlook_email": return "Email ready to send"
+            case "send_message", "send_telegram": return "Message ready to send"
+            case "make_call": return "Call ready to make"
+            case "create_calendar_event": return "Calendar event ready"
+            default: return "This needs your OK"
             }
         }()
     }
 
-    private var subtitle: String {
-        isPayment ? "This will use the saved payment method on the site." : "One tap when it looks right."
-    }
-
     private var confirmLabel: String {
-        if action.action == "book_appointment" { return "Book" }
-        return isPayment ? "Confirm & Place Order" : "Confirm"
+        if isPayment { return "Confirm & Place Order" }
+        switch action.action {
+        case "send_email", "send_outlook_email": return "Send"
+        case "send_message", "send_telegram": return "Send"
+        case "make_call": return "Call"
+        case "create_calendar_event": return "Add"
+        case "book_appointment": return "Book"
+        default: return "Confirm"
+        }
     }
 
     private var detail: String {
@@ -806,15 +813,12 @@ private struct ActionReviewSheet: View {
                     Text(title)
                         .font(.appTitle(20, weight: .semibold))
                         .foregroundStyle(Color.appInk)
-                    Text(subtitle)
-                        .font(.appBody(13))
-                        .foregroundStyle(Color.appMuted)
                 }
                 Spacer()
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Ready for review")
+                Text("Needs your OK")
                     .appEyebrow()
                     .foregroundStyle(isPayment ? Color.appAccent.opacity(0.9) : Color.appMuted)
                 Text(detail)

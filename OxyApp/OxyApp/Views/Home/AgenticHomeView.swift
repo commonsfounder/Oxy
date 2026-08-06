@@ -21,6 +21,7 @@ struct AgenticHomeView: View {
     private static let pollInterval: Duration = .seconds(90)
 
     @State private var briefings: [Briefing] = []
+    @State private var lifeBriefing: LifeBriefing?
     @State private var isLoading = false
     @State private var isRefreshing = false
     @State private var errorMessage: String?
@@ -55,6 +56,8 @@ struct AgenticHomeView: View {
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
     @State private var agentTasks: [AgentTask] = []
+    @State private var agentWatches: [AgentWatch] = []
+    @State private var stoppingWatchIDs = Set<String>()
     @State private var isAgentWorkPresented = false
     /// "Recently touched" strip (Phase 3 of the aside-parity roadmap) — entities the
     /// agent itself touched while running a task, not a search UI. Empty array hides
@@ -87,6 +90,13 @@ struct AgenticHomeView: View {
                             }
                         }
 
+                        if let lifeBriefing = visibleLifeBriefing {
+                            LifeBriefingCard(briefing: lifeBriefing) { item in
+                                handleLifeBriefingItem(item)
+                            }
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
                         if isLoading && missions.isEmpty {
                             ProgressView()
                                 .tint(GlebChrome.ink.opacity(0.4))
@@ -103,7 +113,7 @@ struct AgenticHomeView: View {
                                         ink: GlebChrome.ink,
                                         onCTA: { handleMissionCTA(mission) },
                                         onMailCTA: { email in handleMailCTA(email) },
-                                        onDismiss: mission.kind == .mailGroup ? nil : {
+                                        onDismiss: mission.kind == .mailGroup || mission.watchID != nil ? nil : {
                                             mission.id.hasPrefix("session-") ? abandonSession(mission.id) : dismissMission(mission.id)
                                         }
                                     )
@@ -248,6 +258,7 @@ struct AgenticHomeView: View {
             NavigationStack {
                 ChatView(
                     autoSendTranscript: launch.autoSend,
+                    initialReviewAction: launch.review,
                     startFresh: launch.startFresh
                 )
                 .toolbar {
@@ -356,14 +367,10 @@ struct AgenticHomeView: View {
     // MARK: - Chrome
 
     private var emptyMissions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Nothing running right now")
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Nothing needs handling right now")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(GlebChrome.ink)
-            Text("Ask for a ride, book dinner, order food, or buy something — the job runs as a card and the result lands here.")
-                .font(.system(size: 14))
-                .foregroundStyle(GlebChrome.ink.opacity(0.55))
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -393,6 +400,7 @@ struct AgenticHomeView: View {
     }
 
     private static let suggestions = [
+        "What matters?",
         "Book a table for dinner",
         "Book a ride home",
         "Order food nearby",
@@ -534,15 +542,70 @@ struct AgenticHomeView: View {
 
     // MARK: - Data
 
+    /// Keep one clear card for each item. A message or goal can arrive through both
+    /// the live briefing and the older outcome feed. Showing both makes Millie look
+    /// forgetful, so the outcome card wins and only genuinely new context stays here.
+    private var visibleLifeBriefing: LifeBriefing? {
+        guard let lifeBriefing, !lifeBriefing.items.isEmpty else { return nil }
+        let missionTitles = missions.map { $0.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        let items = lifeBriefing.items.filter { item in
+            let title = item.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let duplicatesOutcome = missionTitles.contains { missionTitle in
+                !title.isEmpty && !missionTitle.isEmpty &&
+                    (missionTitle == title || missionTitle.contains(title) || title.contains(missionTitle))
+            }
+            let duplicatesInbox = item.kind.lowercased() == "message" &&
+                missions.contains { $0.kind == .mailGroup }
+            return !duplicatesOutcome && !duplicatesInbox
+        }
+        guard !items.isEmpty else { return nil }
+        guard items.count != lifeBriefing.items.count else { return lifeBriefing }
+        let headline: String
+        switch items.count {
+        case 1: headline = "One thing needs your attention."
+        default: headline = "\(items.count) things need your attention."
+        }
+        return LifeBriefing(
+            headline: headline,
+            items: items,
+            empty: false,
+            generatedAt: lifeBriefing.generatedAt,
+            coverage: lifeBriefing.coverage
+        )
+    }
+
     private var missions: [HomeMission] {
         let briefingMissions = HomeMissionBuilder.build(from: briefings).filter { $0.kind != .agent }
-        return (persistentTaskMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
+        return (watchMissions + persistentTaskMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
             guard mission.kind == .mailGroup else {
                 return dismissedMissionIDs.contains(mission.id) ? nil : mission
             }
             var visible = mission
             visible.mailItems = mission.mailItems.filter { !dismissedMailIDs.contains($0.id) }
             return visible.mailItems.isEmpty ? nil : visible
+        }
+    }
+
+    private var watchMissions: [HomeMission] {
+        agentWatches.prefix(3).map { watch in
+            let detail: String = {
+                if let condition = watch.condition, !condition.isEmpty {
+                    return "Until \(condition)"
+                }
+                return watch.cadenceLabel
+            }()
+            return HomeMission(
+                id: "watch-\(watch.id)",
+                kind: .agent,
+                eyebrow: "Millie is watching",
+                title: watch.title,
+                detail: detail,
+                cta: "Stop watching",
+                prompt: nil,
+                symbol: "clock",
+                isPrimary: true,
+                watchID: watch.id
+            )
         }
     }
 
@@ -556,7 +619,7 @@ struct AgenticHomeView: View {
             .map { session in
                 let (eyebrow, cta): (String, String?) = {
                     if session.errorMessage != nil { return ("Needs you", "Retry") }
-                    if session.isWorking { return ("Working", nil) }
+                    if session.isWorking { return ("Handling", nil) }
                     if case .assistantAsk = session.currentStep?.ui { return ("Needs you", "Reply") }
                     return ("Ready", "Review")
                 }()
@@ -583,17 +646,17 @@ struct AgenticHomeView: View {
                 let eyebrow: String
                 let cta: String?
                 switch lower {
-                case "running": eyebrow = "Working"; cta = "Open"
-                case "failed": eyebrow = "Needs you"; cta = "Review"
+                case "running": eyebrow = "Handling"; cta = "Open"
+                case "failed": eyebrow = "Needs your attention"; cta = "Review"
                 case "paused": eyebrow = "Paused"; cta = "Resume"
-                default: eyebrow = "Ready"; cta = "Run"
+                default: eyebrow = "Ready"; cta = "Start"
                 }
                 return HomeMission(
                     id: "persistent-task-\(task.id)",
                     kind: .agent,
                     eyebrow: eyebrow,
                     title: task.goal,
-                    detail: "\(task.autonomy) autonomy · \(task.currentStep == 0 ? "Not started" : "Step \(task.currentStep)")",
+                    detail: lower == "running" ? "Millie is handling this." : lower == "paused" ? "Saved and ready to continue." : "Ready when you are.",
                     cta: cta,
                     prompt: nil,
                     symbol: "circle.dotted",
@@ -627,6 +690,19 @@ struct AgenticHomeView: View {
 
     // MARK: - Actions
 
+    private func handleLifeBriefingItem(_ item: LifeBriefingItem) {
+        HapticManager.shared.impact(.light)
+        if item.kind.caseInsensitiveCompare("approval") == .orderedSame {
+            // The pending action already exists in the current conversation. Loading that
+            // conversation lets ChatView present the saved review card with its real email
+            // details. Sending a new "Approve this" turn here could confirm the action
+            // before the user sees what Millie prepared.
+            openChat(autoSend: nil, startFresh: false, review: item.reviewAction)
+            return
+        }
+        handleIntent(item.prompt ?? "Tell me more about \(item.title)")
+    }
+
     private func sendComposer() {
         let text = composerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -636,6 +712,10 @@ struct AgenticHomeView: View {
     }
 
     private func handleMissionCTA(_ mission: HomeMission) {
+        if let watchID = mission.watchID {
+            Task { await stopWatch(id: watchID) }
+            return
+        }
         if mission.taskID != nil {
             HapticManager.shared.impact(.light)
             isAgentWorkPresented = true
@@ -648,6 +728,26 @@ struct AgenticHomeView: View {
         }
         let prompt = mission.prompt?.trimmingCharacters(in: .whitespacesAndNewlines)
         handleIntent((prompt?.isEmpty == false ? prompt : nil) ?? mission.title)
+    }
+
+    private func stopWatch(id: String) async {
+        guard !stoppingWatchIDs.contains(id) else { return }
+        await MainActor.run {
+            stoppingWatchIDs.insert(id)
+            HapticManager.shared.impact(.light)
+        }
+        do {
+            try await AgentTasksService.cancelWatch(id: id)
+            await MainActor.run {
+                agentWatches.removeAll { $0.id == id }
+                stoppingWatchIDs.remove(id)
+            }
+        } catch {
+            await MainActor.run {
+                stoppingWatchIDs.remove(id)
+                errorMessage = "Could not stop watching this."
+            }
+        }
     }
 
     /// Explicitly abandons a backgrounded job — swiping its Home card away. The job
@@ -781,8 +881,8 @@ struct AgenticHomeView: View {
         }
     }
 
-    private func openChat(autoSend: String?, startFresh: Bool) {
-        chatLaunch = ChatLaunch(autoSend: autoSend, startFresh: startFresh)
+    private func openChat(autoSend: String?, startFresh: Bool, review: ActionResult? = nil) {
+        chatLaunch = ChatLaunch(autoSend: autoSend, startFresh: startFresh, review: review)
     }
 
     private func load(forceCheck: Bool) async {
@@ -806,10 +906,20 @@ struct AgenticHomeView: View {
             errorMessage = error.localizedDescription
         }
 
+        // Answer-first context sits above the older feed of individual cards. Preserve
+        // the previous snapshot on a transient connector or server failure so Home does
+        // not flicker back to a blank page while the ambient device is listening.
+        if let fetchedLifeBriefing = try? await service.loadLifeBriefing() {
+            lifeBriefing = fetchedLifeBriefing
+        }
+
         // Durable goals are the continuity layer between chat turns. Preserve the
         // previous snapshot if this ambient fetch fails; Work has its own retry path.
         if let fetchedTasks = try? await AgentTasksService.fetchTasks() {
             agentTasks = fetchedTasks
+        }
+        if let fetchedWatches = try? await AgentTasksService.fetchWatches() {
+            agentWatches = fetchedWatches
         }
 
         #if DEBUG
@@ -818,6 +928,9 @@ struct AgenticHomeView: View {
         if briefings.isEmpty && appState.isDemoSession {
             errorMessage = nil
             briefings = AgenticHomeView.sampleBriefings
+        }
+        if lifeBriefing == nil && appState.isDemoSession {
+            lifeBriefing = AgenticHomeView.sampleLifeBriefing
         }
         #endif
 
@@ -839,11 +952,11 @@ struct AgenticHomeView: View {
             metadata: BriefingMetadata(
                 emails: [
                     BriefingEmail(
-                        from: "Dana Kim <dana@studio.co>",
-                        subject: "Deck for the 3pm review",
-                        snippet: "Can you send the latest before we meet?",
+                        from: "School office <school@example.com>",
+                        subject: "Friday trip details",
+                        snippet: "Please confirm the lunch plan before Friday.",
                         date: "9:02 AM",
-                        summary: "Wants the deck before the 3pm review",
+                        summary: "The school needs a quick reply before Friday",
                         cta: nil,
                         provider: nil,
                         messageId: nil
@@ -870,12 +983,12 @@ struct AgenticHomeView: View {
                 lead: nil,
                 signals: [
                     BriefingSignal(
-                        title: "Reply to Dana about the 3pm deck",
-                        detail: "She needs the latest version before the review",
+                        title: "Reply to the school about Friday's trip",
+                        detail: "They need the lunch plan confirmed",
                         status: "pending",
                         receipt: nil,
                         label: "Draft reply",
-                        prompt: "Draft a reply to Dana about the 3pm deck",
+                        prompt: "Draft a reply to the school about Friday's trip",
                         undo: nil
                     ),
                     BriefingSignal(
@@ -893,6 +1006,51 @@ struct AgenticHomeView: View {
             )
         )
     ]
+
+    static let sampleLifeBriefing = LifeBriefing(
+        headline: "Three things need your attention.",
+        items: [
+            LifeBriefingItem(
+                id: "sample-approval",
+                kind: "approval",
+                title: "Ask the supplier for a lower price",
+                detail: "This needs your OK before Millie can continue.",
+                urgency: "now",
+                prompt: "Review the supplier message",
+                taskId: nil,
+                approvalId: nil,
+                review: LifeBriefingReview(
+                    action: "send_email",
+                    recipient: "sales@supplier.example",
+                    subject: "Could you review the price?",
+                    body: "Hi,\n\nCould you review the price and see if there is room to reduce it?\n\nThanks"
+                )
+            ),
+            LifeBriefingItem(
+                id: "sample-calendar",
+                kind: "calendar",
+                title: "Dentist appointment",
+                detail: "Today at 3:00 PM",
+                urgency: "soon",
+                prompt: "Help me prepare for my dentist appointment",
+                taskId: nil,
+                approvalId: nil
+            ),
+            LifeBriefingItem(
+                id: "sample-goal",
+                kind: "watch",
+                title: "Flight prices to Turkey",
+                detail: "Millie is watching this.",
+                urgency: "background",
+                prompt: "Update me on flight prices to Turkey",
+                taskId: nil,
+                approvalId: nil
+            )
+        ],
+        empty: false,
+        generatedAt: nil,
+        coverage: nil
+    )
     #endif
 
     // MARK: - Copy
@@ -938,6 +1096,68 @@ private struct ChatLaunch: Identifiable, Equatable {
     let id = UUID()
     let autoSend: String?
     let startFresh: Bool
+    let review: ActionResult?
+}
+
+private struct LifeBriefingCard: View {
+    let briefing: LifeBriefing
+    let onItem: (LifeBriefingItem) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("What matters")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(GlebChrome.ink.opacity(0.5))
+                Spacer()
+                AppIcon("sparkles", size: 15)
+                    .foregroundStyle(GlebChrome.ink.opacity(0.45))
+            }
+
+            VStack(spacing: 0) {
+                ForEach(briefing.items) { item in
+                    Button {
+                        HapticManager.shared.impact(.light)
+                        onItem(item)
+                    } label: {
+                        HStack(alignment: .top, spacing: 11) {
+                            AppIcon(item.iconName, size: 16)
+                                .foregroundStyle(GlebChrome.ink.opacity(0.6))
+                                .frame(width: 26, height: 26)
+                                .background(GlebChrome.ink.opacity(0.06), in: Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.title)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(GlebChrome.ink)
+                                    .multilineTextAlignment(.leading)
+                                Text(item.detail)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(GlebChrome.ink.opacity(0.55))
+                                    .multilineTextAlignment(.leading)
+                            }
+
+                            Spacer(minLength: 6)
+                            AppIcon("arrow-right", size: 12)
+                                .foregroundStyle(GlebChrome.ink.opacity(0.35))
+                                .padding(.top, 7)
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.plain)
+
+                    if item.id != briefing.items.last?.id {
+                        Divider()
+                            .overlay(GlebChrome.ink.opacity(0.08))
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { MissionGlassPlate() }
+    }
 }
 
 // MARK: - Mission model (briefing → cards)
@@ -961,6 +1181,7 @@ struct HomeMission: Identifiable, Equatable {
     let symbol: String
     let isPrimary: Bool
     var taskID: String? = nil
+    var watchID: String? = nil
     /// Structured payload for bespoke (Gleb-style) card rendering. All optional so
     /// existing call sites are unaffected and cards degrade gracefully.
     var deliveryStage: Int? = nil
@@ -1081,8 +1302,8 @@ enum HomeMissionBuilder {
                 out.append(HomeMission(
                     id: id,
                     kind: .agent,
-                    eyebrow: "Working",
-                    title: briefing.title ?? "Task in progress",
+                    eyebrow: "Handling",
+                    title: briefing.title ?? "Something Millie is handling",
                     detail: briefing.body,
                     cta: "Continue",
                     prompt: briefing.body,

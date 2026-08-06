@@ -202,6 +202,11 @@ struct ChatService {
         )
     }
 
+    func loadLifeBriefing() async throws -> LifeBriefing {
+        let data = try await api.request(path: "/agent/briefing")
+        return try JSONDecoder().decode(LifeBriefing.self, from: data)
+    }
+
     /// The "go handle it" path for an inbox card — a plain REST call, never a chat/agent
     /// turn, so the model never gets a chance to decide for itself whether to try
     /// browsing/logging into a bank site. See buildEmailActionPlan in api/index.js.

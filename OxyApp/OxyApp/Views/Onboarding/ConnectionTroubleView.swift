@@ -8,9 +8,9 @@ struct ConnectionTroubleView: View {
     var onSkip: () -> Void = {}
 
     private let checks = [
-        "Is the pendant on the charger?",
+        "Is the home device on the charger?",
         "Bluetooth enabled on iPhone?",
-        "Pendant within 1 meter?"
+        "Home device within 1 meter?"
     ]
 
     var body: some View {
@@ -25,7 +25,7 @@ struct ConnectionTroubleView: View {
                     .tracking(2.4)
                     .foregroundStyle(Color.appMuted)
 
-                Text("We couldn't reach your pendant.")
+                Text("We couldn't reach your home device.")
                     .font(.appDisplay(30, weight: .regular))
                     .foregroundStyle(Color.appInk)
                     .fixedSize(horizontal: false, vertical: true)

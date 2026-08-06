@@ -472,7 +472,7 @@ final class NativeIntegrationManager {
     }
 
     func executeLocalRequest(_ message: String) async -> NativeLocalActionResult? {
-        let normalized = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = stripWakeWord(from: message)
         guard !normalized.isEmpty else { return nil }
         let lower = normalized.lowercased()
         if let result = await nativeDiagnostics(for: normalized) {
@@ -527,6 +527,18 @@ final class NativeIntegrationManager {
         }
 
         return nil
+    }
+
+    /// The home device sends the wake word with the spoken request. Remove it before
+    /// local routing so native actions still work when the same request is typed in Chat.
+    private func stripWakeWord(from message: String) -> String {
+        message
+            .replacingOccurrences(
+                of: #"(?i)^\s*(?:hey|okay|ok)?\s*millie(?:\s*[:,;-]\s*|\s+)"#,
+                with: "",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func handleEasyMusic(_ message: String) async -> NativeLocalActionResult? {
@@ -2624,11 +2636,11 @@ final class NativeIntegrationManager {
             lastReminderIdentifier = reminder.calendarItemIdentifier
             lastReminderTitle = title
             lastReminderDueDate = parsedDate
-            let timeText = parsedDate.map { DateFormatter.localizedString(from: $0, dateStyle: .none, timeStyle: .short) }
+            let scheduleText = parsedDate.map { reminderScheduleText(for: $0) }
             return NativeLocalActionResult(
                 action: "create_reminder",
-                text: timeText.map { "Reminder set for \($0): \(title)." } ?? "Reminder set: \(title).",
-                cardText: timeText.map { "\(title) · \($0)" } ?? title,
+                text: scheduleText.map { "Reminder saved for \($0): \(title)." } ?? "Reminder saved: \(title).",
+                cardText: scheduleText.map { "\(title) · \($0)" } ?? title,
                 actionSummary: "Reminder created",
                 deepLink: "x-apple-reminderkit://"
             )
@@ -2783,8 +2795,21 @@ final class NativeIntegrationManager {
         if let match = dateMatch(in: message) {
             title = title.replacingOccurrences(of: match, with: "")
         }
-        title = title.replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
+        title = title
+            .replacingOccurrences(of: #"(?i)^\s*to\s+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)\s+\b(at|on|by|for)\s*$"#, with: "", options: .regularExpression)
         return title.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    private func reminderScheduleText(for date: Date) -> String {
+        let time = DateFormatter.localizedString(from: date, dateStyle: .none, timeStyle: .short)
+        if Calendar.current.isDateInToday(date) {
+            return "today at \(time)"
+        }
+        if Calendar.current.isDateInTomorrow(date) {
+            return "tomorrow at \(time)"
+        }
+        return DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .short)
     }
 
     private func cleanCalendarTitle(_ message: String, date: Date?) -> String {
