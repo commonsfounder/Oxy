@@ -1,11 +1,5 @@
 const { applyActionContractResultMetadata, getActionContract } = require('../action-contracts');
-
-function humanizeActionType(type) {
-  if (!type) return 'Action';
-  return String(type)
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, ch => ch.toUpperCase());
-}
+const { approvalTitle } = require('./user-facing-copy');
 
 function summarizeActionInput(input) {
   if (!input || typeof input !== 'object') return '';
@@ -24,14 +18,16 @@ function isPendingConfirmMessage(message) {
     return false;
   }
   return /^(yes|yeah|yep|yup|ok|okay|sure|confirm|confirmed|approve|approved|proceed)$/i.test(text) ||
-    /\b(yes please|looks good|go ahead|do it|send it|send now|send the message|send that message|message them|book it|order it|call them|open it|that's fine|that is fine|all good)\b/i.test(text);
+    /\b(yes please|looks good|go ahead|do it|send it|send now|send the message|send that message|message them|book it|order it|call them|open it|that's fine|that is fine|all good)\b/i.test(text) ||
+    /\b(approve|approved|confirm|confirmed|proceed with|go ahead with)\b.+/i.test(text);
 }
 
 function isPendingCancelMessage(message) {
   const text = String(message || '').trim();
   return /^(no|nope|nah|cancel|stop|don't|do not|never mind|nevermind|leave it|not now|not yet)$/i
     .test(text) ||
-    /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text);
+    /\b(cancel it|stop it|leave it|scrap it|never mind|nevermind|don't send|do not send|don't book|do not book)\b/i.test(text) ||
+    /\b(cancel|stop)\b.+/i.test(text);
 }
 
 function isPendingRevisionMessage(message) {
@@ -56,21 +52,7 @@ function conciergeMoneyReviewDetail(action, cardInfo) {
 }
 
 function reviewTitleForAction(action) {
-  switch (action?.type) {
-    case 'send_email': return 'Review email';
-    case 'send_message': return 'Review message';
-    case 'send_telegram': return 'Review Telegram';
-    case 'book_uber': return 'Review Uber';
-    case 'make_call': return 'Review call';
-    case 'create_calendar_event': return 'Review calendar event';
-    case 'book_appointment': return 'Appointment ready to book';
-    case 'send_outlook_email': return 'Review email';
-    case 'create_github_issue': return 'Review GitHub issue';
-    case 'comment_github_issue': return 'Review GitHub comment';
-    case 'create_linear_issue': return 'Review Linear issue';
-    case 'comment_linear_issue': return 'Review Linear comment';
-    default: return `Review ${humanizeActionType(action?.type || 'action')}`;
-  }
+  return approvalTitle(action?.type || 'action');
 }
 
 function cleanCalendarTitle(title) {
@@ -181,12 +163,20 @@ function reviewDetailForAction(action, cardInfo = null) {
 function buildPendingReviewResult(action, cardInfo = null) {
   const contract = getActionContract(action?.type) || {};
   const prompt = action?.type === 'send_message'
-    ? 'Check this, then send when ready.'
-    : action?.type === 'send_email'
-      ? 'Check this draft, then send when ready.'
-      : action?.type === 'book_appointment'
-        ? 'Check the time, then tap Book.'
-      : `${reviewTitleForAction(action)}. Confirm to continue, or cancel to stop.`;
+    ? 'Check the message, then tap Send.'
+    : ['send_email', 'send_outlook_email'].includes(action?.type)
+      ? 'Check the email, then tap Send.'
+      : ['book_uber', 'book_lyft'].includes(action?.type)
+        ? 'Check the ride, then tap Book.'
+        : action?.type === 'book_appointment'
+          ? 'Check the time, then tap Book.'
+          : action?.type === 'make_call'
+            ? 'Check the number, then tap Call.'
+            : action?.type === 'create_calendar_event'
+              ? 'Check the details, then tap Add.'
+              : action?.type === 'run_browser_task'
+                ? 'Check the order, then tap Place order.'
+                : `${reviewTitleForAction(action)}. Check the details, then tap Confirm or Cancel.`;
   return applyActionContractResultMetadata(action, {
     success: true,
     pending: true,

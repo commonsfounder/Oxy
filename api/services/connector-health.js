@@ -15,6 +15,8 @@ const ACTION_CONNECTOR = {
   search_github: 'github',
   get_github_notifications: 'github',
   create_github_issue: 'github',
+  github_action: 'github',
+  get_github_prs: 'github',
   comment_github_issue: 'github',
   send_outlook_email: 'microsoft',
   get_outlook_emails: 'microsoft',

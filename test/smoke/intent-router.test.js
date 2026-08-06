@@ -1,7 +1,46 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { inferDeterministicAction } = require('../../api/intent-router');
+const { inferDeterministicAction, buildWatchRequest, buildWatchCancellation } = require('../../api/intent-router');
+
+test('clear flight price watches become bounded daily background checks', () => {
+  const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
+  assert.equal(routed.reason, 'durable_price_watch');
+  assert.equal(routed.actions[0].type, 'create_scheduled_task');
+  assert.deepEqual(routed.actions[0].input, {
+    title: 'flight prices to Turkey',
+    instruction: 'watch flight prices to Turkey and tell me when a cheaper option appears',
+    condition: 'a cheaper option appears',
+    recurrence: 'poll',
+    interval_minutes: 1440
+  });
+  assert.match(routed.spoken, /once a day/);
+});
+
+test('watch request cadence is preserved when the user gives one', () => {
+  const watch = buildWatchRequest('monitor hotel prices every week until they fall');
+  assert.equal(watch.title, 'hotel prices');
+  assert.equal(watch.interval_minutes, 10080);
+  assert.equal(watch.condition, 'they fall');
+});
+
+test('ordinary order tracking does not become a durable watch', () => {
+  assert.equal(inferDeterministicAction('track my order'), null);
+});
+
+test('a one-time price check does not become a durable watch', () => {
+  assert.equal(inferDeterministicAction('check flight prices to Turkey'), null);
+});
+
+test('clear watch cancellation becomes a safe stop action', () => {
+  const routed = inferDeterministicAction('Millie, stop watching flight prices to Turkey');
+  assert.equal(routed.reason, 'stop_durable_watch');
+  assert.deepEqual(routed.actions, [{
+    type: 'cancel_scheduled_task',
+    input: { title: 'flight prices to Turkey' }
+  }]);
+  assert.equal(buildWatchCancellation('cancel the watch for hotel prices'), 'hotel prices');
+});
 
 test('an appointment request starts the appointment flow', () => {
   const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');

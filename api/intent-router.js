@@ -77,6 +77,87 @@ function looksLikeMemoryWrite(message) {
     /^(my|our)\s+[^?.!]{2,80}\s+(is|are)\s+[^?.!]{2,120}$/i.test(text);
 }
 
+const WATCH_VERBS = /\b(watch|monitor|track|follow|keep an eye on)\b/i;
+const WATCH_TARGETS = /\b(flight|flights|fare|fares|ticket|tickets|hotel|hotels|price|prices|cost|costs|sale|cheaper|lower|drops?|falls?)\b/i;
+
+function stripWakeWord(text) {
+  return normalizeText(text)
+    .replace(/^(?:hey|okay|ok)?\s*millie(?:\s*[:,;-]\s*|\s+)/i, '')
+    .replace(/^(?:okay|ok|please|pls)\s+/i, '')
+    .trim();
+}
+
+function looksLikeWatchRequest(message) {
+  const text = stripWakeWord(message);
+  const repeats = /\bcheck\b.+\b(every|each|daily|weekly|when|if|until)\b/i.test(text);
+  if (!text || !(WATCH_VERBS.test(text) || repeats) || !WATCH_TARGETS.test(text)) return false;
+  // "Track my order" and similar status requests belong to the live task path.
+  // A durable watch needs a price, availability, or future-change signal.
+  return /\b(cheaper|lower|price|prices|cost|costs|sale|when|if|until|every|daily|weekly|available|drops?|falls?)\b/i.test(text);
+}
+
+function extractWatchCadence(text) {
+  const normalized = text.toLowerCase();
+  const match = normalized.match(/\b(?:every|each)\s+(\d+)?\s*(minute|hour|day|week)s?\b/) ||
+    normalized.match(/\b(daily|weekly|hourly)\b/);
+  if (!match) return { intervalMinutes: 1440, label: 'once a day' };
+
+  if (match[1] === 'daily') return { intervalMinutes: 1440, label: 'once a day' };
+  if (match[1] === 'weekly') return { intervalMinutes: 10080, label: 'once a week' };
+  if (match[1] === 'hourly') return { intervalMinutes: 60, label: 'once an hour' };
+
+  const amount = Number(match[1] || 1);
+  const unit = match[2];
+  const multiplier = unit === 'minute' ? 1 : unit === 'hour' ? 60 : unit === 'day' ? 1440 : 10080;
+  const intervalMinutes = amount * multiplier;
+  const label = unit === 'minute' && amount === 1 ? 'once a minute'
+    : unit === 'hour' && amount === 1 ? 'once an hour'
+      : unit === 'day' && amount === 1 ? 'once a day'
+        : unit === 'week' && amount === 1 ? 'once a week'
+          : `every ${amount} ${unit}s`;
+  return { intervalMinutes, label };
+}
+
+function buildWatchRequest(message) {
+  const text = stripWakeWord(message).replace(/[?.!]+$/, '').trim();
+  const cadence = extractWatchCadence(text);
+  const conditionMatch = text.match(/\b(?:when|if|until)\s+(.+)$/i);
+  const condition = conditionMatch ? conditionMatch[1].trim() : null;
+  const title = text
+    .replace(/^(?:watch|monitor|track|follow|keep an eye on|check)\s+(?:for\s+)?/i, '')
+    .replace(/\s+(?:when|if|until)\s+.+$/i, '')
+    .replace(/\s+(?:and\s+)?(?:tell|let)\s+me\s*$/i, '')
+    .replace(/\s+(?:every|each)\s+(?:\d+\s+)?(?:minute|hour|day|week)s?$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const instruction = text;
+  return {
+    title: title || 'Price watch',
+    instruction,
+    condition,
+    recurrence: 'poll',
+    interval_minutes: cadence.intervalMinutes,
+    cadenceLabel: cadence.label
+  };
+}
+
+function looksLikeWatchCancellation(message) {
+  const text = stripWakeWord(message);
+  return /\b(stop|cancel|pause|disable|turn off)\b/i.test(text) &&
+    WATCH_TARGETS.test(text) &&
+    /\b(watch|monitor|track|follow|checking|watching)\b/i.test(text);
+}
+
+function buildWatchCancellation(message) {
+  const title = stripWakeWord(message)
+    .replace(/^(?:stop|cancel|pause|disable|turn off)\s+(?:watching|monitoring|tracking|following|the\s+watch\s+for|the\s+watch)\s*/i, '')
+    .replace(/^(?:watch|monitor|track|follow)\s+/i, '')
+    .replace(/\s+(?:watch|monitor|tracking|monitoring)$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return title || 'that watch';
+}
+
 function looksLikeContextualPlaceFollowup(message) {
   const text = normalizeText(message);
   return /\b(that|it|this|one|there)\b/i.test(text) &&
@@ -229,6 +310,33 @@ function inferDeterministicAction(message, options = {}) {
     };
   }
 
+  if (looksLikeWatchCancellation(text)) {
+    const title = buildWatchCancellation(text);
+    return {
+      reason: 'stop_durable_watch',
+      spoken: `I’ll stop watching ${title}.`,
+      actions: [{ type: 'cancel_scheduled_task', input: { title } }]
+    };
+  }
+
+  if (looksLikeWatchRequest(text)) {
+    const watch = buildWatchRequest(text);
+    return {
+      reason: 'durable_price_watch',
+      spoken: `I’ll check ${watch.title} ${watch.cadenceLabel} and tell you when I find a change.`,
+      actions: [{
+        type: 'create_scheduled_task',
+        input: {
+          title: watch.title,
+          instruction: watch.instruction,
+          condition: watch.condition,
+          recurrence: watch.recurrence,
+          interval_minutes: watch.interval_minutes
+        }
+      }]
+    };
+  }
+
   if (looksLikeDirectionsRequest(text)) {
     const fromTo = extractFromTo(text);
     const headingDestination = !fromTo ? extractHeadingDestination(text) : null;
@@ -280,5 +388,9 @@ module.exports = {
   inferDeterministicAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,
-  cleanDestinationPhrase
+  cleanDestinationPhrase,
+  looksLikeWatchRequest,
+  buildWatchRequest,
+  looksLikeWatchCancellation,
+  buildWatchCancellation
 };

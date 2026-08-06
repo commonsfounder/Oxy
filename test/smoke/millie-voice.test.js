@@ -4,7 +4,7 @@ const test = require('node:test');
 const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
 
 test('Millie base prompt defines a casual companion voice, not a corporate bot', () => {
-  assert.match(MILLIE_VOICE_PROMPT, /capable personal companion and concierge/);
+  assert.match(MILLIE_VOICE_PROMPT, /personal presence in the person's home/);
   assert.match(MILLIE_VOICE_PROMPT, /Use contractions naturally/);
   assert.match(MILLIE_VOICE_PROMPT, /Do not add a follow-up question unless it is needed to proceed/);
   assert.match(MILLIE_VOICE_PROMPT, /Never use default chatbot filler or corporate phrasing/);

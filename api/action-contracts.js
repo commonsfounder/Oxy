@@ -335,6 +335,77 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  project_status: {
+    risk: 'low',
+    required: ['project_ref'],
+    inputExample: { project_ref: 'milgrain' },
+    guidance: 'Inspect the configured isolated project for the current durable task. Use before editing or reporting project progress.',
+    successSummary: 'Project status loaded',
+    failureSummary: 'Project status unavailable',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  project_diff: {
+    risk: 'low',
+    required: ['project_ref'],
+    inputExample: { project_ref: 'milgrain' },
+    guidance: 'Inspect the current uncommitted diff in the isolated project. Never claim code changed without checking this.',
+    successSummary: 'Project changes loaded',
+    failureSummary: 'Project changes unavailable',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  project_write: {
+    risk: 'low',
+    required: ['project_ref', 'path', 'content'],
+    inputExample: { project_ref: 'milgrain', path: 'src/feature.js', content: 'code' },
+    guidance: 'Write text into the isolated task project only. The project reference must be configured by the user; never invent a project or use an absolute path.',
+    successSummary: 'Project file saved',
+    failureSummary: 'Project file save failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  project_check: {
+    risk: 'low',
+    required: ['project_ref'],
+    optional: ['check'],
+    inputExample: { project_ref: 'milgrain', check: 'test|release' },
+    guidance: 'Run only the configured project check in the isolated task project. Use check=test by default and report failures honestly.',
+    successSummary: 'Project check finished',
+    failureSummary: 'Project check failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  project_commit: {
+    risk: 'low',
+    required: ['project_ref', 'message'],
+    inputExample: { project_ref: 'milgrain', message: 'Add referral credit flow' },
+    guidance: 'Save the current isolated task changes as a local changeset after checking the diff. This does not publish or merge anything.',
+    successSummary: 'Project changeset saved',
+    failureSummary: 'Project changeset failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  project_rollback: {
+    risk: 'medium',
+    required: ['project_ref'],
+    inputExample: { project_ref: 'milgrain' },
+    guidance: 'Discard only uncommitted changes in the isolated task branch. This is destructive and requires explicit approval.',
+    successSummary: 'Project changes rolled back',
+    failureSummary: 'Project rollback failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  project_sync: {
+    risk: 'high',
+    required: ['project_ref'],
+    inputExample: { project_ref: 'milgrain' },
+    guidance: 'Publish a clean, committed isolated task branch to its configured remote. Never merge or push the default branch; always show the branch and require approval.',
+    successSummary: 'Project branch synchronized',
+    failureSummary: 'Project synchronization failed',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
   create_agent_task: {
     risk: 'medium',
     required: ['goal'],
@@ -343,6 +414,37 @@ const ACTION_CONTRACTS = {
     successSummary: 'Task created for background execution',
     failureSummary: 'Task creation failed',
     confirmation: 'none'
+  },
+  create_scheduled_task: {
+    risk: 'low',
+    required: ['title', 'instruction'],
+    optional: ['recurrence', 'time', 'day_of_week', 'date', 'due_date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap'],
+    inputExample: { title: 'Watch flight prices', instruction: 'Check every week and tell me if the price drops', recurrence: 'poll', interval_minutes: 10080 },
+    guidance: 'Create durable background work only when the user explicitly asks to remind, schedule, watch, monitor, or check again. A condition such as "when the price drops" becomes a bounded poll with an expiry. Never invent a schedule or silently turn an ordinary task into recurring work.',
+    successSummary: 'Watch saved',
+    failureSummary: 'Watch failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  list_scheduled_tasks: {
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Watches loaded',
+    failureSummary: 'Watches unavailable',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  cancel_scheduled_task: {
+    risk: 'low',
+    required: [],
+    optional: ['id', 'title'],
+    inputExample: { title: 'flight prices' },
+    guidance: 'Cancel only the matching background watch. Ask for clarification if there is no id or title.',
+    successSummary: 'Watch stopped',
+    failureSummary: 'Watch could not be stopped',
+    confirmation: 'none',
+    executionMode: 'direct'
   },
   simulate_actions: {
     risk: 'low',
@@ -363,7 +465,9 @@ const ACTION_CONTRACTS = {
   search_google_docs: { risk: 'low', required: [], optional: ['query', 'max_results'], inputExample: { query: 'search term' }, successSummary: 'Docs found', failureSummary: 'Search failed', confirmation: 'none' },
   append_google_doc: { risk: 'low', required: ['content'], optional: ['document_id', 'title'], inputExample: { title: 'doc title', content: 'text to add' }, successSummary: 'Doc updated', failureSummary: 'Append failed', confirmation: 'none' },
   get_google_doc: { risk: 'low', required: [], optional: ['document_id', 'title'], inputExample: { title: 'doc title' }, successSummary: 'Doc fetched', failureSummary: 'Fetch failed', confirmation: 'none' },
-  github_action: { risk: 'low', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'none' },
+  github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review' },
+  create_github_issue: { risk: 'medium', required: ['repo', 'title'], optional: ['body'], inputExample: { repo: 'owner/repo', title: 'Issue title', body: 'Details' }, successSummary: 'GitHub issue created', failureSummary: 'GitHub issue failed', confirmation: 'review_required', executionMode: 'review' },
+  get_github_prs: { risk: 'low', required: ['repo'], inputExample: { repo: 'owner/repo' }, successSummary: 'GitHub pull requests loaded', failureSummary: 'GitHub pull requests failed', confirmation: 'none' },
   track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none' },
   edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },
   analyze_image: {

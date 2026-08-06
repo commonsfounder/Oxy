@@ -307,7 +307,7 @@ test('persistent task controls route carries guard mode into the agent loop', ()
   const routeEnd = source.indexOf("app.post('/agent/tasks/:id/run'", routeStart);
   const route = source.slice(routeStart, routeEnd);
   assert.match(route, /updates\.metadata\s*=\s*\{\s*\.\.\.\(task\.metadata \|\| \{\}\), guardMode\s*\}/);
-  assert.match(source, /context: \{ autonomy: task\.autonomy, guardMode: task\.metadata\?\.guardMode === true \}/);
+  assert.match(source, /context:\s*\{\s*autonomy: claimedTask\.autonomy,\s*guardMode: claimedTask\.metadata\?\.guardMode === true,\s*modelRoute: route,\s*runtimeSessionId: runtimeSession\.id\s*\}/s);
 });
 
 test('action contracts now include new agentic tools', () => {

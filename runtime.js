@@ -1,17 +1,32 @@
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
-const REQUIRED_RUNTIME_ENV = [
+const BASE_RUNTIME_ENV = [
   'SUPABASE_URL',
   'SUPABASE_KEY',
-  'GEMINI_API_KEY',
   'OXY_SESSION_SECRET'
 ];
+
+const BRAIN_PROVIDER_ENV = Object.freeze({
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  gemini: 'GEMINI_API_KEY',
+  groq: 'GROQ_API_KEY',
+  local: 'OXY_LOCAL_MODEL_BASE_URL'
+});
 
 let hasLoggedMissingRuntimeEnv = false;
 
 function getMissingRuntimeEnv() {
-  return REQUIRED_RUNTIME_ENV.filter(name => !process.env[name]);
+  const provider = String(process.env.OXY_BRAIN_PROVIDER || 'openai').trim().toLowerCase();
+  const providerKey = BRAIN_PROVIDER_ENV[provider] || BRAIN_PROVIDER_ENV.openai;
+  const missing = [...BASE_RUNTIME_ENV, providerKey]
+    .filter((name, index, names) => names.indexOf(name) === index)
+    .filter(name => !process.env[name]);
+  if (provider === 'gemini' && (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)) {
+    return missing.filter(name => name !== 'GEMINI_API_KEY');
+  }
+  return missing;
 }
 
 function logMissingRuntimeEnvOnce(context = 'runtime') {
@@ -35,7 +50,11 @@ function createSupabaseServiceClient() {
 }
 
 function createGeminiServiceClient() {
-  if (!process.env.GEMINI_API_KEY) logMissingRuntimeEnvOnce('gemini');
+  const provider = String(process.env.OXY_BRAIN_PROVIDER || 'openai').trim().toLowerCase();
+  const needsGemini = provider === 'gemini' || String(process.env.OXY_VOICE_PROVIDER || '').trim().toLowerCase() === 'gemini';
+  if (needsGemini && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+    logMissingRuntimeEnvOnce('gemini');
+  }
   return new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'missing-gemini-api-key');
 }
 

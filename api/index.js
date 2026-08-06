@@ -87,12 +87,18 @@ const {
 const {
   runAgentLoop: runAgenticLoop,
   generatePlan,
-  reflectOnResults
+  reflectOnResults,
+  replacePendingToolResult
 } = require('./services/agent-orchestrator');
 const taskManager = require('./services/task-manager');
 const { loadAgentContext } = require('./services/agent-context');
 const agentWorkspace = require('./services/agent-workspace');
+const agentRuntime = require('./services/agent-runtime');
+const agentApprovals = require('./services/agent-approval-runtime');
+const agentProjectRuntime = require('./services/agent-project-runtime');
+const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-briefing');
 const agentContinuity = require('./services/agent-continuity');
+const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
@@ -105,6 +111,13 @@ const { resolveCurrencyForLocation } = require('./services/currency-from-locatio
 const { handleStripeWebhookEvent } = require('./services/stripe-webhook');
 const { getTaskSteps } = require('./services/task-steps');
 const { createRoutine, listRoutines, deleteRoutine, listDueRoutines, markRoutineRun } = require('./services/routines');
+const scheduledTasks = require('./services/scheduled-tasks');
+const {
+  actionDisplayName,
+  actionFailureMessage,
+  formatActionFailure,
+  formatProviderFailure
+} = require('./services/user-facing-copy');
 const { resolveEntityReference } = require('./services/entity-recall');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
@@ -112,7 +125,9 @@ const {
   ROUTE_KEYS,
   resolveModelRoute,
   publicModelRouting,
-  validateModelRouteInput
+  validateModelRouteInput,
+  defaultModelForProvider,
+  providerConfiguration
 } = require('./services/model-routing');
 const { geocodeLocation } = require('./geocoding');
 const { proactiveSweepAuthorization } = require('./services/proactive-auth');
@@ -318,10 +333,7 @@ function requireMatchingUser(req, res, candidateUserId) {
 }
 
 function humanizeActionType(type) {
-  if (!type) return 'Action';
-  return String(type)
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, ch => ch.toUpperCase());
+  return actionDisplayName(type);
 }
 
 function signOAuthState(userId) {
@@ -416,6 +428,7 @@ app.use((req, res, next) => {
     '/auth/register',
     '/auth/login',
     '/auth/dev/demo-login',
+    '/proactive/sweep',
     '/auth/forgot-password',
     '/auth/reset-password'
   ]);
@@ -533,9 +546,13 @@ const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 // brain-provider.js; these ids must belong to whichever provider that names.
 // The GEMINI_MODEL/GEMINI_FAST_MODEL overrides are gone on purpose: leaving them would
 // let a stale env var post a Gemini model id to OpenAI's endpoint and 404 at runtime.
-const PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || 'gpt-5.6-luna';
-const FAST_MODEL = process.env.OXY_FAST_MODEL || 'gpt-5.6-luna';
-const STREAMING_CHAT_MODEL = process.env.OXY_STREAM_MODEL || PRIMARY_CHAT_MODEL;
+const DEFAULT_CHAT_PROVIDER = resolveModelRoute({}).provider;
+const PRIMARY_CHAT_MODEL = defaultModelForProvider(DEFAULT_CHAT_PROVIDER, 'reasoning');
+const FAST_MODEL = defaultModelForProvider(DEFAULT_CHAT_PROVIDER, 'fast');
+const configuredStreamModel = String(process.env.OXY_STREAM_MODEL || '').trim();
+const STREAMING_CHAT_MODEL = configuredStreamModel && providerConfiguration(DEFAULT_CHAT_PROVIDER, configuredStreamModel).ready
+  ? configuredStreamModel
+  : PRIMARY_CHAT_MODEL;
 // Voice in/out never moved off Google: transcription takes raw audio and generateSpeech
 // uses Gemini's own prebuilt voices, neither of which the text/vision brain seam covers.
 // They keep their own Gemini model ids so a chat-model change can't silently retarget them.
@@ -732,7 +749,7 @@ async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
   } catch {}
 }
 
-const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('./prompts');
+const { OXCY_SYSTEM_PROMPT, buildMillieSystemPrompt } = require('./prompts');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -905,7 +922,7 @@ function summarizeReadOnlyActionResults(actionResults = [], message = '') {
     parts.push(buildConciseDataAnswer(dataResults));
   }
   if (failures.length) {
-    parts.push(failures.map(entry => `${humanizeActionType(entry.action)} failed: ${userFacingActionFailure(entry)}`).join('\n'));
+    parts.push(failures.map(entry => userFacingActionFailure(entry)).join('\n'));
   }
   return parts.join('\n\n');
 }
@@ -1250,7 +1267,6 @@ Current date: ${dateStr}
 Current time for internal reasoning only: ${timeStr}
 
 RESPONSE RULES:
-- ${MILLIE_VOICE_PROMPT.split('\n').join('\n- ')}
 - The user leads the conversation. Follow their topic instead of steering into unrelated stored memory.
 - Treat stored memory as background context for understanding, not as content to surface by default.
 - Only mention stored memory when it is directly relevant to what the user just said, asked, or asked you to do.
@@ -1296,16 +1312,33 @@ function scoreEmailCandidate(email = {}, message = '') {
     email.from,
     email.senderName,
     email.senderAddress,
-    email.subject
+    email.subject,
+    email.snippet,
+    email.body
   ].filter(Boolean).join(' ').toLowerCase();
   const terms = String(message || '')
     .toLowerCase()
     .split(/[^a-z0-9@._+-]+/i)
     .filter(term => term.length >= 3);
-  return terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+  const directScore = terms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+  const relationshipHints = {
+    supplier: ['suppli', 'quote', 'invoice', 'order', 'delivery', 'sales'],
+    vendor: ['vendor', 'suppli', 'quote', 'invoice', 'order'],
+    client: ['client', 'customer', 'project', 'invoice'],
+    customer: ['customer', 'order', 'invoice', 'delivery'],
+    landlord: ['landlord', 'tenancy', 'rent', 'property'],
+    dentist: ['dentist', 'dental', 'clinic', 'appointment'],
+    doctor: ['doctor', 'medical', 'clinic', 'appointment'],
+    school: ['school', 'teacher', 'class', 'term']
+  };
+  const relationshipScore = Object.entries(relationshipHints).reduce((score, [role, hints]) => {
+    if (!new RegExp(`\\b${role}\\b`, 'i').test(String(message || ''))) return score;
+    return score + (hints.some(hint => haystack.includes(hint)) ? 2 : 0);
+  }, 0);
+  return directScore + relationshipScore;
 }
 
-function findRecentEmailTarget(history = [], message = '') {
+function findRecentEmailTarget(history = [], message = '', { requireMatch = false } = {}) {
   const emails = [];
   for (const turn of [...history].reverse()) {
     for (const entry of [...(turn.actions || [])].reverse()) {
@@ -1320,7 +1353,17 @@ function findRecentEmailTarget(history = [], message = '') {
   const ranked = emails
     .map((email, index) => ({ email, index, score: scoreEmailCandidate(email, message) }))
     .sort((a, b) => b.score - a.score || a.index - b.index);
+  if (requireMatch && (ranked[0]?.score || 0) < 1) return null;
   return ranked[0]?.email || null;
+}
+
+function isEmailDraftRequest(message = '') {
+  const text = String(message || '').trim();
+  if (!text || !/\b(email|mail)\b/i.test(text)) return false;
+  if (/\b(check|search|summari[sz]e|read|look at|show)\b[\s\S]*\b(email|mail|inbox)\b/i.test(text)) {
+    return false;
+  }
+  return /\b(draft|write|compose|send|ask|tell)\b/i.test(text);
 }
 
 async function buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace = null) {
@@ -1371,6 +1414,35 @@ Use the recent email result only if enough context is visible; otherwise ask one
   }
 }
 
+async function buildEmailDraftContext(userId, message, history, memory, preferences, trace = null) {
+  if (!isEmailDraftRequest(message) || isEmailReplyDraftRequest(message)) return '';
+  const target = findRecentEmailTarget(history, message, { requireMatch: true });
+  if (!target?.senderAddress) return '';
+
+  const sender = {
+    name: target.senderName || '',
+    address: target.senderAddress,
+    raw: target.from || ''
+  };
+  const senderMemory = senderMemoryContext(memory, sender) || 'No sender-specific memory found.';
+  return `GMAIL EMAIL DRAFTING CONTEXT:
+The user wants a new email, not a reply to an existing thread.
+Likely recipient name: ${sender.name || 'Unknown'}
+Likely recipient address: ${sender.address}
+Recent subject: ${target.subject || '(no subject)'}
+Memory about this person or company:
+${senderMemory}
+
+User communication style/preferences:
+${preferences || 'No explicit communication preferences yet.'}
+
+Drafting instruction:
+- Use "${sender.address}" as the to address unless the user names a different recipient.
+- Do not include a thread_id, in_reply_to, or references for this new email.
+- Use the user's actual request as the substance of the email.
+- Draft the complete email and let the review step show it before anything is sent.`;
+}
+
 function buildLocationContext(location) {
   const lat = Number(location?.latitude ?? location?.lat);
   const lng = Number(location?.longitude ?? location?.lng);
@@ -1406,7 +1478,7 @@ function buildNativeHintsContext(nativeHints) {
 
 function buildPendingActionContext(pendingAction) {
   if (!pendingAction?.action) return '';
-  return `PENDING ACTION AWAITING REVIEW:
+  return `PENDING ACTION AWAITING REVIEW${pendingAction.taskGoal ? ` FOR GOAL: ${String(pendingAction.taskGoal).slice(0, 240)}` : ''}:
 ${JSON.stringify(pendingAction.action, null, 2)}
 
 If the user is revising it, return the full revised action block and keep it in review. Do not execute, send, book, call, or order until they confirm. If the user is asking a question about it, answer briefly without returning an action.`;
@@ -1429,7 +1501,6 @@ Use this to resolve vague follow-ups like "it", "that", "there", "same", "again"
 
 function buildQuickTurnContext(preferences, statedContext = []) {
   return `FAST TURN MODE:
-${MILLIE_VOICE_PROMPT}
 
 For tiny greetings or acknowledgements, reply in no more than two very short sentences.
 Make the first sentence a tiny acknowledgement of 1-3 words when possible.
@@ -1468,6 +1539,18 @@ function getDeterministicQuickReply(message) {
   if (/^(ok|okay|kk|cool|nice|great)$/.test(normalized)) return 'Got it.';
   if (/^(nah|no)$/.test(normalized)) return 'Got you.';
   return '';
+}
+
+function isLifeBriefingRequest(message = '') {
+  const normalized = String(message || '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^\p{L}\p{N}\s?]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[?]+$/, '')
+    .trim();
+  return /^(?:millie\s+)?(?:what is important|whats important|what matters|anything important|what do i need to know)$/.test(normalized);
 }
 
 function isPureContentGenerationTurn(message = '') {
@@ -1653,6 +1736,25 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
   if (appointmentTurn) return appointmentTurn;
 
+  const explicitMemory = parseExplicitMemoryRequest(text);
+  if (explicitMemory) {
+    try {
+      await saveMemory(userId, explicitMemory, 'manual');
+      return {
+        reason: 'memory_saved',
+        spokenOnly: true,
+        spoken: `Saved. I'll remember that: ${explicitMemory}.`
+      };
+    } catch (error) {
+      trace?.log?.('memory.save_failed', error.message);
+      return {
+        reason: 'memory_save_failed',
+        spokenOnly: true,
+        spoken: "I couldn't save that right now. Try again."
+      };
+    }
+  }
+
   if (isContextualReference(text)) {
     const [history, recentActions, memory] = await Promise.all([
       getHistory(userId, trace, 12, historyOptions),
@@ -1830,7 +1932,7 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   // conversation content, which is too weak for tool use and factuality.
   const canUseCachedPrompt = false;
   const config = {
-    systemInstruction: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
+    systemInstruction: buildMillieSystemPrompt(dynamicSystemPrompt),
     temperature: useSearch ? 0.1 : 0.2,
     topP: 0.8,
     topK: 20
@@ -2434,6 +2536,28 @@ async function executeAction(userId, action, params, context = {}) {
     ...(context.location ? { location: context.location } : {}),
     ...(context.homeLocation ? { homeLocation: context.homeLocation } : {})
   };
+  const recordProjectArtifact = async (input = {}) => {
+    if (!context.runtimeSessionId || !context.persistedTaskId) return null;
+    try {
+      const artifact = await agentRuntime.recordArtifact(supabase, userId, {
+        sessionId: context.runtimeSessionId,
+        taskId: context.persistedTaskId,
+        kind: input.kind || 'note',
+        path: input.path || null,
+        title: input.title,
+        summary: input.summary,
+        status: input.status,
+        metadata: input.metadata
+      });
+      return agentRuntime.summarizeArtifact(artifact);
+    } catch {
+      return null;
+    }
+  };
+  const bindRuntimeProject = async projectRef => {
+    if (!context.runtimeSessionId || !projectRef) return;
+    await agentRuntime.updateSession(supabase, userId, context.runtimeSessionId, { projectRef }).catch(() => {});
+  };
   switch (action) {
     case 'send_message': {
       const contact = String(params?.contact || '').trim();
@@ -2517,6 +2641,200 @@ async function executeAction(userId, action, params, context = {}) {
       return createDiagramArtifact(params || {}, context.imageFile || null);
     case 'create_presentation':
       return createPresentationArtifact(params || {}, context.imageFile || null);
+
+    // Project work is deliberately a separate adapter from the database-backed scratch
+    // workspace. It provisions a task-scoped clone from a server-side project catalog and
+    // exposes only bounded Git/check/write operations; the model never supplies a shell
+    // command, repository URL, or absolute filesystem path.
+    case 'project_status': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_status requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const status = await agentProjectRuntime.gitStatus(userId, context.persistedTaskId, projectRef);
+        return {
+          success: true,
+          text: `${status.projectName} is on ${status.branch}${status.dirty ? ` with ${status.files.length} changed file${status.files.length === 1 ? '' : 's'}.` : ' with no uncommitted changes.'}`,
+          actionSummary: `${status.projectName} status loaded`,
+          ...status
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    case 'project_diff': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_diff requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const diff = await agentProjectRuntime.gitDiff(userId, context.persistedTaskId, projectRef);
+        const hasChanges = Boolean(diff.diff);
+        return {
+          success: true,
+          text: hasChanges ? diff.diff : `${diff.projectName} has no uncommitted changes.`,
+          actionSummary: hasChanges ? `${diff.projectName} changes loaded` : 'No project changes',
+          ...diff
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    case 'project_write': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_write requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      if (!params?.path) return { success: false, error: 'project_write requires path' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const file = await agentProjectRuntime.writeProjectFile(
+          userId,
+          context.persistedTaskId,
+          projectRef,
+          params.path,
+          params.content
+        );
+        const artifact = await recordProjectArtifact({
+          kind: 'file',
+          path: file.path,
+          title: file.path,
+          summary: `Saved ${file.path} in ${file.projectName}.`
+        });
+        return {
+          success: true,
+          text: `Saved ${file.path} in ${file.projectName}.`,
+          actionSummary: `Saved ${file.path}`,
+          projectRef: file.projectRef,
+          path: file.path,
+          bytes: file.bytes,
+          ...(artifact ? { artifact } : {})
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    case 'project_check': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_check requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const check = await agentProjectRuntime.runProjectCheck(
+          userId,
+          context.persistedTaskId,
+          projectRef,
+          params?.check || 'test'
+        );
+        const artifact = await recordProjectArtifact({
+          kind: 'test_result',
+          title: `${check.projectName} ${check.check} check`,
+          summary: check.success
+            ? `${check.check} passed for ${check.projectName}.`
+            : `${check.check} failed for ${check.projectName}.`,
+          status: check.success ? 'created' : 'failed',
+          metadata: { check: check.check, exitCode: check.exitCode, timedOut: check.timedOut }
+        });
+        return {
+          success: check.success,
+          text: check.success
+            ? `${check.projectName} ${check.check} passed.`
+            : `${check.projectName} ${check.check} failed.`,
+          actionSummary: `${check.check} ${check.success ? 'passed' : 'failed'}`,
+          ...check,
+          ...(artifact ? { artifact } : {})
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+
+    case 'project_commit': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_commit requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      if (!params?.message) return { success: false, error: 'project_commit requires a concise message' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const commit = await agentProjectRuntime.commitProjectChanges(
+          userId,
+          context.persistedTaskId,
+          projectRef,
+          params.message
+        );
+        const artifact = await recordProjectArtifact({
+          kind: 'receipt',
+          title: `${commit.projectName} changeset`,
+          summary: `Saved ${commit.commit.slice(0, 12)} on ${commit.branch}.`,
+          metadata: { commit: commit.commit, branch: commit.branch }
+        });
+        return {
+          success: true,
+          text: commit.text,
+          actionSummary: 'Project changeset saved',
+          ...commit,
+          ...(artifact ? { artifact } : {})
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    case 'project_rollback': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_rollback requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const rollback = await agentProjectRuntime.rollbackProjectChanges(
+          userId,
+          context.persistedTaskId,
+          projectRef
+        );
+        const artifact = await recordProjectArtifact({
+          kind: 'receipt',
+          title: `${rollback.projectName} rollback`,
+          summary: `Rolled back uncommitted changes on ${rollback.branch}.`,
+          metadata: { branch: rollback.branch }
+        });
+        return {
+          success: true,
+          text: rollback.text,
+          actionSummary: 'Project changes rolled back',
+          ...rollback,
+          ...(artifact ? { artifact } : {})
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    case 'project_sync': {
+      const projectRef = params?.project_ref || params?.projectRef || context.projectRef;
+      if (!projectRef) return { success: false, error: 'project_sync requires a configured project_ref' };
+      if (!context.persistedTaskId) return { success: false, error: 'Project work requires a durable task.' };
+      try {
+        await bindRuntimeProject(projectRef);
+        const published = await agentProjectRuntime.publishProjectBranch(
+          userId,
+          context.persistedTaskId,
+          projectRef
+        );
+        const artifact = await recordProjectArtifact({
+          kind: 'receipt',
+          title: `${published.projectName} branch synchronized`,
+          summary: `Published ${published.branch}.`,
+          metadata: { branch: published.branch, published: true }
+        });
+        return {
+          success: true,
+          text: published.text,
+          actionSummary: 'Project branch synchronized',
+          ...published,
+          ...(artifact ? { artifact } : {})
+        };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
 
     // Real browser ordering (api/services/browser-task.js) — actually runs Playwright,
     // recipes, the Shopify platform-API tier, and the vision-driven fallback loop. Was
@@ -2702,13 +3020,23 @@ async function executeAction(userId, action, params, context = {}) {
       if (!filePath) return { success: false, error: 'workspace_write requires path' };
       if (typeof content !== 'string') return { success: false, error: 'workspace_write requires content as text' };
       try {
-        const file = await agentWorkspace.writeWorkspaceFile(supabase, userId, filePath, content, params?.kind);
+        const runtimeWrite = context.runtimeSessionId && context.persistedTaskId
+          ? await agentRuntime.writeFileArtifact(supabase, userId, {
+            sessionId: context.runtimeSessionId,
+            taskId: context.persistedTaskId,
+            path: filePath,
+            content,
+            kind: params?.kind
+          })
+          : { file: await agentWorkspace.writeWorkspaceFile(supabase, userId, filePath, content, params?.kind), artifact: null };
+        const file = runtimeWrite.file;
         return {
           success: true,
           text: `Saved ${file.path} (v${file.version}).`,
           actionSummary: `Saved ${file.path}`,
           path: file.path,
-          version: file.version
+          version: file.version,
+          ...(runtimeWrite.artifact ? { artifact: runtimeWrite.artifact } : {})
         };
       } catch (e) {
         return { success: false, error: e.message };
@@ -2761,6 +3089,75 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: false, error: e.message };
       }
     }
+    case 'create_scheduled_task': {
+      const title = String(params?.title || '').trim();
+      const instruction = String(params?.instruction || params?.prompt || '').trim();
+      if (!title || !instruction) return { success: false, error: 'create_scheduled_task requires title and instruction' };
+      const created = await scheduledTasks.createScheduledTask(userId, {
+        title,
+        instruction,
+        recurrence: params?.recurrence,
+        time: params?.time || params?.time_of_day,
+        day_of_week: params?.day_of_week,
+        date: params?.date,
+        due_date: params?.due_date,
+        condition: params?.condition,
+        interval_minutes: params?.interval_minutes,
+        expires_at: params?.expires_at,
+        budget_cap: params?.budget_cap
+      });
+      if (!created.success) return created;
+      const task = created.task || {};
+      return {
+        success: true,
+        text: `I’ll keep an eye on “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`,
+        actionSummary: 'Watch saved',
+        scheduledTask: {
+          id: task.id,
+          title: task.title,
+          recurrence: task.recurrence,
+          nextRunAt: task.next_run_at,
+          condition: task.condition || null,
+          expiresAt: task.expires_at || null
+        }
+      };
+    }
+    case 'list_scheduled_tasks': {
+      const listed = await scheduledTasks.listScheduledTasks(userId);
+      if (!listed.success) return { success: false, error: listed.error };
+      const tasks = (listed.tasks || []).map(task => ({
+        id: task.id,
+        title: task.title,
+        recurrence: task.recurrence,
+        nextRunAt: task.next_run_at,
+        active: task.active !== false
+      }));
+      return {
+        success: true,
+        text: tasks.length
+          ? tasks.map(task => `• ${task.title} · ${scheduledTasks.describeSchedule(task)}`).join('\n')
+          : 'Millie is not watching anything right now.',
+        actionSummary: `${tasks.length} watch${tasks.length === 1 ? '' : 'es'}`,
+        scheduledTasks: tasks
+      };
+    }
+    case 'cancel_scheduled_task': {
+      const id = String(params?.id || '').trim();
+      const title = String(params?.title || '').trim();
+      if (!id && !title) return { success: false, error: 'Tell me which background watch to cancel.' };
+      const cancelled = await scheduledTasks.cancelScheduledTask(userId, { id, title });
+      if (!cancelled.success) {
+        return cancelled.error === 'not_found'
+          ? { success: false, error: 'I could not find that background watch.' }
+          : cancelled;
+      }
+      return {
+        success: true,
+        text: `Stopped watching “${cancelled.task?.title || title || 'that'}”.`,
+        actionSummary: 'Watch stopped',
+        scheduledTask: { id: cancelled.task?.id || id, title: cancelled.task?.title || title, active: false }
+      };
+    }
     case 'simulate_actions': {
       const goal = String(params?.goal || '').trim();
       const actions = params?.actions || [];
@@ -2788,11 +3185,8 @@ async function executeAction(userId, action, params, context = {}) {
       const content = params?.content || params?.text || 'note';
       return { success: true, text: `Saved to Notion: ${String(content).slice(0,80)}`, webLink: 'https://notion.so' };
     }
-    case 'github_action': {
-      const repo = params?.repo || 'repo';
-      const action = params?.action || 'status';
-      return { success: true, text: `GitHub ${action} on ${repo}.`, webLink: `https://github.com/${repo}` };
-    }
+    case 'github_action':
+      return dispatch(userId, action, enrichedParams);
     // track_flight is handled by connectors/flights.js (dispatch fallthrough) — this used to
     // duplicate it inline, making the connector's own branch permanently dead code for no
     // reason (unlike stripe_charge, there's no cap/review logic that needs it inline).
@@ -3171,25 +3565,39 @@ function isUserFacingMemory(row) {
 
 async function saveMemory(userId, content, source = 'fact') {
   if (source === 'manual_profile') {
-    const { data: inserted } = await supabase
+    const { data: inserted, error: insertError } = await supabase
       .from('memories')
       .insert({ user_id: userId, content, source, created_at: new Date().toISOString() })
       .select('id');
 
+    if (insertError) throw insertError;
+
     if (inserted?.[0]?.id) {
-      await supabase
+      const { error: deleteError } = await supabase
         .from('memories')
         .delete()
         .eq('user_id', userId)
         .eq('source', 'manual_profile')
         .neq('id', inserted[0].id);
+      if (deleteError) throw deleteError;
     }
     return;
   }
 
-  await supabase
+  const { error } = await supabase
     .from('memories')
     .insert({ user_id: userId, content, source, created_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+function parseExplicitMemoryRequest(text) {
+  const match = String(text || '').trim().match(
+    /^(?:millie[,:]?\s+)?(?:please\s+)?remember(?:\s+that)?\s+(.+?)\s*[.!?]*$/i
+  );
+  if (!match) return null;
+  const fact = match[1].trim();
+  if (/^(?:this|that|it)$/i.test(fact) || !isUsefulMemoryContent(fact)) return null;
+  return fact;
 }
 
 async function forgetMemory(userId, { scope = '', query = '' } = {}) {
@@ -3537,7 +3945,7 @@ async function setPreferenceValue(userId, key, value) {
     }, { onConflict: 'user_id,key' });
 }
 
-async function getPendingAction(userId) {
+async function getLegacyPendingAction(userId) {
   const { data, error } = await supabase
     .from('preferences')
     .select('value')
@@ -3549,10 +3957,21 @@ async function getPendingAction(userId) {
     const parsed = JSON.parse(data.value);
     if (!parsed?.action?.type) return null;
     parsed._raw = data.value;
+    parsed.storage = 'preference';
     return parsed;
   } catch {
     return null;
   }
+}
+
+async function getPendingAction(userId, message = '') {
+  const runtime = await agentApprovals.listPendingApprovals(supabase, userId).catch(() => ({ available: false, approvals: [] }));
+  const legacy = await getLegacyPendingAction(userId);
+  const candidates = [
+    ...(runtime.available ? runtime.approvals : []),
+    ...(legacy ? [legacy] : [])
+  ];
+  return agentApprovals.selectPendingApproval(candidates, message);
 }
 
 async function setPendingAction(userId, action, context = {}) {
@@ -3560,13 +3979,85 @@ async function setPendingAction(userId, action, context = {}) {
     action,
     createdAt: new Date().toISOString(),
     userMessage: context.userMessage || '',
+    location: context.location || null,
     nativeHints: context.nativeHints || null,
     // Which background run asked for this, so approving it continues that run from its
     // checkpoint rather than executing the action on its own and abandoning the goal.
-    taskId: context.persistedTaskId || null
+    taskId: context.persistedTaskId || null,
+    sessionId: context.runtimeSessionId || null,
+    taskGoal: context.taskGoal || null
   };
+
+  // Once the approval table is installed, every durable run gets its own approval row.
+  // Restoring an already-claimed row is used when execution failed after the user had
+  // approved it; this avoids creating a second approval for the same action.
+  if (context.approvalId) {
+    const restored = await agentApprovals.restoreApproval(supabase, userId, context.approvalId).catch(() => false);
+    if (restored) return { ...payload, approvalId: context.approvalId, storage: 'runtime' };
+  }
+
+  const stored = await agentApprovals.createApproval(supabase, userId, payload).catch(error => ({
+    available: false,
+    error,
+    missingTable: agentApprovals.isMissingTable(error)
+  }));
+  if (stored.available && stored.approval) {
+    return {
+      ...payload,
+      approvalId: stored.approval.approvalId,
+      storage: 'runtime'
+    };
+  }
+
+  if (stored.error && !stored.missingTable) {
+    console.warn('[approval-runtime] durable approval unavailable; using legacy fallback:', stored.error.message || stored.error);
+  }
   await setPreferenceValue(userId, PENDING_ACTION_PREF, JSON.stringify(payload));
-  return payload;
+  return { ...payload, _raw: JSON.stringify(payload), storage: 'preference' };
+}
+
+async function resolveAgentTaskRoute(userId, task) {
+  const stored = task?.metadata?.modelRoute;
+  if (stored?.provider && stored?.model) {
+    return { provider: String(stored.provider), model: String(stored.model), source: 'task' };
+  }
+  const selected = resolveModelRoute(await getPreferenceMap(userId));
+  const active = selected.configured ? selected : (selected.fallback || selected);
+  return { provider: active.provider, model: active.model, source: active.source || 'server' };
+}
+
+function approvedActionSucceeded(actionResults) {
+  return Array.isArray(actionResults) && actionResults.length > 0 && actionResults.every(entry => {
+    const result = entry?.result || {};
+    return result.pending !== true && result.success !== false && !result.error;
+  });
+}
+
+function replacePendingTaskEntry(entries, settledEntry) {
+  const next = Array.isArray(entries) ? [...entries] : [];
+  const pendingIndex = next.findLastIndex(entry =>
+    entry?.action === settledEntry?.action && entry?.result?.pending === true
+  );
+  if (pendingIndex >= 0) {
+    next[pendingIndex] = settledEntry;
+    return next;
+  }
+  const alreadyRecorded = next.some(entry =>
+    entry?.action === settledEntry?.action && entry?.result?.success === true
+  );
+  return alreadyRecorded ? next : [...next, settledEntry];
+}
+
+function settleApprovalEntry(pendingAction, actionResults) {
+  const entry = actionResults?.[0] || {
+    action: pendingAction?.action?.type,
+    result: { success: false, error: 'The approved action did not return a result.' }
+  };
+  return {
+    ...entry,
+    action: entry.action || pendingAction?.action?.type,
+    _toolCallId: pendingAction?.action?._toolCallId || entry._toolCallId || null
+  };
 }
 
 /*
@@ -3581,38 +4072,104 @@ async function setPendingAction(userId, action, context = {}) {
  */
 async function resumeRunAfterApproval(userId, pendingAction, actionResults, trace = null) {
   const taskId = pendingAction?.taskId;
-  if (!taskId) return false;
+  if (!taskId) return { resumed: false };
+  let claimedTask = null;
   try {
     const task = await taskManager.getTask(userId, taskId);
     // Only a parked run with a checkpoint can continue. A run already finished, cancelled,
     // or picked up by another instance must not be restarted underneath it.
-    if (!task || !task.checkpoint || taskManager.isRunActive(task)) return false;
-    if (!['paused', 'pending', 'failed'].includes(String(task.status || '').toLowerCase())) return false;
+    if (!task || !task.checkpoint) return { resumed: false };
+    if (!['paused', 'pending', 'failed'].includes(String(task.status || '').toLowerCase())) return { resumed: false };
 
-    const outcome = (actionResults || [])
-      .map(entry => entry?.result?.actionSummary || entry?.result?.text || entry?.result?.error)
-      .filter(Boolean)
-      .join('; ')
-      .slice(0, 400);
+    claimedTask = await taskManager.claimRun(userId, taskId, { allowAwaitingApproval: true });
+    if (!claimedTask) return { resumed: false };
+
+    const settledEntry = settleApprovalEntry(pendingAction, actionResults);
+    const settledResults = replacePendingTaskEntry(claimedTask.results, settledEntry);
+    const settledCheckpoint = claimedTask.checkpoint
+      ? taskManager.trimCheckpoint({
+        ...claimedTask.checkpoint,
+        contents: replacePendingToolResult(claimedTask.checkpoint.contents, settledEntry),
+        executedActions: replacePendingTaskEntry(claimedTask.checkpoint.executedActions, settledEntry)
+      })
+      : null;
+
+    if (!approvedActionSucceeded(actionResults)) {
+      await taskManager.updateTask(userId, taskId, {
+        status: 'paused',
+        heartbeat_at: null,
+        last_error: 'The approved action did not complete.',
+        results: settledResults,
+        checkpoint: settledCheckpoint,
+        metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
+      });
+      return { resumed: false, failed: true };
+    }
+
+    const route = await resolveAgentTaskRoute(userId, claimedTask);
+    let dynamicSystemPrompt = OXCY_SYSTEM_PROMPT;
+    let useSearch = Boolean(claimedTask.metadata?.useSearch);
+    try {
+      const refreshed = await buildChatContext(userId, claimedTask.goal, trace, route.model, {
+        location: pendingAction.location || null,
+        nativeHints: pendingAction.nativeHints || null
+      });
+      dynamicSystemPrompt = refreshed.dynamicSystemPrompt || dynamicSystemPrompt;
+      useSearch = Boolean(useSearch || refreshed.useSearch);
+    } catch {}
 
     await taskManager.updateTask(userId, taskId, {
-      status: 'running',
-      heartbeat_at: new Date().toISOString(),
-      attempt: (task.attempt || 0) + 1,
-      metadata: { ...(task.metadata || {}), awaitingApproval: false }
+      results: settledResults,
+      checkpoint: settledCheckpoint,
+      metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
     });
+
+    const runtimeSessionId = pendingAction.sessionId || claimedTask.metadata?.runtimeSessionId || null;
+    if (runtimeSessionId) {
+      await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
+        state: 'running',
+        heartbeatAt: new Date().toISOString()
+      }).catch(() => {});
+    }
+
     trace?.log?.('agent.run.resume_after_approval', taskId);
 
     runAgenticLoop({
       userId,
-      initialMessage: task.goal,
-      dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
-      maxIterations: 6,
-      context: { autonomy: task.autonomy, guardMode: task.metadata?.guardMode === true },
+      initialMessage: claimedTask.goal,
+      dynamicSystemPrompt,
+      useSearch,
+      modelName: route.model,
+      provider: route.provider,
+      maxIterations: Number.isFinite(claimedTask.checkpoint?.maxIterations) ? claimedTask.checkpoint.maxIterations : 6,
+      context: {
+        autonomy: claimedTask.autonomy,
+        guardMode: claimedTask.metadata?.guardMode === true,
+        modelRoute: route,
+        useSearch,
+        runtimeSessionId
+      },
       executeActionsFn: executeActions,
       persistTask: true,
       existingTaskId: taskId,
-      resumeNote: `The user approved "${pendingAction.action?.type}" and it has now been executed${outcome ? `: ${outcome}` : ''}. Continue the goal from here; do not ask for that approval again.`
+      resumeAction: settledEntry,
+      // Never place raw connector/provider output in a user-role model message. It can
+      // contain secrets, prompt-injection text, or unbounded payloads. The settled tool
+      // response is already in the checkpoint for the model to inspect as structured data.
+      resumeNote: `The user approved "${pendingAction.action?.type}" and it completed successfully. Continue the goal from here; do not ask for that approval again.`
+    }).then(async (outcome) => {
+      if (!runtimeSessionId) return;
+      const traceStatus = outcome?.agentTrace?.status;
+      const state = traceStatus === 'completed'
+        ? 'completed'
+        : traceStatus === 'awaiting_approval'
+          ? 'waiting_approval'
+          : traceStatus === 'error' ? 'failed' : 'paused';
+      await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
+        state,
+        heartbeatAt: null,
+        completedAt: state === 'completed' ? new Date().toISOString() : null
+      }).catch(() => {});
     }).catch(async (e) => {
       try {
         await taskManager.updateTask(userId, taskId, {
@@ -3621,14 +4178,64 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
           last_error: String(e?.message || e).slice(0, 500)
         });
       } catch {}
+      if (runtimeSessionId) {
+        await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
+          state: 'failed',
+          heartbeatAt: null
+        }).catch(() => {});
+      }
     });
-    return true;
+    return { resumed: true };
   } catch {
-    return false;
+    if (claimedTask) {
+      await taskManager.updateTask(userId, taskId, {
+        status: 'paused',
+        heartbeat_at: null,
+        last_error: 'The approved action completed, but the task could not resume.'
+      }).catch(() => {});
+    }
+    return { resumed: false };
   }
 }
 
-async function clearPendingAction(userId) {
+async function cancelApprovalRun(userId, pendingAction) {
+  const taskId = pendingAction?.taskId;
+  if (!taskId) return false;
+  const task = await taskManager.getTask(userId, taskId);
+  if (!task?.checkpoint) return false;
+  const claimedTask = await taskManager.claimRun(userId, taskId, { allowAwaitingApproval: true });
+  if (!claimedTask) return false;
+  try {
+    await taskManager.updateTask(userId, taskId, {
+      status: 'cancelled',
+      heartbeat_at: null,
+      completed_at: new Date().toISOString(),
+      checkpoint: null,
+      metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
+    });
+  } catch (error) {
+    await taskManager.updateTask(userId, taskId, {
+      status: 'paused',
+      heartbeat_at: null,
+      last_error: 'Cancellation could not be saved.',
+      metadata: { ...(claimedTask.metadata || {}), awaitingApproval: true }
+    }).catch(() => {});
+    throw error;
+  }
+  return true;
+}
+
+async function settlePendingAction(userId, pendingAction, status) {
+  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
+    return agentApprovals.settleApproval(supabase, userId, pendingAction.approvalId, status).catch(() => false);
+  }
+  return false;
+}
+
+async function clearPendingAction(userId, pendingAction = null) {
+  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
+    await settlePendingAction(userId, pendingAction, 'cancelled');
+  }
   await supabase
     .from('preferences')
     .delete()
@@ -3643,6 +4250,9 @@ async function clearPendingAction(userId) {
 // actually prevents two requests (on two different instances) from both
 // executing the same review-gated action after the user says "yes".
 async function claimPendingAction(userId, pendingAction) {
+  if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
+    return agentApprovals.claimApproval(supabase, userId, pendingAction.approvalId).catch(() => false);
+  }
   if (!pendingAction?._raw) return false;
   const { data, error } = await supabase
     .from('preferences')
@@ -5203,6 +5813,9 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   const emailReplyContext = quickTurn
     ? ''
     : await buildEmailReplyDraftContext(userId, message, history, memory, preferences, trace);
+  const emailDraftContext = quickTurn || emailReplyContext
+    ? ''
+    : await buildEmailDraftContext(userId, message, history, memory, preferences, trace);
   const dynamicSystemPrompt = quickTurn
     ? buildQuickTurnContext(preferences, statedContext)
     : buildDynamicSystemPrompt(
@@ -5215,6 +5828,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         buildNativeHintsContext(requestContext.nativeHints),
         buildPendingActionContext(requestContext.pendingAction),
         emailReplyContext,
+        emailDraftContext,
         buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),
       statedContext
@@ -5535,6 +6149,55 @@ Respond with ONLY JSON, shape {"steps":["...","..."],"links":[{"label":"...","ur
   }
 }
 
+async function gatherCalendarContext(userId) {
+  try {
+    const enabled = await getEnabledConnectors(userId);
+    const requests = [];
+    if (enabled.includes('google')) {
+      requests.push(dispatch(userId, 'get_calendar_events', { max_results: 12 }));
+    }
+    if (enabled.includes('microsoft')) {
+      requests.push(dispatch(userId, 'get_outlook_events', { max_results: 12 }));
+    }
+    if (!requests.length) return [];
+    const results = await Promise.all(requests);
+    return results.flatMap(result => result?.success && Array.isArray(result.events) ? result.events : []).slice(0, 24);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function loadLifeBriefing(userId, now = new Date()) {
+  const [tasks, emailContext, events, pending, legacyPending, scheduled] = await Promise.all([
+    taskManager.listTasks(userId, null).catch(() => []),
+    gatherEmailContext(userId),
+    gatherCalendarContext(userId),
+    agentApprovals.listPendingApprovals(supabase, userId).catch(() => ({ approvals: [] })),
+    getLegacyPendingAction(userId),
+    scheduledTasks.listScheduledTasks(userId).catch(() => ({ tasks: [] }))
+  ]);
+
+  const approvals = [
+    ...(pending?.approvals || []),
+    ...(legacyPending ? [legacyPending] : [])
+  ].filter((approval, index, all) => {
+    const key = approval.approvalId || `${approval.taskId || ''}:${approval.action?.type || ''}:${approval.createdAt || ''}`;
+    return all.findIndex(candidate => {
+      const candidateKey = candidate.approvalId || `${candidate.taskId || ''}:${candidate.action?.type || ''}:${candidate.createdAt || ''}`;
+      return candidateKey === key;
+    }) === index;
+  });
+
+  return buildLifeBriefing({
+    tasks: tasks.map(safeAgentTaskSummary),
+    approvals,
+    emails: emailContext?.emails || [],
+    events,
+    scheduledTasks: scheduled?.tasks || [],
+    now
+  });
+}
+
 async function buildIntervalBriefing(userId, window, nativeContext, now = new Date()) {
   const [memory, history, preferences] = await Promise.all([
     getMemory(userId, null, ''),
@@ -5841,6 +6504,7 @@ function emptyProactiveSummary() {
     failureFollowUps: 0,
     healthAlerts: 0,
     locationReminders: 0,
+    scheduledRuns: 0,
     recoveredRuns: 0,
     failures: 0
   };
@@ -5935,6 +6599,133 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   return summary;
 }
 
+async function runScheduledTasksForUser(userId, logger = console, now = new Date()) {
+  let runs = 0;
+  let dueTasks = [];
+  try {
+    dueTasks = await scheduledTasks.getDueScheduledTasks(userId, now);
+  } catch (error) {
+    logger.warn?.(`[scheduled] could not load due tasks for ${userId}: ${error.message}`);
+    return 0;
+  }
+
+  for (const due of dueTasks.slice(0, 3)) {
+    const claimed = await scheduledTasks.claimScheduledTask(due, now).catch(() => null);
+    if (!claimed) continue;
+
+    let persistedTask = null;
+    let runtimeSession = null;
+    try {
+      persistedTask = await taskManager.createTask(userId, claimed.title, {
+        autonomy: 'Active',
+        metadata: {
+          scheduledTaskId: claimed.id,
+          scheduledRecurrence: claimed.recurrence,
+          scheduledCondition: claimed.condition || null
+        }
+      });
+      const claimedTask = await taskManager.claimRun(userId, persistedTask.id, { now });
+      if (!claimedTask) throw new Error('The scheduled run could not be claimed.');
+      persistedTask = claimedTask;
+
+      const route = await resolveAgentTaskRoute(userId, persistedTask);
+      await taskManager.updateTask(userId, persistedTask.id, {
+        metadata: { ...(persistedTask.metadata || {}), modelRoute: route }
+      });
+      persistedTask.metadata = { ...(persistedTask.metadata || {}), modelRoute: route };
+
+      runtimeSession = await agentRuntime.ensureSession(supabase, userId, {
+        taskId: persistedTask.id,
+        deviceType: 'ambient_home',
+        kind: 'task',
+        title: claimed.title,
+        state: 'running'
+      });
+      await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+        state: 'running',
+        heartbeatAt: new Date().toISOString()
+      });
+
+      const result = await runAgenticLoop({
+        userId,
+        initialMessage: scheduledTasks.buildScheduledRunInstruction(claimed),
+        dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+        provider: route.provider,
+        modelName: route.model,
+        maxIterations: 6,
+        context: {
+          autonomy: 'Active',
+          modelRoute: route,
+          runtimeSessionId: runtimeSession.id,
+          taskMetadata: persistedTask.metadata
+        },
+        executeActionsFn: executeActions,
+        persistTask: true,
+        existingTaskId: persistedTask.id
+      });
+
+      const waiting = result.agentTrace?.status === 'awaiting_approval';
+      const failed = result.agentTrace?.status === 'error';
+      const conditionTriggered = scheduledTasks.scheduledConditionTriggered(claimed, result);
+      await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+        state: waiting ? 'waiting_approval' : failed ? 'failed' : 'completed',
+        heartbeatAt: null,
+        completedAt: waiting ? null : new Date().toISOString()
+      }).catch(() => {});
+
+      if (failed) {
+        await scheduledTasks.deferScheduledTask(claimed, now);
+      } else if (conditionTriggered) {
+        await scheduledTasks.completeScheduledTask(claimed, now);
+      } else if (waiting) {
+        // Keep the watch alive, but do not create another run while this one waits
+        // for the person to review an action.
+        await scheduledTasks.deferScheduledTask(claimed, now);
+      } else {
+        await scheduledTasks.advanceScheduledTask(claimed, now);
+      }
+
+      const spoken = sanitizeAgentTaskText(
+        scheduledTasks.cleanScheduledResultText(result.spoken),
+        waiting ? `“${claimed.title}” needs your OK before Millie can continue.`
+          : conditionTriggered ? `I found a match for “${claimed.title}”.`
+            : `I checked “${claimed.title}”.`,
+        500
+      );
+      await createBriefing(userId, {
+        kind: 'scheduled_task',
+        title: claimed.title,
+        body: spoken,
+        source: 'agent',
+        metadata: {
+          scheduledTaskId: claimed.id,
+          taskId: persistedTask.id,
+          status: waiting ? 'waiting_approval' : failed ? 'failed' : conditionTriggered ? 'triggered' : 'completed'
+        }
+      }).catch(error => logger.warn?.(`[scheduled] briefing failed for ${claimed.id}: ${error.message}`));
+      runs += 1;
+    } catch (error) {
+      if (persistedTask?.id) {
+        await taskManager.updateTask(userId, persistedTask.id, {
+          status: 'paused',
+          heartbeat_at: null,
+          last_error: 'Scheduled work could not start or finish.'
+        }).catch(() => {});
+      }
+      if (runtimeSession?.id) {
+        await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+          state: 'failed',
+          heartbeatAt: null,
+          completedAt: new Date().toISOString()
+        }).catch(() => {});
+      }
+      await scheduledTasks.deferScheduledTask(claimed, now).catch(() => {});
+      logger.error?.(`[scheduled] run failed for ${claimed.id}: ${error.message}`);
+    }
+  }
+  return runs;
+}
+
 function mergeProactiveSummary(target, source) {
   for (const key of Object.keys(emptyProactiveSummary())) {
     target[key] = (target[key] || 0) + (source[key] || 0);
@@ -5966,6 +6757,7 @@ async function runProactiveSweep(logger = console) {
   for (const user of users || []) {
     const userSummary = await runProactiveForUser(user.user_id, logger);
     mergeProactiveSummary(summary, userSummary);
+    summary.scheduledRuns += await runScheduledTasksForUser(user.user_id, logger, new Date());
   }
 
   // Scheduled routines (Phase 4 of the aside-parity roadmap) — reuses the existing
@@ -6064,7 +6856,7 @@ function safeAgentTaskSummary(task) {
       ? result.text || result.actionSummary
       : success
         ? result.actionSummary || result.cardText || result.text
-        : result.actionSummary || result.error || result.text;
+        : actionFailureMessage(entry?.action, result.error || result.text);
     return {
       id: index + '-' + String(entry?.action || 'step'),
       action: sanitizeAgentTaskText(entry?.action, 'Agent step'),
@@ -6135,6 +6927,7 @@ function enrichActionForBrowser(entry) {
     pending ? '⏳' : (success ? '✓' : '⚠️');
 
   const rawText = (result.text || result.error || '').toString().trim();
+  const safeError = isError ? formatActionFailure(actionType, result.error || result.text) : '';
   const summary = rawText.length > 160 ? rawText.slice(0, 157) + '…' : rawText;
 
   return {
@@ -6144,34 +6937,18 @@ function enrichActionForBrowser(entry) {
     label,
     icon,
     status: pending ? 'pending' : (success ? 'success' : 'error'),
-    summary,
+    summary: isError ? safeError : summary,
     isData: DATA_ACTIONS.has(actionType),
     isPendingReview: pending,
     displayTitle: pending
-      ? (result.text || `${label} (needs your confirmation)`)
+      ? (result.text || `${label} needs your OK`)
       : label,
-    outcome: isError ? (result.error || 'Failed') : (pending ? 'Awaiting confirmation' : 'Done'),
+    outcome: isError ? safeError : (pending ? 'Needs your OK' : 'Done'),
   };
 }
 
 function userFacingActionFailure(entry) {
-  const action = entry?.action || '';
-  const rawError = String(entry?.result?.error || '').trim();
-  if (action === 'book_uber' || action === 'find_place') {
-    if (/Google Places is not ready|Places API|Google Places is not configured/i.test(rawError)) {
-      return 'Nearby place ranking needs Google Places enabled on the server. Uber itself does not need an API key.';
-    }
-    if (/need your current location|enable location/i.test(rawError)) {
-      return "Tiny snag - I need location access to find that nearby place. Turn it on and I'll try again.";
-    }
-    if (/couldn't find a nearby|No place results found/i.test(rawError)) {
-      return "I couldn't find a good nearby match. Try a different place name or turn location on.";
-    }
-    if (/Geocoding error|No results found/i.test(rawError)) {
-      return "I couldn't find that destination. Try a different place name.";
-    }
-  }
-  return rawError || 'Tiny snag - that action failed.';
+  return formatActionFailure(entry?.action, entry?.result?.error || entry?.result?.text);
 }
 
 function toSingleSentence(text) {
@@ -6215,7 +6992,7 @@ function summarizeFinishedActionsForUser(actionResults) {
     return failures
       .map(entry => {
         const error = userFacingActionFailure(entry);
-        return `${humanizeActionType(entry.action)} failed: ${error}`;
+        return error;
       })
       .join('\n');
   }
@@ -6561,7 +7338,7 @@ function getStructuredDataResults(actionResults, message = '') {
 
 // Fire-and-forget post-response tasks (memory + style preferences)
 function postResponseTasks(userId, message, extra = {}) {
-  if (shouldSaveMemory(message)) {
+  if (shouldSaveMemory(message) && !parseExplicitMemoryRequest(message)) {
     extractMemoryFact(userId, message).then(fact => {
       if (!fact) return;
       if (isDurableProfileFact(message)) {
@@ -6659,9 +7436,75 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     // Let the model start as soon as context is ready instead of waiting on the DB write.
     saveMessage(userId, 'user', message, trace).catch(err => trace.log('supabase.conversations.insert_user.async_fail', err.message));
 
-    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => getPendingAction(userId));
+    const pendingAction = await timedDev('chat', 'intent_classification.pending_action', {}, () => getPendingAction(userId, message));
+    if (pendingAction?.ambiguous && (
+      isPendingConfirmMessage(message) ||
+      isPendingCancelMessage(message) ||
+      isPendingRevisionMessage(message)
+    )) {
+      await respondWithResult({
+        res,
+        streaming,
+        wantsTTS,
+        settings,
+        trace,
+        userId,
+        message,
+        spoken: agentApprovals.describeAmbiguousApprovals(pendingAction.approvals)
+      });
+      return;
+    }
     if (pendingAction && isPendingCancelMessage(message)) {
-      await clearPendingAction(userId);
+      // Cancellation claims the same pending row as confirmation so a near-simultaneous
+      // "yes" cannot execute the action after the task has been marked cancelled.
+      const claimed = await claimPendingAction(userId, pendingAction);
+      if (!claimed) {
+        await respondWithResult({
+          res,
+          streaming,
+          wantsTTS,
+          settings,
+          trace,
+          userId,
+          message,
+          spoken: 'That request was already handled.'
+        });
+        return;
+      }
+      let cancelled = false;
+      try {
+        cancelled = await cancelApprovalRun(userId, pendingAction);
+      } catch (error) {
+        trace.log('pending_action.cancel_failed', error.message);
+      }
+      if (cancelled || !pendingAction.taskId) {
+        await settlePendingAction(userId, pendingAction, 'cancelled');
+      }
+      if (pendingAction.taskId && !cancelled) {
+        // The preference was already claimed above. Put it back if task settlement
+        // failed, otherwise a transient database error would silently lose the user's
+        // only retry/cancel handle while the task remains resumable.
+        await setPendingAction(userId, pendingAction.action, {
+          userMessage: pendingAction.userMessage,
+          location: pendingAction.location,
+          nativeHints: pendingAction.nativeHints,
+          persistedTaskId: pendingAction.taskId,
+          runtimeSessionId: pendingAction.sessionId,
+          taskGoal: pendingAction.taskGoal,
+          approvalId: pendingAction.approvalId
+        }).catch(() => {});
+        await respondWithResult({
+          res,
+          streaming,
+          wantsTTS,
+          settings,
+          trace,
+          userId,
+          message,
+          spoken: 'I could not cancel that task cleanly. It is still waiting for your choice.'
+        });
+        return;
+      }
       await respondWithResult({
         res,
         streaming,
@@ -6676,7 +7519,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     }
 
     if (pendingAction && isPendingConfirmMessage(message)) {
-      const pendingKey = `${userId}:${pendingAction.createdAt || ''}:${pendingAction.action.type}:${JSON.stringify(pendingAction.action.input || {})}`;
+      const pendingKey = `${userId}:${pendingAction.approvalId || pendingAction.createdAt || ''}:${pendingAction.action.type}:${JSON.stringify(pendingAction.action.input || {})}`;
       if (pendingActionConfirmLocks.has(pendingKey)) {
         await respondWithResult({
           res,
@@ -6718,21 +7561,26 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         try {
           let actionResults = await executeActions(userId, [pendingAction.action], {
             userMessage: pendingAction.userMessage || message,
-            location,
+            location: pendingAction.location || location,
             nativeHints: pendingAction.nativeHints || nativeHints,
             bypassReview: true,
             trace
           }, trace);
           actionResults = normalizeActionResultsForClient(actionResults);
+          await settlePendingAction(
+            userId,
+            pendingAction,
+            approvedActionSucceeded(actionResults) ? 'approved' : 'failed'
+          );
           // If a background run was parked waiting on this approval, continue it from its
           // checkpoint. Executing the action alone would satisfy the confirmation prompt and
           // silently abandon the goal that asked for it.
-          const resumedRun = await resumeRunAfterApproval(userId, pendingAction, actionResults, trace);
+          const resumeState = await resumeRunAfterApproval(userId, pendingAction, actionResults, trace);
           const spoken = [
             summarizeFinishedActionsForUser(actionResults) ||
               actionResults.map(a => a.result?.text || a.result?.error).filter(Boolean).join(' ') ||
               'Done.',
-            resumedRun ? 'Picking that task back up now.' : ''
+            resumeState.resumed ? 'Picking that task back up now.' : ''
           ].filter(Boolean).join(' ');
           await respondWithResult({
             res,
@@ -6752,13 +7600,38 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           // again instead of losing the pending confirmation entirely.
           await setPendingAction(userId, pendingAction.action, {
             userMessage: pendingAction.userMessage,
-            nativeHints: pendingAction.nativeHints
+            location: pendingAction.location,
+            nativeHints: pendingAction.nativeHints,
+            persistedTaskId: pendingAction.taskId,
+            runtimeSessionId: pendingAction.sessionId,
+            taskGoal: pendingAction.taskGoal,
+            approvalId: pendingAction.approvalId
           }).catch(() => {});
           throw e;
         }
       } finally {
         pendingActionConfirmLocks.delete(pendingKey);
       }
+      return;
+    }
+
+    if (isLifeBriefingRequest(message)) {
+      let briefing = null;
+      try {
+        briefing = await timedDev('chat', 'life_briefing.load', {}, () => loadLifeBriefing(userId));
+      } catch (error) {
+        trace.log('life_briefing.failed', error.message);
+      }
+      await respondWithResult({
+        res,
+        streaming,
+        wantsTTS,
+        settings,
+        trace,
+        userId,
+        message,
+        spoken: briefing ? formatLifeBriefing(briefing) : 'I couldn’t pull that together right now.'
+      });
       return;
     }
 
@@ -6980,6 +7853,61 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
     let agenticSendStatus = null;
     if (useAgentic) {
       const isBroadMoneyGoal = /make money|earn cash|side hustle|monetize|make income|financial freedom|profit/i.test(message);
+      let runtimeTaskId = null;
+      let runtimeSessionId = null;
+      let matchedTask = null;
+      let runtimeStartError = null;
+
+      // Create the execution identity before the first model turn. This is what makes an
+      // ambient request a durable delegated goal rather than a chat response that happens
+      // to call tools. If the optional runtime migration is not present yet, retain the
+      // existing task-loop behaviour and surface the failure in the trace.
+      try {
+        const resumableTasks = await taskManager.listTasks(userId, null);
+        matchedTask = resolveTaskReference(resumableTasks, message);
+        const task = matchedTask || await taskManager.createTask(userId, message, {
+          autonomy: autonomyLevel,
+          metadata: {
+            guardMode: settings.guardMode === true,
+            modelRoute: { provider: chatProvider, model: chatModel },
+            useSearch: Boolean(isBroadMoneyGoal || useSearch),
+            deviceType: req.body?.deviceType || 'ambient_home'
+          }
+        });
+        const claimed = await taskManager.claimRun(userId, task.id);
+        if (matchedTask && !claimed) {
+          runtimeStartError = 'That goal is already being handled.';
+          throw new Error(runtimeStartError);
+        }
+        const executionTask = claimed || task;
+        runtimeTaskId = executionTask.id;
+        const projectRef = req.body?.projectRef || executionTask.metadata?.projectRef;
+        const session = await agentRuntime.ensureSession(supabase, userId, {
+          taskId: executionTask.id,
+          deviceId: req.body?.deviceId,
+          deviceType: req.body?.deviceType || 'ambient_home',
+          projectRef,
+          title: executionTask.goal || message,
+          state: 'running'
+        });
+        runtimeSessionId = session.id;
+        await agentRuntime.updateSession(supabase, userId, session.id, {
+          state: 'running',
+          heartbeatAt: new Date().toISOString()
+        });
+        await taskManager.updateTask(userId, executionTask.id, {
+          metadata: {
+            ...(executionTask.metadata || {}),
+            runtimeSessionId: session.id,
+            ...(projectRef ? { projectRef } : {}),
+            modelRoute: { provider: chatProvider, model: chatModel },
+            useSearch: Boolean(isBroadMoneyGoal || useSearch),
+            deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
+          }
+        });
+      } catch (error) {
+        trace.log('agent.runtime_session.start_failed', String(error?.message || error).slice(0, 240));
+      }
 
       // Open the SSE stream BEFORE the loop runs, not after — the loop internally
       // already calls onStep at each think/execute/observe phase (agent-orchestrator.js),
@@ -6997,6 +7925,20 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         agenticSendStatus = (status, label, extra = {}) => agenticSse({ type: 'status', status, label, ...extra });
       }
 
+      if (runtimeStartError) {
+        const spoken = runtimeStartError;
+        if (streaming) {
+          agenticSse({ type: 'replace', text: spoken });
+          agenticSse({ type: 'done' });
+          res.end();
+        } else {
+          res.json({ text: spoken, actions: [] });
+        }
+        saveMessage(userId, 'assistant', { text: spoken, actions: [] }, trace).catch(() => {});
+        postResponseTasks(userId, message);
+        return;
+      }
+
       // The client's send watchdog extends itself on every status event it receives (see
       // ChatViewModel.startSendWatchdog) — but a single slow step inside the agent loop
       // (a page load, a third-party redirect) can legitimately go longer than the
@@ -7012,14 +7954,23 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       try {
         const agentResult = await runAgenticLoop({
           userId,
-          initialMessage: message,
-          dynamicSystemPrompt: `${OXCY_SYSTEM_PROMPT}\n\n${dynamicSystemPrompt}`.trim(),
+          initialMessage: matchedTask ? (matchedTask.goal || message) : message,
+          dynamicSystemPrompt,
           baseHistory,
           useSearch: isBroadMoneyGoal || useSearch, // force real-time research for money goals
           provider: chatProvider,
           modelName: chatModel,
           maxIterations: isBroadMoneyGoal || autonomyLevel === 'High' || autonomyLevel === 'Bold' ? 10 : 6,
-          context: { userMessage: message, location, nativeHints, autonomy: autonomyLevel },
+          context: {
+            userMessage: message,
+            location,
+            nativeHints,
+            autonomy: autonomyLevel,
+            modelRoute: { provider: chatProvider, model: chatModel },
+            useSearch: isBroadMoneyGoal || useSearch,
+            runtimeSessionId,
+            ...(matchedTask ? { continuationMessage: message } : {})
+          },
           executeActionsFn: executeActions,
           trace,
           onStep: !agenticSendStatus ? null : step => {
@@ -7038,9 +7989,24 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               }
             }
           },
-          persistTask: true // broad goals like "go make me money" get persistent tracking
+          persistTask: true,
+          existingTaskId: runtimeTaskId || null
         });
         clearInterval(heartbeat);
+
+        if (runtimeSessionId) {
+          const traceStatus = agentResult?.agentTrace?.status;
+          const state = traceStatus === 'completed'
+            ? 'completed'
+            : traceStatus === 'awaiting_approval'
+              ? 'waiting_approval'
+              : traceStatus === 'error' ? 'failed' : 'paused';
+          await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
+            state,
+            heartbeatAt: null,
+            completedAt: state === 'completed' ? new Date().toISOString() : null
+          }).catch(error => trace.log('agent.runtime_session.settle_failed', error.message));
+        }
 
         let actionResults = normalizeActionResultsForClient(agentResult.actions || []);
         let spoken = agentResult.spoken || 'Completed agent turn.';
@@ -7339,7 +8305,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       } catch (err) {
         trace.log('request.error', err.message);
         console.error('/chat stream error:', err.message);
-        try { sse({ type: 'error', error: err.message }); res.end(); } catch {}
+        try { sse({ type: 'error', error: formatProviderFailure(err.message) }); res.end(); } catch {}
       }
       return;
     }
@@ -7453,7 +8419,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
   } catch (err) {
     console.log(`[trace:chat:unscoped] FAIL outer ${err.message}`);
     console.error('/chat error:', err.message);
-    res.status(500).json({ error: err.message, text: `Error: ${err.message}` });
+    const safeError = formatProviderFailure(err.message);
+    res.status(500).json({ error: safeError, text: safeError });
   }
 });
 
@@ -7742,9 +8709,18 @@ app.get('/health', async (_req, res) => {
   }
   const mem = process.memoryUsage();
   const versionInfo = getRuntimeVersion();
+  const brainRoute = resolveModelRoute({});
+  const brainStatus = providerConfiguration(brainRoute.provider, brainRoute.model);
   res.json({
-    status: (missingEnv.length || dbStatus !== 'ok') ? 'degraded' : 'ok',
+    status: (missingEnv.length || dbStatus !== 'ok' || !brainStatus.ready) ? 'degraded' : 'ok',
     db: { status: dbStatus, latencyMs: dbLatencyMs },
+    brain: {
+      provider: brainStatus.provider,
+      model: brainStatus.model,
+      configured: brainStatus.configured,
+      ready: brainStatus.ready,
+      issue: brainStatus.issue
+    },
     memory: { heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024), heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024) },
     uptime: Math.round(process.uptime()),
     missingEnv,
@@ -8081,6 +9057,19 @@ app.get('/agent/context', requireSessionAuth, async (req, res) => {
   }
 });
 
+// One bounded, answer-first view of the user's current life context. The endpoint exposes
+// only ranked titles and short next-step summaries; connector payloads, message bodies,
+// addresses, credentials, and raw task results stay server-side.
+app.get('/agent/briefing', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    res.json(await loadLifeBriefing(userId));
+  } catch (e) {
+    res.status(503).json({ error: 'Could not load the current briefing.' });
+  }
+});
+
 app.get('/agent/tools', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -8217,6 +9206,76 @@ app.get('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/agent/scheduled-tasks', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await scheduledTasks.listScheduledTasks(userId);
+    if (!result.success) return res.status(500).json({ error: result.error });
+    res.json({
+      tasks: (result.tasks || []).map(task => ({
+        id: task.id,
+        title: task.title,
+        recurrence: task.recurrence,
+        nextRunAt: task.next_run_at,
+        condition: task.condition || null,
+        intervalMinutes: task.interval_minutes || null,
+        expiresAt: task.expires_at || null,
+        active: task.active !== false
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load what Millie is watching.' });
+  }
+});
+
+app.delete('/agent/scheduled-tasks/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await scheduledTasks.cancelScheduledTask(userId, { id: req.params.id });
+    if (!result.success) return res.status(result.error === 'not_found' ? 404 : 500).json({ error: result.error });
+    res.json({ success: true, task: { id: result.task?.id, title: result.task?.title, active: false } });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not stop watching that.' });
+  }
+});
+
+app.get('/agent/tasks/:id/runtime', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const task = await taskManager.getTask(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    const sessionId = task.metadata?.runtimeSessionId;
+    res.json({ runtime: sessionId ? await agentRuntime.getSnapshot(supabase, userId, sessionId) : null });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load the work session.' });
+  }
+});
+
+app.get('/agent/tasks/:id/runtime/diff', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const task = await taskManager.getTask(userId, req.params.id);
+    if (!task) return res.status(404).json({ error: 'Not found' });
+    const sessionId = task.metadata?.runtimeSessionId;
+    if (!sessionId) return res.status(404).json({ error: 'No work session has started.' });
+    const runtime = await agentRuntime.getSnapshot(supabase, userId, sessionId);
+    if (!runtime?.projectRef) return res.status(404).json({ error: 'This work session has no project changes.' });
+    const diff = await agentProjectRuntime.gitDiff(userId, task.id, runtime.projectRef);
+    res.json({
+      projectRef: diff.projectRef,
+      projectName: diff.projectName,
+      diff: diff.diff,
+      truncated: diff.truncated
+    });
+  } catch (e) {
+    res.status(503).json({ error: 'Project changes are not available right now.' });
+  }
+});
+
 app.patch('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -8248,45 +9307,94 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const task = await taskManager.getTask(userId, req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
-  // A run with a live heartbeat is already being worked on by another instance. Starting a
-  // second one would duplicate every action the first is mid-way through performing.
-  if (taskManager.isRunActive(task)) {
-    return res.status(409).json({ error: 'That task is already running.', taskId: task.id });
+  if (task.metadata?.awaitingApproval === true) {
+    return res.status(409).json({ error: 'That task is waiting for your approval.', awaitingApproval: true, taskId: task.id });
   }
 
   const resuming = Boolean(task.checkpoint);
-  // Mark it running before handing off to the background loop. Otherwise a very
-  // fast run can complete and write `completed`, then this request writes the
-  // stale `running` state over it. The heartbeat is set here too, so the task is
-  // never briefly 'running' with no heartbeat (which the sweep would read as stale).
-  await taskManager.updateTask(userId, task.id, {
-    status: 'running',
-    heartbeat_at: new Date().toISOString(),
-    attempt: (task.attempt || 0) + 1,
-    last_error: null
+  // Claim with a compare-and-set update before handing off to the background loop.
+  // This closes the read-then-update race between Work, approval resume, and two
+  // simultaneous requests on different Cloud Run instances.
+  const claimedTask = await taskManager.claimRun(userId, task.id);
+  if (!claimedTask) {
+    return res.status(409).json({ error: 'That task is already running or was claimed by another request.', taskId: task.id });
+  }
+  let runtimeSession;
+  try {
+    runtimeSession = await agentRuntime.ensureSession(supabase, userId, {
+      taskId: claimedTask.id,
+      deviceId: req.body?.deviceId || claimedTask.metadata?.deviceId,
+      deviceType: req.body?.deviceType || claimedTask.metadata?.deviceType || 'ambient_home',
+      projectRef: req.body?.projectRef || claimedTask.metadata?.projectRef,
+      kind: req.body?.kind || claimedTask.metadata?.runtimeKind || 'task',
+      title: claimedTask.goal,
+      state: 'running'
+    });
+    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+      state: 'running',
+      heartbeatAt: new Date().toISOString()
+    });
+  } catch (error) {
+    await taskManager.updateTask(userId, claimedTask.id, {
+      status: 'paused',
+      heartbeat_at: null,
+      last_error: 'The work session could not be started.'
+    }).catch(() => {});
+    return res.status(503).json({ error: 'Could not start the work session.' });
+  }
+  const route = await resolveAgentTaskRoute(userId, claimedTask);
+  await taskManager.updateTask(userId, claimedTask.id, {
+    metadata: {
+      ...(claimedTask.metadata || {}),
+      modelRoute: route,
+      runtimeSessionId: runtimeSession.id
+    }
   });
 
   runAgenticLoop({
     userId,
-    initialMessage: task.goal,
+    initialMessage: claimedTask.goal,
     dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
-    maxIterations: 6,
-    context: { autonomy: task.autonomy, guardMode: task.metadata?.guardMode === true },
+    provider: route.provider,
+    modelName: route.model,
+    maxIterations: Number.isFinite(claimedTask.checkpoint?.maxIterations) ? claimedTask.checkpoint.maxIterations : 6,
+    context: {
+      autonomy: claimedTask.autonomy,
+      guardMode: claimedTask.metadata?.guardMode === true,
+      modelRoute: route,
+      runtimeSessionId: runtimeSession.id
+    },
     executeActionsFn: executeActions,
     persistTask: true,
-    existingTaskId: task.id
+    existingTaskId: claimedTask.id
+  }).then(async (outcome) => {
+    const traceStatus = outcome?.agentTrace?.status;
+    const state = traceStatus === 'completed'
+      ? 'completed'
+      : traceStatus === 'awaiting_approval'
+        ? 'waiting_approval'
+        : traceStatus === 'error' ? 'failed' : 'paused';
+    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+      state,
+      heartbeatAt: null,
+      completedAt: state === 'completed' ? new Date().toISOString() : null
+    }).catch(error => console.warn('[agent-runtime] session settlement failed:', error.message));
   }).catch(async (e) => {
     // Swallowing this left the task stranded at 'running' forever with nothing to explain
     // it. Record the failure and keep the checkpoint so it stays resumable.
     try {
-      await taskManager.updateTask(userId, task.id, {
+      await taskManager.updateTask(userId, claimedTask.id, {
         status: 'paused',
         heartbeat_at: null,
         last_error: String(e?.message || e).slice(0, 500)
       });
     } catch {}
+    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
+      state: 'failed',
+      heartbeatAt: null
+    }).catch(() => {});
   });
-  res.json({ started: true, resumed: resuming, taskId: task.id });
+  res.json({ started: true, resumed: resuming, taskId: claimedTask.id });
 });
 
 app.post('/agent/simulate', requireSessionAuth, async (req, res) => {
@@ -8654,11 +9762,15 @@ module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
 module.exports.safeAgentTaskSummary = safeAgentTaskSummary;
+module.exports.approvedActionSucceeded = approvedActionSucceeded;
 module.exports.executeAction = executeAction;
 module.exports.validatePendantTranscriptionUpload = validatePendantTranscriptionUpload;
 module.exports.isUserFacingMemory = isUserFacingMemory;
 module.exports.isUsefulMemoryContent = isUsefulMemoryContent;
 module.exports.isDurableProfileFact = isDurableProfileFact;
+module.exports.parseExplicitMemoryRequest = parseExplicitMemoryRequest;
+module.exports.isEmailDraftRequest = isEmailDraftRequest;
+module.exports.findRecentEmailTarget = findRecentEmailTarget;
 module.exports.CONNECTORS = CONNECTORS;
 module.exports.getWavDurationMs = getWavDurationMs;
 module.exports.isImplausibleTranscript = isImplausibleTranscript;

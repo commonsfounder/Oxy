@@ -93,6 +93,23 @@ test('Core actions (incl. new agentic) have contracts for reliability work', () 
   }
 });
 
+test('background watches require an explicit instruction and remain low-risk', () => {
+  assert.equal(ACTION_CONTRACTS.create_scheduled_task.risk, 'low');
+  assert.equal(ACTION_CONTRACTS.create_scheduled_task.executionMode, 'direct');
+  assert.match(
+    validateActionWithContract(
+      { type: 'create_scheduled_task', input: { title: 'Flight prices' } },
+      'watch flights'
+    ).error,
+    /instruction/
+  );
+  assert.equal(validateActionWithContract({
+    type: 'create_scheduled_task',
+    input: { title: 'Flight prices', instruction: 'Check weekly and tell me if they drop', recurrence: 'weekly' }
+  }, 'watch flight prices'), null);
+  assert.equal(ACTION_CONTRACTS.cancel_scheduled_task.confirmation, 'none');
+});
+
 test('Core actions validate required fields consistently', () => {
   for (const [type, contract] of Object.entries(ACTION_CONTRACTS)) {
     const input = {};

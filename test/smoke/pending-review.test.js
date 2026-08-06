@@ -19,6 +19,8 @@ test('pending review accepts natural confirmation phrases', () => {
   assert.equal(isPendingConfirmMessage('send the message'), true);
   assert.equal(isPendingConfirmMessage('send that message'), true);
   assert.equal(isPendingConfirmMessage('go ahead'), true);
+  assert.equal(isPendingConfirmMessage('approve the website task'), true);
+  assert.equal(isPendingCancelMessage('cancel the supplier task'), true);
 });
 
 test('pending review does not confirm revision or cancellation language', () => {
@@ -72,7 +74,7 @@ test('pending review result owns concise final wording for high-risk actions', (
   assert.equal(result.pending, true);
   assert.equal(result.confirmation, 'review_required');
   assert.equal(result.cardText, 'Josh · Can we meet Friday?');
-  assert.equal(result.text, 'Check this, then send when ready.');
+  assert.equal(result.text, 'Check the message, then tap Send.');
 });
 
 test('MONEY_ACTION_TYPES covers every concierge-money action type', () => {

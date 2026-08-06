@@ -71,6 +71,35 @@ test('github connector reports failure for an unrecognized action instead of fab
   delete require.cache[require.resolve('../../connectors/github')];
 });
 
+test('github connector fails closed when no user or development token is connected', async () => {
+  delete process.env.GITHUB_TOKEN;
+  const github = withMockedAxios(
+    { post: async () => ({ data: {} }), get: async () => ({ data: {} }) },
+    () => require('../../connectors/github')
+  );
+  const result = await github.execute('user-1', 'github_action', { repo: 'a/b', action: 'status' });
+  assert.equal(result.success, false);
+  assert.match(result.error, /not connected/i);
+  delete require.cache[require.resolve('../../connectors/github')];
+});
+
+test('github status uses the real repository response', async () => {
+  process.env.GITHUB_TOKEN = 'test-token';
+  const github = withMockedAxios(
+    {
+      post: async () => ({ data: {} }),
+      get: async () => ({ data: { full_name: 'a/b', private: true, default_branch: 'main', open_issues_count: 3, html_url: 'https://github.com/a/b' } })
+    },
+    () => require('../../connectors/github')
+  );
+  const result = await github.execute('user-1', 'github_action', { repo: 'a/b', action: 'status' });
+  assert.equal(result.success, true);
+  assert.equal(result.repository.defaultBranch, 'main');
+  assert.match(result.text, /3 open issues/);
+  delete process.env.GITHUB_TOKEN;
+  delete require.cache[require.resolve('../../connectors/github')];
+});
+
 test('slack connector reports failure when Slack returns HTTP 200 with ok:false', async () => {
   process.env.SLACK_BOT_TOKEN = 'test-token';
   const slack = withMockedAxios(
@@ -96,4 +125,3 @@ test('slack connector reports failure when the real API call throws', async () =
   delete process.env.SLACK_BOT_TOKEN;
   delete require.cache[require.resolve('../../connectors/slack')];
 });
-

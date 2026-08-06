@@ -33,6 +33,7 @@
  */
 
 const { GoogleGenAI } = require('@google/genai');
+const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
 
 // Reasoning-tier models (gpt-5.x) bill reasoning tokens against max_completion_tokens
 // BEFORE any visible text. The chat path sets maxOutputTokens=32 for quick turns, which
@@ -53,6 +54,13 @@ function geminiConfigured() {
 
 function getBrainProvider() {
   return (process.env.OXY_BRAIN_PROVIDER || 'openai').toLowerCase();
+}
+
+function resolveBrainModel(provider, model, role = 'reasoning') {
+  const candidate = String(model || '').trim();
+  return candidate && modelMatchesProvider(provider, candidate)
+    ? candidate
+    : defaultModelForProvider(provider, role);
 }
 
 // Gemini contents (role/parts) + systemInstruction -> OpenAI-style messages.
@@ -203,11 +211,12 @@ function compatibleRequestFromConfig(provider, config = {}) {
 }
 
 async function* compatibleStream({ provider, model, contents, config }) {
+  const resolvedModel = resolveBrainModel(provider, model);
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
     headers: compatibleHeaders(provider),
     body: JSON.stringify({
-      model: compatibleModel(provider, model),
+      model: compatibleModel(provider, resolvedModel),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
       stream: true,
       ...compatibleRequestFromConfig(provider, config)
@@ -218,11 +227,12 @@ async function* compatibleStream({ provider, model, contents, config }) {
 }
 
 async function compatibleGenerate({ provider, model, contents, config }) {
+  const resolvedModel = resolveBrainModel(provider, model);
   const res = await fetch(`${compatibleBaseURL(provider)}/chat/completions`, {
     method: 'POST',
     headers: compatibleHeaders(provider),
     body: JSON.stringify({
-      model: compatibleModel(provider, model),
+      model: compatibleModel(provider, resolvedModel),
       messages: toOpenAIMessages(contents, config?.systemInstruction),
       ...compatibleRequestFromConfig(provider, config)
     })
@@ -345,10 +355,11 @@ async function anthropicGenerate({ model, contents, config, tools = [] }) {
  */
 function streamBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
-  if (p === 'groq') return groqStream({ model, contents, config });
-  if (p === 'openai' || p === 'local') return compatibleStream({ provider: p, model, contents, config });
-  if (p === 'anthropic') return anthropicStream({ model, contents, config });
-  if (p === 'gemini') return geminiClient().models.generateContentStream({ model, contents, config });
+  const resolvedModel = resolveBrainModel(p, model);
+  if (p === 'groq') return groqStream({ model: resolvedModel, contents, config });
+  if (p === 'openai' || p === 'local') return compatibleStream({ provider: p, model: resolvedModel, contents, config });
+  if (p === 'anthropic') return anthropicStream({ model: resolvedModel, contents, config });
+  if (p === 'gemini') return geminiClient().models.generateContentStream({ model: resolvedModel, contents, config });
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
@@ -358,10 +369,11 @@ function streamBrain({ provider, model, contents, config }) {
  */
 async function generateBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
-  if (OPENAI_COMPATIBLE.has(p)) return compatibleGenerate({ provider: p, model, contents, config });
-  if (p === 'anthropic') return anthropicGenerate({ model, contents, config });
+  const resolvedModel = resolveBrainModel(p, model);
+  if (OPENAI_COMPATIBLE.has(p)) return compatibleGenerate({ provider: p, model: resolvedModel, contents, config });
+  if (p === 'anthropic') return anthropicGenerate({ model: resolvedModel, contents, config });
   if (p === 'gemini') {
-    const res = await geminiClient().models.generateContent({ model, contents, config });
+    const res = await geminiClient().models.generateContent({ model: resolvedModel, contents, config });
     return { text: res.text || '' };
   }
   throw new Error(`Unknown brain provider: ${p}`);
@@ -541,16 +553,17 @@ function openAIResponseToGeminiShape(json) {
  */
 async function callToolsBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
+  const resolvedModel = resolveBrainModel(p, model);
   if (p === 'anthropic') {
     return anthropicGenerate({
-      model,
+      model: resolvedModel,
       contents,
       config,
       tools: geminiToolsToAnthropic(config?.tools)
     });
   }
   if (p === 'gemini') {
-    return geminiClient().models.generateContent({ model, contents, config });
+    return geminiClient().models.generateContent({ model: resolvedModel, contents, config });
   }
   // Anything left must speak the OpenAI tool-calling shape. Falling through to the Gemini
   // SDK here used to send e.g. a Groq model id to generativelanguage.googleapis.com — a
@@ -559,7 +572,7 @@ async function callToolsBrain({ provider, model, contents, config }) {
 
   const tools = geminiToolsToOpenAI(config?.tools);
   const body = {
-    model: compatibleModel(p, model),
+    model: compatibleModel(p, resolvedModel),
     messages: toOpenAIToolMessages(contents, config?.systemInstruction),
     ...compatibleRequestFromConfig(p, config)
   };

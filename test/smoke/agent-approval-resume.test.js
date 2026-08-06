@@ -136,6 +136,7 @@ test('resuming after approval continues the goal and does not re-ask', async (t)
     maxIterations: 6,
     persistTask: true,
     existingTaskId: 'task-1',
+    resumeAction: { action: 'send_email', result: { success: true, text: 'Sent and logged.' } },
     resumeNote: 'The user approved "send_email" and it has now been executed: Sent. Continue the goal from here; do not ask for that approval again.',
     executeActionsFn: async () => []
   });
@@ -147,7 +148,38 @@ test('resuming after approval continues the goal and does not re-ask', async (t)
   assert.equal(task.status, 'completed');
   assert.equal(task.metadata.awaitingApproval, false, 'the waiting flag must clear on completion');
   assert.equal(task.checkpoint, null, 'a completed goal must not stay replayable');
+  assert.equal(task.results[0].result.pending, undefined, 'completed history must replace the pending approval result');
+  assert.equal(task.results[0].result.success, true);
   assert.equal(result.actions.length, 1, 'work done before the approval is carried forward');
+});
+
+test('a resume after the final parked iteration still gets one model turn', async (t) => {
+  t.after(restore);
+  const { task } = stubTaskStore({
+    status: 'paused',
+    checkpoint: {
+      iteration: 5,
+      maxIterations: 6,
+      contents: [{ role: 'user', parts: [{ text: 'Send the supplier a quote request' }] }],
+      executedActions: [{ action: 'send_email', result: { pending: true } }],
+      spoken: ''
+    }
+  });
+  let calls = 0;
+  brainProvider.callToolsBrain = scriptedBrain([{ text: 'Finished after approval.' }]);
+  const result = await runAgentLoop({
+    userId: 'user-1',
+    initialMessage: 'Send the supplier a quote request',
+    maxIterations: 6,
+    persistTask: true,
+    existingTaskId: 'task-1',
+    resumeAction: { action: 'send_email', result: { success: true, text: 'Sent.' } },
+    resumeNote: 'The user approved send_email and it completed successfully. Continue.',
+    executeActionsFn: async () => { calls += 1; return []; }
+  });
+  assert.equal(calls, 0, 'a final text turn needs no action execution');
+  assert.equal(result.spoken, 'Finished after approval.');
+  assert.equal(task.status, 'completed');
 });
 
 test('an approval-parked run is reported as waiting, not as a failure', () => {
@@ -167,4 +199,11 @@ test('an approval-parked run is reported as waiting, not as a failure', () => {
   assert.equal(stalled.awaiting_approval, false);
   assert.equal(stalled.resumable, false);
   assert.match(stalled.last_error, /provider exploded/);
+});
+
+test('approval resume only treats a real action success as completed', () => {
+  const { approvedActionSucceeded } = require('../../api');
+  assert.equal(approvedActionSucceeded([{ action: 'send_email', result: { success: true } }]), true);
+  assert.equal(approvedActionSucceeded([{ action: 'send_email', result: { success: false, error: 'SMTP unavailable' } }]), false);
+  assert.equal(approvedActionSucceeded([{ action: 'send_email', result: { pending: true } }]), false);
 });

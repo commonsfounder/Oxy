@@ -20,7 +20,7 @@ test('action runner parks high-risk actions for review', async () => {
   ], { userMessage: 'email Josh saying can we meet Friday' });
 
   assert.equal(result[0].result.pending, true);
-  assert.equal(result[0].result.actionSummary, 'Review email');
+  assert.equal(result[0].result.actionSummary, 'Email ready to send');
   assert.equal(pending.length, 1);
   assert.equal(logs[0].result.pending, true);
 });

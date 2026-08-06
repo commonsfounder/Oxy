@@ -1,13 +1,15 @@
 // Agent orchestrator - no circular deps. Client and model injected or required carefully.
 // The model call goes through the brain-provider seam, so this loop follows whatever
 // OXY_BRAIN_PROVIDER selects (OpenAI by default) without knowing which provider it is.
-let PRIMARY_CHAT_MODEL = process.env.OXY_REASONING_MODEL || 'gpt-5.6-luna';
+const { defaultModelForProvider } = require('./model-routing');
+let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER || 'openai', 'reasoning');
 
 // Held as the module object, not destructured: the loop's behaviour around a failing or
 // slow model (retries, checkpointing, resume) is only testable if the brain call can be
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
+const { buildMillieSystemPrompt } = require('../prompts');
 const taskManager = require('./task-manager');
 
 // Simple in-memory for traces during a run; production should persist
@@ -43,6 +45,24 @@ function extractSpokenFromResponseSafe(resp) {
     }
   } catch {}
   return '';
+}
+
+function replacePendingToolResult(contents, entry) {
+  if (!Array.isArray(contents) || !entry?.action) return contents;
+  const next = JSON.parse(JSON.stringify(contents));
+  const expectedId = entry._toolCallId || null;
+  for (const turn of next) {
+    for (const part of turn?.parts || []) {
+      const response = part?.functionResponse;
+      if (!response || response.name !== entry.action || (expectedId && response.id !== expectedId)) continue;
+      let parsed = null;
+      try { parsed = JSON.parse(response.response?.result || ''); } catch {}
+      if (parsed?.pending !== true) continue;
+      response.response.result = JSON.stringify(entry.result || {});
+      return next;
+    }
+  }
+  return next;
 }
 
 function createAgentTrace(userId, goal) {
@@ -96,7 +116,8 @@ async function runAgentLoop({
   onStep = null,
   persistTask = false,
   existingTaskId = null,
-  resumeNote = null
+  resumeNote = null,
+  resumeAction = null
 }) {
   const agentTrace = createAgentTrace(userId, initialMessage);
   let persistedTask = null;
@@ -107,7 +128,14 @@ async function runAgentLoop({
       // user-visible goal instead of silently creating a duplicate row.
       persistedTask = existingTaskId
         ? await taskManager.getTask(userId, existingTaskId)
-        : await taskManager.createTask(userId, initialMessage, { autonomy: context.autonomy || 'Active' });
+        : await taskManager.createTask(userId, initialMessage, {
+          autonomy: context.autonomy || 'Active',
+          metadata: {
+            ...(context.taskMetadata || {}),
+            ...(context.modelRoute ? { modelRoute: context.modelRoute } : {}),
+            ...(context.useSearch !== undefined ? { useSearch: Boolean(context.useSearch) } : {})
+          }
+        });
       if (!persistedTask) throw new Error('Persistent task not found');
       agentTrace.persistedTaskId = persistedTask.id;
     } catch (e) {
@@ -125,7 +153,23 @@ async function runAgentLoop({
     ? [...resumeFrom.contents]
     : [...baseHistory, { role: 'user', parts: [{ text: initialMessage }] }];
   const executedActions = [...(resumeFrom?.executedActions || [])];
+  if (resumeAction) {
+    const pendingIndex = executedActions.findLastIndex(entry =>
+      entry?.action === resumeAction.action && entry?.result?.pending === true
+    );
+    if (pendingIndex >= 0) executedActions[pendingIndex] = resumeAction;
+    else if (!executedActions.some(entry => entry?.action === resumeAction.action && entry?.result?.success === true)) {
+      executedActions.push(resumeAction);
+    }
+  }
+  const resumedContents = resumeAction ? replacePendingToolResult(contents, resumeAction) : contents;
   const startIteration = Number.isFinite(resumeFrom?.iteration) ? resumeFrom.iteration + 1 : 0;
+  // Approval may arrive after the run parked on its final allowed iteration. Give
+  // the resumed goal at least one model turn instead of falling through as completed.
+  const effectiveMaxIterations = Math.max(
+    Number.isFinite(resumeFrom?.maxIterations) ? resumeFrom.maxIterations : maxIterations,
+    startIteration + 1
+  );
   let spoken = resumeFrom?.spoken || '';
   let lastToolResultsText = '';
 
@@ -133,11 +177,17 @@ async function runAgentLoop({
     logAgentStep(agentTrace, { type: 'resumed', fromIteration: startIteration, actionsAlready: executedActions.length });
     // The checkpoint ends on a tool result saying "waiting for approval". Without this the
     // model reads that as still-blocked and asks for the same approval again.
-    if (resumeNote) contents.push({ role: 'user', parts: [{ text: resumeNote }] });
+    if (resumeNote) resumedContents.push({ role: 'user', parts: [{ text: resumeNote }] });
+    if (context.continuationMessage) {
+      resumedContents.push({
+        role: 'user',
+        parts: [{ text: `The user has continued this goal with: ${String(context.continuationMessage).slice(0, 1200)}` }]
+      });
+    }
     if (resumeFrom.truncated) {
       // The checkpoint had to drop history to fit. Say so in-band rather than letting the
       // model infer a gap it can't see.
-      contents.push({ role: 'user', parts: [{ text: `Continuing an interrupted run of: ${initialMessage}. Earlier steps are summarised in the results already recorded; do not repeat completed work.` }] });
+      resumedContents.push({ role: 'user', parts: [{ text: `Continuing an interrupted run of: ${initialMessage}. Earlier steps are summarised in the results already recorded; do not repeat completed work.` }] });
     }
   }
 
@@ -146,7 +196,8 @@ async function runAgentLoop({
     try {
       await taskManager.saveCheckpoint(userId, persistedTask.id, {
         iteration,
-        contents,
+        maxIterations,
+        contents: resumedContents,
         executedActions,
         spoken,
         goal: initialMessage
@@ -171,13 +222,13 @@ async function runAgentLoop({
       if (plan?.steps?.length > 1) {
         logAgentStep(agentTrace, { type: 'auto_plan', plan: plan.title });
         // Inject plan into context for agent
-        contents.push({ role: 'user', parts: [{ text: `Internal plan: ${JSON.stringify(plan.steps)}` }] });
+        resumedContents.push({ role: 'user', parts: [{ text: `Internal plan: ${JSON.stringify(plan.steps)}` }] });
       }
     } catch {}
   }
 
   const baseConfig = {
-    systemInstruction: dynamicSystemPrompt,
+    systemInstruction: buildMillieSystemPrompt(dynamicSystemPrompt),
     temperature: 0.2,
     topP: 0.8,
     tools: buildToolsForGemini ? buildToolsForGemini(useSearch) : [{ functionDeclarations: [] }],
@@ -188,21 +239,21 @@ async function runAgentLoop({
 
   await checkpoint(startIteration - 1);
 
-  for (let i = startIteration; i < maxIterations; i++) {
+  for (let i = startIteration; i < effectiveMaxIterations; i++) {
     logAgentStep(agentTrace, { type: 'think', iteration: i + 1 });
 
     if (onStep) onStep({ phase: 'thinking', iteration: i + 1 });
 
     let resp;
     try {
-      resp = await callGeminiWithTools(modelName, contents, baseConfig, trace, provider);
+      resp = await callGeminiWithTools(modelName, resumedContents, baseConfig, trace, provider);
     } catch (err) {
       logAgentStep(agentTrace, { type: 'error', error: err.message });
       // Retry once on transient error for cream-of-crop reliability
       if (i < maxIterations - 1) {
         await new Promise(r => setTimeout(r, 500));
         try {
-          resp = await callGeminiWithTools(modelName, contents, baseConfig, trace, provider);
+          resp = await callGeminiWithTools(modelName, resumedContents, baseConfig, trace, provider);
         } catch (e2) {
           logAgentStep(agentTrace, { type: 'error_retry_failed', error: e2.message });
           agentTrace.status = 'error';
@@ -251,7 +302,8 @@ async function runAgentLoop({
           ...context,
           agentIteration: i,
           sequential: true,
-          persistedTaskId: persistedTask?.id || null
+          persistedTaskId: persistedTask?.id || null,
+          taskGoal: persistedTask?.goal || initialMessage
         }, trace);
       } catch (e) {
         results = actions.map(a => ({ action: a.type, result: { success: false, error: e.message } }));
@@ -275,8 +327,8 @@ async function runAgentLoop({
     });
 
     // Append model turn that led to tools + the function responses
-    contents.push({ role: 'model', parts: responseParts.length ? responseParts : [{ text: spoken || '...' }] });
-    contents.push(...functionResponses);
+    resumedContents.push({ role: 'model', parts: responseParts.length ? responseParts : [{ text: spoken || '...' }] });
+    resumedContents.push(...functionResponses);
 
     logAgentStep(agentTrace, { type: 'observe', results: results.map(r => r.action) });
 
@@ -468,5 +520,6 @@ module.exports = {
   logAgentStep,
   executePlanWithBranching,
   delegateToSpecialist,
-  extractToolCalls
+  extractToolCalls,
+  replacePendingToolResult
 };

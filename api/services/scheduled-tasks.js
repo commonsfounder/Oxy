@@ -108,7 +108,7 @@ function describeSchedule(task) {
   const time = task.time_of_day || '09:00';
   if (task.recurrence === 'poll') {
     const mins = task.interval_minutes || 30;
-    return task.condition ? `keep watching until: ${task.condition}` : `check every ${mins} min`;
+    return task.condition ? `until ${task.condition}` : `every ${mins} minutes`;
   }
   if (task.recurrence === 'daily') return `every day at ${time}`;
   if (task.recurrence === 'weekly') {
@@ -118,8 +118,28 @@ function describeSchedule(task) {
   return `on ${new Intl.DateTimeFormat('en-GB', { timeZone: TIMEZONE, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(task.next_run_at))}`;
 }
 
+function buildScheduledRunInstruction(task) {
+  const instruction = String(task?.instruction || task?.title || '').trim();
+  if (!task?.condition) return instruction;
+  return `${instruction}\n\nThis is a background watch. Check the condition: "${String(task.condition).slice(0, 240)}". If reliable evidence shows that the condition is true, start your final answer with [WATCH_TRIGGERED]. If it is not true, start your final answer with [WATCH_PENDING]. Do not use [WATCH_TRIGGERED] without evidence.`;
+}
+
+function scheduledConditionTriggered(task, result) {
+  if (!task?.condition) return false;
+  const spoken = result?.spoken || result?.agentTrace?.finalSpoken || '';
+  return /\[WATCH_TRIGGERED\]/i.test(String(spoken));
+}
+
+function cleanScheduledResultText(value) {
+  return String(value || '')
+    .replace(/\[WATCH_TRIGGERED\]|\[WATCH_PENDING\]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 const DEFAULT_POLL_MINUTES = 30;
 const DEFAULT_POLL_EXPIRY_DAYS = 30;
+const CLAIM_LEASE_MINUTES = 10;
 
 async function createScheduledTask(userId, {
   title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date,
@@ -187,7 +207,7 @@ async function createScheduledTask(userId, {
 async function listScheduledTasks(userId) {
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
-    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, active')
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, active')
     .eq('user_id', userId)
     .eq('active', true)
     .order('next_run_at', { ascending: true });
@@ -237,6 +257,36 @@ async function getDueScheduledTasks(userId, now = new Date()) {
   return data || [];
 }
 
+// A sweep can run on more than one Cloud Run instance. Move the due timestamp forward
+// with a compare-and-set so only one instance owns a scheduled run. If that instance dies,
+// the lease expires and the next sweep can retry it; the durable agent task remains the
+// user-visible record of what happened.
+async function claimScheduledTask(task, now = new Date()) {
+  if (!task?.id || !task.next_run_at) return null;
+  const leaseUntil = new Date(now.getTime() + CLAIM_LEASE_MINUTES * 60000);
+  const { data, error } = await getSupabase()
+    .from('scheduled_tasks')
+    .update({ next_run_at: leaseUntil.toISOString() })
+    .eq('id', task.id)
+    .eq('active', true)
+    .eq('completed', false)
+    .eq('next_run_at', task.next_run_at)
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
+    .maybeSingle();
+  if (error || !data) return null;
+  return { ...task, ...data, claimedUntil: leaseUntil.toISOString() };
+}
+
+async function deferScheduledTask(task, now = new Date()) {
+  if (!task?.id) return { ok: false, error: 'scheduled task id required' };
+  const nextRunAt = new Date(now.getTime() + CLAIM_LEASE_MINUTES * 60000);
+  const { error } = await getSupabase().from('scheduled_tasks').update({
+    next_run_at: nextRunAt.toISOString(),
+    last_run_at: now.toISOString()
+  }).eq('id', task.id);
+  return error ? { ok: false, error: error.message } : { ok: true, nextRunAt: nextRunAt.toISOString() };
+}
+
 // Mark a one-shot or condition task as fulfilled so a retried sweep can't double-run it.
 async function completeScheduledTask(task, now = new Date()) {
   await getSupabase().from('scheduled_tasks').update({
@@ -273,10 +323,15 @@ async function advanceScheduledTask(task, now = new Date()) {
 
 module.exports = {
   describeSchedule,
+  buildScheduledRunInstruction,
+  scheduledConditionTriggered,
+  cleanScheduledResultText,
   createScheduledTask,
   listScheduledTasks,
   cancelScheduledTask,
   getDueScheduledTasks,
+  claimScheduledTask,
+  deferScheduledTask,
   completeScheduledTask,
   advanceScheduledTask
 };

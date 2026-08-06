@@ -121,7 +121,7 @@ Schema lives across `supabase/migrations/` (22 files as of this writing — base
    ```bash
    cp .env.example .env
    ```
-   See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_KEY`, `GEMINI_API_KEY`, `OXY_SESSION_SECRET`. Optional blocks enable individual connectors (Google, Microsoft, Telegram, Stripe, Plaid, Monzo, etc.) — each connector degrades gracefully if its keys are absent.
+See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_KEY`, `OPENAI_API_KEY`, `OXY_BRAIN_PROVIDER`, and `OXY_SESSION_SECRET`. Set matching provider and model values. Optional blocks enable individual connectors (Google, Microsoft, Telegram, Stripe, Plaid, Monzo, etc.) — each connector degrades gracefully if its keys are absent.
 
 4. **Run the database migrations**
 

@@ -16,12 +16,17 @@ process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-secret'
  * production code path runs, only the database is a double.
  */
 const agentWorkspace = require('../../api/services/agent-workspace');
+const agentRuntime = require('../../api/services/agent-runtime');
 const { buildToolsForGemini, ACTION_CONTRACTS } = require('../../api/action-contracts');
 const { connectorForAction } = require('../../api/services/connector-health');
 const { executeAction } = require('../../api');
 
 const real = { ...agentWorkspace };
-function restore() { Object.assign(agentWorkspace, real); }
+const realRuntime = { ...agentRuntime };
+function restore() {
+  Object.assign(agentWorkspace, real);
+  Object.assign(agentRuntime, realRuntime);
+}
 
 test('the workspace tools are declared to the model', () => {
   const decls = buildToolsForGemini(false)[0].functionDeclarations;
@@ -59,6 +64,31 @@ test('workspace_write persists through to the workspace service', async (t) => {
   assert.equal(calls[0].userId, 'user-1');
   assert.equal(calls[0].path, 'research/laptops.md');
   assert.match(result.actionSummary, /research\/laptops\.md/);
+});
+
+test('workspace_write records a bounded artifact for a durable runtime session', async (t) => {
+  t.after(restore);
+  agentWorkspace.writeWorkspaceFile = async () => ({ id: 'file-1', path: 'projects/milgrain/brief.md', version: 3 });
+  const calls = [];
+  agentRuntime.writeFileArtifact = async (_db, userId, input) => {
+    calls.push({ userId, input });
+    return {
+      file: { id: 'file-1', path: input.path, version: 3 },
+      artifact: { id: 'artifact-1', kind: 'file', path: input.path, title: input.path, summary: 'Created artifact.', status: 'created' }
+    };
+  };
+
+  const result = await executeAction('user-1', 'workspace_write', {
+    path: 'projects/milgrain/brief.md',
+    content: 'private project content'
+  }, { runtimeSessionId: 'session-1', persistedTaskId: 'task-1' });
+
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].input.sessionId, 'session-1');
+  assert.equal(calls[0].input.taskId, 'task-1');
+  assert.equal(result.artifact.id, 'artifact-1');
+  assert.doesNotMatch(JSON.stringify(result), /private project content/);
 });
 
 test('workspace_write rejects a missing path or non-text content', async (t) => {

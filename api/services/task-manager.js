@@ -50,6 +50,49 @@ async function updateTask(userId, taskId, updates) {
   return data;
 }
 
+/*
+ * Atomically claim a task for one background run. The old read-then-update shape
+ * let two Cloud Run instances observe the same paused task and both replay its
+ * checkpoint. The status (and, for stale running rows, heartbeat) is part of the
+ * update predicate, so only one caller receives the claimed row.
+ */
+async function claimRun(userId, taskId, { now = new Date(), allowAwaitingApproval = false } = {}) {
+  const sb = getSupabase();
+  const task = await getTask(userId, taskId);
+  if (!task) return null;
+
+  const status = String(task.status || '').toLowerCase();
+  const active = isRunActive(task, now);
+  const staleRunning = status === 'running' && !active;
+  const claimable = ['pending', 'paused', 'failed'].includes(status) || staleRunning;
+  if (!claimable || (task.metadata?.awaitingApproval === true && !allowAwaitingApproval)) return null;
+
+  const updates = {
+    status: 'running',
+    heartbeat_at: now.toISOString(),
+    attempt: (task.attempt || 0) + 1,
+    last_error: null,
+    updated_at: now.toISOString()
+  };
+  let query = sb.from('agent_tasks')
+    .update(updates)
+    .eq('user_id', userId)
+    .eq('id', taskId)
+    .eq('status', task.status);
+  if (status === 'running') {
+    // Supabase/PostgREST treats SQL NULL as a missing value, not as a literal that
+    // `.eq()` can match. A freshly claimed row can therefore have a null heartbeat
+    // in tests/older schemas; keep the compare-and-set atomic in that case too.
+    query = task.heartbeat_at === null
+      ? query.is('heartbeat_at', null)
+      : query.eq('heartbeat_at', task.heartbeat_at);
+  }
+
+  const { data, error } = await query.select().maybeSingle();
+  if (error || !data) return null;
+  return data;
+}
+
 async function appendResultToTask(userId, taskId, resultEntry) {
   const task = await getTask(userId, taskId);
   if (!task) return null;
@@ -208,6 +251,7 @@ module.exports = {
   getTask,
   listTasks,
   updateTask,
+  claimRun,
   appendResultToTask,
   saveTrace,
   completeTask,

@@ -23,7 +23,9 @@ const {
   shouldIgnoreModelAuthoredActions,
   triageEmailsForRequest,
   normalizeActionResultsForClient,
-  validatePendantTranscriptionUpload
+  validatePendantTranscriptionUpload,
+  isEmailDraftRequest,
+  findRecentEmailTarget
 } = require('../../api/index.js');
 
 // Build a fake model that returns scripted replies in order, and an executor that returns
@@ -82,6 +84,36 @@ test('direct tool prompts route away from the fast streaming path', () => {
       pendingAction: null
     }), true, message);
   }
+});
+
+test('new email drafts use a clear action intent', () => {
+  assert.equal(isEmailDraftRequest('Draft an email to my supplier asking for a lower price'), true);
+  assert.equal(isEmailDraftRequest('Send an email to Sam about tomorrow'), true);
+  assert.equal(isEmailDraftRequest('Check my inbox'), false);
+});
+
+test('email draft context can match a named person from recent email results', () => {
+  const history = [{
+    role: 'assistant',
+    actions: [{
+      action: 'get_emails',
+      result: {
+        emails: [{
+          from: 'Acme Supplies <sales@acmesupplies.example>',
+          senderName: 'Acme Supplies',
+          senderAddress: 'sales@acmesupplies.example',
+          subject: 'Revised quote'
+        }]
+      }
+    }]
+  }];
+
+  const target = findRecentEmailTarget(history, 'Draft an email to my supplier asking for a lower price', { requireMatch: true });
+  assert.equal(target.senderAddress, 'sales@acmesupplies.example');
+  assert.equal(
+    findRecentEmailTarget(history, 'Draft an email to my dentist', { requireMatch: true }),
+    null
+  );
 });
 
 test('plain factual search prompts stay on the fast streaming path', () => {
@@ -169,7 +201,8 @@ test('compound read-only summary surfaces a failed half instead of pretending it
   ]);
   assert.doesNotMatch(spoken, /Upcoming events:/);
   assert.match(spoken, /Planning/);
-  assert.match(spoken, /Search Emails failed/i);
+  assert.match(spoken, /email/i);
+  assert.match(spoken, /Reconnect it in Settings/i);
 });
 
 test('structured email context strips URLs boilerplate and raw addresses', () => {

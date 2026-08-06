@@ -96,6 +96,13 @@ test('OpenAI-compatible providers do not inherit the reasoning-tier request shap
   });
 });
 
+test('the provider seam replaces a stale cross-provider model before sending it', async () => {
+  await withCapturedFetch(async (seen) => {
+    await generateBrain({ provider: 'openai', ...ARGS, model: 'gemini-3-flash-preview' }).catch(() => {});
+    assert.equal(seen.body.model, 'gpt-5.6-luna');
+  });
+});
+
 test('groq and local resolve their own default model when none is supplied', async () => {
   await withCapturedFetch(async (seen) => {
     await generateBrain({ provider: 'groq', ...ARGS, model: undefined }).catch(() => {});
