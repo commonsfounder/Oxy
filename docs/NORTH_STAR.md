@@ -115,6 +115,60 @@ software work comes first.
     - Local processing where possible.
     - Secure authentication.
 
+## Current real-life status — 6 August 2026
+
+Supersedes the 5 August audit (which never left a scratch worktree and understated
+three items that were fixed the same week). Each line is graded on what a person can
+actually do today, not what exists in code. "Verified" means checked directly this
+session — a real build, a live request, a database write, or a production log, not a
+report taken on trust.
+
+1. **Physical Device — Missing, by choice.** Explicitly deferred; no hardware exists.
+2. **Agent Operating System — Partly built.** Durable per-goal execution sessions
+   (`agent_runtime_sessions`) are live in production and verified with a real write.
+   Memory, preferences, and a simplified "About You" profile screen exist. Not proven
+   as dependable everyday help — still early.
+3. **Personal AI Workspace — Missing for a person.** The storage/session tables exist
+   but hold no real content, and the project-diff/runtime-inspection surface that used
+   to sit on top of it was developer tooling, not a consumer feature — removed from
+   navigation this session.
+4. **Model Independence — Missing.** Provider routing is server-configured only; a
+   person cannot connect their own ChatGPT/Claude/Gemini account. The "AI choices"
+   screen was removed from navigation for the same reason.
+5. **AI Account Migration and Continuity — Partly built.** Real ChatGPT/Claude
+   conversation import and Zapier-routine conversion shipped and passed tests
+   (213c51c1); not yet proven against a real person's actual export.
+6. **Tool Ecosystem — Partly built.** The general appointment-booking flow (not
+   dentist-specific) was proven end-to-end live in the signed-in app this week:
+   choices offered, explicit approval required, one booking made, calendar entry
+   added, confirmation shown on Home. Sandbox-only — no real practice contacted yet.
+   Email/calendar context and reminders are real; banking visibility, smart home, and
+   subscriptions are not started.
+7. **Browser Agent — Partly built, the most mature area.** Persistent sessions, login
+   management, and real checkout have completed live purchases in production
+   (verified in prod, not just locally). Some sites remain blocked by bot walls
+   (Magento/BigCommerce, some Nike-class sites) with no viable path found yet.
+8. **Permission System — Partly built.** Explicit-approval-before-action was proven
+   live for the booking flow this week. A durable approval table
+   (`agent_runtime_approvals`) now backs this in production, verified with a real
+   write today. A permission-policy and audit-log screen ("Trust") is now reachable
+   from Settings. Coverage across every action type is not audited.
+9. **Agent Execution Engine — Partly built.** Background watches ("Millie is
+   watching…") now surface as real cards on Home and in the task list, not just
+   backend state. Dependable follow-through and notifications across a full week of
+   real use is not proven.
+10. **Voice Intelligence — Partly built.** Voice input/output runs on OpenAI TTS/STT
+    in production. The product's core promise — say one sentence, get it handled — has
+    only been proven through typed chat so far, not spoken.
+11. **Multi-device Presence — Missing.** iPhone app only.
+12. **Security and Trust — Partly built, meaningfully improved this week.** The live
+    AI connection is healthy (was rejecting all requests as of 5 Aug; fixed and
+    verified). Row-level security was closed on 6 previously-exposed tables,
+    including the credential vault, verified in both directions (writes still work,
+    anon reads are blocked). A silent bug that returned 403 on two real endpoints
+    (Home's recent-entities feed, Payments' stored-card lookup) was found and fixed.
+    Data export and account deletion exist in Account, not re-verified this session.
+
 ## Core outcome
 
 The user can ask Millie, “What matters?” She knows their emails, calendar,

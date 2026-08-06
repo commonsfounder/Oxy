@@ -98,6 +98,93 @@ test('ignores stale and informational items', () => {
   assert.equal(briefing.items.length, 0);
 });
 
+test('ranks personal-life messages above automated work notifications competing for the same room', () => {
+  const briefing = buildLifeBriefing({
+    now,
+    emails: [
+      {
+        messageId: 'm-work-1',
+        subject: 'Failed production deployment',
+        summary: 'Your production deployment failed — review the error and redeploy if needed',
+        cta: 'Review',
+        personal: false
+      },
+      {
+        messageId: 'm-work-2',
+        subject: 'Your action plan is ready',
+        summary: 'Your debt advice action plan is ready — review the recommended next steps',
+        cta: 'Review',
+        personal: false
+      },
+      {
+        messageId: 'm-personal-1',
+        subject: "Emma's parents evening",
+        summary: 'Confirm the 4pm slot before Friday',
+        cta: 'Confirm',
+        personal: true
+      },
+      {
+        messageId: 'm-personal-2',
+        subject: 'Prescription ready',
+        summary: 'Your prescription is ready for collection',
+        cta: 'Collect',
+        personal: true
+      }
+    ]
+  });
+
+  assert.equal(briefing.items.length, 3);
+  const titles = briefing.items.map(item => item.title);
+  assert.deepEqual(titles.slice(0, 2).sort(), ["Emma's parents evening", 'Prescription ready']);
+  assert.ok(
+    titles[2] === 'Failed production deployment' || titles[2] === 'Your action plan is ready',
+    'the third slot goes to a work notification only once personal items are placed'
+  );
+});
+
+test('collapses repeated automated notifications into one item instead of eating multiple slots', () => {
+  const briefing = buildLifeBriefing({
+    now,
+    emails: [
+      {
+        messageId: 'm-deploy-1',
+        subject: "Failed production deployment on team 'commonsfounder's projects'",
+        summary: 'Your production deployment failed — review the error and redeploy if needed',
+        cta: 'Review',
+        personal: false
+      },
+      {
+        messageId: 'm-deploy-2',
+        subject: "Failed production deployment on team 'commonsfounder's projects'",
+        summary: 'Your production deployment failed — review the error and redeploy if needed',
+        cta: 'Review',
+        personal: false
+      },
+      {
+        messageId: 'm-personal-1',
+        subject: 'Prescription ready',
+        summary: 'Your prescription is ready for collection',
+        cta: 'Collect',
+        personal: true
+      }
+    ]
+  });
+
+  assert.equal(briefing.items.length, 2);
+  const deployItem = briefing.items.find(item => item.title.startsWith('Failed production deployment'));
+  assert.ok(deployItem, 'the repeated notification still appears once');
+  assert.match(deployItem.detail, /^2 /);
+  assert.match(deployItem.prompt, /2/);
+});
+
+test('treats a message as personal when no judgment is available, rather than silently burying it', () => {
+  const briefing = buildLifeBriefing({
+    now,
+    emails: [{ messageId: 'm-unjudged', subject: 'Unjudged message', summary: 'Needs a look', cta: 'Reply' }]
+  });
+  assert.equal(briefing.items[0].title, 'Unjudged message');
+});
+
 test('keeps an active background watch visible when there is room', () => {
   const briefing = buildLifeBriefing({
     now,

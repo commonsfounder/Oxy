@@ -225,6 +225,12 @@ function normalizeEmail(email = {}, index = 0) {
   if (cta === 'ignore' || summaryLooksInformational) return null;
   const sender = cleanSender(email.from);
   const detail = summary || `${sender} may be waiting on you.`;
+  // "What matters" means the person's life, not their work inbox. A real, actionable
+  // notification (a failed deploy, a business alert) still deserves a lower rank than a
+  // family or health message so the two don't compete on "actionable" alone. Fail open
+  // when unjudged (personal !== false, not personal === true) — a missing judgment must
+  // not silently bury something that might be exactly what the person needed to see.
+  const isPersonal = email.personal !== false;
   return {
     id: `message:${email.messageId || `${sender}:${subject}:${index}`}`,
     kind: 'message',
@@ -232,7 +238,7 @@ function normalizeEmail(email = {}, index = 0) {
     detail,
     prompt: `Handle this message from ${sender}: ${subject}`,
     urgency: 'soon',
-    priority: cta ? 62 : 55,
+    priority: isPersonal ? (cta ? 62 : 55) : (cta ? 40 : 32),
     sortTime: asDate(email.date)?.getTime() || Number.MAX_SAFE_INTEGER
   };
 }
@@ -254,6 +260,39 @@ function normalizeScheduledTask(task = {}, now = new Date()) {
     priority: 40,
     sortTime: asDate(task.next_run_at)?.getTime() || Number.MAX_SAFE_INTEGER
   };
+}
+
+// The same automated alert (e.g. two identically-worded deploy-failure emails) firing
+// twice should read as one line with a count, not eat two of the three precious slots —
+// "what matters" is supposed to be a short list, not an inbox dump. Keyed on the exact
+// subject text, which is enough for the real case this exists for (a repeated templated
+// notification) without merging genuinely distinct messages that happen to share wording.
+function groupRepeatedMessages(items) {
+  const groups = new Map();
+  const ordered = [];
+  for (const item of items) {
+    if (item.kind !== 'message') {
+      ordered.push({ item, count: 0 });
+      continue;
+    }
+    const key = item.title.toLowerCase();
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    const entry = { item, count: 1 };
+    groups.set(key, entry);
+    ordered.push(entry);
+  }
+  return ordered.map(({ item, count }) => {
+    if (count <= 1) return item;
+    return {
+      ...item,
+      detail: `${count} of these. ${item.detail}`,
+      prompt: `Show me the ${count} messages about ${item.title}`
+    };
+  });
 }
 
 function itemSort(a, b) {
@@ -290,7 +329,7 @@ function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [
   const taskItems = tasks.map(normalizeTask).filter(Boolean);
   const approvalItems = approvals.map(normalizeApproval).filter(Boolean);
   const eventItems = events.map(event => normalizeEvent(event, reference)).filter(Boolean);
-  const emailItems = emails.map(normalizeEmail).filter(Boolean);
+  const emailItems = groupRepeatedMessages(emails.map(normalizeEmail).filter(Boolean));
   const scheduledItems = scheduledTasks.map(task => normalizeScheduledTask(task, reference)).filter(Boolean);
   const items = dedupeItems([
     ...approvalItems,

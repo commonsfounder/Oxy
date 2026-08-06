@@ -6033,7 +6033,8 @@ async function gatherEmailContext(userId) {
         summary: e.summary,
         cta: e.cta,
         provider: e.provider,
-        messageId: e.messageId
+        messageId: e.messageId,
+        personal: e.llmPersonal
       }))
       .slice(0, 10);
     // Deliveries/reservations can legitimately be CATEGORY_UPDATES, so parse incoming
@@ -6078,7 +6079,7 @@ async function summarizeEmails(emails) {
     const listing = emails.map((e, i) =>
       `${i}. From: ${e.from}\nSubject: ${e.subject}\nSnippet: ${(e.snippet || '').slice(0, 300)}`
     ).join('\n\n');
-    const prompt = `For each numbered email below, judge three things:
+    const prompt = `For each numbered email below, judge four things:
 
 1. summary: ONE short, casual line (under 20 words) written the way a sharp assistant would
 text a friend, not the way you'd file an email. If there's a real consequence — a fee, a
@@ -6097,13 +6098,22 @@ discounts) as opposed to something personal, transactional, or genuinely actiona
 a real notification about something the user did, a message worth replying to, an
 account/security alert).
 
+4. personal: true if this is about the user's own life outside work — family, health,
+home, personal appointments, deliveries, money that's personally theirs to pay or chase.
+false if it is about their job, business, or an automated system notification (a CI build,
+a production deployment, a server alert, a SaaS product they run or administer) — these can
+be just as real and actionable as a personal email, they are simply not what "what matters
+in my life today" means. When genuinely unclear, prefer true — the cost of ranking a
+personal-ish email slightly higher is much smaller than burying one that mattered.
+
 ${listing}
 
 Respond with ONLY a JSON array, one object per email, same order as input, shape
-[{"summary":"...","cta":"...","promotional":true|false}]. Examples:
-[{"summary":"Capital One suspended your card after a missed payment — pay £22.80 today to unblock it","cta":"Pay it","promotional":false},
-{"summary":"Amazon order shipped, arrives Thursday, nothing needed","cta":"Track it","promotional":false},
-{"summary":"Product newsletter — nothing needed","cta":"Ignore","promotional":true}]`;
+[{"summary":"...","cta":"...","promotional":true|false,"personal":true|false}]. Examples:
+[{"summary":"Capital One suspended your card after a missed payment — pay £22.80 today to unblock it","cta":"Pay it","promotional":false,"personal":true},
+{"summary":"Amazon order shipped, arrives Thursday, nothing needed","cta":"Track it","promotional":false,"personal":true},
+{"summary":"Product newsletter — nothing needed","cta":"Ignore","promotional":true,"personal":false},
+{"summary":"Production deployment failed — review the error and redeploy","cta":"Review","promotional":false,"personal":false}]`;
     const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
     const match = (res.text || '').match(/\[[\s\S]*\]/);
     if (!match) return emails;
@@ -6114,7 +6124,10 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
       cta: typeof judged[i]?.cta === 'string' ? judged[i].cta.trim().slice(0, 24) : undefined,
       // Fail open (false) on a missing/malformed judgment for this email — better to
       // show one extra email than to silently drop something that might matter.
-      llmPromotional: judged[i]?.promotional === true
+      llmPromotional: judged[i]?.promotional === true,
+      // Fail open (true) here too, but in the opposite direction: an unjudged or
+      // malformed result must not silently demote something that might have mattered.
+      llmPersonal: judged[i]?.personal !== false
     }));
   } catch (e) {
     return emails;
