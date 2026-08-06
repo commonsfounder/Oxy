@@ -5146,6 +5146,20 @@ app.post('/memory', async (req, res) => {
   }
 });
 
+// Concrete /memory paths MUST stay above /memory/:userId. Express dispatches to the first
+// matching route, so a literal segment registered below the param route is dead code —
+// "recent-entities" reads as a userId, fails the ownership check, and returns 403.
+app.get('/memory/recent-entities', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { entities } = await listRecentEntities(supabase, userId, 10);
+    res.json({ entities });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/memory/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
@@ -5364,6 +5378,19 @@ const KNOWN_CONNECTOR_IDS = new Set(CONNECTORS.map(c => c.id));
 const ACTION_LOG_STATUSES = new Set(['executed', 'failed', 'pending']);
 const PENDING_ACTION_PREF = 'pending.action';
 const pendingActionConfirmLocks = new Set();
+
+// Concrete /connectors paths MUST stay above /connectors/:userId — see the note on
+// /memory/recent-entities. "agent-card" reads as a userId and returns 403 otherwise.
+app.get('/connectors/agent-card', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const card = await getAgentCardSummary(supabase, userId);
+    res.json({ card });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.get('/connectors/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
@@ -9518,17 +9545,6 @@ app.post('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   }
 });
 
-app.get('/connectors/agent-card', requireSessionAuth, async (req, res) => {
-  const userId = getAuthenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const card = await getAgentCardSummary(supabase, userId);
-    res.json({ card });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 app.delete('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9601,17 +9617,6 @@ app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
 // Recently touched entities (Phase 3 of the aside-parity roadmap) — a light "what did the
 // agent last work on" surface, not a search UI. Reuses task_entities written by
 // api/services/browser-task.js's runOrderingTurnImpl.
-app.get('/memory/recent-entities', requireSessionAuth, async (req, res) => {
-  const userId = getAuthenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const { entities } = await listRecentEntities(supabase, userId, 10);
-    res.json({ entities });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // Chat settings (Phase 4 of the aside-parity roadmap) — effort is stored/exposed as a
 // preference only (no model-selection wiring). Guard mode is enforced server-side, see
 // api/services/action-runner.js's executionMode gate.
