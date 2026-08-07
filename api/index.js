@@ -4708,6 +4708,9 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
 
     log('info', 'auth.register', { userId });
 
+    require('./services/millie-identity').ensureMillieIdentity(supabase, userId, { attemptPhone: false })
+      .catch(err => log('warn', 'millie.provision.signup_failed', { userId, error: err.message }));
+
     if (email) {
       try {
         const { sendWelcomeEmail } = require('./services/email');
@@ -4720,6 +4723,22 @@ app.post('/auth/register', registerRateLimiter, async (req, res) => {
     res.json({ success: true, token: createSessionToken(userId, 1), userId });
   } catch (err) {
     log('error', 'auth.register.error', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/millie/provision', async (req, res) => {
+  try {
+    const { userId } = req.body || {};
+    if (!requireMatchingUser(req, res, userId)) return;
+    const { ensureMillieIdentity } = require('./services/millie-identity');
+    const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+    res.json({
+      success: true,
+      email: handles.find(h => h.channel_type === 'email')?.handle_value || null
+    });
+  } catch (err) {
+    log('error', 'millie.provision.error', { error: err.message });
     res.status(500).json({ error: err.message });
   }
 });
