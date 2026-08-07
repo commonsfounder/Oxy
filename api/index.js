@@ -374,13 +374,31 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
   }
 });
 
-app.post('/webhooks/millie-email', express.json(), async (req, res) => {
-  // Always 200 quickly — providers retry on non-2xx, and a malformed/unmatched
-  // inbound email is not the sender's problem to see an error for.
+app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), async (req, res) => {
+  // Raw body (not express.json()) is required here: signature verification is computed
+  // over the exact bytes Resend sent, and any parse+re-serialize would change
+  // whitespace/key order and silently break every signature.
+  const { verifyResendWebhookSignature, parseInboundPayload } = require('../connectors/millie-email-resend');
+  const rawBody = req.body.toString('utf8');
+  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  if (!secret) {
+    // Fail closed: an unconfigured secret means we cannot tell a real Resend delivery
+    // from anyone who discovers this URL and posts a fabricated "reply" to it — reject
+    // rather than silently trust unverified inbound traffic.
+    log('error', 'millie_email.inbound.no_webhook_secret', {});
+    return res.status(400).json({ error: 'Webhook not configured.' });
+  }
+  if (!verifyResendWebhookSignature(rawBody, req.headers, secret)) {
+    log('warn', 'millie_email.inbound.signature_invalid', {});
+    return res.status(400).json({ error: 'Invalid signature.' });
+  }
+
+  // Always 200 quickly once verified — providers retry on non-2xx, and a malformed/
+  // unmatched inbound email is not the sender's problem to see an error for.
   res.status(200).json({ received: true });
   try {
-    const { parseInboundPayload } = require('../connectors/millie-email-resend');
-    const normalized = parseInboundPayload(req.body);
+    const parsedPayload = JSON.parse(rawBody);
+    const normalized = parseInboundPayload(parsedPayload);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
     const { data: handles } = await supabase
@@ -429,7 +447,7 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
       subject: normalized.subject,
       body: normalized.body,
       needsDecision: decision === 'ask',
-      rawProviderPayload: req.body
+      rawProviderPayload: parsedPayload
     });
     log('info', 'millie_email.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
   } catch (err) {

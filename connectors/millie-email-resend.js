@@ -1,5 +1,6 @@
 'use strict';
 const axios = require('axios');
+const crypto = require('crypto');
 
 // Millie's own outbound/inbound email, sent through the same Resend account this
 // platform already uses for transactional mail (api/services/email.js) — a
@@ -51,4 +52,48 @@ function parseInboundPayload(payload) {
   };
 }
 
-module.exports = { sendMillieEmail, parseInboundPayload, MILLIE_EMAIL_SIGNATURE_LINE };
+// Resend delivers inbound webhooks via Svix. The signing scheme is fixed by Svix, not by
+// Resend: secret is "whsec_<base64>"; the signed content is "<svix-id>.<svix-timestamp>.<raw
+// body>", HMAC-SHA256'd with the decoded secret and base64-encoded; the svix-signature header
+// carries one or more space-separated "v1,<sig>" entries (key rotation sends more than one).
+// `rawBody` MUST be the exact bytes Resend sent — parsing and re-serializing JSON before this
+// check would change whitespace/key order and silently break every signature.
+const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 5 * 60;
+
+function verifyResendWebhookSignature(rawBody, headers = {}, secret) {
+  if (!secret) return false;
+  const id = headers['svix-id'];
+  const timestamp = headers['svix-timestamp'];
+  const signatureHeader = headers['svix-signature'];
+  if (!id || !timestamp || !signatureHeader) return false;
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) return false;
+  const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds);
+  if (ageSeconds > WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS) return false;
+
+  let secretBytes;
+  try {
+    secretBytes = Buffer.from(String(secret).split('_')[1] || '', 'base64');
+  } catch {
+    return false;
+  }
+  if (!secretBytes.length) return false;
+
+  const signedContent = `${id}.${timestamp}.${rawBody}`;
+  const expected = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
+  const expectedBuf = Buffer.from(expected, 'base64');
+
+  return String(signatureHeader).split(' ').some(entry => {
+    const provided = entry.startsWith('v1,') ? entry.slice(3) : entry;
+    let providedBuf;
+    try {
+      providedBuf = Buffer.from(provided, 'base64');
+    } catch {
+      return false;
+    }
+    return providedBuf.length === expectedBuf.length && crypto.timingSafeEqual(providedBuf, expectedBuf);
+  });
+}
+
+module.exports = { sendMillieEmail, parseInboundPayload, verifyResendWebhookSignature, MILLIE_EMAIL_SIGNATURE_LINE };
