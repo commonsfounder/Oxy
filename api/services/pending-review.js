@@ -142,7 +142,8 @@ function reviewDetailForAction(action, cardInfo = null) {
       return [input.issue, input.body].filter(Boolean).join(' · ');
     case 'send_message':
     case 'send_telegram':
-      return [input.contact, input.message].filter(Boolean).join(' · ');
+    case 'send_millie_email':
+      return [input.to || input.contact, input.body || input.message].filter(Boolean).join(' · ');
     case 'book_uber':
       return input.destination ? `Destination: ${input.destination}` : '';
     case 'create_calendar_event':
@@ -164,18 +165,20 @@ function buildPendingReviewResult(action, cardInfo = null) {
   const contract = getActionContract(action?.type) || {};
   const prompt = action?.type === 'send_message'
     ? 'Check the message, then tap Send.'
-    : ['send_email', 'send_outlook_email'].includes(action?.type)
-      ? 'Check the email, then tap Send.'
-      : ['book_uber', 'book_lyft'].includes(action?.type)
-        ? 'Check the ride, then tap Book.'
-        : action?.type === 'book_appointment'
-          ? 'Check the time, then tap Book.'
-          : action?.type === 'make_call'
-            ? 'Check the number, then tap Call.'
-            : action?.type === 'create_calendar_event'
-              ? 'Check the details, then tap Add.'
-              : action?.type === 'run_browser_task'
-                ? 'Check the order, then tap Place order.'
+    : action?.type === 'send_millie_email'
+      ? 'Check the message, then confirm to send it.'
+      : ['send_email', 'send_outlook_email'].includes(action?.type)
+        ? 'Check the email, then tap Send.'
+        : ['book_uber', 'book_lyft'].includes(action?.type)
+          ? 'Check the ride, then tap Book.'
+          : action?.type === 'book_appointment'
+            ? 'Check the time, then tap Book.'
+            : action?.type === 'make_call'
+              ? 'Check the number, then tap Call.'
+              : action?.type === 'create_calendar_event'
+                ? 'Check the details, then tap Add.'
+                : action?.type === 'run_browser_task'
+                  ? 'Check the order, then tap Place order.'
                 : `${reviewTitleForAction(action)}. Check the details, then tap Confirm or Cancel.`;
   return applyActionContractResultMetadata(action, {
     success: true,

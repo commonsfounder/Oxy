@@ -111,6 +111,22 @@ const ACTION_CONTRACTS = {
     confirmation: 'review_required',
     executionMode: 'review'
   },
+  send_millie_email: {
+    risk: 'medium',
+    required: ['to', 'body'],
+    optional: ['subject', 'request_task_id'],
+    aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
+    inputExample: {
+      to: 'business or contact email address',
+      subject: 'optional subject inferred from the body if omitted',
+      body: 'the message to send, on the user\'s behalf',
+      request_task_id: 'optional id of the ongoing request this belongs to'
+    },
+    successSummary: 'Message sent from Millie',
+    failureSummary: 'Message failed to send',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
   get_emails: {
     risk: 'low',
     required: [],

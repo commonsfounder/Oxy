@@ -2517,7 +2517,7 @@ function resolveNativeMessageContact(contact, nativeHints) {
   }
   const normalizedContact = normalizeContactLookup(contact);
   const contacts = Array.isArray(nativeHints?.contacts) ? nativeHints.contacts : [];
-  const match = contacts.find(candidate => {
+  const matches = contacts.filter(candidate => {
     const names = [
       candidate.displayName,
       candidate.phone,
@@ -2529,6 +2529,22 @@ function resolveNativeMessageContact(contact, nativeHints) {
       normalizedContact.includes(name)
     ));
   });
+
+  if (matches.length > 1) {
+    // Two matches that both resolve to the same real number/email (e.g. the same person
+    // appearing twice in the hints array) aren't actually ambiguous — only distinct targets
+    // are. Never silently pick one when they genuinely differ; ask instead.
+    const distinctTargets = new Set(matches.map(m => normalizeContactLookup(m.phone || m.email || '')).filter(Boolean));
+    if (distinctTargets.size > 1) {
+      return {
+        ambiguous: true,
+        // Minimal identifying info only — enough to ask "which one", not a data dump.
+        candidates: matches.map(m => m.displayName || m.phone || m.email).filter(Boolean)
+      };
+    }
+  }
+
+  const match = matches[0];
   const value = match?.phone || match?.email || '';
   return {
     label: match?.displayName || contact,
@@ -2580,7 +2596,25 @@ async function executeAction(userId, action, params, context = {}) {
       const contact = String(params?.contact || '').trim();
       const message = String(params?.message || '').trim();
       if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
+
+      // Easy WhatsApp handoff — prefilled, just tap. Doesn't target a specific number (WhatsApp's
+      // own compose UI handles recipient selection), so no contact resolution/ambiguity check applies.
+      if (params?.platform === 'whatsapp' || action === 'whatsapp') {
+        return {
+          success: true,
+          text: `Opening WhatsApp for ${contact}.`,
+          deepLink: `https://wa.me/?text=${encodeURIComponent(message)}`,
+          cardText: message.slice(0, 60)
+        };
+      }
+
       const resolvedContact = resolveNativeMessageContact(contact, context.nativeHints);
+      if (resolvedContact.ambiguous) {
+        return {
+          success: false,
+          error: `I found more than one ${contact} in your contacts — ${resolvedContact.candidates.join(' or ')}? Tell me which one.`
+        };
+      }
       if (!resolvedContact.value) {
         return {
           success: false,
@@ -2593,6 +2627,64 @@ async function executeAction(userId, action, params, context = {}) {
         cardText: `To ${resolvedContact.label} · ${message}`,
         actionSummary: 'Message ready',
         deepLink: `sms:${encodeURIComponent(resolvedContact.value)}?&body=${encodeURIComponent(message)}`
+      };
+    }
+    case 'send_millie_email': {
+      const to = String(params?.to || '').trim();
+      const body = String(params?.body || '').trim();
+      if (!to || !body) return { success: false, error: 'send_millie_email requires a recipient and a message' };
+      if (!/[^\s<]+@[^\s>]+\.[^\s>]+/.test(to)) {
+        return { success: false, error: `I need ${to}'s email address — that doesn't look like one.` };
+      }
+
+      const { ensureMillieIdentity, getActiveHandle } = require('./services/millie-identity');
+      const { findOrCreateParticipant } = require('./services/participants');
+      const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
+      const { sendMillieEmail } = require('../connectors/millie-email-resend');
+
+      // TEMPORARY: replaced with the real DB-backed daily cap in the abuse-guard task —
+      // this stub always allows, so it's a no-op gate until then, not a missing check.
+      const checkMillieSendCap = async () => ({ allowed: true });
+      const cap = await checkMillieSendCap(userId, 'email');
+      if (!cap.allowed) return { success: false, error: cap.message };
+
+      const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+      const emailHandle = handles.find(h => h.channel_type === 'email') || await getActiveHandle(supabase, userId, 'email');
+      if (!emailHandle) return { success: false, error: 'Millie does not have an email address set up yet.' };
+
+      const { participant, address } = await findOrCreateParticipant(supabase, userId, {
+        displayName: to, channelType: 'email', addressValue: to
+      });
+      const requestTaskId = params?.request_task_id || null;
+      const { conversation } = await getOrCreateConversation(supabase, {
+        userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+      });
+
+      const subject = String(params?.subject || '').trim() || 'A message from Millie';
+      let sendResult;
+      try {
+        sendResult = await sendMillieEmail({ from: emailHandle.handle_value, to, subject, body });
+      } catch (err) {
+        return { success: false, error: `Couldn't send that: ${err.message}` };
+      }
+
+      await appendEvent(supabase, {
+        conversationId: conversation.id,
+        channelType: 'email',
+        direction: 'outbound',
+        participantAddressId: address.id,
+        millieIdentityHandleId: emailHandle.id,
+        providerEventId: sendResult.providerMessageId,
+        subject,
+        body
+      });
+
+      return {
+        success: true,
+        text: `Sent to ${to} from Millie's email.`,
+        cardText: `To ${to} · ${body}`,
+        actionSummary: 'Message sent',
+        conversationId: conversation.id
       };
     }
     case 'make_call': {
@@ -3385,32 +3477,6 @@ async function executeAction(userId, action, params, context = {}) {
         nativeExecution: 'reminder',
         cardText: title,
         deepLink: `x-apple-reminderkit://`
-      };
-    }
-
-    // Easy WhatsApp / iMessage handoff — prefilled, just tap (consumer easiest)
-    case 'send_message': {
-      if (params?.platform === 'whatsapp' || action === 'whatsapp') {
-        const contact = params?.contact || '';
-        const msg = params?.message || '';
-        const link = `https://wa.me/?text=${encodeURIComponent(msg)}`;
-        return {
-          success: true,
-          text: `Opening WhatsApp for ${contact}.`,
-          deepLink: link,
-          cardText: msg.slice(0, 60)
-        };
-      }
-      // fall to normal
-      const contact = String(params?.contact || '').trim();
-      const message = String(params?.message || '').trim();
-      if (!contact || !message) return { success: false, error: 'send_message requires contact and message' };
-      const resolvedContact = resolveNativeMessageContact(contact, context.nativeHints);
-      return {
-        success: true,
-        text: `Message ready for ${resolvedContact.label}.`,
-        cardText: `To ${resolvedContact.label} · ${message}`,
-        deepLink: `sms:${encodeURIComponent(resolvedContact.value)}?&body=${encodeURIComponent(message)}`
       };
     }
 
