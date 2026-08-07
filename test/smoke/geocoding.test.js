@@ -10,9 +10,112 @@ Module._load = function patchedLoad(request, parent, isMain) {
 };
 
 const { getGoogleDirectionsKey, getGooglePlacesKey } = require('../../api/services/maps-config');
-const { resolvePlaceDestination } = require('../../api/geocoding');
+const { resolvePlaceDestination, cleanPlaceSearchQuery, meaningfulPlaceTokens, placeMatchesQuery } = require('../../api/geocoding');
 
 Module._load = originalLoad;
+
+// ── Question-opener filler no longer poisons Places result matching ───────────────────────
+// Regression, 2026-08-07 live verification: "is there a gym near Old Street" left "there" as
+// a required-match token (no real gym's name/address contains the word "there"), so
+// placeMatchesQuery rejected every real Places result even when Places found the right gym.
+
+test('meaningfulPlaceTokens drops question-opener filler ("there", "here", "any", "good", "decent", "nice", "are", "around")', () => {
+  assert.deepEqual(meaningfulPlaceTokens('is there a gym near Old Street'), ['old', 'street']);
+  assert.deepEqual(meaningfulPlaceTokens('are there any decent gyms around here'), ['gyms']);
+  // "coffee"/"shop" are themselves already-existing category stopwords (this path is meant
+  // to be matched by TYPE via Nearby Search, not by text) — empty means "matches anything",
+  // which is correct here, not a regression.
+  assert.deepEqual(meaningfulPlaceTokens("do you know if there's a coffee shop near me"), []);
+});
+
+test('placeMatchesQuery matches a real gym for "is there a gym near Old Street" (used to reject every result)', () => {
+  const place = {
+    displayName: { text: 'PureGym Old Street' },
+    formattedAddress: '35 Old Street, London EC1V 9HX',
+    types: ['gym']
+  };
+  assert.equal(placeMatchesQuery(place, 'is there a gym near Old Street'), true);
+});
+
+test('cleanPlaceSearchQuery strips "is there a" / "are there any" / "do you know if there\'s" openers', () => {
+  assert.equal(cleanPlaceSearchQuery('is there a gym near Old Street'), 'gym near Old Street');
+  assert.equal(cleanPlaceSearchQuery('are there any decent gyms around here'), 'decent gyms around here');
+  // "near me" is separately stripped further down the same pipeline (unrelated to this
+  // fix — it's how the category/Nearby-Search path already worked before today).
+  assert.equal(cleanPlaceSearchQuery("do you know if there's a coffee shop near me"), 'coffee shop');
+});
+
+test('cleanPlaceSearchQuery does not truncate "any"/"anywhere" to a bare "a" (regex-alternation ordering bug caught while adding the opener strip)', () => {
+  assert.equal(cleanPlaceSearchQuery('are there any decent gyms'), 'decent gyms');
+  assert.equal(cleanPlaceSearchQuery('is there anywhere good to eat'), 'good to eat');
+});
+
+test('messy variant: "is there anywhere good to eat near Old Street?" resolves via Places text search', async () => {
+  const oldPlaces = process.env.GOOGLE_PLACES_API_KEY;
+  const oldPost = mockAxios.post;
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    mockAxios.post = async (url, body) => {
+      assert.equal(url, 'https://places.googleapis.com/v1/places:searchText');
+      // "eat" is not stripped by this fix's scope (it's a real word, not filler like
+      // "there"/"good") and stays a required token — so the synthetic result below
+      // deliberately includes it, matching a real restaurant listing/description would.
+      assert.match(body.textQuery, /old street/i);
+      return {
+        data: {
+          places: [{
+            displayName: { text: 'Old Street Eatery' },
+            formattedAddress: '12 Old Street, London EC1V 9BE',
+            location: { latitude: 51.5265, longitude: -0.0876 },
+            businessStatus: 'OPERATIONAL',
+            types: ['restaurant']
+          }]
+        }
+      };
+    };
+    const result = await resolvePlaceDestination('is there anywhere good to eat near Old Street?', {
+      location: { latitude: 51.5265, longitude: -0.0876 }
+    });
+    assert.equal(result.name, 'Old Street Eatery');
+  } finally {
+    mockAxios.post = oldPost;
+    if (oldPlaces === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = oldPlaces;
+  }
+});
+
+test('messy variant: "do you know if there\'s a coffee shop near me?" uses the robust near-me category path', async () => {
+  const oldPlaces = process.env.GOOGLE_PLACES_API_KEY;
+  const oldPost = mockAxios.post;
+  try {
+    process.env.GOOGLE_PLACES_API_KEY = 'places-key';
+    mockAxios.post = async (url, body) => {
+      // "near me" phrasing survives the opener strip, so this hits Nearby Search by
+      // category (type: cafe) rather than a text query — immune to token-matching at all.
+      assert.equal(url, 'https://places.googleapis.com/v1/places:searchNearby');
+      assert.deepEqual(body.includedTypes, ['cafe']);
+      return {
+        data: {
+          places: [{
+            displayName: { text: 'Grind Coffee' },
+            formattedAddress: '1 Old Street, London',
+            location: { latitude: 51.5266, longitude: -0.0877 },
+            businessStatus: 'OPERATIONAL',
+            types: ['cafe']
+          }]
+        }
+      };
+    };
+    const result = await resolvePlaceDestination("do you know if there's a coffee shop near me?", {
+      location: { latitude: 51.5265, longitude: -0.0876 }
+    });
+    assert.equal(result.name, 'Grind Coffee');
+  } finally {
+    mockAxios.post = oldPost;
+    if (oldPlaces === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = oldPlaces;
+  }
+});
 
 test('Places key can come from dedicated Places env var', () => {
   const oldMaps = process.env.GOOGLE_MAPS_API_KEY;

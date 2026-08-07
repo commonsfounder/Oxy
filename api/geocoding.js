@@ -21,6 +21,12 @@ function isExplicitNearbyQuery(query) {
 function cleanPlaceSearchQuery(query) {
   let cleaned = String(query || '')
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, ' ')
+    // Ordinary question-opener phrasing ("is there a gym...", "are there any decent
+    // gyms...", "do you know if there's a coffee shop..."). Left in, these leak into
+    // meaningfulPlaceTokens as required-match tokens that never appear in a real
+    // place's name/address, causing placeMatchesQuery to reject every real result.
+    .replace(/^(?:is|are)\s+there\s+(?:a|an|any|anywhere)?\b\s*/i, ' ')
+    .replace(/^do\s+you\s+know\s+if\s+there'?s?\s+(?:a|an|any)?\b\s*/i, ' ')
     .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, ' ')
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, ' ')
     .replace(/^where['’]?s\s+(the\s+)?/i, ' ')
@@ -104,7 +110,11 @@ function meaningfulPlaceTokens(query) {
     .filter(token => ![
       'the', 'a', 'an', 'place', 'shop', 'store', 'restaurant', 'cafe', 'coffee',
       'gym', 'station', 'near', 'nearest', 'closest', 'to', 'me', 'from', 'is',
-      'that', 'this', 'where', 's'
+      'that', 'this', 'where', 's',
+      // Natural-language filler ("is THERE a gym...", "any decent gyms...") that never
+      // appears in a real place's name/address — left in, these force placeMatchesQuery
+      // to reject every real result even when Places found the right place.
+      'there', 'here', 'any', 'good', 'decent', 'nice', 'are', 'around'
     ].includes(token));
 }
 
@@ -370,4 +380,12 @@ async function resolvePlaceDestination(destination, options = {}) {
   return geocodeLocation(query);
 }
 
-module.exports = { geocodeLocation, resolvePlaceDestination, looksLikeNearbyPlaceQuery, cleanPlaceSearchQuery, distanceMeters };
+module.exports = {
+  geocodeLocation,
+  resolvePlaceDestination,
+  looksLikeNearbyPlaceQuery,
+  cleanPlaceSearchQuery,
+  distanceMeters,
+  meaningfulPlaceTokens,
+  placeMatchesQuery
+};

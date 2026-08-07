@@ -176,6 +176,11 @@ function looksLikeContextualTravelFollowup(message) {
 function cleanDestinationPhrase(message) {
   const text = normalizeText(message)
     .replace(/^(okay|ok|right|cool|great|can you|could you|please|pls)\s+/i, '')
+    // Ordinary question-opener phrasing ("is there a gym...", "are there any decent
+    // gyms...", "do you know if there's a coffee shop...") — see the matching strip in
+    // geocoding.js's cleanPlaceSearchQuery for why this matters downstream.
+    .replace(/^(?:is|are)\s+there\s+(?:a|an|any|anywhere)?\b\s*/i, '')
+    .replace(/^do\s+you\s+know\s+if\s+there'?s?\s+(?:a|an|any)?\b\s*/i, '')
     .replace(/^(tell me|show me|let me know|can you find)\s+(where\s+)?/i, '')
     .replace(/^(can you\s+)?(tell|show)\s+me\s+(where\s+)?/i, '')
     .replace(/^(what|which)\s+(bus|buses|public transport|transit)\s+(can|should|do|could)\s+i\s+(take|get)\s+(to)?\s*/i, '')

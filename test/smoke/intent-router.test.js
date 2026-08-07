@@ -1,7 +1,30 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { inferDeterministicAction, buildWatchRequest, buildWatchCancellation } = require('../../api/intent-router');
+const { inferDeterministicAction, buildWatchRequest, buildWatchCancellation, cleanDestinationPhrase } = require('../../api/intent-router');
+
+// ── Question-opener filler stripped from place/directions queries ─────────────────────────
+// Regression, 2026-08-07 live verification: "is there a gym near Old Street" reached
+// find_place with the opener still attached, feeding a non-address sentence to strict
+// geocoding once Places match failed. See the matching geocoding.test.js suite for the
+// downstream token-matching half of this fix.
+test('cleanDestinationPhrase strips "is there a" / "are there any" / "do you know if there\'s" openers', () => {
+  assert.equal(cleanDestinationPhrase('is there a gym near Old Street'), 'gym near Old Street');
+  assert.equal(cleanDestinationPhrase('are there any decent gyms around here'), 'decent gyms around here');
+  assert.equal(cleanDestinationPhrase("do you know if there's a coffee shop near me"), 'coffee shop near me');
+  assert.equal(cleanDestinationPhrase('is there anywhere good to eat near Old Street?'), 'good to eat near Old Street');
+});
+
+test('cleanDestinationPhrase does not truncate "any"/"anywhere" to a bare "a"', () => {
+  assert.equal(cleanDestinationPhrase('are there any decent gyms'), 'decent gyms');
+  assert.equal(cleanDestinationPhrase('is there anywhere good to eat'), 'good to eat');
+});
+
+test('find a gym near Old Street: still resolves via the deterministic local-place route with these openers stripped upstream', () => {
+  const routed = inferDeterministicAction('is there a gym near Old Street');
+  assert.equal(routed.reason, 'find_local_place');
+  assert.equal(routed.actions[0].input.query, 'gym near Old Street');
+});
 
 test('clear flight price watches become bounded daily background checks', () => {
   const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
