@@ -127,6 +127,21 @@ const ACTION_CONTRACTS = {
     confirmation: 'review_required',
     executionMode: 'review'
   },
+  send_millie_sms: {
+    risk: 'medium',
+    required: ['to', 'body'],
+    optional: ['request_task_id'],
+    aliases: { to: ['phone', 'recipient'], body: ['message', 'content', 'text'] },
+    inputExample: {
+      to: 'business or contact phone number, e.g. +447700900123',
+      body: 'the message to send, on the user\'s behalf',
+      request_task_id: 'optional id of the ongoing request this belongs to'
+    },
+    successSummary: 'Message sent from Millie',
+    failureSummary: 'Message failed to send',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
   get_emails: {
     risk: 'low',
     required: [],

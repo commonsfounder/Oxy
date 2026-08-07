@@ -11,6 +11,7 @@ const ACTION_NAMES = Object.freeze({
   send_message: 'Message',
   send_telegram: 'Message',
   send_millie_email: 'Message',
+  send_millie_sms: 'Message',
   make_call: 'Call',
   create_reminder: 'Reminder',
   update_reminder: 'Reminder',

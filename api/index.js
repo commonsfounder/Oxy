@@ -437,6 +437,61 @@ app.post('/webhooks/millie-email', express.json(), async (req, res) => {
   }
 });
 
+app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async (req, res) => {
+  res.status(200).send('<Response></Response>'); // Twilio expects TwiML or empty 200
+  try {
+    const { parseInboundSmsPayload } = require('../connectors/millie-sms-twilio');
+    const normalized = parseInboundSmsPayload(req.body);
+    if (!normalized?.toAddress || !normalized.fromAddress) return;
+
+    const { data: handles } = await supabase
+      .from('millie_identity_handles')
+      .select('*')
+      .eq('channel_type', 'phone_sms')
+      .eq('handle_value', normalized.toAddress)
+      .eq('status', 'active');
+    const handle = handles?.[0];
+    if (!handle) {
+      log('warn', 'millie_sms.inbound.no_matching_handle', { to: normalized.toAddress });
+      return;
+    }
+    const { data: identities } = await supabase.from('millie_identities').select('*').eq('id', handle.millie_identity_id);
+    const identity = identities?.[0];
+    if (!identity) return;
+
+    const { findOrCreateParticipant } = require('./services/participants');
+    const { getOrCreateConversation, appendEvent, findOpenConversationsForParticipant } = require('./services/external-conversations');
+    const { classifyReply } = require('./services/reply-policy');
+
+    const { participant, address } = await findOrCreateParticipant(supabase, identity.user_id, {
+      displayName: normalized.fromAddress, channelType: 'phone_sms', addressValue: normalized.fromAddress
+    });
+
+    const openConversations = await findOpenConversationsForParticipant(supabase, participant.id);
+    const conversation = openConversations.length
+      ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
+      : (await getOrCreateConversation(supabase, {
+        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+      })).conversation;
+
+    const decision = classifyReply(normalized.body);
+    await appendEvent(supabase, {
+      conversationId: conversation.id,
+      channelType: 'phone_sms',
+      direction: 'inbound',
+      participantAddressId: address.id,
+      millieIdentityHandleId: handle.id,
+      providerEventId: normalized.providerMessageId,
+      body: normalized.body,
+      needsDecision: decision === 'ask',
+      rawProviderPayload: req.body
+    });
+    log('info', 'millie_sms.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
+  } catch (err) {
+    log('error', 'millie_sms.inbound.error', { error: err.message });
+  }
+});
+
 // Only the continuity endpoints take a whole vendor export. Raising the limit globally to
 // suit them would hand every other route — /chat included — a 40x larger body to absorb.
 // The global parser must SKIP those paths rather than run first: body-parser marks the
@@ -2750,6 +2805,62 @@ async function executeAction(userId, action, params, context = {}) {
         conversationId: conversation.id
       };
     }
+    case 'send_millie_sms': {
+      const to = String(params?.to || '').trim();
+      const body = String(params?.body || '').trim();
+      if (!to || !body) return { success: false, error: 'send_millie_sms requires a recipient phone number and a message' };
+      if (!looksLikeMessageAddress(to)) {
+        return { success: false, error: `I need a phone number for ${to} — that doesn't look like one.` };
+      }
+
+      const { ensureMillieIdentity, getActiveHandle } = require('./services/millie-identity');
+      const { findOrCreateParticipant } = require('./services/participants');
+      const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
+      const { sendMillieSms } = require('../connectors/millie-sms-twilio');
+
+      // TEMPORARY: replaced with the real DB-backed daily cap in the abuse-guard task —
+      // this stub always allows, so it's a no-op gate until then, not a missing check.
+      const checkMillieSendCap = async () => ({ allowed: true });
+      const cap = await checkMillieSendCap(userId, 'phone_sms');
+      if (!cap.allowed) return { success: false, error: cap.message };
+
+      const { identity } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+      const phoneHandle = await getActiveHandle(supabase, userId, 'phone_sms');
+      if (!phoneHandle) return { success: false, error: 'Millie does not have a phone number set up yet.' };
+
+      const { participant, address } = await findOrCreateParticipant(supabase, userId, {
+        displayName: to, channelType: 'phone_sms', addressValue: to
+      });
+      const requestTaskId = params?.request_task_id || null;
+      const { conversation } = await getOrCreateConversation(supabase, {
+        userId, millieIdentityId: identity.id, participantId: participant.id, requestTaskId
+      });
+
+      let sendResult;
+      try {
+        sendResult = await sendMillieSms({ from: phoneHandle.handle_value, to, body });
+      } catch (err) {
+        return { success: false, error: `Couldn't send that: ${err.message}` };
+      }
+
+      await appendEvent(supabase, {
+        conversationId: conversation.id,
+        channelType: 'phone_sms',
+        direction: 'outbound',
+        participantAddressId: address.id,
+        millieIdentityHandleId: phoneHandle.id,
+        providerEventId: sendResult.providerMessageId,
+        body
+      });
+
+      return {
+        success: true,
+        text: `Sent to ${to} from Millie's number.`,
+        cardText: `To ${to} · ${body}`,
+        actionSummary: 'Message sent',
+        conversationId: conversation.id
+      };
+    }
     case 'make_call': {
       const contact = String(params?.contact || '').trim();
       if (!contact) return { success: false, error: 'make_call requires a contact' };
@@ -4732,10 +4843,15 @@ app.post('/millie/provision', async (req, res) => {
     const { userId } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
     const { ensureMillieIdentity } = require('./services/millie-identity');
-    const { identity, handles } = await ensureMillieIdentity(supabase, userId, { attemptPhone: false });
+    const { provisionPhoneNumber } = require('../connectors/millie-sms-twilio');
+    const { identity, handles } = await ensureMillieIdentity(supabase, userId, {
+      attemptPhone: true,
+      provisionPhoneNumber
+    });
     res.json({
       success: true,
-      email: handles.find(h => h.channel_type === 'email')?.handle_value || null
+      email: handles.find(h => h.channel_type === 'email')?.handle_value || null,
+      phone: handles.find(h => h.channel_type === 'phone_sms')?.handle_value || null
     });
   } catch (err) {
     log('error', 'millie.provision.error', { error: err.message });
