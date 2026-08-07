@@ -71,11 +71,11 @@ test('confirmation is never copied into a native tool description — nothing re
 });
 
 // ── Guidance for the 7 named categories survives, natively, verbatim ──────────────────────
-// (18 contracts carry a `guidance` field in total, not 19 — corrected from an earlier estimate
-// that miscounted a `guidance:` match inside actionToFunctionDeclaration's own source.)
-test('exactly 18 contracts define guidance, and every one appears verbatim in its native description', () => {
+// (22 contracts carry a `guidance` field in total — 18, plus 4 added 2026-08-07 for default
+// identity selection: send_message, send_millie_email, send_millie_sms, send_outlook_email.)
+test('exactly 22 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 18);
+  assert.equal(withGuidance.length, 22);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -124,6 +124,15 @@ test('email drafting: send_email guidance survives natively, plus the body/tone 
   assert.match(decls.send_email.description, /Match both the user tone and the thread formality/);
   assert.match(decls.send_email.parameters.properties.body.description, /never a terse literal fragment/);
   assert.match(decls.send_email.parameters.properties.tone.description, /casual, warm, professional/);
+});
+
+test('default identity selection: Millie-identity vs personal-mailbox guidance survives natively on all four contracts', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.send_millie_email.description, /business, support line, restaurant/);
+  assert.match(decls.send_millie_sms.description, /business, support line, restaurant/);
+  assert.match(decls.send_email.description, /personal correspondence where the sender should clearly be the user/);
+  assert.match(decls.send_outlook_email.description, /personal correspondence where the sender should clearly be the user/);
+  assert.match(decls.send_message.description, /always their own identity, never Millie's/);
 });
 
 test('project actions: all 7 project_* guidance strings survive natively, including the destructive-action warnings', () => {

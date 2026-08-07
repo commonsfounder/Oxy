@@ -1,9 +1,22 @@
+// Default identity selection for outbound messaging — not a UI mode, purely which tool the
+// model reaches for. Millie has her own persistent email/phone identity (send_millie_email/
+// send_millie_sms); the user also has their own connected mailbox/device (send_email/
+// send_outlook_email/send_message). Nothing distinguished these before, so the model
+// defaulted to whichever tool it already knew best (send_email), even for messages that were
+// clearly Millie acting as the user's representative to a third party. Live-verified
+// 2026-08-07: explicit steering, not just tool availability, is what actually changes which
+// one gets picked.
+const MILLIE_IDENTITY_GUIDANCE = 'Use this by default whenever Millie is contacting a business, support line, restaurant or booking, delivery or vendor service, or any external organization or stranger on the user\'s behalf — this is the normal case for requests like "email/text the restaurant and ask if they can move us to 8." Do not use this for the user\'s own personal correspondence — friends, family, work or school contacts, job applications, or anything where the sender should clearly be the user, not Millie — use the user\'s own connected mailbox/device for that instead. Millie signs as herself; never impersonate the user.';
+const PERSONAL_IDENTITY_GUIDANCE = 'Use this only when the user is personally corresponding as themselves — friends, family, work or school contacts, job applications, or any personal correspondence where the sender should clearly be the user. If the user is contacting a business, support line, restaurant, vendor, delivery service, or any external organization or stranger with Millie acting on their behalf, use send_millie_email instead, unless the user explicitly says to send it from their own account.';
+const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone via their device\'s Messages app — always their own identity, never Millie\'s. Fine for personal contacts (friends, family, colleagues). If the user is contacting a business, support line, restaurant, vendor, or any external organization or stranger with Millie acting on their behalf, use send_millie_sms instead so it comes from Millie\'s own number.';
+
 const ACTION_CONTRACTS = {
   send_message: {
     risk: 'medium',
     required: ['contact', 'message'],
     aliases: { message: ['body', 'text', 'content'] },
     inputExample: { contact: 'name', message: 'text' },
+    guidance: PERSONAL_SMS_IDENTITY_GUIDANCE,
     successSummary: 'Message ready',
     failureSummary: 'Message failed',
     confirmation: 'none',
@@ -105,7 +118,7 @@ const ACTION_CONTRACTS = {
       body: 'a polished, complete email draft — never a terse literal fragment of what the user said',
       tone: 'e.g. casual, warm, professional, apologetic, direct'
     },
-    guidance: 'If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made.',
+    guidance: `If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made. ${PERSONAL_IDENTITY_GUIDANCE}`,
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
@@ -122,6 +135,7 @@ const ACTION_CONTRACTS = {
       body: 'the message to send, on the user\'s behalf',
       request_task_id: 'optional id of the ongoing request this belongs to'
     },
+    guidance: MILLIE_IDENTITY_GUIDANCE,
     successSummary: 'Message sent from Millie',
     failureSummary: 'Message failed to send',
     confirmation: 'review_required',
@@ -137,6 +151,7 @@ const ACTION_CONTRACTS = {
       body: 'the message to send, on the user\'s behalf',
       request_task_id: 'optional id of the ongoing request this belongs to'
     },
+    guidance: MILLIE_IDENTITY_GUIDANCE,
     successSummary: 'Message sent from Millie',
     failureSummary: 'Message failed to send',
     confirmation: 'review_required',
@@ -166,6 +181,7 @@ const ACTION_CONTRACTS = {
     optional: ['subject'],
     aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
     inputExample: { to: 'email', subject: 'optional subject inferred from the body if omitted', body: 'polished complete email draft' },
+    guidance: PERSONAL_IDENTITY_GUIDANCE,
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',

@@ -189,3 +189,37 @@ test('connector fallback summaries are not overwritten by generic contract text'
 
   assert.equal(result.actionSummary, 'Maps search ready');
 });
+
+// ── Default identity selection: Millie's own address for external outreach, the user's own
+// connected mailbox for personal correspondence. Not a UI mode — pure model guidance, so the
+// only thing testable here is that the steering text actually exists in the right places
+// (model tool-selection behavior itself needs live verification, not a unit test).
+test('send_millie_email/send_millie_sms guidance names the external-outreach cases and defers personal correspondence to the user\'s own mailbox', () => {
+  for (const type of ['send_millie_email', 'send_millie_sms']) {
+    const contract = getActionContract(type);
+    assert.ok(contract.guidance, `${type} must have guidance steering the model toward it for external outreach`);
+    const g = contract.guidance.toLowerCase();
+    for (const term of ['business', 'support', 'restaurant', 'vendor', 'stranger']) {
+      assert.match(g, new RegExp(term), `${type} guidance should mention "${term}"`);
+    }
+    // Must also say when NOT to use it, not just when to.
+    assert.match(g, /personal|friend|family|manager|colleague/i, `${type} guidance must defer personal correspondence to the user's own mailbox`);
+  }
+});
+
+test('send_email/send_outlook_email guidance scopes them to the user\'s own personal correspondence', () => {
+  for (const type of ['send_email', 'send_outlook_email']) {
+    const contract = getActionContract(type);
+    assert.ok(contract.guidance, `${type} must have guidance`);
+    const g = contract.guidance.toLowerCase();
+    assert.match(g, /personal|friend|family/i, `${type} guidance should scope it to the user's own correspondence`);
+    // Must point the model at the Millie-identity alternative for business/external outreach.
+    assert.match(g, /send_millie_email/, `${type} guidance should redirect business/external outreach to send_millie_email`);
+  }
+});
+
+test('actionPromptBlock (the plain-text tool list the model also sees) carries the identity-selection guidance', () => {
+  const block = actionPromptBlock();
+  assert.match(block, /send_millie_email/);
+  assert.match(block, /business/i);
+});
