@@ -1383,7 +1383,7 @@ function extractShoppingContextHints(history = []) {
 // directly. The public-figures-grounding and search-staleness lines that used to live in this
 // function's own RESPONSE RULES tail now live once, universally, in TRUTHFULNESS_SAFETY_SECTION
 // (api/prompts.js) — every surface gets them, not just chat.
-function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
+function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = [], autonomyContext = {}) {
   return buildSystemPrompt({
     surface: 'chat',
     context: {
@@ -1392,6 +1392,8 @@ function buildDynamicSystemPrompt(memory, preferences, availableActions, userCon
       connectedCapabilities: availableActions,
       extraContext: userContext,
       statedContext,
+      autonomy: autonomyContext.autonomy,
+      guardMode: autonomyContext.guardMode,
       dateStr: getLocalDateKey(),
       timeStr: new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })
     }
@@ -6163,11 +6165,13 @@ app.get('/history/:userId/date', async (req, res) => {
 // chat path uses, so background gets the same memory/preferences/connected-capabilities/active-
 // goals-and-outcomes a live chat turn would.
 async function buildBackgroundSystemPrompt(userId) {
-  const [memory, preferences, enabledConnectors, liveContext] = await Promise.all([
+  const [memory, preferences, enabledConnectors, liveContext, chatSettings, nativeContext] = await Promise.all([
     getMemory(userId, null, ''),
     getPreferences(userId),
     getEnabledConnectors(userId),
-    getUserContext(userId)
+    getUserContext(userId),
+    getChatSettings(supabase, userId),
+    getLatestNativeContext(userId)
   ]);
   return buildSystemPrompt({
     surface: 'background',
@@ -6176,6 +6180,8 @@ async function buildBackgroundSystemPrompt(userId) {
       preferences,
       connectedCapabilities: buildAvailableActions(enabledConnectors),
       liveContext,
+      autonomy: parseJsonObject(nativeContext?.settings)?.autonomy,
+      guardMode: chatSettings?.guardMode === true,
       dateStr: getLocalDateKey(),
       timeStr: new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })
     }
@@ -6186,15 +6192,23 @@ async function buildBackgroundSystemPrompt(userId) {
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
   const historyOptions = { since: requestContext.chatStartedAt };
-  const [memory, history, preferences, preferenceMap, enabledConnectors, userContext, recentActions] = await Promise.all([
+  const [memory, history, preferences, preferenceMap, enabledConnectors, userContext, recentActions, chatSettings, nativeContext] = await Promise.all([
     quickTurn ? Promise.resolve('') : getMemory(userId, trace, message || ''),
     getHistory(userId, trace, 12, historyOptions),
     getPreferences(userId, trace),
     getPreferenceMap(userId),
     quickTurn ? Promise.resolve([]) : getEnabledConnectors(userId, trace),
     quickTurn ? Promise.resolve('') : getUserContext(userId, trace),
-    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions)
+    quickTurn ? Promise.resolve([]) : getRecentLoggedActions(userId, trace, 8, historyOptions),
+    quickTurn ? Promise.resolve(null) : getChatSettings(supabase, userId),
+    quickTurn ? Promise.resolve(null) : getLatestNativeContext(userId)
   ]);
+  // Real autonomy/guardMode for the AUTONOMY & APPROVAL prompt block — this only explains the
+  // setting to the model; the server-side review gate in action-runner.js is unaffected by it.
+  const autonomyContext = {
+    autonomy: parseJsonObject(nativeContext?.settings)?.autonomy,
+    guardMode: chatSettings?.guardMode === true
+  };
   const requestedRoute = resolveModelRoute(preferenceMap);
   const modelRoute = requestedRoute.configured ? requestedRoute : (requestedRoute.fallback || requestedRoute);
   const cachedContentName = await getPromptCacheName(trace, modelRoute.model);
@@ -6235,7 +6249,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         emailDraftContext,
         buildResolvedContextBlock(resolvedContext)
       ].filter(Boolean).join('\n\n'),
-      statedContext
+      statedContext,
+      autonomyContext
     );
   const searchReason = getSearchReason(message);
   const useSearch = Boolean(searchReason);
@@ -10187,6 +10202,9 @@ module.exports.extractShoppingContextHints = extractShoppingContextHints;
 module.exports.buildDynamicSystemPrompt = buildDynamicSystemPrompt;
 module.exports.buildQuickTurnContext = buildQuickTurnContext;
 module.exports.buildBackgroundSystemPrompt = buildBackgroundSystemPrompt;
+module.exports.buildChatContext = buildChatContext;
 module.exports.buildMorningBriefing = buildMorningBriefing;
 module.exports.buildIntervalBriefing = buildIntervalBriefing;
 module.exports.checkMillieSendCap = checkMillieSendCap;
+module.exports.runAgenticLoop = runAgenticLoop;
+module.exports.executeActions = executeActions;

@@ -494,6 +494,7 @@ const ACTION_CONTRACTS = {
     optional: ['autonomy', 'plan'],
     inputExample: { goal: 'the long term goal', autonomy: 'Active|High', plan: 'optional initial plan json' },
     paramHints: { autonomy: 'Active|High' },
+    guidance: 'This is the ownership mechanism: use it for a genuine outcome that will take more than this turn to reach — something to keep working on, checking on, or driving toward completion without the user re-prompting every step. Do not use it for a single tool call that already finishes the request, for ordinary conversation, or for musing/thinking-aloud — the same carve-out that keeps a tool call from firing on a half-formed thought applies here too.',
     successSummary: 'Task created for background execution',
     failureSummary: 'Task creation failed',
     confirmation: 'none'
