@@ -5907,7 +5907,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     ? [...extractAlreadyStatedContext(history), ...shoppingContext]
     : shoppingContext;
   const resolvedContext = requestContext.resolvedContext || (!quickTurn && isContextualReference(message)
-    ? buildResolvedContext(history, recentActions)
+    ? buildResolvedContext(message, history, recentActions)
     : null);
   const emailReplyContext = quickTurn
     ? ''
