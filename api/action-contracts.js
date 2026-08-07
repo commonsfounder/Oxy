@@ -22,6 +22,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['title', 'due_date'],
     inputExample: { title: 'reminder', due_date: 'ISO date' },
+    paramHints: { due_date: 'ISO date' },
     successSummary: 'Reminder created',
     failureSummary: 'Reminder failed',
     confirmation: 'none'
@@ -48,6 +49,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
+    paramHints: { start_date: 'ISO date', end_date: 'ISO date' },
     successSummary: 'Calendar updated',
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
@@ -93,6 +95,15 @@ const ACTION_CONTRACTS = {
       body: 'polished complete email draft based on the user intent, not a terse literal fragment',
       tone: 'optional requested tone such as casual, warm, professional, apologetic, direct',
       thread_id: 'optional Gmail thread ID for replies'
+    },
+    // These two travel on the PARAMETER itself, not only the tool-level guidance below: a
+    // function-calling model weighs a per-argument description more heavily when constructing
+    // that argument than prose several fields away, and "terse literal fragment" is the exact
+    // failure mode this guards against (turning "email him saying running late" into a body
+    // that literally reads "running late").
+    paramHints: {
+      body: 'a polished, complete email draft — never a terse literal fragment of what the user said',
+      tone: 'e.g. casual, warm, professional, apologetic, direct'
     },
     guidance: 'If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made.',
     successSummary: 'Email sent',
@@ -150,6 +161,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
+    paramHints: { start_date: 'ISO date', end_date: 'ISO date' },
     successSummary: 'Calendar updated',
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
@@ -189,6 +201,7 @@ const ACTION_CONTRACTS = {
     optional: ['origin', 'mode', 'arrival_time', 'departure_time'],
     aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
     inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time', departure_time: 'optional leave-at/around time' },
+    paramHints: { mode: 'driving|walking|transit' },
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none'
@@ -199,6 +212,7 @@ const ACTION_CONTRACTS = {
     optional: ['origin', 'departure_time', 'arrival_time', 'preference'],
     aliases: { destination: ['query', 'place', 'address', 'to'], origin: ['from'] },
     inputExample: { destination: 'London Euston', origin: 'optional start place or station', departure_time: 'optional leave-at/around time', arrival_time: 'optional arrive-by time', preference: 'balanced|fastest|fewest_changes' },
+    paramHints: { preference: 'balanced|fastest|fewest_changes' },
     successSummary: 'Trip planned',
     failureSummary: 'Trip failed',
     confirmation: 'none'
@@ -243,6 +257,7 @@ const ACTION_CONTRACTS = {
     risk: 'medium',
     required: ['scope'],
     inputExample: { scope: 'recent|all', query: 'optional memory topic to forget' },
+    paramHints: { scope: 'recent|all' },
     successSummary: 'Memory updated',
     failureSummary: 'Memory update failed',
     confirmation: 'none'
@@ -370,6 +385,7 @@ const ACTION_CONTRACTS = {
     required: ['project_ref'],
     optional: ['check'],
     inputExample: { project_ref: 'milgrain', check: 'test|release' },
+    paramHints: { check: 'test|release' },
     guidance: 'Run only the configured project check in the isolated task project. Use check=test by default and report failures honestly.',
     successSummary: 'Project check finished',
     failureSummary: 'Project check failed',
@@ -411,6 +427,7 @@ const ACTION_CONTRACTS = {
     required: ['goal'],
     optional: ['autonomy', 'plan'],
     inputExample: { goal: 'the long term goal', autonomy: 'Active|High', plan: 'optional initial plan json' },
+    paramHints: { autonomy: 'Active|High' },
     successSummary: 'Task created for background execution',
     failureSummary: 'Task creation failed',
     confirmation: 'none'
@@ -455,8 +472,8 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Simulation failed',
     confirmation: 'none'
   },
-  log_health: { risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, successSummary: 'Health logged', failureSummary: 'Log failed', confirmation: 'none' },
-  control_smart_home: { risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Control failed', confirmation: 'none' },
+  log_health: { risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, paramHints: { metric: 'steps|heart_rate' }, successSummary: 'Health logged', failureSummary: 'Log failed', confirmation: 'none' },
+  control_smart_home: { risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, paramHints: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Control failed', confirmation: 'none' },
   save_to_notion: { risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
   // Google Docs — implemented in connectors/google.js but had no contract at all, so the
   // agent's tool-calling interface could never reach them. Same low-risk/no-confirmation
@@ -465,11 +482,11 @@ const ACTION_CONTRACTS = {
   search_google_docs: { risk: 'low', required: [], optional: ['query', 'max_results'], inputExample: { query: 'search term' }, successSummary: 'Docs found', failureSummary: 'Search failed', confirmation: 'none' },
   append_google_doc: { risk: 'low', required: ['content'], optional: ['document_id', 'title'], inputExample: { title: 'doc title', content: 'text to add' }, successSummary: 'Doc updated', failureSummary: 'Append failed', confirmation: 'none' },
   get_google_doc: { risk: 'low', required: [], optional: ['document_id', 'title'], inputExample: { title: 'doc title' }, successSummary: 'Doc fetched', failureSummary: 'Fetch failed', confirmation: 'none' },
-  github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review' },
+  github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, paramHints: { action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review' },
   create_github_issue: { risk: 'medium', required: ['repo', 'title'], optional: ['body'], inputExample: { repo: 'owner/repo', title: 'Issue title', body: 'Details' }, successSummary: 'GitHub issue created', failureSummary: 'GitHub issue failed', confirmation: 'review_required', executionMode: 'review' },
   get_github_prs: { risk: 'low', required: ['repo'], inputExample: { repo: 'owner/repo' }, successSummary: 'GitHub pull requests loaded', failureSummary: 'GitHub pull requests failed', confirmation: 'none' },
   track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none' },
-  edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },
+  edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, paramHints: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },
   analyze_image: {
     risk: 'low',
     required: ['prompt'],
@@ -571,6 +588,12 @@ const ACTION_CONTRACTS = {
     required: [],
     optional: ['goal', 'url', 'credentialSites'],
     inputExample: { goal: 'order a medium black t-shirt from Rothys', url: 'https://www.rothys.com' },
+    // credentialSites has no entry in inputExample above (it's a rare param), so without this
+    // the native schema would only say "credentialSites (optional)" — giving no hint that it
+    // must be an ARRAY of domains. The guidance below states the same rule in prose, but a
+    // wrongly-shaped argument (a bare string instead of an array) is exactly the kind of
+    // mistake a per-parameter format hint prevents that prose elsewhere does not.
+    paramHints: { credentialSites: 'array of site domains to offer a saved credential for, e.g. ["delta.com"]' },
     successSummary: 'Order progressed',
     failureSummary: 'Order task failed',
     confirmation: 'none',
@@ -781,13 +804,15 @@ function actionToFunctionDeclaration(type, contract) {
   const inputEx = contract.inputExample || {};
   const required = new Set(contract.required || []);
   const optional = new Set(contract.optional || []);
-  const allParams = new Set([...Object.keys(inputEx), ...required, ...optional]);
+  const allParams = new Set([...Object.keys(inputEx), ...required, ...(contract.paramHints ? Object.keys(contract.paramHints) : []), ...optional]);
+  const hints = contract.paramHints || {};
 
   for (const key of allParams) {
     const isRequired = required.has(key);
+    const hint = hints[key];
     properties[key] = {
       type: 'string',
-      description: `${key}${isRequired ? ' (required)' : ' (optional)'}`
+      description: `${key}${isRequired ? ' (required)' : ' (optional)'}${hint ? ` — ${hint}` : ''}`
     };
   }
 

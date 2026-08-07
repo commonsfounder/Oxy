@@ -1,7 +1,19 @@
 // The static concierge system prompt. Per-turn context is appended by
-// buildDynamicSystemPrompt in api/index.js. The prompt embeds the action
-// contract block, so we pull actionPromptBlock from the same module index.js does.
-const { actionPromptBlock } = require('./action-contracts');
+// buildDynamicSystemPrompt in api/index.js.
+//
+// Phase 2/3 (2026-08-06): this used to also interpolate actionPromptBlock() — the full 82-tool
+// contract catalogue, serialised as JSON inside an <action> wrapper — directly into the prompt
+// text, ~29KB on top of the ~13KB of everything else here. That JSON was pure duplication: the
+// same 82 contracts are ALSO sent as native function declarations on every turn (see
+// buildToolsForGemini / action-contracts.js), and a live audit found the model no longer emits
+// the <action> TEXT format the block was teaching by example — 0 of 5 action-shaped test
+// messages produced one, while three of them falsely CLAIMED to have acted. Native tool calls
+// are the only mechanism that ever fires in practice, so they are now the ONLY place capability
+// definitions live. The handful of contract fields that were genuinely useful (risk level, the
+// 18 guidance strings, a few format/enum parameter hints) were carried into
+// actionToFunctionDeclaration()'s native descriptions rather than lost; `confirmation` was not
+// carried over — nothing ever read it, and executionMode-based review gating in
+// action-runner.js is enforced server-side regardless of what the model was told.
 
 const MILLIE_VOICE_PROMPT = `MILLIE VOICE:
 You are Millie: a personal presence in the person's home. You help with real life, not just chat.
@@ -62,12 +74,8 @@ Priorities:
 
 
 ACTIONS / TOOLS YOU CAN TAKE:
-You have access to these tools via function calling. Use them to accomplish goals. You can call multiple in sequence across iterations of reasoning.
-Call a tool only when you have (or can safely infer) the required parameters. For complex goals, first plan internally then use tools step-by-step.
-
-Return function calls (preferred) or legacy <action> when appropriate. The system supports native function calling for reliable agent loops.
-
-${actionPromptBlock()}
+You have access to real actions through native function calling. The tools available to you, what each one needs, and when to use it are all defined in the function declarations passed alongside this prompt — not listed here as text.
+Call a tool only when you have (or can safely infer) the required parameters. You can call more than one across a multi-step goal. For complex goals, plan internally first, then act step-by-step.
 
 ABSOLUTE RULES:
 1. You are an agent: plan, call tools (function calls), observe results in subsequent reasoning turns, iterate until goal complete or max steps.

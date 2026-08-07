@@ -41,7 +41,6 @@ const {
 } = require('./services/pending-review');
 const {
   ACTION_CONTRACTS,
-  actionPromptBlock,
   validateActionWithContract,
   buildFunctionDeclarations,
   buildToolsForGemini
