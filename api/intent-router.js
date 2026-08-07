@@ -54,6 +54,22 @@ function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
 }
 
+// "Restaurant"/"gym"/"hotel" etc. sit in LOCAL_PLACE_TERMS, so any sentence that merely
+// mentions one — including a plain request to email/text/contact them about something —
+// used to fall through to the find_local_place fallback and get routed as a nearby-place
+// search before the model ever saw it. A literal email address, or an explicit
+// email/text/message/contact verb, means this is a communication request, not "find me a
+// place" — narrow and high-precision on purpose, same shape as looksLikeShoppingRequest
+// immediately below.
+const COMMUNICATION_TERMS = /\b(email|e-mail|text|message|contact|write to)\b/i;
+const EMAIL_ADDRESS_RE = /[^\s<]+@[^\s>]+\.[^\s>]+/;
+
+function looksLikeCommunicationRequest(message) {
+  const text = normalizeText(message);
+  if (!text) return false;
+  return EMAIL_ADDRESS_RE.test(text) || COMMUNICATION_TERMS.test(text);
+}
+
 function looksLikeDirectionsRequest(message) {
   return DIRECTIONS_TERMS.test(normalizeText(message));
 }
@@ -379,6 +395,11 @@ function inferDeterministicAction(message, options = {}) {
   // defer to the LLM/browser-task path. Placed after the ride & directions guards so
   // "order me an uber" / "directions to john lewis" still route correctly.
   if (looksLikeShoppingRequest(text)) return null;
+
+  // Placed after ride & directions the same way looksLikeShoppingRequest is, so
+  // "get me an uber to the restaurant" is unaffected — only the final place-lookup
+  // fallback is guarded.
+  if (looksLikeCommunicationRequest(text)) return null;
 
   if (!looksLikeLocalPlaceRequest(text)) return null;
 

@@ -26,6 +26,40 @@ test('find a gym near Old Street: still resolves via the deterministic local-pla
   assert.equal(routed.actions[0].input.query, 'gym near Old Street');
 });
 
+// ── A place-keyword collision must not eat a communication request ────────────────────────
+// Regression, 2026-08-07 live verification: "restaurant" sits in LOCAL_PLACE_TERMS, so any
+// sentence mentioning one — even a plain request to email/text/contact them about something —
+// fell through to the find_local_place fallback and was routed as a nearby-place search before
+// the model ever saw it. Narrow fix, mirrors the existing looksLikeShoppingRequest guard
+// immediately above the same fallback in api/intent-router.js.
+test('a request to email a restaurant about a booking does not become a nearby-place search', () => {
+  assert.equal(inferDeterministicAction('Send an email to test-business@example.com asking if they can move our 7pm restaurant booking to 8pm tonight.'), null);
+});
+
+test('"email the restaurant and ask if they can move us to 8" defers to the model, not find_place', () => {
+  assert.equal(inferDeterministicAction('email the restaurant and ask if they can move us to 8'), null);
+});
+
+test('"text the restaurant" and "contact the restaurant" also defer, not just "email"', () => {
+  assert.equal(inferDeterministicAction('text the restaurant to ask about our booking'), null);
+  assert.equal(inferDeterministicAction('contact the restaurant about tonight'), null);
+});
+
+test('a literal email address anywhere in the message defers, regardless of wording', () => {
+  assert.equal(inferDeterministicAction('let reservations@bistro.example know we are running late'), null);
+});
+
+test('an ordinary "find a restaurant near me" with no communication verb still routes to find_place', () => {
+  const routed = inferDeterministicAction('find a restaurant near me');
+  assert.equal(routed.reason, 'find_local_place');
+  assert.equal(routed.actions[0].type, 'find_place');
+});
+
+test('"nearest restaurant" (no email/text/contact wording) is unaffected by the fix', () => {
+  const routed = inferDeterministicAction('nearest restaurant');
+  assert.equal(routed.reason, 'find_local_place');
+});
+
 test('clear flight price watches become bounded daily background checks', () => {
   const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
   assert.equal(routed.reason, 'durable_price_watch');
