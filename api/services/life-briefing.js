@@ -295,6 +295,26 @@ function groupRepeatedMessages(items) {
   });
 }
 
+// A reply that implies a decision (see api/services/reply-policy.js's classifyReply)
+// ranks alongside a stalled goal — worth surfacing promptly, not urgent enough to be
+// "now" (that tier is reserved for approvals and imminent events). A purely
+// informational reply ranks like a background email notification.
+function normalizeConversationUpdate(update = {}) {
+  const name = cleanText(update.participantDisplayName, 'Someone Millie contacted', 120);
+  const body = cleanText(update.latestEventBody, 'Sent an update.', 210);
+  const needsDecision = Boolean(update.needsDecision);
+  return {
+    id: `conversation:${update.id}`,
+    kind: 'conversation_update',
+    title: name,
+    detail: body,
+    prompt: needsDecision ? `What did ${name} say, and what should I tell them?` : `What did ${name} say?`,
+    urgency: needsDecision ? 'soon' : 'background',
+    priority: needsDecision ? 76 : 35,
+    sortTime: asDate(update.lastActivityAt)?.getTime() || Number.MAX_SAFE_INTEGER
+  };
+}
+
 function itemSort(a, b) {
   return b.priority - a.priority || a.sortTime - b.sortTime || a.title.localeCompare(b.title);
 }
@@ -324,19 +344,21 @@ function publicItem(item) {
   return output;
 }
 
-function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [], scheduledTasks = [], now = new Date() } = {}) {
+function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [], scheduledTasks = [], conversationUpdates = [], now = new Date() } = {}) {
   const reference = asDate(now) || new Date();
   const taskItems = tasks.map(normalizeTask).filter(Boolean);
   const approvalItems = approvals.map(normalizeApproval).filter(Boolean);
   const eventItems = events.map(event => normalizeEvent(event, reference)).filter(Boolean);
   const emailItems = groupRepeatedMessages(emails.map(normalizeEmail).filter(Boolean));
   const scheduledItems = scheduledTasks.map(task => normalizeScheduledTask(task, reference)).filter(Boolean);
+  const conversationItems = conversationUpdates.map(normalizeConversationUpdate).filter(Boolean);
   const items = dedupeItems([
     ...approvalItems,
     ...taskItems,
     ...eventItems,
     ...emailItems,
-    ...scheduledItems
+    ...scheduledItems,
+    ...conversationItems
   ]).sort(itemSort).slice(0, MAX_ITEMS).map(publicItem);
 
   const headline = items.length === 0
@@ -355,7 +377,8 @@ function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [
       approvals: approvals.length > 0,
       messages: emails.length > 0,
       calendar: events.length > 0,
-      watches: scheduledTasks.length > 0
+      watches: scheduledTasks.length > 0,
+      conversations: conversationUpdates.length > 0
     }
   };
 }
@@ -378,5 +401,6 @@ module.exports = {
   normalizeApproval,
   normalizeEvent,
   normalizeEmail,
-  normalizeScheduledTask
+  normalizeScheduledTask,
+  normalizeConversationUpdate
 };
