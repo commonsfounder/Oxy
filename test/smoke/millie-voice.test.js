@@ -10,7 +10,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
+const { CORE_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
 
 function phrase(text) {
   return new RegExp(text.trim().split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
@@ -19,7 +19,7 @@ function phrase(text) {
 test('Millie is framed as a presence, not a support agent or search tool', () => {
   assert.match(MILLIE_VOICE_PROMPT, phrase('not a support agent'));
   assert.match(MILLIE_VOICE_PROMPT, phrase('not a search box with a voice'));
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /^You are a full-service personal concierge/);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /^You are a full-service personal concierge/);
 });
 
 test('bans chatbot filler and corporate phrasing explicitly, including the examples the user flagged', () => {

@@ -10,13 +10,22 @@ const MILLIE_IDENTITY_GUIDANCE = 'Use this by default whenever Millie is contact
 const PERSONAL_IDENTITY_GUIDANCE = 'Use this only when the user is personally corresponding as themselves — friends, family, work or school contacts, job applications, or any personal correspondence where the sender should clearly be the user. If the user is contacting a business, support line, restaurant, vendor, delivery service, or any external organization or stranger with Millie acting on their behalf, use send_millie_email instead, unless the user explicitly says to send it from their own account.';
 const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone via their device\'s Messages app — always their own identity, never Millie\'s. Fine for personal contacts (friends, family, colleagues). If the user is contacting a business, support line, restaurant, vendor, or any external organization or stranger with Millie acting on their behalf, use send_millie_sms instead so it comes from Millie\'s own number.';
 
+// Shared messaging-register guidance for conversational channels (iMessage/WhatsApp/Telegram).
+// Moved out of the numbered prompt rules — this is squarely about how to construct THIS
+// argument, not general behaviour, so it belongs on the tool, not in the static prompt.
+const CONVERSATIONAL_MESSAGE_GUIDANCE = 'Keep the message brief, natural, and text-like: rewrite the requested content into an actual first-person message addressed to the contact, matching the register of any recent messages with them. Never paste a "saying X" clause verbatim as the message body — e.g. "saying how much I miss her" must become something like "I miss you so much", not "how much i miss her".';
+
+// Shared email tone/quality guidance, appended to both the user's-own-account and
+// Millie's-own-identity email contracts.
+const EMAIL_TONE_GUIDANCE = 'Draft the body as 1-3 short paragraphs. Default tone is warm, clear, and human — most email is professional or corporate, so use polished business language when the thread calls for it, but avoid empty cliches like "I hope this email finds you well", "I am writing to", "please do not hesitate", and "kindly" unless the thread or user specifically warrants that formality. If the user specifies a tone (casual, friendly, firm, apologetic, confident, less desperate, short, professional), make the draft visibly follow it. If the user gives no real content (e.g. only "say hello" or "introduce myself"), ask for the actual substance before sending — never send a placeholder or generic template body; it must contain specific content from the user, the conversation, memory, or tool results.';
+
 const ACTION_CONTRACTS = {
   send_message: {
     risk: 'medium',
     required: ['contact', 'message'],
     aliases: { message: ['body', 'text', 'content'] },
     inputExample: { contact: 'name', message: 'text' },
-    guidance: PERSONAL_SMS_IDENTITY_GUIDANCE,
+    guidance: `${PERSONAL_SMS_IDENTITY_GUIDANCE} ${CONVERSATIONAL_MESSAGE_GUIDANCE}`,
     successSummary: 'Message ready',
     failureSummary: 'Message failed',
     confirmation: 'none',
@@ -44,6 +53,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['query'],
     inputExample: { query: 'search term' },
+    guidance: 'For requests that depend on current facts, charts, rankings, popularity, or trends ("most popular song", "top song", "right now", "Billboard Hot 100"), first resolve the exact title/artist via search grounding — never pass a vague query like "most popular song" directly. If you cannot verify the current result, say you need to check instead of guessing.',
     successSummary: 'Music opened',
     failureSummary: 'Music failed',
     confirmation: 'none'
@@ -54,6 +64,7 @@ const ACTION_CONTRACTS = {
     optional: ['playlist'],
     aliases: { playlist: ['playlistName', 'list'] },
     inputExample: { query: 'song or album', playlist: 'optional playlist name' },
+    guidance: 'Use when the user asks to add a song or album to their music library or playlist — use play_music instead for immediate playback.',
     successSummary: 'Music added',
     failureSummary: 'Music add failed',
     confirmation: 'none'
@@ -67,7 +78,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
     executionMode: 'review',
-    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me.'
+    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me. Calendar beats music: if the user says calendar, schedule, or event, do not use play_music or add_to_music_playlist just because the phrase contains "add".'
   },
   get_calendar_events: {
     risk: 'low',
@@ -118,7 +129,7 @@ const ACTION_CONTRACTS = {
       body: 'a polished, complete email draft — never a terse literal fragment of what the user said',
       tone: 'e.g. casual, warm, professional, apologetic, direct'
     },
-    guidance: `If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made. ${PERSONAL_IDENTITY_GUIDANCE}`,
+    guidance: `If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made. ${EMAIL_TONE_GUIDANCE} ${PERSONAL_IDENTITY_GUIDANCE}`,
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
@@ -181,7 +192,7 @@ const ACTION_CONTRACTS = {
     optional: ['subject'],
     aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
     inputExample: { to: 'email', subject: 'optional subject inferred from the body if omitted', body: 'polished complete email draft' },
-    guidance: PERSONAL_IDENTITY_GUIDANCE,
+    guidance: `${EMAIL_TONE_GUIDANCE} ${PERSONAL_IDENTITY_GUIDANCE}`,
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
@@ -213,7 +224,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
     executionMode: 'review',
-    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me.'
+    guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me. Calendar beats music: if the user says calendar, schedule, or event, do not use play_music or add_to_music_playlist just because the phrase contains "add".'
   },
   get_outlook_events: {
     risk: 'low',
@@ -228,6 +239,7 @@ const ACTION_CONTRACTS = {
     required: ['destination'],
     aliases: { destination: ['query', 'place', 'address'] },
     inputExample: { destination: 'natural place or address phrase' },
+    guidance: 'Pass the user\'s natural destination phrase (e.g. "get me an Uber to the nearest gym") — never invent a branch address.',
     successSummary: 'Uber opened',
     failureSummary: 'Uber needs attention',
     confirmation: 'none',
@@ -238,6 +250,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     aliases: { query: ['destination', 'place', 'address'] },
     inputExample: { query: 'natural place or address phrase' },
+    guidance: 'For plain local place requests like "nearest gym", "closest McDonald\'s", or "coffee near me", pass the user\'s natural phrase as query — do not ask for a full address or branch details. Never use this for product searches, price lookups, or online shopping, even if the request names a retailer like "John Lewis", "ASOS", or "Amazon" — this is only for physical locations to visit (buildings, stores as places, restaurants). "Find me grey jeans on John Lewis" is a shopping task for run_browser_task, not a place lookup.',
     successSummary: 'Place found',
     failureSummary: 'Place search failed',
     confirmation: 'none'
@@ -249,6 +262,7 @@ const ACTION_CONTRACTS = {
     aliases: { destination: ['query', 'place', 'address'], origin: ['from'] },
     inputExample: { origin: 'optional start place or station', destination: 'natural place or address phrase', mode: 'driving|walking|transit', arrival_time: 'optional arrive-by time', departure_time: 'optional leave-at/around time' },
     paramHints: { mode: 'driving|walking|transit' },
+    guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff, or for generic local directions, walking, driving, and bus questions where a route summary is useful. Never pretend a route opened if all you have is a text answer. For live train times, platforms, or journey options, prefer a grounded search answer instead — this tool is not the source of truth for that.',
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
     confirmation: 'none'
@@ -260,6 +274,7 @@ const ACTION_CONTRACTS = {
     aliases: { destination: ['query', 'place', 'address', 'to'], origin: ['from'] },
     inputExample: { destination: 'London Euston', origin: 'optional start place or station', departure_time: 'optional leave-at/around time', arrival_time: 'optional arrive-by time', preference: 'balanced|fastest|fewest_changes' },
     paramHints: { preference: 'balanced|fastest|fewest_changes' },
+    guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff for a rail trip. Prefer a grounded search answer over this for live train times, platforms, or journey options — this tool is not the source of truth for that.',
     successSummary: 'Trip planned',
     failureSummary: 'Trip failed',
     confirmation: 'none'
@@ -269,6 +284,7 @@ const ACTION_CONTRACTS = {
     required: ['contact', 'message'],
     aliases: { message: ['body', 'text', 'content'] },
     inputExample: { contact: 'contact name', message: 'message text' },
+    guidance: CONVERSATIONAL_MESSAGE_GUIDANCE,
     successSummary: 'Telegram sent',
     failureSummary: 'Telegram failed',
     confirmation: 'review_required',
@@ -287,6 +303,7 @@ const ACTION_CONTRACTS = {
     required: ['origin', 'destination'],
     aliases: { origin: ['from'], destination: ['to'] },
     inputExample: { origin: 'station name or CRS code', destination: 'station name or CRS code' },
+    guidance: 'Prefer a grounded search answer over this for live train times, platforms, or journey options — this connector is not the source of truth for that. Use it only when the user explicitly wants a formal train search result.',
     successSummary: 'Train route checked',
     failureSummary: 'Train search failed',
     confirmation: 'none'
@@ -296,6 +313,7 @@ const ACTION_CONTRACTS = {
     required: ['station'],
     aliases: { station: ['origin', 'from'] },
     inputExample: { station: 'station name or CRS code' },
+    guidance: 'Prefer a grounded search answer over this for live departures, arrivals, or platforms — this connector is not the source of truth for that. Use it only when the user explicitly wants a live station board.',
     successSummary: 'Station board ready',
     failureSummary: 'Station board failed',
     confirmation: 'none'
@@ -305,6 +323,7 @@ const ACTION_CONTRACTS = {
     required: ['scope'],
     inputExample: { scope: 'recent|all', query: 'optional memory topic to forget' },
     paramHints: { scope: 'recent|all' },
+    guidance: 'Use whenever the user asks to forget, delete, wipe, or remove something from memory — never just say you will do it without calling this. For "forget that" or "delete that from memory", use scope "recent" unless they clearly mean all memory.',
     successSummary: 'Memory updated',
     failureSummary: 'Memory update failed',
     confirmation: 'none'
@@ -645,7 +664,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Order task failed',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists.'
+    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists. If the user says "wrong price", "that\'s wrong", or gives any price correction, always re-check the exact same retailer/site that produced the previous price — never drift to the brand\'s own website or a different retailer.'
   },
   // The second half of the two-phase flow above — only ever called on a turn AFTER the user
   // has explicitly approved a review_required result from run_browser_task. executionMode:

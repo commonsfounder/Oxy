@@ -884,7 +884,7 @@ async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
   } catch {}
 }
 
-const { OXCY_SYSTEM_PROMPT, buildMillieSystemPrompt } = require('./prompts');
+const { buildSystemPrompt, CORE_SYSTEM_PROMPT } = require('./prompts');
 
 function normalizeGeminiHistory(history) {
   const mapped = history.map(m => ({
@@ -1378,47 +1378,24 @@ function extractShoppingContextHints(history = []) {
   return hints;
 }
 
+// Thin wrapper over buildSystemPrompt's 'chat' surface, kept with its original positional
+// signature — test/smoke/preference-context-hygiene.test.js and prompt-safety.test.js call this
+// directly. The public-figures-grounding and search-staleness lines that used to live in this
+// function's own RESPONSE RULES tail now live once, universally, in TRUTHFULNESS_SAFETY_SECTION
+// (api/prompts.js) — every surface gets them, not just chat.
 function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = []) {
-  const timeStr = new Date().toLocaleString('en-GB', { timeZone: TIMEZONE });
-  const dateStr = getLocalDateKey();
-  return `WHAT YOU KNOW ABOUT THIS PERSON:
-${memory || 'Nothing yet.'}
-
-HOW THE USER LIKES THINGS (learned over time):
-${preferences || 'Still learning.'}
-
-CONNECTED APPS:
-${availableActions}
-
-NATIVE CREATIVE TOOLS:
-- generate_visual for contextual images, mockups, study aids, previews, and supporting visuals
-- create_diagram for explaining systems, concepts, and workflows
-- create_presentation for slide structures and decks
-
-CONTEXT YOU ALREADY STATED IN THIS CONVERSATION:
-${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : 'Nothing important has been stated yet.'}
-
-Current date: ${dateStr}
-Current time for internal reasoning only: ${timeStr}
-
-RESPONSE RULES:
-- The user leads the conversation. Follow their topic instead of steering into unrelated stored memory.
-- Treat stored memory as background context for understanding, not as content to surface by default.
-- Only mention stored memory when it is directly relevant to what the user just said, asked, or asked you to do.
-- Treat personal fact statements like "my usual station is Birmingham New Street" as memory to acknowledge, not as a place, web, or app search.
-- When suggesting what someone could do — they're bored, deciding between options, making plans — pull ideas from the actual conversation, not from a mental inventory of their stored facts. A stored fact about their life is not raw material for a suggestion unless they've brought that topic up themselves.
-- For greetings or simple check-ins like "hi", "hey", or "ok", just respond naturally to that message. Do not surface legal cases, health goals, TV shows, or personal situations unless the user brings them up.
-- Do not repeat context you already stated earlier in this conversation.
-- Especially avoid repeating time/date, current plans, study topics, or personal brief details unless the user directly asks again.
-- Do not mention the current time or date unless the user asked for it or it is necessary for the action/result.
-- If a factual answer involves public figures, news, violence, legal events, prices, schedules, or recent/current facts, do not provide names, dates, or counts unless they are grounded in search/tool/context evidence.
-- Search and tool results can be stale. Check any dates inside them against the current date above; a result saying "as of" an earlier year is outdated, not proof something never happened. When sources conflict with the current date, say the information may be out of date and offer to check again — never invent releases, cancellations, or history to reconcile the conflict.
-- If the user questions or challenges your previous factual answer, correct only the factual issue. Do not answer with meta/persona language.
-- If an action is completed successfully, stop after one confirmation sentence. No follow-up question, no summary, no check-in.
-- If an action hits a small blocker, say plainly what's blocking it and give the one next step, in a single short sentence — in your own words, not a fixed phrase.
-
----
-${userContext}`;
+  return buildSystemPrompt({
+    surface: 'chat',
+    context: {
+      memory,
+      preferences,
+      connectedCapabilities: availableActions,
+      extraContext: userContext,
+      statedContext,
+      dateStr: getLocalDateKey(),
+      timeStr: new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })
+    }
+  });
 }
 
 function isEmailReplyDraftRequest(message = '') {
@@ -1635,23 +1612,10 @@ ${JSON.stringify(safe, null, 2)}
 Use this to resolve vague follow-ups like "it", "that", "there", "same", "again", "what about tomorrow", and "the other one". If confidence is low, ask one short clarification instead of guessing.`;
 }
 
+// Thin wrapper over buildSystemPrompt's 'quick' surface, kept with its original positional
+// signature — test/smoke/preference-context-hygiene.test.js calls this directly.
 function buildQuickTurnContext(preferences, statedContext = []) {
-  return `FAST TURN MODE:
-
-For tiny greetings or acknowledgements, reply in no more than two very short sentences.
-Make the first sentence a tiny acknowledgement of 1-3 words when possible.
-Keep the total reply under 10 words unless the user explicitly asks for more.
-If the user says "huh", "what", "what do you mean", or similar, briefly clarify the previous answer or admit the confusion. Do not mention persona, goals, style, or internal instructions.
-Do not recap the user's saved memories, plans, recent actions, or personal brief unless they directly asked for that context.
-The user leads the conversation. Reply to what they just said instead of surfacing unrelated memory.
-Treat memory as background context only. If the user just says hi, say hi back.
-Keep it warm, effortless, and concise.
-Do not repeat context you already mentioned earlier in this conversation.
-Already stated context:
-${statedContext.length ? statedContext.map(line => `- ${line}`).join('\n') : '- none'}
-
-USER STYLE PREFERENCES:
-${preferences || 'Still learning.'}`;
+  return buildSystemPrompt({ surface: 'quick', context: { preferences, statedContext } });
 }
 
 function isQuickTurnMessage(message) {
@@ -2003,7 +1967,7 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
 }
 
 function getPromptCacheState(modelName = STREAMING_CHAT_MODEL) {
-  const cacheKey = `${modelName}:${OXCY_SYSTEM_PROMPT}`;
+  const cacheKey = `${modelName}:${CORE_SYSTEM_PROMPT}`;
   let cacheState = promptCacheStates.get(cacheKey);
   if (!cacheState) {
     cacheState = { key: cacheKey, name: '', expireAt: 0, pending: null };
@@ -2033,7 +1997,7 @@ async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MO
             model: modelName,
             config: {
               displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
-              systemInstruction: OXCY_SYSTEM_PROMPT,
+              systemInstruction: CORE_SYSTEM_PROMPT,
               ttl: PROMPT_CACHE_TTL
             }
           }))
@@ -2041,7 +2005,7 @@ async function ensurePromptCacheWarm(trace = null, modelName = STREAMING_CHAT_MO
             model: modelName,
             config: {
               displayName: `oxy-base-system-prompt-${modelName.replace(/[^a-z0-9-]+/gi, '-')}`,
-              systemInstruction: OXCY_SYSTEM_PROMPT,
+              systemInstruction: CORE_SYSTEM_PROMPT,
               ttl: PROMPT_CACHE_TTL
             }
           });
@@ -2080,7 +2044,9 @@ function buildModernGenerateRequest({ dynamicSystemPrompt, useSearch, cachedCont
   // conversation content, which is too weak for tool use and factuality.
   const canUseCachedPrompt = false;
   const config = {
-    systemInstruction: buildMillieSystemPrompt(dynamicSystemPrompt),
+    // dynamicSystemPrompt is always a fully-composed prompt now (built via buildSystemPrompt),
+    // not a fragment needing a static prefix — see buildDynamicSystemPrompt/buildQuickTurnContext.
+    systemInstruction: dynamicSystemPrompt,
     temperature: useSearch ? 0.1 : 0.2,
     topP: 0.8,
     topK: 20
@@ -4441,7 +4407,8 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
     }
 
     const route = await resolveAgentTaskRoute(userId, claimedTask);
-    let dynamicSystemPrompt = OXCY_SYSTEM_PROMPT;
+    // Fallback only — overwritten below by a real per-user chat prompt if the refresh succeeds.
+    let dynamicSystemPrompt = buildSystemPrompt({ surface: 'background', context: {} });
     let useSearch = Boolean(claimedTask.metadata?.useSearch);
     try {
       const refreshed = await buildChatContext(userId, claimedTask.goal, trace, route.model, {
@@ -6190,6 +6157,31 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
+// Builds the 'background' surface system prompt for an unsupervised agent run (scheduled task,
+// routine, or manual task resume/run) — the fix for background runs previously receiving only
+// the bare static prompt (see api/prompts.js header comment). Reuses the exact same helpers the
+// chat path uses, so background gets the same memory/preferences/connected-capabilities/active-
+// goals-and-outcomes a live chat turn would.
+async function buildBackgroundSystemPrompt(userId) {
+  const [memory, preferences, enabledConnectors, liveContext] = await Promise.all([
+    getMemory(userId, null, ''),
+    getPreferences(userId),
+    getEnabledConnectors(userId),
+    getUserContext(userId)
+  ]);
+  return buildSystemPrompt({
+    surface: 'background',
+    context: {
+      memory,
+      preferences,
+      connectedCapabilities: buildAvailableActions(enabledConnectors),
+      liveContext,
+      dateStr: getLocalDateKey(),
+      timeStr: new Date().toLocaleString('en-GB', { timeZone: TIMEZONE })
+    }
+  });
+}
+
 // Shared logic for building the Gemini model + system prompt
 async function buildChatContext(userId, message, trace = null, modelName = STREAMING_CHAT_MODEL, requestContext = {}) {
   const quickTurn = !requestContext.pendingAction && isQuickTurnMessage(message);
@@ -6281,21 +6273,18 @@ async function buildMorningBriefing(userId, now = new Date()) {
   ]);
 
   const hour = getLocalHour(now);
-  const greeting = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const systemPrompt = `You are a personal assistant. It's ${greeting} and you're checking in with your friend.
-
-Here's what you know about them:
-${memory || 'Not much yet — learn as you go.'}
-
-Recent conversation:
-${history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.'}
-
-Give a brief morning-style update. Keep it natural and friendly — not a corporate briefing. If there's nothing interesting, just say hi and check in. Don't make stuff up. Be brief — under 100 words.
-- Only mention things that are directly supported by memory or recent conversation shown above.
-- Do not invent plans, meetings, news, weather, or tasks.
-- If there is no concrete update, just greet them and say it's a quiet start.
-
-The current time is: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}`;
+  const windowLabel = hour < 12 ? 'Morning' : hour < 18 ? 'Afternoon' : 'Evening';
+  const systemPrompt = buildSystemPrompt({
+    surface: 'briefing',
+    context: {
+      memory,
+      historyText: history.slice(-5).map(m => `${m.role}: ${m.content}`).join('\n') || 'No recent messages.',
+      windowLabel,
+      maxWords: 100,
+      dateStr: getLocalDateKey(now),
+      timeStr: now.toLocaleString('en-GB', { timeZone: TIMEZONE })
+    }
+  });
 
   const briefingRes = await generateBrain({
     model: PRIMARY_CHAT_MODEL,
@@ -6632,27 +6621,22 @@ async function buildIntervalBriefing(userId, window, nativeContext, now = new Da
 
   const health = parseJsonObject(nativeContext?.health);
   const location = parseJsonObject(nativeContext?.location);
-  const systemPrompt = `You are a personal assistant writing a useful, concise ${window.label.toLowerCase()} for the user.
-
-Use only the information shown here. Do not invent weather, traffic, calendar events, health facts, or plans.
-If there is nothing useful, write one warm quiet-start sentence.
-
-Memory:
-${memory || 'none'}
-
-Preferences:
-${preferences || 'none'}
-
-Recent conversation:
-${history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none'}
-
-Native context:
+  const nativeContextText = `Native context:
 Location: ${location.latitude && location.longitude ? `${location.latitude}, ${location.longitude}` : 'not available'}
-Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}
-Current time: ${now.toLocaleString('en-GB', { timeZone: TIMEZONE })}
-
-Keep it under 70 words. Include only useful items.
-Write plain flowing prose only — no markdown, no headers (###), no bold (**), no bullet or numbered lists.`;
+Health: ${Object.keys(health).length ? JSON.stringify(health).slice(0, 800) : 'not available'}`;
+  const systemPrompt = buildSystemPrompt({
+    surface: 'briefing',
+    context: {
+      memory,
+      preferences,
+      historyText: history.slice(-6).map(m => `${m.role}: ${m.content}`).join('\n') || 'none',
+      nativeContextText,
+      windowLabel: window.label,
+      maxWords: 70,
+      dateStr: getLocalDateKey(now),
+      timeStr: now.toLocaleString('en-GB', { timeZone: TIMEZONE })
+    }
+  });
 
   const windowRes = await generateBrain({
     model: PRIMARY_CHAT_MODEL,
@@ -7074,7 +7058,7 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       const result = await runAgenticLoop({
         userId,
         initialMessage: scheduledTasks.buildScheduledRunInstruction(claimed),
-        dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+        dynamicSystemPrompt: await buildBackgroundSystemPrompt(userId),
         provider: route.provider,
         modelName: route.model,
         maxIterations: 6,
@@ -7194,7 +7178,7 @@ async function runProactiveSweep(logger = console) {
       await runAgenticLoop({
         userId: routine.user_id,
         initialMessage: routine.prompt,
-        dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+        dynamicSystemPrompt: await buildBackgroundSystemPrompt(routine.user_id),
         maxIterations: 6,
         context: { autonomy: 'Active' },
         executeActionsFn: executeActions,
@@ -9793,10 +9777,10 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
     }
   });
 
-  runAgenticLoop({
+  buildBackgroundSystemPrompt(userId).then(dynamicSystemPrompt => runAgenticLoop({
     userId,
     initialMessage: claimedTask.goal,
-    dynamicSystemPrompt: OXCY_SYSTEM_PROMPT,
+    dynamicSystemPrompt,
     provider: route.provider,
     modelName: route.model,
     maxIterations: Number.isFinite(claimedTask.checkpoint?.maxIterations) ? claimedTask.checkpoint.maxIterations : 6,
@@ -9835,7 +9819,7 @@ app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
       state: 'failed',
       heartbeatAt: null
     }).catch(() => {});
-  });
+  }));
   res.json({ started: true, resumed: resuming, taskId: claimedTask.id });
 });
 
@@ -10202,4 +10186,7 @@ module.exports.extractAlreadyStatedContext = extractAlreadyStatedContext;
 module.exports.extractShoppingContextHints = extractShoppingContextHints;
 module.exports.buildDynamicSystemPrompt = buildDynamicSystemPrompt;
 module.exports.buildQuickTurnContext = buildQuickTurnContext;
+module.exports.buildBackgroundSystemPrompt = buildBackgroundSystemPrompt;
+module.exports.buildMorningBriefing = buildMorningBriefing;
+module.exports.buildIntervalBriefing = buildIntervalBriefing;
 module.exports.checkMillieSendCap = checkMillieSendCap;

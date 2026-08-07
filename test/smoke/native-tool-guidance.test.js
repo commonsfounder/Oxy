@@ -17,7 +17,7 @@ const {
   actionPromptBlock,
   getActionContract
 } = require('../../api/action-contracts');
-const { OXCY_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
+const { CORE_SYSTEM_PROMPT, MILLIE_VOICE_PROMPT } = require('../../api/prompts');
 
 function nativeDescriptions() {
   const decls = buildToolsForGemini(false)[0].functionDeclarations;
@@ -26,20 +26,20 @@ function nativeDescriptions() {
 
 // ── The prompt no longer carries the catalogue ─────────────────────────────────────────────
 test('the live system prompt contains no <action> block', () => {
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /<action>/i);
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /<\/action>/i);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /<action>/i);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /<\/action>/i);
 });
 
 test('the live system prompt contains no serialised tool catalogue', () => {
   // The catalogue's own JSON.stringify shape — actionPromptList() wraps every entry in
   // {"actions": [...]} — plus a couple of field names that only ever appeared inside it.
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /"actions":\s*\[/);
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /"inputExample"/);
-  assert.doesNotMatch(OXCY_SYSTEM_PROMPT, /"executionMode"/);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /"actions":\s*\[/);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /"inputExample"/);
+  assert.doesNotMatch(CORE_SYSTEM_PROMPT, /"executionMode"/);
   // Spot-check a handful of action type names that appeared ONLY inside the catalogue block,
   // never in prose elsewhere in the static prompt.
   for (const type of ['workspace_write', 'project_rollback', 'confirm_credential_use', 'stripe_payout_to_user']) {
-    assert.doesNotMatch(OXCY_SYSTEM_PROMPT, new RegExp(`"${type}"`), `${type} should only exist as a function declaration now, not prompt text`);
+    assert.doesNotMatch(CORE_SYSTEM_PROMPT, new RegExp(`"${type}"`), `${type} should only exist as a function declaration now, not prompt text`);
   }
 });
 
@@ -49,11 +49,11 @@ test('the static prompt shrank by roughly the size of the removed catalogue', ()
   // wired into the prompt.
   const removedBlockSize = actionPromptBlock().length;
   assert.ok(removedBlockSize > 25000, 'sanity: the catalogue itself should still be roughly its known size');
-  assert.ok(OXCY_SYSTEM_PROMPT.length < 20000, `static prompt is ${OXCY_SYSTEM_PROMPT.length} chars — the catalogue should be gone, not just shrunk`);
+  assert.ok(CORE_SYSTEM_PROMPT.length < 20000, `static prompt is ${CORE_SYSTEM_PROMPT.length} chars — the catalogue should be gone, not just shrunk`);
 });
 
 test('the personality block itself is untouched by this phase', () => {
-  assert.ok(OXCY_SYSTEM_PROMPT.startsWith(MILLIE_VOICE_PROMPT), 'MILLIE_VOICE_PROMPT must still open the prompt, unchanged');
+  assert.ok(CORE_SYSTEM_PROMPT.startsWith(MILLIE_VOICE_PROMPT), 'MILLIE_VOICE_PROMPT must still open the prompt, unchanged');
 });
 
 test('actionPromptBlock() itself still works — kept as a decommissioned fallback, not deleted', () => {
@@ -70,12 +70,14 @@ test('confirmation is never copied into a native tool description — nothing re
   }
 });
 
-// ── Guidance for the 7 named categories survives, natively, verbatim ──────────────────────
-// (22 contracts carry a `guidance` field in total — 18, plus 4 added 2026-08-07 for default
-// identity selection: send_message, send_millie_email, send_millie_sms, send_outlook_email.)
-test('exactly 22 contracts define guidance, and every one appears verbatim in its native description', () => {
+// ── Guidance survives, natively, verbatim ──────────────────────────────────────────────────
+// (32 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
+// 2026-08-07 when the prompt restructure moved tool-specific disambiguation rules — trains vs
+// directions, music vs calendar, place vs shopping, messaging register, email tone, forget_memory
+// scope — out of the numbered static prompt and onto the tool they actually govern.)
+test('exactly 32 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 22);
+  assert.equal(withGuidance.length, 32);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -117,6 +119,57 @@ test('calendar read-vs-write: the write-only guidance survives, and the read act
   assert.doesNotMatch(decls.get_calendar_events.description, /read-only calendar language/);
 });
 
+// ── Phase 6 (2026-08-07): disambiguation rules moved out of the numbered static prompt onto
+// the tool they actually govern, when the rule was about constructing/choosing THAT tool's call
+// rather than general behaviour. ────────────────────────────────────────────────────────────
+test('trains vs directions: search_trains/station_board/plan_trip defer to grounded search, get_directions covers generic routes', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.search_trains.description, /Prefer a grounded search answer over this/);
+  assert.match(decls.station_board.description, /Prefer a grounded search answer over this/);
+  assert.match(decls.plan_trip.description, /Prefer a grounded search answer over this/);
+  assert.match(decls.get_directions.description, /generic local directions, walking, driving, and bus questions/);
+  assert.match(decls.get_directions.description, /Never pretend a route opened if all you have is a text answer/);
+});
+
+test('calendar beats music: create_calendar_event/create_outlook_event warn against the play_music/add_to_music_playlist mixup', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.create_calendar_event.description, /Calendar beats music/);
+  assert.match(decls.create_outlook_event.description, /Calendar beats music/);
+});
+
+test('music: play_music requires search-grounded resolution for trending/chart queries; add_to_music_playlist is distinguished from playback', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.play_music.description, /first resolve the exact title\/artist via search grounding/);
+  assert.match(decls.add_to_music_playlist.description, /use play_music instead for immediate playback/);
+});
+
+test('find_place: natural-phrase place lookup, never product search/shopping', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.find_place.description, /do not ask for a full address or branch details/);
+  assert.match(decls.find_place.description, /Never use this for product searches, price lookups, or online shopping/);
+});
+
+test('run_browser_task: price-correction guidance re-checks the same retailer', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.run_browser_task.description, /always re-check the exact same retailer\/site that produced the previous price/);
+});
+
+test('book_uber: natural destination phrase, never an invented address', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.book_uber.description, /never invent a branch address/);
+});
+
+test('conversational messaging register: send_message and send_telegram both carry it', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.send_message.description, /Never paste a "saying X" clause verbatim/);
+  assert.match(decls.send_telegram.description, /Never paste a "saying X" clause verbatim/);
+});
+
+test('forget_memory: explicit guidance for scope "recent" vs "all"', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.forget_memory.description, /use scope "recent" unless they clearly mean all memory/);
+});
+
 test('email drafting: send_email guidance survives natively, plus the body/tone parameter hints', () => {
   const decls = nativeDescriptions();
   assert.match(decls.send_email.description, /Do not ask for a subject/);
@@ -124,6 +177,15 @@ test('email drafting: send_email guidance survives natively, plus the body/tone 
   assert.match(decls.send_email.description, /Match both the user tone and the thread formality/);
   assert.match(decls.send_email.parameters.properties.body.description, /never a terse literal fragment/);
   assert.match(decls.send_email.parameters.properties.tone.description, /casual, warm, professional/);
+});
+
+test('email tone guidance (moved from the static prompt): cliches, requested tone, placeholder safety net, on both user-identity email tools', () => {
+  const decls = nativeDescriptions();
+  for (const type of ['send_email', 'send_outlook_email']) {
+    assert.match(decls[type].description, /avoid empty cliches like "I hope this email finds you well"/, `${type} missing cliche guidance`);
+    assert.match(decls[type].description, /casual, friendly, firm, apologetic, confident, less desperate, short, professional/, `${type} missing tone list`);
+    assert.match(decls[type].description, /never send a placeholder or generic template body/, `${type} missing placeholder safety net`);
+  }
 });
 
 test('default identity selection: Millie-identity vs personal-mailbox guidance survives natively on all four contracts', () => {

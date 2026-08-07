@@ -9,7 +9,6 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
-const { buildMillieSystemPrompt } = require('../prompts');
 const taskManager = require('./task-manager');
 
 // Simple in-memory for traces during a run; production should persist
@@ -228,7 +227,9 @@ async function runAgentLoop({
   }
 
   const baseConfig = {
-    systemInstruction: buildMillieSystemPrompt(dynamicSystemPrompt),
+    // dynamicSystemPrompt is always a fully-composed prompt now (built by the caller via
+    // buildSystemPrompt), not a fragment needing a static prefix.
+    systemInstruction: dynamicSystemPrompt,
     temperature: 0.2,
     topP: 0.8,
     tools: buildToolsForGemini ? buildToolsForGemini(useSearch) : [{ functionDeclarations: [] }],
