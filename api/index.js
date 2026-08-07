@@ -374,6 +374,69 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
   }
 });
 
+app.post('/webhooks/millie-email', express.json(), async (req, res) => {
+  // Always 200 quickly — providers retry on non-2xx, and a malformed/unmatched
+  // inbound email is not the sender's problem to see an error for.
+  res.status(200).json({ received: true });
+  try {
+    const { parseInboundPayload } = require('../connectors/millie-email-resend');
+    const normalized = parseInboundPayload(req.body);
+    if (!normalized?.toAddress || !normalized.fromAddress) return;
+
+    const { data: handles } = await supabase
+      .from('millie_identity_handles')
+      .select('*')
+      .eq('channel_type', 'email')
+      .eq('handle_value', normalized.toAddress)
+      .eq('status', 'active');
+    const handle = handles?.[0];
+    if (!handle) {
+      log('warn', 'millie_email.inbound.no_matching_handle', { to: normalized.toAddress });
+      return;
+    }
+    const { data: identities } = await supabase.from('millie_identities').select('*').eq('id', handle.millie_identity_id);
+    const identity = identities?.[0];
+    if (!identity) return;
+
+    const { findOrCreateParticipant } = require('./services/participants');
+    const { getOrCreateConversation, appendEvent, findOpenConversationsForParticipant } = require('./services/external-conversations');
+    const { classifyReply } = require('./services/reply-policy');
+
+    const { participant, address } = await findOrCreateParticipant(supabase, identity.user_id, {
+      displayName: normalized.fromAddress, channelType: 'email', addressValue: normalized.fromAddress
+    });
+
+    const openConversations = await findOpenConversationsForParticipant(supabase, participant.id);
+    // More than one open conversation with the same participant: do not guess which
+    // one this reply belongs to. Attach to the most recently active one and rely on
+    // the surfaced update carrying enough context for the user to notice if it's
+    // wrong — a stronger disambiguation (asking the user which thread) is future
+    // work, not silently picking without any signal at all.
+    const conversation = openConversations.length
+      ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
+      : (await getOrCreateConversation(supabase, {
+        userId: identity.user_id, millieIdentityId: identity.id, participantId: participant.id
+      })).conversation;
+
+    const decision = classifyReply(normalized.body);
+    await appendEvent(supabase, {
+      conversationId: conversation.id,
+      channelType: 'email',
+      direction: 'inbound',
+      participantAddressId: address.id,
+      millieIdentityHandleId: handle.id,
+      providerEventId: normalized.providerMessageId,
+      subject: normalized.subject,
+      body: normalized.body,
+      needsDecision: decision === 'ask',
+      rawProviderPayload: req.body
+    });
+    log('info', 'millie_email.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
+  } catch (err) {
+    log('error', 'millie_email.inbound.error', { error: err.message });
+  }
+});
+
 // Only the continuity endpoints take a whole vendor export. Raising the limit globally to
 // suit them would hand every other route — /chat included — a 40x larger body to absorb.
 // The global parser must SKIP those paths rather than run first: body-parser marks the
