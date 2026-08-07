@@ -2629,6 +2629,43 @@ function looksLikeMessageAddress(value) {
   return /^\+?[0-9][0-9\s().-]{5,}$/.test(text) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
 }
 
+// DB-backed daily send cap for Millie's own identity — not the existing in-memory
+// createRateLimiter, whose Map doesn't survive a restart and isn't shared across
+// Cloud Run instances if the service scales beyond one. This counts real rows
+// instead. Millie's identity has no human tap-to-send safety net the way
+// send_message's device-level deep link does, so this is a real abuse guard, not
+// a formality.
+// Testable without hitting Supabase: __testOverride lets tests inject the count
+// function directly, matching this file's existing convention of exposing a narrow
+// test seam rather than mocking the module's own `supabase` client.
+async function countMillieSendsToday(userId, channelType) {
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  const { data: identities } = await supabase.from('millie_identities').select('id').eq('user_id', userId).limit(1);
+  const identityId = identities?.[0]?.id;
+  if (!identityId) return 0;
+  const { data: handles } = await supabase.from('millie_identity_handles').select('id').eq('millie_identity_id', identityId).eq('channel_type', channelType);
+  const handleIds = (handles || []).map(h => h.id);
+  if (!handleIds.length) return 0;
+  const { count } = await supabase
+    .from('external_conversation_events')
+    .select('id', { count: 'exact', head: true })
+    .eq('direction', 'outbound')
+    .in('millie_identity_handle_id', handleIds)
+    .gte('created_at', since.toISOString());
+  return count || 0;
+}
+
+async function checkMillieSendCap(userId, channelType, countFn = countMillieSendsToday) {
+  const cap = Number(process.env.MILLIE_DAILY_SEND_CAP) || 20;
+  const sentToday = await countFn(userId, channelType);
+  if (sentToday >= cap) {
+    return { allowed: false, message: `Millie has reached her sending limit for today (${cap}). Try again tomorrow.` };
+  }
+  return { allowed: true };
+}
+checkMillieSendCap.__testOverride = (countFn, userId, channelType) => checkMillieSendCap(userId, channelType, countFn);
+
 function resolveNativeMessageContact(contact, nativeHints) {
   if (looksLikeMessageAddress(contact)) {
     return { label: contact, value: contact };
@@ -2760,9 +2797,6 @@ async function executeAction(userId, action, params, context = {}) {
       const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
       const { sendMillieEmail } = require('../connectors/millie-email-resend');
 
-      // TEMPORARY: replaced with the real DB-backed daily cap in the abuse-guard task —
-      // this stub always allows, so it's a no-op gate until then, not a missing check.
-      const checkMillieSendCap = async () => ({ allowed: true });
       const cap = await checkMillieSendCap(userId, 'email');
       if (!cap.allowed) return { success: false, error: cap.message };
 
@@ -2818,9 +2852,6 @@ async function executeAction(userId, action, params, context = {}) {
       const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
       const { sendMillieSms } = require('../connectors/millie-sms-twilio');
 
-      // TEMPORARY: replaced with the real DB-backed daily cap in the abuse-guard task —
-      // this stub always allows, so it's a no-op gate until then, not a missing check.
-      const checkMillieSendCap = async () => ({ allowed: true });
       const cap = await checkMillieSendCap(userId, 'phone_sms');
       if (!cap.allowed) return { success: false, error: cap.message };
 
@@ -10153,3 +10184,4 @@ module.exports.extractAlreadyStatedContext = extractAlreadyStatedContext;
 module.exports.extractShoppingContextHints = extractShoppingContextHints;
 module.exports.buildDynamicSystemPrompt = buildDynamicSystemPrompt;
 module.exports.buildQuickTurnContext = buildQuickTurnContext;
+module.exports.checkMillieSendCap = checkMillieSendCap;
