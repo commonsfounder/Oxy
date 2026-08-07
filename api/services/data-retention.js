@@ -26,6 +26,12 @@ const RETENTION_POLICY = {
   native_context: { maxAgeDays: 90, column: 'updated_at', label: 'Device context (location, health snapshots): the single latest snapshot is overwritten on each sync and purged after 90 days of inactivity.' },
   browser_sessions: { maxAgeDays: 90, column: 'updated_at', label: 'Saved website logins for browser tasks: deleted after 90 days unused.' },
   password_reset_tokens: { column: 'expires_at', expireWhenPast: true, label: 'Password-reset tokens: deleted as soon as they expire.' },
+  // Identity, handle, participant, and conversation *records* are relationship
+  // metadata, not message content, and are intentionally left out of this policy —
+  // only the event bodies (the actual correspondence) get a retention clock, mirroring
+  // how conversations (chat) has one but connectors (the relationship, not its
+  // content) does not.
+  external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Millie has sent or received on your behalf: deleted after 180 days.' },
 };
 
 // Pure: returns the ids of conversation rows that should be deleted.

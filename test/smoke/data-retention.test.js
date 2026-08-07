@@ -93,3 +93,8 @@ test('runRetentionSweep skips the conversations delete when nothing is expired',
 test('RETENTION_POLICY documents the conversation window the privacy page promises', () => {
   assert.strictEqual(RETENTION_POLICY.conversations.maxAgeDays, 180);
 });
+
+test('external_conversation_events has a retention policy entry', () => {
+  assert.ok(RETENTION_POLICY.external_conversation_events);
+  assert.equal(RETENTION_POLICY.external_conversation_events.maxAgeDays, 180);
+});
