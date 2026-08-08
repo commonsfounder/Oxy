@@ -48,6 +48,13 @@ function classifyForCleanup(email, triageSignal) {
   if (triageSignal.category === 'bulk updates') {
     return { archive: true, unsubscribeCandidate: Boolean(email?.listUnsubscribe), reason: 'promotional or bulk mail' };
   }
+  // Job alerts were classified into their own bucket and then never acted on, so the single
+  // largest junk category in a real inbox (dozens of Indeed/StarNow/Workcircle digests a day)
+  // survived every cleanup. They are already scored as explicitly low-value, and this is the
+  // same reversible archive as any other bulk mail.
+  if (triageSignal.category === 'job alerts') {
+    return { archive: true, unsubscribeCandidate: Boolean(email?.listUnsubscribe), reason: 'automated job alert' };
+  }
   return { archive: false, unsubscribeCandidate: false, reason: 'not clearly junk' };
 }
 

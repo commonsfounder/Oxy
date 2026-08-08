@@ -216,6 +216,23 @@ function stripHtml(html = '') {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
+    // Currency entities, and numeric entities generally. Found against a real mailbox: a
+    // Travelzoo receipt renders its total as `<b>&pound;1</b>`, so without this the body
+    // reaching the receipt extractor contains "Total &pound;1" — no £ character anywhere,
+    // and a genuine receipt is silently worth nothing. HTML-only mail is the common case for
+    // receipts, not the exception.
+    .replace(/&pound;/gi, '£')
+    .replace(/&euro;/gi, '€')
+    .replace(/&yen;/gi, '¥')
+    .replace(/&cent;/gi, '¢')
+    .replace(/&#(\d{2,5});/g, (_, code) => {
+      const num = Number(code);
+      return num >= 32 && num <= 0x10ffff ? String.fromCodePoint(num) : ' ';
+    })
+    .replace(/&#x([0-9a-f]{2,5});/gi, (_, hex) => {
+      const num = parseInt(hex, 16);
+      return num >= 32 && num <= 0x10ffff ? String.fromCodePoint(num) : ' ';
+    })
     .replace(/\s+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')

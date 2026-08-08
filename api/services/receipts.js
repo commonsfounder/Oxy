@@ -26,7 +26,10 @@ const CURRENCY_SYMBOLS = { '£': 'GBP', '$': 'USD', '€': 'EUR', '¥': 'JPY' };
 const CURRENCY_CODES = ['GBP', 'USD', 'EUR', 'JPY', 'CAD', 'AUD', 'CHF', 'SEK', 'NOK', 'DKK', 'PLN'];
 
 // Only these labels license reading a number as "what was charged".
-const TOTAL_LABEL = '(?:order\\s+total|grand\\s+total|total\\s+(?:paid|charged|cost|price|amount)|total|amount\\s+(?:paid|charged|due)|you\\s+(?:paid|were\\s+charged)|payment\\s+(?:total|amount)|charged|paid)';
+// "(open) invoice amount (of)" comes from a real Hetzner invoice — without it a genuine
+// €1.44 charge extracted as nothing. Deliberately NOT a bare "amount of": that would let any
+// sentence mentioning a number become a total.
+const TOTAL_LABEL = '(?:order\\s+total|grand\\s+total|total\\s+(?:paid|charged|cost|price|amount)|total|(?:open\\s+)?invoice\\s+amount(?:\\s+of)?|amount\\s+(?:paid|charged|due)|you\\s+(?:paid|were\\s+charged)|payment\\s+(?:total|amount)|charged|paid)';
 const AMOUNT = '([£$€¥]\\s?\\d[\\d,]*(?:\\.\\d{2})?|\\d[\\d,]*(?:\\.\\d{2})?\\s?(?:GBP|USD|EUR|JPY|CAD|AUD))';
 const TOTAL_PATTERN = new RegExp(`${TOTAL_LABEL}\\s*(?:\\(inc[^)]*\\))?\\s*[:\\-–]?\\s*${AMOUNT}`, 'i');
 const REFUND_AMOUNT_PATTERN = new RegExp(`(?:refund(?:ed)?(?:\\s+(?:amount|total|of))?|credited)\\s*[:\\-–]?\\s*${AMOUNT}`, 'i');
@@ -35,12 +38,37 @@ const REFUND_AMOUNT_PATTERN = new RegExp(`(?:refund(?:ed)?(?:\\s+(?:amount|total
 // "confirmation" as the order id. Global, because the first syntactic match is often not the
 // first VALID one and giving up after it loses the real reference further down the email.
 const ORDER_ID_PATTERN = /\b(?:order|reference|confirmation|invoice|booking)\s*(?:(?:number|no\.?|id|ref(?:erence)?\.?|#)\s*[:#]?\s*|[:#]\s*)([A-Z0-9][A-Z0-9\-_/]{4,24})\b/gi;
+// A reference with NO separator at all ("invoice 089001095497", straight from a real Hetzner
+// mail). Requires a long, mostly-numeric run so it cannot swallow an ordinary following word.
+const BARE_REFERENCE_PATTERN = /\b(?:order|reference|confirmation|invoice|booking)\s+(\d[\dA-Z\-_/]{5,23})\b/gi;
 
 // Recurring/subscription language — reported as a signal, never as a separate guessed total.
 const SUBSCRIPTION_PATTERN = /\b(subscription|monthly plan|annual plan|auto-?renew(?:al|s|ed)?|recurring (?:payment|charge)|membership (?:fee|renewal)|your plan renews|next billing date)\b/i;
 
+// Money the user OWES is not money the user SPENT. A real mailbox is full of these — Clearpay
+// instalment reminders, "your payment failed to process", arrears notices — and they carry
+// exactly the labelled-amount shape a receipt does ("Total amount due £12.50"). Counting them
+// as spending would inflate every total with charges that never happened, some of them twice
+// (reminder, then failure, then the real receipt). They are obligations, not purchases.
+const PAYMENT_REQUEST_PATTERN = /\b(payment reminder|is due in|due date|now overdue|is overdue|payment is overdue|late fees?|failed to process|payment failed|unable to charge|charge failed|missed payments?|sums in arrears|notice of sums|amount outstanding|please settle|settle the invoice immediately|minimum payment)\b/i;
+
+// Currency entities again, defensively: this extractor is also fed by paths that did not go
+// through the Gmail connector's stripHtml, and a body containing "&pound;1" instead of "£1"
+// silently yields no total at all. Found against a real HTML-only receipt.
+function decodeCurrencyEntities(value) {
+  return String(value ?? '')
+    .replace(/&pound;/gi, '£')
+    .replace(/&euro;/gi, '€')
+    .replace(/&yen;/gi, '¥')
+    .replace(/&#163;/g, '£')
+    .replace(/&#8364;/g, '€')
+    .replace(/&#36;/g, '$')
+    .replace(/&#x00a3;/gi, '£')
+    .replace(/&#x20ac;/gi, '€');
+}
+
 function clean(value, max = 400) {
-  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const text = decodeCurrencyEntities(value).replace(/\s+/g, ' ').trim();
   return text.length > max ? text.slice(0, max) : text;
 }
 
@@ -86,11 +114,18 @@ function merchantFromSender({ senderAddress = '', senderName = '', from = '' } =
 
 // A receipt is transactional content, not a sender shape: order confirmations routinely come
 // from no-reply@ addresses, and marketing routinely comes from a friendly name.
+function isPaymentRequest(email = {}) {
+  const haystack = `${clean(email.subject, 300)} ${clean(email.body || email.snippet, 4000)}`;
+  return PAYMENT_REQUEST_PATTERN.test(haystack);
+}
+
 function isReceiptLike(email = {}) {
   const subject = clean(email.subject, 300);
   const body = clean(email.body || email.snippet, 4000);
   const haystack = `${subject} ${body}`;
   if (!RECEIPT_SUBJECT_PATTERN.test(haystack)) return false;
+  // A bill, a chase or a failed charge is not a purchase, however receipt-shaped it looks.
+  if (PAYMENT_REQUEST_PATTERN.test(haystack)) return false;
   // Promotional mail that merely mentions "your order" (e.g. "rate your order — 20% off your
   // next one") must not be mined for a total. A labelled total in the same email overrides
   // this only when the promotional wording is absent from the SUBJECT.
@@ -112,12 +147,15 @@ function extractItems(body = '') {
 }
 
 function extractOrderId(text = '') {
-  for (const match of String(text).matchAll(ORDER_ID_PATTERN)) {
-    const id = match[1].toUpperCase();
-    // Reject things that are obviously not identifiers: a bare year, a word with no digits.
-    if (/^\d{4}$/.test(id)) continue;
-    if (!/\d/.test(id)) continue;
-    return id;
+  const source = String(text);
+  for (const pattern of [ORDER_ID_PATTERN, BARE_REFERENCE_PATTERN]) {
+    for (const match of source.matchAll(pattern)) {
+      const id = match[1].toUpperCase();
+      // Reject things that are obviously not identifiers: a bare year, a word with no digits.
+      if (/^\d{4}$/.test(id)) continue;
+      if (!/\d/.test(id)) continue;
+      return id;
+    }
   }
   return null;
 }
@@ -128,7 +166,9 @@ function extractReceipt(email = {}) {
   if (!isReceiptLike(email)) return null;
 
   const subject = clean(email.subject, 300);
-  const body = String(email.body || email.snippet || '');
+  // Decoded, not raw: an HTML-only receipt reaches here with "&pound;1" unless every upstream
+  // path stripped entities, and the total pattern needs a real currency symbol to match.
+  const body = decodeCurrencyEntities(email.body || email.snippet || '');
   const haystack = `${subject}\n${body}`;
 
   const totalMatch = haystack.match(TOTAL_PATTERN);
@@ -337,6 +377,7 @@ function formatPurchaseLine(purchase = {}) {
 module.exports = {
   RECEIPT_SUBJECT_PATTERN,
   isReceiptLike,
+  isPaymentRequest,
   extractReceipt,
   extractOrderId,
   extractItems,

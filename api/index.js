@@ -8437,6 +8437,11 @@ function emailTriageSignals(email = {}, message = '') {
   if (/\?|\b(can you|could you|please|let me know|reply|respond|confirm|approve|send me|need you to)\b/i.test(haystack)) add(3, 'asks for a response');
   if (/\b(today|tomorrow|tonight|asap|urgent|deadline|due|expires?|by \d|before \d|appointment|meeting|interview)\b/i.test(haystack)) add(2, 'time-sensitive');
   if (/\b(security|sign-?in|login|password|verification|suspicious|fraud|payment failed|failed payment|declined|overdue|disruption|cancelled|delayed|problem with your order|action required)\b/i.test(haystack)) add(4, 'needs attention');
+  // Debt/arrears wording, added after a REAL Capital One "Notice of Sums in Arrears" scored
+  // -2 and came out archivable: none of the words above appear in it, while its sending
+  // domain (notification.capitalone.co.uk) collected the automated-sender penalty. Archiving
+  // a genuine arrears notice is the worst thing inbox cleanup could do.
+  if (/\b(arrears|sums in arrears|missed (?:a )?payments?|missed two or more|final notice|default notice|debt|collections|repossess|payment is (?:now )?overdue|late fees? (?:now )?apply|settle the invoice|please settle)\b/i.test(haystack)) add(5, 'money you owe');
   if (/\b(school|teacher|university|work|manager|client|invoice|contract|doctor|dentist|gp|travel|flight|train|hotel)\b/i.test(haystack)) add(2, 'personal/work signal');
   // Transactional mail (receipts, order/shipping/booking confirmations, refunds) is very
   // often sent from an automated-looking address (order-confirm@, noreply@, tracking@) —
@@ -8447,6 +8452,13 @@ function emailTriageSignals(email = {}, message = '') {
 
   const automatedSender = /\b(no-?reply|noreply|donotreply|mailer-daemon|notification|notifications|alerts?|digest|newsletter|marketing)\b/i.test(sender);
   if (automatedSender) low(2, 'automated sender');
+  // A List-Unsubscribe header is what actually makes something mailing-list mail. Real
+  // promotional mail (an abandoned-cart nudge saying "complete your order") often carries no
+  // marketing WORDS at all, so content alone left it unclassified and uncleaned. Recorded as
+  // a signal here; whether it counts as bulk is decided below, so a receipt that happens to
+  // come from a list-sending domain is not reclassified as junk.
+  const mailingList = Boolean(email.listUnsubscribe);
+  if (mailingList) low(1, 'mailing list header');
   if (/\b(newsletter|digest|roundup|recommended|recommendations|promotion|sale|offer|unsubscribe|manage preferences|marketing)\b/i.test(haystack)) low(3, 'bulk or promotional');
   if (/\b(job alert|jobs? alert|new jobs?|recommended jobs?|vacanc(?:y|ies)|workcircle|indeed|findeveryjob|totaljobs|reed\.co\.uk)\b/i.test(haystack)) {
     if (jobContext) add(2, 'job context match');
@@ -8461,8 +8473,12 @@ function emailTriageSignals(email = {}, message = '') {
   // CONTENT (newsletter/offer/unsubscribe wording) always counts on its own.
   const hasBulkContent = lowSignals.includes('bulk or promotional');
   const hasOnlyAutomatedSenderPenalty = lowSignals.includes('automated sender') && signals.length === 0;
+  // Same rule for the list header as for the sender shape: it only makes something bulk when
+  // nothing positive fired. This is what keeps a real Travelzoo RECEIPT — which carries both
+  // a List-Unsubscribe header and an unsubscribe footer — out of the archive pile.
+  const isUnredeemedListMail = mailingList && signals.length === 0;
   const category = lowSignals.includes('generic job alert') ? 'job alerts'
-    : (hasBulkContent || hasOnlyAutomatedSenderPenalty) ? 'bulk updates'
+    : (hasBulkContent || hasOnlyAutomatedSenderPenalty || isUnredeemedListMail) ? 'bulk updates'
       : score >= 3 ? 'actionable messages'
         : 'other messages';
 

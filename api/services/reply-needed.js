@@ -12,11 +12,30 @@
 
 const MAX_THREAD_TEXT = 6000;
 
+// Content that says, in so many words, that something is waiting on the user. Real platforms
+// send exactly this from no-reply addresses — a Y Combinator "co-founder matching invite is
+// still waiting for your response" was being dropped before it ever reached judgment purely
+// because of its sending address. The pre-filter is a cheap screen for obvious noise; it must
+// not silently discard a message whose own text says the user is the blocker.
+// "Please confirm" is deliberately NOT here: real marketing uses it constantly ("Please
+// Confirm: Your £19.99 Offer!"), and including it pulled a Temu promo out of the noise filter
+// during real-inbox testing. Every phrase below is about a RESPONSE being awaited, not about
+// clicking something.
+const EXPLICITLY_AWAITING_USER = /\b(waiting for your (?:response|reply|answer)|awaiting your (?:response|reply|approval)|your response is (?:needed|required)|needs your (?:approval|response|attention)|respond by|reply by|please (?:respond|reply)|invitation .{0,40}waiting|still waiting for)\b/i;
+
+function looksExplicitlyAwaitingUser(latestMessage = {}) {
+  const haystack = `${latestMessage.subject || ''} ${latestMessage.snippet || latestMessage.body || ''}`;
+  return EXPLICITLY_AWAITING_USER.test(haystack);
+}
+
 function isObviouslyNoReplyNeeded(latestMessage = {}) {
   const sender = String(latestMessage.senderAddress || latestMessage.from || '').toLowerCase();
   const subject = String(latestMessage.subject || '').toLowerCase();
   const snippet = String(latestMessage.snippet || latestMessage.body || '').toLowerCase();
   const haystack = `${subject} ${snippet}`;
+  // Checked first: an explicit "this is waiting on you" outranks every cheap noise heuristic
+  // below, including the sending address and the list header.
+  if (looksExplicitlyAwaitingUser(latestMessage)) return false;
   if (/\b(no-?reply|noreply|donotreply|mailer-daemon)\b/.test(sender)) return true;
   if (latestMessage.listUnsubscribe) return true;
   if (/\b(receipt|invoice|order confirm|has shipped|out for delivery|been delivered|tracking number|newsletter|digest|unsubscribe|promo(?:tion)?|% off|sale ends)\b/i.test(haystack)) return true;
@@ -135,6 +154,7 @@ function formatReplyNeededSummary(items = [], { maxItems = 8 } = {}) {
 
 module.exports = {
   isObviouslyNoReplyNeeded,
+  looksExplicitlyAwaitingUser,
   latestMessagePerThread,
   buildReplyNeededPrompt,
   parseReplyNeededResponse,
