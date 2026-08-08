@@ -10,6 +10,7 @@ Rules:
 - Balance activities across morning / afternoon / evening; respect travel pace preference
 - Include estimated costs per activity where known; use null when unknown
 - Do not invent specific prices, availability, or booking confirmations — mark estimates as approximate
+- If real, current research is provided below, treat it as ground truth for opening hours, prices, closures, and travel times; do not override it with prior knowledge, and do not schedule a visit to something the research says is closed on that day
 - Respect all dietary requirements and accessibility needs
 - Suggest alternatives for each day's highlight activity
 
@@ -58,6 +59,12 @@ function buildItineraryPrompt(requirements, searchResults, userProfile) {
   const sections = [
     `Trip requirements: ${JSON.stringify(requirements)}`,
     userProfile ? `User travel profile: ${JSON.stringify(userProfile)}` : '',
+    // Real, current grounded web research (opening hours, prices, closures, transit) — the
+    // only live-facts source this actually has today. hotels/activities/flights below stay
+    // supported for a future real structured search, but nothing currently populates them;
+    // do not invent data to fill them.
+    searchResults?.groundedNotes
+      ? `Real, current research (grounded web search — treat as the source of truth for anything it covers; do not contradict it):\n${searchResults.groundedNotes}` : '',
     searchResults?.hotels?.length
       ? `Available hotels (pre-ranked): ${JSON.stringify(searchResults.hotels.slice(0, 3))}` : '',
     searchResults?.activities?.length
@@ -78,6 +85,24 @@ function buildModifyPrompt(itinerary, instruction, requirements) {
   ].join('\n\n');
 }
 
+// A trailing comma before a closing } or ] is invalid JSON but a common model slip on a long
+// generated payload — live verified 2026-08-08 (a real Bath itinerary call failed with
+// "Expected double-quoted property name" from exactly this). Stripping it is safe: it only
+// removes a comma immediately followed by whitespace and a closing bracket, never touches a
+// comma that separates real content.
+function parseModelJson(raw) {
+  const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  try {
+    return JSON.parse(clean);
+  } catch (e) {
+    try {
+      return JSON.parse(clean.replace(/,(\s*[}\]])/g, '$1'));
+    } catch {
+      throw e;
+    }
+  }
+}
+
 async function generateItinerary(requirements, searchResults = {}, userProfile = null, callModel) {
   if (!callModel) throw new Error('callModel is required for itinerary generation.');
   if (!requirements?.destination) throw new Error('destination is required in requirements.');
@@ -86,8 +111,7 @@ async function generateItinerary(requirements, searchResults = {}, userProfile =
   const raw = await callModel(ITINERARY_SYSTEM, prompt);
   if (!raw) throw new Error('No response from model.');
 
-  const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-  const itinerary = JSON.parse(clean);
+  const itinerary = parseModelJson(raw);
 
   // Sanity check
   if (!itinerary.days || !Array.isArray(itinerary.days)) {
@@ -105,8 +129,7 @@ async function modifyItinerary(existingItinerary, instruction, requirements, cal
   const raw = await callModel(MODIFY_SYSTEM, prompt);
   if (!raw) throw new Error('No response from model.');
 
-  const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
-  const result = JSON.parse(clean);
+  const result = parseModelJson(raw);
 
   if (!result.days) throw new Error('Model returned invalid modification structure.');
 
@@ -142,5 +165,6 @@ module.exports = {
   modifyItinerary,
   itineraryToText,
   buildItineraryPrompt,
-  buildModifyPrompt
+  buildModifyPrompt,
+  parseModelJson
 };

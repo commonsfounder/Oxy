@@ -6,7 +6,8 @@ const {
   modifyItinerary,
   itineraryToText,
   buildItineraryPrompt,
-  buildModifyPrompt
+  buildModifyPrompt,
+  parseModelJson
 } = require('../../api/services/itinerary-engine');
 
 const { rankHotels, rankActivities, rankFlights } = require('../../api/services/travel-ranking');
@@ -75,6 +76,25 @@ test('generateItinerary uses model output and returns structured itinerary', asy
   assert.equal(result.totalDays, 3);
   assert.ok(Array.isArray(result.days));
   assert.equal(result.days[0].morning.why, 'Historic temple');
+});
+
+// Live verified 2026-08-08: a real itinerary generation call failed with "Expected
+// double-quoted property name in JSON" — the model's own JSON payload had a trailing comma
+// before a closing bracket. This is the exact fix.
+test('parseModelJson tolerates a trailing comma before a closing brace/bracket (real live failure mode)', () => {
+  const withTrailingCommas = '{"days":[{"day":1,"activities":["Roman Baths",],},],}';
+  const parsed = parseModelJson(withTrailingCommas);
+  assert.deepEqual(parsed, { days: [{ day: 1, activities: ['Roman Baths'] }] });
+});
+
+test('parseModelJson still throws on genuinely broken JSON, not just anything', () => {
+  assert.throws(() => parseModelJson('{"days": [1, 2'));
+});
+
+test('generateItinerary succeeds even when the model emits a trailing comma', async () => {
+  const callModel = async () => '{"title":"Bath","destination":"Bath","totalDays":1,"days":[{"day":1,"theme":"History",},],}';
+  const result = await generateItinerary({ destination: 'Bath' }, {}, null, callModel);
+  assert.equal(result.days.length, 1);
 });
 
 test('generateItinerary throws on invalid model output', async () => {

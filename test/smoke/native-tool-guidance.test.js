@@ -82,10 +82,16 @@ test('confirmation is never copied into a native tool description — nothing re
 // unsubscribe_email, clean_inbox, plus 1 more added 2026-08-08 for find_reply_needed
 // ("who's waiting on me?"). create_scheduled_task and run_browser_task's EXISTING guidance
 // were also extended the same day for delivery-tracking watches, but that's the same contract
-// gaining more text, not a new one, so it doesn't change this count.)
-test('exactly 39 contracts define guidance, and every one appears verbatim in its native description', () => {
+// gaining more text, not a new one, so it doesn't change this count. Plus 4 more added
+// 2026-08-08 for real trip planning: plan_itinerary, modify_itinerary, and guidance newly added to
+// the previously-bare search_flights/search_hotels steering the model away from treating their
+// deep-link output as real prices or availability. plan_itinerary is a distinct key from the
+// pre-existing plan_trip (a point-to-point route/train planner) — they briefly collided under
+// the same name during development, which silently discarded plan_itinerary's contract entirely
+// until the rename fixed it; the count here is the tripwire that would have caught that.)
+test('exactly 43 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 39);
+  assert.equal(withGuidance.length, 43);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);

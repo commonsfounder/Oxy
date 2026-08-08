@@ -10,6 +10,7 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
 const taskManager = require('./task-manager');
+const { isTravelPlanningRequest } = require('./travel-concierge');
 
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
@@ -215,7 +216,14 @@ async function runAgentLoop({
   // before the first real turn even starts. Word-boundaried (`\b`) — the un-boundaried
   // version matched "book" inside "MacBook", so this fired on every MacBook order anyway
   // despite the keyword gate above.
-  if (/\b(plan|book|research|find|organize|handle|arrange)\b/i.test(initialMessage)) {
+  // Trip-planning requests are excluded: plan_itinerary already IS the single research+build step
+  // (real grounded search feeding itinerary generation in one call). Auto-planning here used to
+  // inject a generic "research each piece separately" framing ahead of the model's first real
+  // turn, which measurably steered it into free-form web_search + hand-written prose instead of
+  // the actual tool — defeating the point of a structured, savable, editable itinerary (live
+  // verified 2026-08-08: "Plan me a Saturday day trip to Bath..." never called plan_itinerary at all
+  // until this exclusion was added).
+  if (/\b(plan|book|research|find|organize|handle|arrange)\b/i.test(initialMessage) && !isTravelPlanningRequest(initialMessage)) {
     try {
       const plan = await generatePlan(userId, initialMessage, context.summary || '', modelName, provider);
       if (plan?.steps?.length > 1) {

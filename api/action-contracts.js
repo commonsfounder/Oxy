@@ -260,6 +260,46 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // Real trip planning: a grounded web search feeds itinerary-engine.js's generation, so
+  // opening hours/prices/closures/travel-time claims come from an actual current search, not
+  // model recall. Deliberately does not touch search_flights/search_hotels (see their own
+  // guidance) or itinerary-engine.js's dormant hotels/activities/flights fields — nothing real
+  // populates those today.
+  // Named plan_itinerary, not plan_trip: plan_trip already exists (below, near search_trains)
+  // as a train/route planner between two points — a different, unrelated capability. Do not
+  // rename either without checking both.
+  plan_itinerary: {
+    risk: 'low',
+    required: ['destination'],
+    optional: ['origin', 'start_date', 'end_date', 'duration_days', 'party_size', 'budget', 'budget_currency', 'transport_mode', 'interests', 'dietary', 'accessibility', 'pace', 'already_done', 'notes'],
+    inputExample: { destination: 'Bath', start_date: 'Saturday', duration_days: 2, party_size: 2, budget: 200, budget_currency: '£', interests: ['culture', 'food'] },
+    paramHints: {
+      interests: 'array of interest keywords, e.g. ["culture","food","outdoors"]',
+      dietary: 'array of dietary requirements, e.g. ["vegetarian"]',
+      already_done: 'anything the user says they have already done/seen, so it is not repeated',
+      pace: 'e.g. "relaxed, do not want to rush" or "pack in as much as possible"'
+    },
+    guidance: 'Use for "plan me a trip to X", "plan Saturday in X", a weekend/day trip, or any request for a real day-by-day plan — not for a single fact lookup (use web_search for that), and not the same thing as plan_trip (that is a point-to-point route/train planner, not a day-by-day itinerary). Always call this tool for that, even if you could piece a plan together yourself from your own web_search calls first — a hand-written itinerary in chat prose cannot be saved or edited later; only the structured itinerary this action returns can. Extract every constraint the user actually stated (dates, arrival/departure times, starting location, budget, who is going, transport limits, interests, food preferences, things already booked or already done, accessibility, "keep it walkable", "do not want to rush") into the matching parameter; do not invent constraints the user never gave. The result is a real, time-aware plan grounded in an actual web search done inside this call — do not also call search_flights/search_hotels to "fill in" the itinerary, they only build a browser link and return no real prices or availability. If the user then asks to save it, call workspace_write with a path like trips/<destination>-<date>.json and the CONTENT SET TO THE FULL ITINERARY JSON THIS ACTION RETURNED (not a prose summary) — that is what makes it editable later via modify_itinerary. If asked to add it to the calendar, call create_calendar_event a small number of times for the genuinely meaningful blocks (e.g. one per day or per booked/timed item), never one event per itinerary line. Planning and booking are separate: if the user asks to actually book a hotel, buy tickets, or reserve something from the plan, use run_browser_task against the real site — never say something was booked unless that flow actually confirmed it.',
+    successSummary: 'Itinerary planned',
+    failureSummary: 'Could not plan that trip',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  modify_itinerary: {
+    risk: 'low',
+    required: ['instruction'],
+    optional: ['itinerary', 'workspace_path'],
+    inputExample: { instruction: 'swap the museum for something outdoors', itinerary: '{...the itinerary object plan_itinerary returned...}' },
+    paramHints: {
+      itinerary: 'the exact itinerary JSON object returned by the most recent plan_itinerary call in this conversation — pass it back as-is, do not retype it from memory',
+      workspace_path: 'path of a previously saved itinerary (from workspace_write) to load and edit instead, when the itinerary is not already in this conversation'
+    },
+    guidance: 'Use for incremental edits to a real itinerary — "swap the museum for something outdoors", "move dinner later", "we actually arrive at 12", "cut £30 from the budget" — never for building a new trip from scratch (use plan_itinerary for that). Prefer passing the itinerary you already have from a recent plan_itinerary result; only use workspace_path when the trip was saved earlier and is not already in view. This updates only what the instruction asks for and leaves the rest of the plan intact, unlike calling plan_itinerary again which would regenerate everything.',
+    successSummary: 'Itinerary updated',
+    failureSummary: 'Could not update the itinerary',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',
@@ -708,8 +748,8 @@ const ACTION_CONTRACTS = {
   send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
   book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none' },
   get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none' },
-  search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none' },
-  search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none' },
+  search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none', guidance: 'This only opens a flight-search page as a link — it does not return real prices, availability, or results. Never use it as a data source for plan_itinerary or to answer "how much would flights cost". Use web_search for a real current estimate, or run_browser_task if the user wants to actually look at and book real flights.' },
+  search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none', guidance: 'This only opens a hotel-search page as a link — it does not return real prices, availability, or results. Never use it as a data source for plan_itinerary or to answer "how much would a hotel cost". Use web_search for a real current estimate, or run_browser_task if the user wants to actually look at and book a real hotel.' },
   get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' },
   // Real browser ordering (api/services/browser-task.js) — was built across many sessions
   // but never actually registered here, so it was unreachable from live chat. High risk

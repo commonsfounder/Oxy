@@ -149,6 +149,11 @@ const {
   parseReplyNeededResponse,
   formatReplyNeededSummary
 } = require('./services/reply-needed');
+const {
+  generateItinerary,
+  modifyItinerary,
+  itineraryToText
+} = require('./services/itinerary-engine');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -2248,6 +2253,8 @@ const ACTION_STATUS_LABELS = {
   find_place: 'Finding place',
   get_directions: 'Checking directions',
   plan_trip: 'Planning trip',
+  plan_itinerary: 'Planning itinerary',
+  modify_itinerary: 'Updating itinerary',
   send_telegram: 'Sending Telegram message',
   get_telegram_contacts: 'Checking Telegram contacts',
   search_trains: 'Checking train times',
@@ -3808,6 +3815,159 @@ async function executeAction(userId, action, params, context = {}) {
         scanned: emails.length,
         threadsConsidered: threadContexts.length,
         text: formatReplyNeededSummary(items)
+      };
+    }
+
+    // Real trip planning. Named plan_itinerary, not plan_trip: plan_trip already exists
+    // elsewhere in this switch as a point-to-point route/train planner, an unrelated
+    // capability — do not merge or rename either without checking both. Deliberately does NOT
+    // use search_flights/search_hotels (those only build a browser deep-link, never real
+    // prices or availability) or itinerary-engine.js's dormant hotels/activities/flights
+    // fields (nothing populates them for real) — the only live-facts source here is a real
+    // grounded web search, fed into itinerary-engine.js as groundedNotes. Booking is a
+    // deliberately separate step (see run_browser_task's guidance).
+    case 'plan_itinerary': {
+      const destination = String(params?.destination || '').trim();
+      if (!destination) return { success: false, error: 'plan_itinerary requires destination' };
+
+      const requirements = {
+        destination,
+        origin: params?.origin || undefined,
+        date: params?.start_date || undefined,
+        endDate: params?.end_date || undefined,
+        duration: params?.duration_days || undefined,
+        partySize: params?.party_size || undefined,
+        budget: params?.budget ? `${params?.budget_currency || ''}${params.budget}` : undefined,
+        transportMode: params?.transport_mode || undefined,
+        interests: Array.isArray(params?.interests) ? params.interests : undefined,
+        dietary: Array.isArray(params?.dietary) ? params.dietary : undefined,
+        accessibility: params?.accessibility || undefined,
+        pace: params?.pace || undefined,
+        alreadyDone: params?.already_done || undefined,
+        notes: params?.notes || undefined
+      };
+      Object.keys(requirements).forEach(key => requirements[key] === undefined && delete requirements[key]);
+
+      let groundedNotes = '';
+      let groundedResearch = false;
+      try {
+        const searchQuery = [
+          `Practical trip-planning info for ${destination}`,
+          params?.start_date ? `around ${params.start_date}${params?.end_date ? ` to ${params.end_date}` : ''}` : '',
+          params?.interests?.length ? `for someone interested in ${[].concat(params.interests).join(', ')}` : ''
+        ].filter(Boolean).join(' ');
+        const answer = await webSearchBrain({
+          model: FAST_MODEL,
+          prompt: `Today's date is ${getLocalDateKey()}. ${searchQuery}. Cover: top attractions worth the time with realistic visit durations, current opening hours and any closures, approximate current ticket/entry prices, realistic walking/transit times between areas, and any well-known food spots. Only report what search results actually support; say plainly if something can't be verified rather than guessing. Plain prose, no markdown headings or asterisks.`
+        });
+        if (answer) { groundedNotes = answer; groundedResearch = true; }
+      } catch (e) {
+        console.warn('[plan_itinerary] grounded search failed, generating without it:', e.message);
+      }
+
+      // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
+      // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
+      // left nothing for visible output once a reasoning model spent its budget on reasoning
+      // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
+      // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
+      // maxOutputTokens unset; raising the cap fixed it.
+      const callModel = async (systemPrompt, prompt) => {
+        const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
+        return res?.text || '';
+      };
+
+      let itinerary;
+      try {
+        itinerary = await generateItinerary(requirements, { groundedNotes }, null, callModel);
+      } catch (e) {
+        return { success: false, error: `Could not build an itinerary: ${e.message}` };
+      }
+
+      const caveats = [
+        groundedResearch
+          ? null
+          : "I couldn't verify current opening hours/prices/closures for this trip, so treat times and costs as estimates, not confirmed facts.",
+        'Flights and hotels are not live-searched or booked here — say the word and I can look at real options and take you through an actual booking.'
+      ].filter(Boolean);
+
+      return {
+        success: true,
+        itinerary,
+        groundedResearch,
+        text: `${itineraryToText(itinerary)}\n\n${caveats.join(' ')}`
+      };
+    }
+
+    // Surgical edit of an existing itinerary (preserves days/sections the instruction doesn't
+    // touch) rather than a full regeneration. Accepts the itinerary inline (the model's own
+    // context from a recent plan_itinerary call) or a workspace_path to a previously saved one —
+    // whichever is fresher wins if both are given, and a workspace-loaded trip is re-saved
+    // to the same path after the edit so the saved copy stays in sync.
+    case 'modify_itinerary': {
+      const instruction = String(params?.instruction || '').trim();
+      if (!instruction) return { success: false, error: 'modify_itinerary requires instruction' };
+
+      let itinerary = null;
+      let workspacePath = params?.workspace_path ? String(params.workspace_path).trim() : '';
+
+      if (params?.itinerary) {
+        try {
+          itinerary = typeof params.itinerary === 'string' ? JSON.parse(params.itinerary) : params.itinerary;
+        } catch {
+          return { success: false, error: 'The itinerary passed to modify_itinerary was not valid JSON. Pass the exact itinerary object from plan_itinerary, or a workspace_path to a previously saved one.' };
+        }
+      } else if (workspacePath) {
+        let file;
+        try {
+          file = await agentWorkspace.readWorkspaceFile(supabase, userId, workspacePath);
+        } catch (e) {
+          return { success: false, error: e.message };
+        }
+        if (!file) return { success: false, error: `No saved itinerary at ${workspacePath}.` };
+        try {
+          itinerary = JSON.parse(file.content);
+        } catch {
+          return { success: false, error: `The saved file at ${workspacePath} isn't valid itinerary JSON, so it can't be edited directly. Generate a fresh one with plan_itinerary instead.` };
+        }
+      } else {
+        return { success: false, error: 'modify_itinerary needs either the itinerary JSON from a recent plan_itinerary call, or a workspace_path to a previously saved itinerary.' };
+      }
+
+      if (!itinerary?.days) return { success: false, error: 'That does not look like a valid itinerary (no days array).' };
+
+      // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
+      // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
+      // left nothing for visible output once a reasoning model spent its budget on reasoning
+      // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
+      // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
+      // maxOutputTokens unset; raising the cap fixed it.
+      const callModel = async (systemPrompt, prompt) => {
+        const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
+        return res?.text || '';
+      };
+
+      let updated;
+      try {
+        updated = await modifyItinerary(itinerary, instruction, {}, callModel);
+      } catch (e) {
+        return { success: false, error: `Could not apply that change: ${e.message}` };
+      }
+
+      let resaved = false;
+      if (workspacePath) {
+        try {
+          await agentWorkspace.writeWorkspaceFile(supabase, userId, workspacePath, JSON.stringify(updated, null, 2), 'file');
+          resaved = true;
+        } catch (e) {
+          console.warn('[modify_itinerary] re-save failed:', e.message);
+        }
+      }
+
+      return {
+        success: true,
+        itinerary: updated,
+        resaved,
+        text: `${updated.lastModification?.summary || 'Updated the itinerary.'}${resaved ? ` (re-saved to ${workspacePath})` : ''}\n\n${itineraryToText(updated)}`
       };
     }
 
