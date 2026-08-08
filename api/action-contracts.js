@@ -72,6 +72,7 @@ const ACTION_CONTRACTS = {
   create_calendar_event: {
     risk: 'medium',
     required: ['title', 'start_date', 'end_date'],
+    optional: ['description', 'attendees'],
     inputExample: { title: 'event', start_date: 'ISO date', end_date: 'ISO date' },
     paramHints: { start_date: 'ISO date', end_date: 'ISO date' },
     successSummary: 'Calendar updated',
@@ -331,6 +332,52 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Could not check occasions',
     confirmation: 'none',
     executionMode: 'direct'
+  },
+  // ── Calendar as an actionable surface ──────────────────────────────────────────────
+  find_free_time: {
+    risk: 'low',
+    required: [],
+    optional: ['duration_minutes', 'days', 'earliest', 'latest', 'include_weekends', 'max_options'],
+    inputExample: { duration_minutes: 60, days: 7 },
+    paramHints: {
+      duration_minutes: 'how long the thing actually needs, e.g. 120 for "two hours"',
+      earliest: 'a stated constraint like "9am" or "after 4"',
+      latest: 'a stated constraint like "before 6"',
+      include_weekends: 'true only if the user said weekends are fine'
+    },
+    guidance: 'Use for "when am I actually free this week?", "find time for this", "I need two hours before Friday". It subtracts the user\'s REAL events from their working window — it never proposes time it has not checked. If it reports calendarRead:false, say the calendar could not be read and do not suggest times anyway; a slot that turns out to be double-booked is worse than no answer. Report the options it returns rather than picking one silently, unless the user asked you to just book it.',
+    successSummary: 'Free time found',
+    failureSummary: 'Could not check your calendar',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  schedule_block: {
+    risk: 'medium',
+    required: ['title'],
+    optional: ['duration_minutes', 'start', 'earliest', 'latest', 'days', 'description', 'attendees', 'allow_conflict', 'commitment_id'],
+    inputExample: { title: 'Case study', duration_minutes: 120 },
+    paramHints: {
+      start: 'an ISO time ONLY when the user named a specific time ("2pm tomorrow"); omit it to have a real free slot chosen',
+      attendees: 'email addresses to actually invite — this sends them a real invitation',
+      allow_conflict: 'true only after the user has been told about the clash and said to book it anyway'
+    },
+    guidance: 'Use for "block two hours tomorrow for this", "schedule a call with Ben", "fit these three things in before Friday" (one call each). It reads the real calendar first: it refuses to book blind if the calendar cannot be read, it will not double-book without allow_conflict, and it will not create a second copy of a block that is already there. When the user names a time, pass start; otherwise leave it out and a genuinely free slot is chosen. Adding attendees sends a REAL invitation, so only do that when the user asked to invite someone, and resolve who they mean with find_people first rather than guessing an address. If it comes back with conflicts, tell the user what it clashes with and let them choose — do not silently move it or force it.',
+    successSummary: 'Booked',
+    failureSummary: 'Could not book that',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
+  move_calendar_event: {
+    risk: 'medium',
+    required: ['start'],
+    optional: ['event_id', 'title', 'duration_minutes', 'allow_conflict'],
+    inputExample: { title: 'gym', start: '2026-08-12T16:00:00' },
+    paramHints: { start: 'the new ISO start time', duration_minutes: 'only if the length is also changing ("I need an extra hour")' },
+    guidance: 'Use for "that no longer works", "move it after 4", "move my gym session around the interview", "I need an extra hour". This MODIFIES the existing event — never create a new one to reschedule, which would leave the old time sitting in the calendar next to it. It keeps the original length unless a new one is given, ignores the event itself when checking for clashes, and asks rather than forcing when the new time collides with something else. If more than one event matches the description, it asks which — do not guess.',
+    successSummary: 'Event moved',
+    failureSummary: 'Could not move that',
+    confirmation: 'review_required',
+    executionMode: 'review'
   },
   // ── Commitments ────────────────────────────────────────────────────────────────────
   track_commitment: {

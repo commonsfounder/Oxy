@@ -95,10 +95,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // Plus 3 for general watches: update_scheduled_task, record_watch_observation, and guidance
 // newly added to the previously-bare list_scheduled_tasks. Plus 1 for proactive outbound
 // delivery: set_notification_preference. Plus 3 for commitment tracking: track_commitment,
-// find_commitments, resolve_commitment.)
-test('exactly 57 contracts define guidance, and every one appears verbatim in its native description', () => {
+// find_commitments, resolve_commitment. Plus 3 for the calendar: find_free_time,
+// schedule_block, move_calendar_event.)
+test('exactly 60 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 57);
+  assert.equal(withGuidance.length, 60);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -487,4 +488,26 @@ test('commitments: a sent email containing a promise is captured after it is act
   const desc = nativeDescriptions().send_email.description;
   assert.match(desc, /call track_commitment straight after it is actually sent/);
   assert.match(desc, /Only for a real undertaking with a concrete action/);
+});
+
+test('calendar: availability is never invented when the calendar cannot be read', () => {
+  const desc = nativeDescriptions().find_free_time.description;
+  assert.match(desc, /It subtracts the user's REAL events from their working window/);
+  assert.match(desc, /it never proposes time it has not checked/);
+  assert.match(desc, /a slot that turns out to be double-booked is worse than no answer/);
+});
+
+test('calendar: booking refuses to double-book, duplicate or book blind', () => {
+  const desc = nativeDescriptions().schedule_block.description;
+  assert.match(desc, /it refuses to book blind if the calendar cannot be read/);
+  assert.match(desc, /will not double-book without allow_conflict/);
+  assert.match(desc, /will not create a second copy of a block that is already there/);
+  assert.match(desc, /Adding attendees sends a REAL invitation/);
+});
+
+test('calendar: replanning modifies the event instead of leaving the old time behind', () => {
+  const desc = nativeDescriptions().move_calendar_event.description;
+  assert.match(desc, /This MODIFIES the existing event/);
+  assert.match(desc, /never create a new one to reschedule/);
+  assert.match(desc, /If more than one event matches the description, it asks which/);
 });

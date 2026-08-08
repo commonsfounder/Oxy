@@ -104,6 +104,7 @@ const travelSearch = require('./services/travel-search');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
 const commitments = require('./services/commitments');
+const scheduling = require('./services/scheduling');
 const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
 const { sendEmail: sendEmailService } = require('./services/email');
 const agentContinuity = require('./services/agent-continuity');
@@ -4366,6 +4367,147 @@ async function executeAction(userId, action, params, context = {}) {
         research: researchText,
         bookable: false,
         text: travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) })
+      };
+    }
+
+    // ── Calendar as something you can actually act on ─────────────────────────────────
+    // Availability is computed by subtracting REAL events from the working window. If the
+    // calendar cannot be read, this says so rather than inventing free time.
+    case 'find_free_time': {
+      const durationMinutes = Math.max(15, Math.min(Number(params?.duration_minutes) || 60, 480));
+      const days = Math.max(1, Math.min(Number(params?.days) || 7, 21));
+      const calendar = await dispatch(userId, 'get_calendar_events', { max_results: 100, days });
+      if (!calendar?.success) {
+        return {
+          success: false,
+          calendarRead: false,
+          error: calendar?.error || 'your calendar was unreachable',
+          text: scheduling.formatFreeSlots([], { durationMinutes, calendarRead: false, reason: calendar?.error })
+        };
+      }
+
+      const working = { ...scheduling.DEFAULT_WORKING };
+      if (params?.include_weekends === true || String(params?.include_weekends) === 'true') working.days = [0, 1, 2, 3, 4, 5, 6];
+      const slots = scheduling.findFreeSlots({
+        events: calendar.events || [],
+        from: new Date(),
+        days,
+        durationMinutes,
+        working,
+        earliestMinute: scheduling.parseTimeOfDay(params?.earliest),
+        latestMinute: scheduling.parseTimeOfDay(params?.latest),
+        maxSlots: Math.max(1, Math.min(Number(params?.max_options) || 6, 12))
+      });
+
+      return {
+        success: true,
+        calendarRead: true,
+        durationMinutes,
+        slots: slots.map(slot => ({ start: slot.start.toISOString(), end: slot.end.toISOString(), label: scheduling.describeSlot(slot) })),
+        busyCount: (calendar.events || []).length,
+        text: scheduling.formatFreeSlots(slots, { durationMinutes })
+      };
+    }
+
+    // Books a real block, at a real free time, without double-booking or duplicating.
+    case 'schedule_block': {
+      const title = String(params?.title || '').trim();
+      if (!title) return { success: false, error: 'schedule_block needs a title' };
+      const durationMinutes = Math.max(15, Math.min(Number(params?.duration_minutes) || 60, 480));
+
+      const calendar = await dispatch(userId, 'get_calendar_events', { max_results: 100, days: 21 });
+      if (!calendar?.success) {
+        return { success: false, error: `I couldn't read your calendar (${calendar?.error || 'unreachable'}), so I won't book anything blind.` };
+      }
+      const events = calendar.events || [];
+
+      let start = params?.start ? new Date(params.start) : null;
+      if (start && Number.isNaN(start.getTime())) start = null;
+      if (!start) {
+        const [slot] = scheduling.findFreeSlots({
+          events, from: new Date(), days: Math.max(1, Math.min(Number(params?.days) || 7, 21)),
+          durationMinutes,
+          earliestMinute: scheduling.parseTimeOfDay(params?.earliest),
+          latestMinute: scheduling.parseTimeOfDay(params?.latest),
+          maxSlots: 1
+        });
+        if (!slot) return { success: false, error: `There's no free ${durationMinutes}-minute slot in that window — your calendar is full across it.` };
+        start = slot.start;
+      }
+      const end = new Date(start.getTime() + durationMinutes * 60000);
+
+      const duplicate = scheduling.findDuplicateEvent({ title, start, events });
+      if (duplicate) {
+        return { success: true, duplicate: true, eventId: duplicate.id, text: `"${title}" is already in your calendar around then — I haven't added a second one.` };
+      }
+      const conflicts = scheduling.findConflicts({ start, end, events });
+      if (conflicts.length && params?.allow_conflict !== true) {
+        return {
+          success: false, conflicts,
+          error: `That clashes with ${conflicts.map(c => c.title).join(', ')}. Want me to put it somewhere else, or book it anyway?`
+        };
+      }
+
+      const created = await dispatch(userId, 'create_calendar_event', {
+        title, start_date: start.toISOString(), end_date: end.toISOString(),
+        description: params?.description || '', attendees: params?.attendees
+      });
+      if (!created?.success) return { success: false, error: created?.error || 'The calendar rejected that event.' };
+
+      // A block booked FOR a commitment stays linked to it, so the commitment is what gets
+      // chased — not the calendar entry.
+      if (params?.commitment_id) {
+        await supabase.from('commitments').update({ updated_at: new Date().toISOString() })
+          .eq('id', params.commitment_id).eq('user_id', userId);
+      }
+      return {
+        success: true,
+        eventId: created.eventId,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        invited: created.invited || [],
+        text: `Booked "${title}" ${scheduling.describeSlot({ start, end })}${created.invited?.length ? ` and invited ${created.invited.join(', ')}` : ''}.`
+      };
+    }
+
+    // Replanning changes the existing event rather than leaving the old time behind.
+    case 'move_calendar_event': {
+      const eventId = String(params?.event_id || '').trim();
+      const query = String(params?.title || '').trim();
+      const calendar = await dispatch(userId, 'get_calendar_events', { max_results: 100, days: 30 });
+      if (!calendar?.success) return { success: false, error: `I couldn't read your calendar (${calendar?.error || 'unreachable'}).` };
+      const events = calendar.events || [];
+
+      let target = eventId ? events.find(e => e.id === eventId) : null;
+      if (!target && query) {
+        const matches = events.filter(e => String(e.title || '').toLowerCase().includes(query.toLowerCase()));
+        if (matches.length > 1) return { success: false, error: `More than one event matches "${query}": ${matches.map(m => m.title).join(', ')}. Which one?` };
+        target = matches[0] || null;
+      }
+      if (!target) return { success: false, error: `I couldn't find an event matching "${query || eventId}".` };
+
+      const start = params?.start ? new Date(params.start) : null;
+      if (!start || Number.isNaN(start.getTime())) return { success: false, error: 'move_calendar_event needs a new start time.' };
+      const originalStart = new Date(target.start);
+      const originalEnd = new Date(target.end || target.start);
+      const length = Number(params?.duration_minutes) > 0
+        ? Number(params.duration_minutes) * 60000
+        : Math.max(originalEnd.getTime() - originalStart.getTime(), 30 * 60000);
+      const end = new Date(start.getTime() + length);
+
+      // The event being moved is not a conflict with itself.
+      const conflicts = scheduling.findConflicts({ start, end, events: events.filter(e => e.id !== target.id) });
+      if (conflicts.length && params?.allow_conflict !== true) {
+        return { success: false, conflicts, error: `That would clash with ${conflicts.map(c => c.title).join(', ')}. Somewhere else, or move it anyway?` };
+      }
+
+      const updated = await dispatch(userId, 'update_calendar_event', {
+        event_id: target.id, start_date: start.toISOString(), end_date: end.toISOString()
+      });
+      if (!updated?.success) return { success: false, error: updated?.error || 'The calendar rejected that change.' };
+      return {
+        success: true, eventId: target.id,
+        text: `Moved "${target.title}" to ${scheduling.describeSlot({ start, end })}.`
       };
     }
 

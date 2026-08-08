@@ -15,7 +15,10 @@ const SUPPORTED_ACTIONS = [
   // Real Gmail mutation primitives (inbox cleanup) — see api/services/gmail-cleanup.js for
   // the classification/orchestration layer that decides WHAT to archive/unsubscribe; these
   // three only ever do WHAT they're told, against the real Gmail API.
-  'archive_emails', 'label_emails', 'unsubscribe_email'
+  'archive_emails', 'label_emails', 'unsubscribe_email',
+  // Real calendar mutation. create_calendar_event existed; moving or resizing an event did
+  // not, so "move it to 4pm" could only be done by creating a second event.
+  'update_calendar_event'
 ];
 
 // Comfortably under Gmail's own 1000-ids-per-batchModify-call cap — chunking this small
@@ -752,15 +755,55 @@ async function execute(userId, action, params) {
             endLocal = startLocal;
           }
         }
+        // Attendees make this a real invitation rather than a private block. sendUpdates:'all'
+        // is what actually emails them; without it Google creates the event silently and the
+        // guest never hears about it.
+        const attendees = (Array.isArray(params.attendees) ? params.attendees : String(params.attendees || '').split(','))
+          .map(a => String(a || '').trim())
+          .filter(a => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a))
+          .map(email => ({ email }));
+
         const event = await axios.post('https://www.googleapis.com/calendar/v3/calendars/primary/events',
           {
             summary: title,
             description,
             start: { dateTime: startLocal, timeZone: timezone },
-            end:   { dateTime: endLocal,   timeZone: timezone }
+            end:   { dateTime: endLocal,   timeZone: timezone },
+            ...(attendees.length ? { attendees } : {})
           },
-          { headers, timeout: 15000 });
-        return { success: true, text: `Event "${title}" created`, eventId: event.data.id };
+          { headers, timeout: 15000, params: attendees.length ? { sendUpdates: 'all' } : undefined });
+        return {
+          success: true,
+          text: `Event "${title}" created${attendees.length ? ` and invited ${attendees.map(a => a.email).join(', ')}` : ''}`,
+          eventId: event.data.id,
+          invited: attendees.map(a => a.email)
+        };
+      }
+
+      // Moves or resizes an EXISTING event. PATCH, not POST: replanning must change the thing
+      // in the user's calendar, not leave the old time sitting there next to a new one.
+      case 'update_calendar_event': {
+        const { event_id, title, start_date, end_date, timezone = 'Europe/London' } = params;
+        if (!event_id) return { success: false, error: 'update_calendar_event requires event_id' };
+        const toLocal = dt => String(dt).replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
+        const patch = {};
+        if (title) patch.summary = title;
+        if (start_date) patch.start = { dateTime: toLocal(start_date), timeZone: timezone };
+        if (end_date) patch.end = { dateTime: toLocal(end_date), timeZone: timezone };
+        if (!Object.keys(patch).length) return { success: false, error: 'Nothing to change on that event.' };
+
+        const updated = await axios.patch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(event_id)}`,
+          patch,
+          { headers, timeout: 15000, params: { sendUpdates: 'all' } }
+        );
+        return {
+          success: true,
+          eventId: updated.data.id,
+          text: `Moved "${updated.data.summary || title || 'the event'}"`,
+          start: updated.data.start?.dateTime || updated.data.start?.date,
+          end: updated.data.end?.dateTime || updated.data.end?.date
+        };
       }
 
       case 'get_calendar_events': {
