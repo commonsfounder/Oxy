@@ -99,6 +99,7 @@ const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-brief
 const dailyDigest = require('./services/daily-digest');
 const people = require('./services/people');
 const receipts = require('./services/receipts');
+const watches = require('./services/watches');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -3435,13 +3436,22 @@ async function executeAction(userId, action, params, context = {}) {
         condition: params?.condition,
         interval_minutes: params?.interval_minutes,
         expires_at: params?.expires_at,
-        budget_cap: params?.budget_cap
+        budget_cap: params?.budget_cap,
+        watch_type: params?.watch_type,
+        threshold: params?.threshold,
+        comparator: params?.comparator,
+        notify_rule: params?.notify_rule,
+        source_url: params?.source_url,
+        target_state: params?.target_state
       });
       if (!created.success) return created;
       const task = created.task || {};
       return {
         success: true,
-        text: `I’ll keep an eye on “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`,
+        deduped: Boolean(created.deduped),
+        text: created.deduped
+          ? `I'm already watching “${task.title || title}” — updated it rather than starting a second one. ${scheduledTasks.describeSchedule(task)}.`
+          : `I’ll keep an eye on “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`,
         actionSummary: 'Watch saved',
         scheduledTask: {
           id: task.id,
@@ -3456,17 +3466,34 @@ async function executeAction(userId, action, params, context = {}) {
     case 'list_scheduled_tasks': {
       const listed = await scheduledTasks.listScheduledTasks(userId);
       if (!listed.success) return { success: false, error: listed.error };
-      const tasks = (listed.tasks || []).map(task => ({
+      const rows = listed.tasks || [];
+      const tasks = rows.map(task => ({
         id: task.id,
         title: task.title,
         recurrence: task.recurrence,
         nextRunAt: task.next_run_at,
-        active: task.active !== false
+        active: task.active !== false,
+        condition: task.condition || null,
+        // "What are you watching for me?" should answer with the real state of each watch —
+        // what it looks at, what it last saw, and whether its last check actually worked.
+        watch: task.watch_state ? {
+          type: task.watch_state.type,
+          threshold: task.watch_state.threshold ?? null,
+          comparator: task.watch_state.comparator || null,
+          notifyRule: task.watch_state.notifyRule || null,
+          sourceUrl: task.watch_state.sourceUrl || null,
+          lastObserved: task.watch_state.lastObserved || null,
+          lastCheckFailed: task.watch_state.lastEvaluation?.kind === 'blocked'
+            ? task.watch_state.lastEvaluation.reason : null
+        } : null
       }));
       return {
         success: true,
         text: tasks.length
-          ? tasks.map(task => `• ${task.title} · ${scheduledTasks.describeSchedule(task)}`).join('\n')
+          ? rows.map(task => {
+            const detail = watches.describeWatch(task);
+            return `• ${task.title} · ${scheduledTasks.describeSchedule(task)}${detail ? ` · ${detail}` : ''}`;
+          }).join('\n')
           : 'Millie is not watching anything right now.',
         actionSummary: `${tasks.length} watch${tasks.length === 1 ? '' : 'es'}`,
         scheduledTasks: tasks
@@ -3489,6 +3516,69 @@ async function executeAction(userId, action, params, context = {}) {
         scheduledTask: { id: cancelled.task?.id || id, title: cancelled.task?.title || title, active: false }
       };
     }
+    // Adjusting a watch instead of deleting and recreating it — which would throw away the
+    // baseline and observation history that make "has it changed?" answerable at all.
+    case 'update_scheduled_task': {
+      const updated = await scheduledTasks.updateScheduledTask(userId, {
+        id: params?.id,
+        title: params?.title,
+        new_title: params?.new_title,
+        recurrence: params?.recurrence,
+        interval_minutes: params?.interval_minutes,
+        time: params?.time || params?.time_of_day,
+        day_of_week: params?.day_of_week,
+        condition: params?.condition,
+        threshold: params?.threshold,
+        comparator: params?.comparator,
+        notify_rule: params?.notify_rule,
+        source_url: params?.source_url,
+        instruction: params?.instruction,
+        budget_cap: params?.budget_cap
+      });
+      if (!updated.success) {
+        if (updated.error === 'not_found') return { success: false, error: 'I could not find that watch.' };
+        if (updated.error === 'ambiguous') {
+          return { success: false, error: `More than one watch matches that: ${updated.candidates.map(c => c.title).join(', ')}. Which one?` };
+        }
+        return updated;
+      }
+      const task = updated.task || {};
+      return {
+        success: true,
+        text: `Updated “${task.title}” — now ${scheduledTasks.describeSchedule(task)}${watches.describeWatch(task) ? ` · ${watches.describeWatch(task)}` : ''}.`,
+        actionSummary: 'Watch updated',
+        scheduledTask: { id: task.id, title: task.title, recurrence: task.recurrence, nextRunAt: task.next_run_at, watch: task.watch_state || null }
+      };
+    }
+
+    // Called by a watch's own background run with what it ACTUALLY observed. The notify
+    // decision comes back from watches.evaluateObservation — deterministic, computed from
+    // the recorded value, and therefore not something the model can talk itself into.
+    case 'record_watch_observation': {
+      const recorded = await scheduledTasks.recordWatchObservation(userId, {
+        id: String(params?.watch_id || params?.id || '').trim(),
+        value: params?.value,
+        state: params?.state,
+        note: params?.note,
+        accessible: !(params?.accessible === false || String(params?.accessible) === 'false'),
+        error: params?.error || params?.reason
+      });
+      if (!recorded.success) {
+        return recorded.error === 'not_found'
+          ? { success: false, error: 'That watch no longer exists.' }
+          : recorded;
+      }
+      return {
+        success: true,
+        notify: recorded.notify,
+        kind: recorded.kind,
+        terminal: recorded.terminal,
+        text: recorded.notify
+          ? `This IS news: ${recorded.reason}. Report it to the user.`
+          : `Not news: ${recorded.reason}. Do not notify the user this cycle.`
+      };
+    }
+
     case 'simulate_actions': {
       const goal = String(params?.goal || '').trim();
       const actions = params?.actions || [];
@@ -7819,7 +7909,11 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
 
       const waiting = result.agentTrace?.status === 'awaiting_approval';
       const failed = result.agentTrace?.status === 'error';
-      const conditionTriggered = scheduledTasks.scheduledConditionTriggered(claimed, result);
+      // Re-read the row: the run may have written a real observation, and that recorded
+      // verdict outranks whatever marker the model put in its answer.
+      const { data: afterRun } = await supabase.from('scheduled_tasks')
+        .select('watch_state').eq('id', claimed.id).maybeSingle();
+      const conditionTriggered = scheduledTasks.scheduledConditionTriggered(claimed, result, afterRun?.watch_state || null);
       await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
         state: waiting ? 'waiting_approval' : failed ? 'failed' : 'completed',
         heartbeatAt: null,
@@ -7829,7 +7923,13 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       if (failed) {
         await scheduledTasks.deferScheduledTask(claimed, now);
       } else if (conditionTriggered) {
-        await scheduledTasks.completeScheduledTask(claimed, now);
+        // A watch the user asked about once ("tell me when it drops below £500") is done when
+        // it fires. An ongoing or every-change watch ("keep me updated") must keep running —
+        // it used to depend on the model remembering to re-create itself, which lost the
+        // watch's baseline and history every time.
+        const evaluation = afterRun?.watch_state?.lastEvaluation;
+        if (evaluation && evaluation.terminal === false) await scheduledTasks.advanceScheduledTask(claimed, now);
+        else await scheduledTasks.completeScheduledTask(claimed, now);
       } else if (waiting) {
         // Keep the watch alive, but do not create another run while this one waits
         // for the person to review an action.

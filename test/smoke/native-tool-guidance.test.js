@@ -91,10 +91,12 @@ test('confirmation is never copied into a native tool description — nothing re
 // until the rename fixed it; the count here is the tripwire that would have caught that. Plus
 // 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.
 // Plus 1 more for the morning digest: daily_digest, and 3 for the people layer:
-// remember_person, find_people, forget_person_detail, and 1 for spend awareness: find_spend.)
-test('exactly 50 contracts define guidance, and every one appears verbatim in its native description', () => {
+// remember_person, find_people, forget_person_detail, and 1 for spend awareness: find_spend.
+// Plus 3 for general watches: update_scheduled_task, record_watch_observation, and guidance
+// newly added to the previously-bare list_scheduled_tasks.)
+test('exactly 53 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 50);
+  assert.equal(withGuidance.length, 53);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -400,4 +402,34 @@ test('spend: unreadable totals, currencies and categories are never filled in wi
   assert.match(desc, /do not fill them in with a plausible number/);
   assert.match(desc, /Different currencies are never converted or added together/);
   assert.match(desc, /cannot be classified confidently, say which records were excluded rather than guessing/);
+});
+
+test('watches: a general watch is told to record what it observed, not to judge for itself', () => {
+  const desc = nativeDescriptions().record_watch_observation.description;
+  assert.match(desc, /with what you ACTUALLY observed on the real source this run/);
+  assert.match(desc, /never a remembered value, never an assumption that nothing changed/);
+  assert.match(desc, /relay that verdict, do not overrule it/);
+  assert.match(desc, /a watch that silently reports "unchanged" while it is actually broken is worse/);
+});
+
+test('watches: create_scheduled_task covers thresholds, target states and recurring checks', () => {
+  const desc = nativeDescriptions().create_scheduled_task.description;
+  assert.match(desc, /a stated number is a threshold watch/);
+  assert.match(desc, /a stated end state \("back in stock"\) is target_state/);
+  assert.match(desc, /an open question re-answered on a cadence is watch_type "recurring_check"/);
+  assert.match(desc, /Do not invent a threshold or a cadence the user did not give/);
+  assert.match(desc, /Repeating a watch the user already has adjusts the existing one/);
+});
+
+test('watches: editing is steered away from delete-and-recreate, which would lose the baseline', () => {
+  const desc = nativeDescriptions().update_scheduled_task.description;
+  assert.match(desc, /Always prefer this over cancelling and re-creating/);
+  assert.match(desc, /a new watch has no baseline/);
+  assert.match(desc, /If more than one watch matches the title, it asks which — do not guess/);
+});
+
+test('watches: the watch list must report a failing check rather than implying health', () => {
+  const desc = nativeDescriptions().list_scheduled_tasks.description;
+  assert.match(desc, /what are you watching for me\?/);
+  assert.match(desc, /If a watch reports lastCheckFailed, say so plainly/);
 });

@@ -1,0 +1,19 @@
+-- Watches get memory. Until now a background watch could only ask the model, every cycle,
+-- "is the condition true?" — with no record of what was true last time. The delivery watch
+-- worked around that by writing its own state into the agent workspace, described only in
+-- prose guidance; nothing else could reuse it, and a price or stock watch had no way at all
+-- to tell "unchanged" from "changed".
+--
+-- One jsonb column rather than five typed ones, because this is the watch's own private
+-- config-and-memory blob, only ever read and written together, and its shape differs per
+-- watch type. Contents (see api/services/watches.js, which is the only writer):
+--   type            'state_change' | 'threshold' | 'recurring_check'
+--   threshold       number, for threshold watches
+--   comparator      'below' | 'above'
+--   notifyRule      'once' | 'every_change' | 'ongoing'
+--   sourceUrl       what is actually inspected each run
+--   baseline        the first observation, kept so "has it changed since I started" works
+--   lastObserved    the most recent observation
+--   history         a short trail of recent observations
+--   lastEvaluation  the deterministic notify/don't-notify verdict from the last run
+alter table scheduled_tasks add column if not exists watch_state jsonb;

@@ -741,10 +741,19 @@ const ACTION_CONTRACTS = {
   create_scheduled_task: {
     risk: 'low',
     required: ['title', 'instruction'],
-    optional: ['recurrence', 'time', 'day_of_week', 'date', 'due_date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap'],
+    optional: ['recurrence', 'time', 'day_of_week', 'date', 'due_date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap', 'watch_type', 'threshold', 'comparator', 'notify_rule', 'source_url', 'target_state'],
+    paramHints: {
+      watch_type: 'threshold (a number crossing a line) | state_change (something becomes something else) | recurring_check (re-answer a question on a cadence)',
+      threshold: 'the number the user actually named, e.g. 500 for "tell me if it drops below £500"',
+      comparator: 'below (default) | above',
+      notify_rule: 'once (default for a threshold — tell me when it crosses, not every cycle after) | every_change | ongoing (the user explicitly wants repeated updates)',
+      source_url: 'the exact page/source that will be inspected each run — set this whenever there is one, it is also how a repeat request is recognised as the same watch',
+      target_state: 'the specific state that ENDS the watch, e.g. "in stock", "delivered", "open" — omit for an open-ended "keep me updated"'
+    },
     inputExample: { title: 'Watch flight prices', instruction: 'Check every week and tell me if the price drops', recurrence: 'poll', interval_minutes: 10080 },
     guidance: 'Create durable background work only when the user explicitly asks to remind, schedule, watch, monitor, or check again. A condition such as "when the price drops" becomes a bounded poll with an expiry. Never invent a schedule or silently turn an ordinary task into recurring work. ' +
-      'For a delivery/tracking watch ("tell me when this arrives", "keep an eye on this parcel"): resolve the tracking URL/number yourself first — from what the user gave you, or by searching recent order/shipping emails (search_emails) for an unambiguous match — before asking them to find something you can already access. Each check should use run_browser_task to read the REAL current page; never invent a status. Normalize whatever the carrier\'s own wording says to one of: label created, awaiting carrier, collected, in transit, at depot, customs, delayed, delivery attempted, out for delivery, delivered, returned to sender, exception. Before comparing, workspace_read the last state you saved for this shipment (workspace_write it after every check, keyed by tracking number/order); only [WATCH_TRIGGERED] when the CURRENT normalized state differs from that saved state in a way that matches what the user actually asked for — never on every poll just because a timestamp on the page moved. Match the condition to their actual phrasing: "tell me when it arrives" only triggers on delivered; "tell me if it\'s delayed" only triggers on a delay/exception; "tell me when it\'s out for delivery" only triggers at that stage; "keep me updated" triggers on any meaningful transition. For an ongoing "keep me updated" watch, when a non-terminal transition triggers, ALSO call create_scheduled_task again in the same run before finishing (same tracking info) so the next stage still gets checked — do not do this after a terminal state (delivered, returned to sender) ends the watch on its own; never keep checking a delivered parcel forever. If the carrier\'s page can\'t be read (login wall, CAPTCHA, blocked), say exactly that — never report an invented or stale status.',
+      'For a delivery/tracking watch ("tell me when this arrives", "keep an eye on this parcel"): resolve the tracking URL/number yourself first — from what the user gave you, or by searching recent order/shipping emails (search_emails) for an unambiguous match — before asking them to find something you can already access. Each check should use run_browser_task to read the REAL current page; never invent a status. Normalize whatever the carrier\'s own wording says to one of: label created, awaiting carrier, collected, in transit, at depot, customs, delayed, delivery attempted, out for delivery, delivered, returned to sender, exception. Before comparing, workspace_read the last state you saved for this shipment (workspace_write it after every check, keyed by tracking number/order); only [WATCH_TRIGGERED] when the CURRENT normalized state differs from that saved state in a way that matches what the user actually asked for — never on every poll just because a timestamp on the page moved. Match the condition to their actual phrasing: "tell me when it arrives" only triggers on delivered; "tell me if it\'s delayed" only triggers on a delay/exception; "tell me when it\'s out for delivery" only triggers at that stage; "keep me updated" triggers on any meaningful transition. For an ongoing "keep me updated" watch, when a non-terminal transition triggers, ALSO call create_scheduled_task again in the same run before finishing (same tracking info) so the next stage still gets checked — do not do this after a terminal state (delivered, returned to sender) ends the watch on its own; never keep checking a delivered parcel forever. If the carrier\'s page can\'t be read (login wall, CAPTCHA, blocked), say exactly that — never report an invented or stale status. ' +
+      'For ANY other watch ("tell me if this price drops below £500", "tell me when it\'s back in stock", "check monthly whether my broadband deal is still good", "every Friday remind me who I still owe a reply to", "tell me if this page changes"): set source_url to the real page that will be checked, and set watch_type/threshold/comparator/target_state to match what the user actually said — a stated number is a threshold watch, a stated end state ("back in stock") is target_state, an open question re-answered on a cadence is watch_type "recurring_check". Do not invent a threshold or a cadence the user did not give; ask if it matters. Each run then inspects the REAL source and calls record_watch_observation, which decides whether it is news — you do not decide that yourself. Repeating a watch the user already has adjusts the existing one instead of starting a second; to change cadence, threshold or notification rule later, use update_scheduled_task rather than creating a new watch, which would throw away the baseline that makes "has it changed?" answerable.',
     successSummary: 'Watch saved',
     failureSummary: 'Watch failed',
     confirmation: 'none',
@@ -754,8 +763,43 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: [],
     inputExample: {},
+    guidance: 'Use for "what are you watching for me?", "what have you got running?", or before changing/cancelling a watch so you act on the right one. It returns each watch\'s real state — what it inspects, what it last observed, and whether its last check failed. If a watch reports lastCheckFailed, say so plainly instead of implying it is still working.',
     successSummary: 'Watches loaded',
     failureSummary: 'Watches unavailable',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  update_scheduled_task: {
+    risk: 'low',
+    required: [],
+    optional: ['id', 'title', 'new_title', 'recurrence', 'interval_minutes', 'time', 'day_of_week', 'condition', 'threshold', 'comparator', 'notify_rule', 'source_url', 'instruction', 'budget_cap'],
+    inputExample: { title: 'hotel price', threshold: 450 },
+    paramHints: {
+      title: 'enough of the existing watch\'s title to identify it',
+      threshold: 'the new number, e.g. 450 for "only notify me if it goes below £450"',
+      interval_minutes: 'for a condition watch — 10080 for weekly, 1440 for daily',
+      notify_rule: 'once | every_change | ongoing'
+    },
+    guidance: 'Use for "change that to weekly", "only notify me if it goes below £450", "check it more often", "watch this page instead" — any adjustment to a watch that already exists. Always prefer this over cancelling and re-creating: a new watch has no baseline, so it cannot tell changed from unchanged on its first run and will either go quiet or fire spuriously. A new threshold deliberately re-arms the notification, so a price already under the old threshold still gets reported against the new one. If more than one watch matches the title, it asks which — do not guess.',
+    successSummary: 'Watch updated',
+    failureSummary: 'Watch could not be updated',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  record_watch_observation: {
+    risk: 'low',
+    required: ['watch_id'],
+    optional: ['value', 'state', 'note', 'accessible', 'error'],
+    inputExample: { watch_id: 'the id given in the watch instruction', value: 92 },
+    paramHints: {
+      value: 'the raw value you actually observed — a price as a plain number (92, not "£92 per night"), otherwise a short phrase',
+      state: 'the current state in a few words when it is not a number, e.g. "in stock", "out for delivery", "applications closed"',
+      accessible: 'false ONLY when you genuinely could not read the source — login wall, CAPTCHA, page gone, site changed shape',
+      error: 'when accessible is false, the short honest reason'
+    },
+    guidance: 'Only ever called from inside a background watch run, with what you ACTUALLY observed on the real source this run — never a remembered value, never an assumption that nothing changed. It returns whether this is news: relay that verdict, do not overrule it. Report accessible:false rather than inventing a reading when the source cannot be reached; a watch that silently reports "unchanged" while it is actually broken is worse than one that says it is broken.',
+    successSummary: 'Observation recorded',
+    failureSummary: 'Could not record that observation',
     confirmation: 'none',
     executionMode: 'direct'
   },

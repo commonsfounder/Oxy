@@ -1,4 +1,5 @@
 const { createSupabaseServiceClient } = require('../../runtime');
+const watches = require('./watches');
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -121,18 +122,41 @@ function describeSchedule(task) {
 function buildScheduledRunInstruction(task) {
   const instruction = String(task?.instruction || task?.title || '').trim();
   if (!task?.condition) return instruction;
-  return `${instruction}\n\nThis is a background watch. Check the condition: "${String(task.condition).slice(0, 240)}". If reliable evidence shows that the condition is true, start your final answer with [WATCH_TRIGGERED]. If it is not true, start your final answer with [WATCH_PENDING]. Do not use [WATCH_TRIGGERED] without evidence.`;
+  const config = task.watch_state || {};
+  const source = config.sourceUrl ? ` The source to inspect is ${config.sourceUrl}.` : '';
+  const last = config.lastObserved
+    ? ` Last time you observed: ${JSON.stringify(config.lastObserved.value ?? config.lastObserved.state).slice(0, 160)}.`
+    : ' Nothing has been observed for this watch yet, so this run establishes the baseline.';
+  // The observation call is what makes the verdict deterministic. Whether the user is
+  // notified is decided from the recorded value by watches.evaluateObservation, NOT from
+  // the marker below — a model can assert [WATCH_TRIGGERED], it cannot make a number be
+  // below a threshold once the number is written down.
+  return `${instruction}
+
+This is a background watch. Check the condition: "${String(task.condition).slice(0, 240)}".${source}${last}
+
+Inspect the REAL source this run — never answer from memory of a previous check, and never assume nothing changed. Then call record_watch_observation with watch_id "${task.id}" and the value you actually observed (a price as a plain number, a stock/availability state as a short phrase, otherwise a short description of the current state). If you could NOT read the source at all — login wall, CAPTCHA, page gone, site changed shape — call it with accessible:false and a short reason instead of guessing, and start your final answer with [WATCH_BLOCKED].
+
+record_watch_observation tells you whether this is news. Relay only what it says: start your final answer with [WATCH_TRIGGERED] if it reports notify, otherwise [WATCH_PENDING]. Do not use [WATCH_TRIGGERED] without it.`;
 }
 
-function scheduledConditionTriggered(task, result) {
+// The recorded observation wins over the model's own marker whenever the run actually made
+// one: the evaluation in watch_state is computed from a real value by watches.js, so it
+// cannot be talked into firing. The marker remains the fallback for watches that predate
+// this (or that legitimately record nothing, e.g. a recurring reassessment).
+function scheduledConditionTriggered(task, result, latestWatchState = null) {
   if (!task?.condition) return false;
-  const spoken = result?.spoken || result?.agentTrace?.finalSpoken || '';
-  return /\[WATCH_TRIGGERED\]/i.test(String(spoken));
+  const evaluation = (latestWatchState || task.watch_state || {}).lastEvaluation;
+  const spoken = String(result?.spoken || result?.agentTrace?.finalSpoken || '');
+  if (evaluation?.at && Date.parse(evaluation.at) >= (task.claimedAtMs || 0)) {
+    return evaluation.notify === true;
+  }
+  return /\[WATCH_TRIGGERED\]/i.test(spoken);
 }
 
 function cleanScheduledResultText(value) {
   return String(value || '')
-    .replace(/\[WATCH_TRIGGERED\]|\[WATCH_PENDING\]/gi, '')
+    .replace(/\[WATCH_TRIGGERED\]|\[WATCH_PENDING\]|\[WATCH_BLOCKED\]/gi, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -155,16 +179,34 @@ function isRecurringCadence(recurrence) {
 
 async function createScheduledTask(userId, {
   title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date,
-  condition = null, interval_minutes, expires_at, budget_cap
+  condition = null, interval_minutes, expires_at, budget_cap,
+  watch_type, threshold, comparator, notify_rule, source_url, target_state
 }) {
   const cleanTitle = String(title || '').trim();
   if (!cleanTitle) return { success: false, error: 'A title is required.' };
 
-  const cleanCondition = condition ? String(condition).trim() : null;
+  // Anything carrying watch configuration IS a watch, even when the user's phrasing did not
+  // produce a separate condition sentence. Without this, "tell me if the price at <url> drops
+  // below £90" became a one-shot task that fired once and never polled — and a later "check
+  // it weekly" then reported success while changing nothing.
+  const isWatch = Boolean(condition || source_url || threshold !== undefined || watch_type);
+  const isRecurringCheck = watch_type === 'recurring_check';
+  let cleanCondition = condition ? String(condition).trim() : null;
+  if (isWatch && !cleanCondition) {
+    const comparatorWord = comparator === 'above' ? 'above' : 'below';
+    cleanCondition = threshold !== undefined && threshold !== null
+      ? `the value goes ${comparatorWord} ${threshold}${source_url ? ` at ${source_url}` : ''}`
+      : target_state
+        ? `it becomes "${String(target_state).trim().slice(0, 80)}"`
+        : `the state${source_url ? ` at ${source_url}` : ''} changes`;
+  }
+
   // A condition ("when tickets go on sale") becomes a poll task: re-check on an interval
-  // until the condition is met or it expires.
-  let resolvedRecurrence = cleanCondition ? 'poll'
-    : (isRecurringCadence(recurrence) || recurrence === 'poll' ? recurrence : 'once');
+  // until the condition is met or it expires. A recurring reassessment is the exception — the
+  // user asked for a cadence ("every Friday"), not for polling until something happens.
+  let resolvedRecurrence = (isRecurringCheck && isRecurringCadence(recurrence)) ? recurrence
+    : cleanCondition ? 'poll'
+      : (isRecurringCadence(recurrence) || recurrence === 'poll' ? recurrence : 'once');
 
   let nextRunAt;
   let timeOfDay = time || null;
@@ -183,7 +225,7 @@ async function createScheduledTask(userId, {
   } else if (due_date) {
     nextRunAt = new Date(due_date);
     if (Number.isNaN(nextRunAt.getTime())) return { success: false, error: 'due_date is not a valid date.' };
-    if (!isRecurringCadence(resolvedRecurrence)) resolvedRecurrence = 'once';
+    if (!isRecurringCadence(resolvedRecurrence) && resolvedRecurrence !== 'poll') resolvedRecurrence = 'once';
     timeOfDay = timeOfDay || `${pad2(nextRunAt.getUTCHours())}:${pad2(nextRunAt.getUTCMinutes())}`;
   } else {
     if (!timeOfDay) timeOfDay = '09:00';
@@ -206,20 +248,165 @@ async function createScheduledTask(userId, {
     active: true
   };
 
+  // Watch configuration lives with the watch. Only condition-bearing tasks get one — a plain
+  // "remind me on Tuesday" is not a watch and has nothing to observe.
+  if (cleanCondition || source_url || threshold !== undefined) {
+    row.watch_state = {
+      ...watches.buildWatchConfig({ type: watch_type, threshold, comparator, notify_rule, source_url, condition: cleanCondition }),
+      targetState: target_state ? String(target_state).trim().slice(0, 120) : null
+    };
+  }
+
+  // Asking for the same watch twice must adjust the one that exists rather than leaving two
+  // polling the same page. Observed for real: four separate "Brighton hotel price" watches,
+  // all created by re-asking, all firing independently.
+  if (row.watch_state) {
+    const { data: active } = await getSupabase()
+      .from('scheduled_tasks')
+      .select('id, title, condition, recurrence, time_of_day, day_of_week, next_run_at, interval_minutes, expires_at, budget_cap, watch_state, active')
+      .eq('user_id', userId)
+      .eq('active', true);
+    const duplicate = watches.findDuplicateWatch(active || [], { title: cleanTitle, condition: cleanCondition, source_url });
+    if (duplicate) {
+      const patch = {
+        interval_minutes: intervalMinutes,
+        expires_at: expiresAt ? expiresAt.toISOString() : duplicate.expires_at,
+        // The existing watch keeps its observation history — replacing it would throw away
+        // the baseline that makes "has it changed?" answerable.
+        watch_state: { ...row.watch_state, ...pickObservationState(duplicate.watch_state) }
+      };
+      const { data: updated, error: updateError } = await getSupabase()
+        .from('scheduled_tasks').update(patch).eq('id', duplicate.id)
+        .select('id, title, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap, watch_state')
+        .single();
+      if (updateError) return { success: false, error: updateError.message };
+      return { success: true, task: updated, deduped: true };
+    }
+  }
+
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
     .insert(row)
-    .select('id, title, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
+    .select('id, title, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap, watch_state')
     .single();
   if (error) return { success: false, error: error.message };
 
   return { success: true, task: data };
 }
 
+// What must survive an edit or a re-request: the observations, never the config.
+function pickObservationState(existing = {}) {
+  if (!existing) return {};
+  const kept = {};
+  for (const key of ['baseline', 'lastObserved', 'history', 'lastEvaluation', 'thresholdMet', 'lastBlockedAt']) {
+    if (existing[key] !== undefined) kept[key] = existing[key];
+  }
+  return kept;
+}
+
+// "Change that to weekly", "only tell me if it goes below £450", "stop checking that" — a
+// watch you cannot adjust is one the user has to delete and recreate, losing its history.
+async function updateScheduledTask(userId, { id, title, ...changes } = {}) {
+  let query = getSupabase().from('scheduled_tasks').select('*').eq('user_id', userId).eq('active', true);
+  if (id) query = query.eq('id', id);
+  else if (title) query = query.ilike('title', `%${String(title).trim().replace(/[\\%_]/g, m => `\\${m}`)}%`);
+  else return { success: false, error: 'A title or id is required to change a watch.' };
+
+  const { data: matches, error } = await query.order('next_run_at', { ascending: true }).limit(2);
+  if (error) return { success: false, error: error.message };
+  if (!matches?.length) return { success: false, error: 'not_found' };
+  if (matches.length > 1) {
+    return { success: false, error: 'ambiguous', candidates: matches.map(t => ({ id: t.id, title: t.title })) };
+  }
+  const task = matches[0];
+
+  const patch = {};
+  const config = { ...(task.watch_state || {}) };
+  let configChanged = false;
+
+  if (changes.threshold !== undefined && changes.threshold !== null) {
+    config.threshold = watches.parseNumber(changes.threshold);
+    config.type = 'threshold';
+    // A new threshold is a new question: whether the OLD one had been met must not suppress
+    // the first notification about the new one.
+    config.thresholdMet = false;
+    configChanged = true;
+  }
+  if (changes.comparator) { config.comparator = changes.comparator === 'above' ? 'above' : 'below'; configChanged = true; }
+  if (changes.notify_rule && watches.NOTIFY_RULES.includes(changes.notify_rule)) { config.notifyRule = changes.notify_rule; configChanged = true; }
+  if (changes.source_url) { config.sourceUrl = String(changes.source_url).trim().slice(0, 500); configChanged = true; }
+  if (changes.condition) { patch.condition = String(changes.condition).trim(); config.condition = patch.condition; configChanged = true; }
+  if (configChanged) patch.watch_state = config;
+
+  if (changes.instruction) patch.instruction = String(changes.instruction).trim();
+  if (changes.new_title) patch.title = String(changes.new_title).trim();
+  if (changes.budget_cap !== undefined) {
+    const cap = Number(changes.budget_cap);
+    patch.budget_cap = Number.isFinite(cap) && cap > 0 ? cap : null;
+  }
+
+  // Cadence changes reschedule from now, so "make it weekly" takes effect on the next run
+  // rather than whenever the old cadence happened to land.
+  const cadenceGiven = changes.recurrence || changes.interval_minutes !== undefined || changes.time || changes.day_of_week !== undefined;
+  if (cadenceGiven) {
+    const recurrence = changes.recurrence || task.recurrence;
+    const isWatchTask = Boolean(task.watch_state);
+    if (recurrence === 'poll' || (task.recurrence === 'poll' && !changes.recurrence)
+      || (isWatchTask && changes.interval_minutes !== undefined && !isRecurringCadence(changes.recurrence))) {
+      const minutes = Number(changes.interval_minutes);
+      patch.interval_minutes = Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : task.interval_minutes;
+      patch.recurrence = 'poll';
+      patch.next_run_at = new Date(Date.now() + (patch.interval_minutes || DEFAULT_POLL_MINUTES) * 60000).toISOString();
+    } else {
+      patch.recurrence = isRecurringCadence(recurrence) ? recurrence : task.recurrence;
+      if (changes.time) patch.time_of_day = changes.time;
+      if (changes.day_of_week !== undefined) patch.day_of_week = normalizeDayOfWeek(changes.day_of_week);
+      patch.next_run_at = computeNextRun(new Date(), {
+        recurrence: patch.recurrence,
+        time_of_day: patch.time_of_day || task.time_of_day,
+        day_of_week: patch.day_of_week ?? task.day_of_week
+      }).toISOString();
+    }
+  }
+
+  const { data: updated, error: updateError } = await getSupabase()
+    .from('scheduled_tasks').update(patch).eq('id', task.id)
+    .select('id, title, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap, watch_state')
+    .single();
+  if (updateError) return { success: false, error: updateError.message };
+  return { success: true, task: updated, changed: Object.keys(patch) };
+}
+
+// Writes one real observation and returns the deterministic verdict for it.
+async function recordWatchObservation(userId, { id, value, state, note, accessible = true, error: reason } = {}) {
+  if (!id) return { success: false, error: 'A watch id is required.' };
+  const { data: task, error } = await getSupabase()
+    .from('scheduled_tasks').select('*').eq('id', id).eq('user_id', userId).maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!task) return { success: false, error: 'not_found' };
+
+  const verdict = watches.evaluateObservation(task.watch_state || {}, { value, state, note, accessible, error: reason });
+  const { error: writeError } = await getSupabase()
+    .from('scheduled_tasks')
+    .update({ watch_state: verdict.state })
+    .eq('id', id);
+  if (writeError) return { success: false, error: writeError.message };
+
+  return {
+    success: true,
+    notify: verdict.notify,
+    kind: verdict.kind,
+    reason: verdict.reason,
+    terminal: verdict.terminal,
+    watchId: id,
+    title: task.title
+  };
+}
+
 async function listScheduledTasks(userId) {
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
-    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, active')
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, active, watch_state')
     .eq('user_id', userId)
     .eq('active', true)
     .order('next_run_at', { ascending: true });
@@ -260,7 +447,7 @@ async function cancelScheduledTask(userId, { id, title }) {
 async function getDueScheduledTasks(userId, now = new Date()) {
   const { data, error } = await getSupabase()
     .from('scheduled_tasks')
-    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap, watch_state')
     .eq('user_id', userId)
     .eq('active', true)
     .eq('completed', false)
@@ -283,10 +470,12 @@ async function claimScheduledTask(task, now = new Date()) {
     .eq('active', true)
     .eq('completed', false)
     .eq('next_run_at', task.next_run_at)
-    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap')
+    .select('id, title, instruction, recurrence, time_of_day, day_of_week, next_run_at, condition, interval_minutes, expires_at, budget_cap, watch_state')
     .maybeSingle();
   if (error || !data) return null;
-  return { ...task, ...data, claimedUntil: leaseUntil.toISOString() };
+  // claimedAtMs lets scheduledConditionTriggered tell a verdict recorded BY THIS RUN from a
+  // stale one left by the previous cycle.
+  return { ...task, ...data, claimedUntil: leaseUntil.toISOString(), claimedAtMs: now.getTime() };
 }
 
 async function deferScheduledTask(task, now = new Date()) {
@@ -340,6 +529,8 @@ module.exports = {
   cleanScheduledResultText,
   isRecurringCadence,
   createScheduledTask,
+  updateScheduledTask,
+  recordWatchObservation,
   listScheduledTasks,
   cancelScheduledTask,
   getDueScheduledTasks,
