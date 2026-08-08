@@ -7023,6 +7023,18 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   return summary;
 }
 
+// A condition watch that checked and found nothing new is not news — it's the poll doing
+// its job. Surfacing it anyway is exactly the "notify on every poll" noise a background
+// watch should avoid: a 30-minute price watch would otherwise post a fresh Home card and
+// chat message every single cycle, most of them saying nothing happened. Every other
+// outcome (a genuine trigger, a failure worth knowing about, or something that needs
+// approval) is real news, and so is a plain non-condition scheduled task — it has no
+// "checked, nothing yet" state at all, every run of it IS the deliverable.
+function isScheduledRunNoteworthy(task, { conditionTriggered, failed, waiting }) {
+  if (!task?.condition) return true;
+  return Boolean(conditionTriggered || failed || waiting);
+}
+
 async function runScheduledTasksForUser(userId, logger = console, now = new Date()) {
   let runs = 0;
   let dueTasks = [];
@@ -7109,24 +7121,26 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
         await scheduledTasks.advanceScheduledTask(claimed, now);
       }
 
-      const spoken = sanitizeAgentTaskText(
-        scheduledTasks.cleanScheduledResultText(result.spoken),
-        waiting ? `“${claimed.title}” needs your OK before Millie can continue.`
-          : conditionTriggered ? `I found a match for “${claimed.title}”.`
-            : `I checked “${claimed.title}”.`,
-        500
-      );
-      await createBriefing(userId, {
-        kind: 'scheduled_task',
-        title: claimed.title,
-        body: spoken,
-        source: 'agent',
-        metadata: {
-          scheduledTaskId: claimed.id,
-          taskId: persistedTask.id,
-          status: waiting ? 'waiting_approval' : failed ? 'failed' : conditionTriggered ? 'triggered' : 'completed'
-        }
-      }).catch(error => logger.warn?.(`[scheduled] briefing failed for ${claimed.id}: ${error.message}`));
+      if (isScheduledRunNoteworthy(claimed, { conditionTriggered, failed, waiting })) {
+        const spoken = sanitizeAgentTaskText(
+          scheduledTasks.cleanScheduledResultText(result.spoken),
+          waiting ? `“${claimed.title}” needs your OK before Millie can continue.`
+            : conditionTriggered ? `I found a match for “${claimed.title}”.`
+              : `I checked “${claimed.title}”.`,
+          500
+        );
+        await createBriefing(userId, {
+          kind: 'scheduled_task',
+          title: claimed.title,
+          body: spoken,
+          source: 'agent',
+          metadata: {
+            scheduledTaskId: claimed.id,
+            taskId: persistedTask.id,
+            status: waiting ? 'waiting_approval' : failed ? 'failed' : conditionTriggered ? 'triggered' : 'completed'
+          }
+        }).catch(error => logger.warn?.(`[scheduled] briefing failed for ${claimed.id}: ${error.message}`));
+      }
       runs += 1;
     } catch (error) {
       if (persistedTask?.id) {
@@ -10209,3 +10223,4 @@ module.exports.checkMillieSendCap = checkMillieSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
 module.exports.executeActions = executeActions;
 module.exports.runScheduledTasksForUser = runScheduledTasksForUser;
+module.exports.isScheduledRunNoteworthy = isScheduledRunNoteworthy;
