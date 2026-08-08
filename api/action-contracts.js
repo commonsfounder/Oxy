@@ -279,7 +279,7 @@ const ACTION_CONTRACTS = {
       already_done: 'anything the user says they have already done/seen, so it is not repeated',
       pace: 'e.g. "relaxed, do not want to rush" or "pack in as much as possible"'
     },
-    guidance: 'Use for "plan me a trip to X", "plan Saturday in X", a weekend/day trip, or any request for a real day-by-day plan — not for a single fact lookup (use web_search for that), and not the same thing as plan_trip (that is a point-to-point route/train planner, not a day-by-day itinerary). Always call this tool for that, even if you could piece a plan together yourself from your own web_search calls first — a hand-written itinerary in chat prose cannot be saved or edited later; only the structured itinerary this action returns can. Extract every constraint the user actually stated (dates, arrival/departure times, starting location, budget, who is going, transport limits, interests, food preferences, things already booked or already done, accessibility, "keep it walkable", "do not want to rush") into the matching parameter; do not invent constraints the user never gave. The result is a real, time-aware plan grounded in an actual web search done inside this call — do not also call search_flights/search_hotels to "fill in" the itinerary, they only build a browser link and return no real prices or availability. If the user then asks to save it, call workspace_write with a path like trips/<destination>-<date>.json and the CONTENT SET TO THE FULL ITINERARY JSON THIS ACTION RETURNED (not a prose summary) — that is what makes it editable later via modify_itinerary. If asked to add it to the calendar, call create_calendar_event a small number of times for the genuinely meaningful blocks (e.g. one per day or per booked/timed item), never one event per itinerary line. Planning and booking are separate: if the user asks to actually book a hotel, buy tickets, or reserve something from the plan, use run_browser_task against the real site — never say something was booked unless that flow actually confirmed it.',
+    guidance: 'Use for "plan me a trip to X", "plan Saturday in X", a weekend/day trip, or any request for a real day-by-day plan — not for a single fact lookup (use web_search for that), and not the same thing as plan_trip (that is a point-to-point route/train planner, not a day-by-day itinerary). Always call this tool for that, even if you could piece a plan together yourself from your own web_search calls first — a hand-written itinerary in chat prose cannot be saved or edited later; only the structured itinerary this action returns can. Extract every constraint the user actually stated (dates, arrival/departure times, starting location, budget, who is going, transport limits, interests, food preferences, things already booked or already done, accessibility, "keep it walkable", "do not want to rush") into the matching parameter; do not invent constraints the user never gave. The result is a real, time-aware plan grounded in an actual web search done inside this call. When the trip involves getting there or staying overnight — especially with a total budget like "3 days in Prague for £400 including travel and hotel" — call search_flights and/or search_hotels FIRST and plan around what they actually return, then say what the travel and accommodation legs really cost and how much that leaves for the rest. Those two are real searches now (they return observed prices with their sources), but they are still not bookings: carry their "observed, not held" caveat into the plan, and never present a price for the wrong dates as the price for these ones. If the user then asks to save it, call workspace_write with a path like trips/<destination>-<date>.json and the CONTENT SET TO THE FULL ITINERARY JSON THIS ACTION RETURNED (not a prose summary) — that is what makes it editable later via modify_itinerary. If asked to add it to the calendar, call create_calendar_event a small number of times for the genuinely meaningful blocks (e.g. one per day or per booked/timed item), never one event per itinerary line. Planning and booking are separate: if the user asks to actually book a hotel, buy tickets, or reserve something from the plan, use run_browser_task against the real site — never say something was booked unless that flow actually confirmed it.',
     successSummary: 'Itinerary planned',
     failureSummary: 'Could not plan that trip',
     confirmation: 'none',
@@ -916,8 +916,41 @@ const ACTION_CONTRACTS = {
   send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
   book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none' },
   get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none' },
-  search_flights: { risk: 'low', required: ['from', 'to'], inputExample: { from: 'LHR', to: 'JFK' }, successSummary: 'Flights found', failureSummary: 'Failed', confirmation: 'none', guidance: 'This only opens a flight-search page as a link — it does not return real prices, availability, or results. Never use it as a data source for plan_itinerary or to answer "how much would flights cost". Use web_search for a real current estimate, or run_browser_task if the user wants to actually look at and book real flights.' },
-  search_hotels: { risk: 'low', required: ['location'], inputExample: { location: 'Paris' }, successSummary: 'Hotels found', failureSummary: 'Failed', confirmation: 'none', guidance: 'This only opens a hotel-search page as a link — it does not return real prices, availability, or results. Never use it as a data source for plan_itinerary or to answer "how much would a hotel cost". Use web_search for a real current estimate, or run_browser_task if the user wants to actually look at and book a real hotel.' },
+  search_flights: {
+    risk: 'low',
+    required: ['from', 'to'],
+    optional: ['depart_date', 'return_date', 'adults', 'max_price', 'direct_only', 'max_stops', 'notes'],
+    inputExample: { from: 'Birmingham', to: 'Prague', depart_date: '2026-09-15', return_date: '2026-09-18', adults: 1 },
+    paramHints: {
+      depart_date: 'ISO date — resolve "next month" to a real date yourself before calling',
+      max_price: 'a number the user actually stated, e.g. 150 for "under £150"',
+      direct_only: 'true only when the user asked for direct flights',
+      max_stops: 'use instead of direct_only when the user allows some connections',
+      notes: 'other stated constraints in the user\'s own words, e.g. "nothing before 9am", "Friday night vs Saturday morning"'
+    },
+    guidance: 'This performs a REAL web search and returns the flight options that search results actually stated — airline, direct or connecting, an observed price with its currency, the site that quoted it, and the exact dates that price applies to. Use it for "find me flights from X to Y", "cheapest direct flights under £150", comparing days, and for costing the travel leg of a trip. Two things must survive into what you tell the user: prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability, and results whose matchesRequestedDates is false are priced for DIFFERENT dates — report those separately and never present one as the price for the dates asked about. Never claim a flight is bookable or available; this searched, it did not query an airline reservation system. If the user wants to actually book, hand off to run_browser_task against the airline or agent site. If it returns no options, say that plainly instead of filling the gap with a plausible-sounding fare.',
+    successSummary: 'Flights found',
+    failureSummary: 'Flight search failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  search_hotels: {
+    risk: 'low',
+    required: ['location'],
+    optional: ['check_in', 'check_out', 'guests', 'max_price', 'area', 'min_rating', 'style', 'notes'],
+    inputExample: { location: 'Bath', check_in: '2026-09-12', check_out: '2026-09-14', guests: 2, max_price: 140 },
+    paramHints: {
+      check_in: 'ISO date',
+      max_price: 'the per-night ceiling the user stated, e.g. 140 for "under £140 a night"',
+      area: 'a stated location constraint, e.g. "walking distance from the centre"',
+      style: 'budget | mid | boutique | luxury, only if the user indicated one'
+    },
+    guidance: 'This performs a REAL web search and returns the hotel options that search results actually stated — property, area, an observed nightly or total price with its currency, the site that quoted it, and the dates that price applies to. Use it for "find hotels in Bath under £140 a night", "somewhere walking distance from the centre", "two nights, two people", and for costing the accommodation leg of a trip. Two things must survive into what you tell the user: prices are OBSERVED IN SEARCH RESULTS, not held quotes, and availability is only claimed when availabilityStated is true — otherwise say availability was not confirmed. Results whose matchesRequestedDates is false are priced for DIFFERENT dates; report them separately rather than as the price for the requested stay. Never present a generic list of well-known hotels as a search result, and never claim a room can be booked; hand off to run_browser_task for an actual booking. If it returns no options, say so plainly.',
+    successSummary: 'Hotels found',
+    failureSummary: 'Hotel search failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' },
   // Real browser ordering (api/services/browser-task.js) — was built across many sessions
   // but never actually registered here, so it was unreachable from live chat. High risk

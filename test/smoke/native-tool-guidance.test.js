@@ -433,3 +433,28 @@ test('watches: the watch list must report a failing check rather than implying h
   assert.match(desc, /what are you watching for me\?/);
   assert.match(desc, /If a watch reports lastCheckFailed, say so plainly/);
 });
+
+test('travel: search_flights is described as a real search whose prices are observed, not held', () => {
+  const desc = nativeDescriptions().search_flights.description;
+  assert.match(desc, /performs a REAL web search/);
+  assert.match(desc, /prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability/);
+  assert.match(desc, /matchesRequestedDates is false are priced for DIFFERENT dates/);
+  assert.match(desc, /Never claim a flight is bookable or available/);
+  // The old text told the model this tool was fake. That must be gone.
+  assert.doesNotMatch(desc, /only opens a flight-search page as a link/);
+});
+
+test('travel: search_hotels claims availability only when the source stated it', () => {
+  const desc = nativeDescriptions().search_hotels.description;
+  assert.match(desc, /performs a REAL web search/);
+  assert.match(desc, /availability is only claimed when availabilityStated is true/);
+  assert.match(desc, /Never present a generic list of well-known hotels as a search result/);
+  assert.doesNotMatch(desc, /only opens a hotel-search page as a link/);
+});
+
+test('travel: plan_itinerary now composes with the real searches instead of avoiding them', () => {
+  const desc = nativeDescriptions().plan_itinerary.description;
+  assert.match(desc, /call search_flights and\/or search_hotels FIRST and plan around what they actually return/);
+  assert.match(desc, /carry their "observed, not held" caveat into the plan/);
+  assert.doesNotMatch(desc, /they only build a browser link and return no real prices/);
+});

@@ -15,7 +15,6 @@ const lyft = require('./lyft');
 const strava = require('./strava');
 const oura = require('./oura');
 const flights = require('./flights');
-const hotels = require('./hotels');
 const stocks = require('./stocks');
 
 // Registry: action name → connector module
@@ -39,11 +38,10 @@ for (const action of lyft.SUPPORTED_ACTIONS) registry[action] = lyft;
 for (const action of strava.SUPPORTED_ACTIONS) registry[action] = strava;
 for (const action of oura.SUPPORTED_ACTIONS) registry[action] = oura;
 for (const action of flights.SUPPORTED_ACTIONS) registry[action] = flights;
-for (const action of hotels.SUPPORTED_ACTIONS) registry[action] = hotels;
 for (const action of stocks.SUPPORTED_ACTIONS) registry[action] = stocks;
 
 // Real API connectors (actual server actions)
-const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'stripe', 'weather', 'slack', 'strava', 'oura', 'flights', 'hotels', 'stocks']);
+const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'stripe', 'weather', 'slack', 'strava', 'oura', 'flights', 'stocks']);
 
 // Handoff / convenience connectors (open apps with prefill - still useful for consumer)
 const HANDOFF_CONNECTORS = new Set(['uber', 'trainline', 'spotify', 'lyft', 'amazon']);

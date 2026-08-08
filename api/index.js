@@ -100,6 +100,8 @@ const dailyDigest = require('./services/daily-digest');
 const people = require('./services/people');
 const receipts = require('./services/receipts');
 const watches = require('./services/watches');
+const travelSearch = require('./services/travel-search');
+const travelRanking = require('./services/travel-ranking');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -4250,6 +4252,114 @@ async function executeAction(userId, action, params, context = {}) {
         success: true,
         items,
         text: formatOccasionsSummary(items)
+      };
+    }
+
+    // ── Real travel search ────────────────────────────────────────────────────────────
+    // These two used to build a deep link and report success. They now do a real grounded
+    // web search and return what the results actually stated, with prices marked as
+    // observed-not-bookable. See api/services/travel-search.js for why this route and not
+    // an API or a browser. They are also removed from the connectors registry, so the old
+    // link-generator is unreachable rather than merely unused.
+    case 'search_flights':
+    case 'search_hotels': {
+      const kind = action === 'search_flights' ? 'flights' : 'hotels';
+      const today = getLocalDateKey();
+
+      const research = kind === 'flights'
+        ? travelSearch.buildFlightResearchPrompt({
+          from: String(params?.from || '').trim(),
+          to: String(params?.to || params?.destination || '').trim(),
+          departDate: String(params?.depart_date || params?.date || '').trim(),
+          returnDate: String(params?.return_date || '').trim(),
+          adults: Math.max(1, Math.min(Number(params?.adults) || 1, 9)),
+          notes: String(params?.notes || '').trim(),
+          maxPrice: Number(params?.max_price) || null,
+          directOnly: params?.direct_only === true || String(params?.direct_only) === 'true',
+          today
+        })
+        : travelSearch.buildHotelResearchPrompt({
+          location: String(params?.location || params?.city || '').trim(),
+          checkIn: String(params?.check_in || params?.checkin || '').trim(),
+          checkOut: String(params?.check_out || params?.checkout || '').trim(),
+          guests: Math.max(1, Math.min(Number(params?.guests) || 2, 12)),
+          maxNightly: params?.max_price ? String(params.max_price) : '',
+          area: String(params?.area || '').trim(),
+          notes: String(params?.notes || '').trim(),
+          today
+        });
+
+      if (kind === 'flights' && (!params?.from || !(params?.to || params?.destination))) {
+        return { success: false, error: 'search_flights needs both a departure and a destination.' };
+      }
+      if (kind === 'hotels' && !(params?.location || params?.city)) {
+        return { success: false, error: 'search_hotels needs a location.' };
+      }
+
+      let researchText = '';
+      try {
+        researchText = await webSearchBrain({ model: FAST_MODEL, prompt: research });
+      } catch (e) {
+        return { success: false, error: `The travel search could not run: ${e.message}` };
+      }
+      if (!researchText) {
+        return { success: false, error: 'The web search returned nothing for that route — I have no real options to show you rather than made-up ones.' };
+      }
+
+      // Stage two runs WITHOUT the search tool: it may only restructure the text above, so
+      // it cannot introduce an option that was never found. The token budget is explicit —
+      // the default (768, shared with reasoning) silently returns an empty string on an
+      // input this long.
+      let options = [];
+      try {
+        const extracted = await generateBrain({
+          model: FAST_MODEL,
+          contents: [{ role: 'user', parts: [{ text: travelSearch.buildExtractionPrompt(kind, researchText, params || {}) }] }],
+          config: { maxOutputTokens: travelSearch.EXTRACTION_TOKENS }
+        });
+        options = travelSearch.parseTravelResults(kind, extracted.text || '');
+      } catch (e) {
+        return { success: false, error: `The travel search found results but could not read them: ${e.message}`, research: researchText };
+      }
+
+      const { kept, dropped } = travelSearch.applyConstraints(options, {
+        maxPrice: Number(params?.max_price) || null,
+        directOnly: params?.direct_only === true || String(params?.direct_only) === 'true',
+        maxStops: Number.isFinite(Number(params?.max_stops)) && params?.max_stops !== undefined ? Number(params.max_stops) : undefined,
+        minRating: Number(params?.min_rating) || null
+      });
+
+      // travel-ranking.js finally has real structured results to rank. It was written for an
+      // Amadeus connector that never existed here, which is why it sat orphaned; the mapping
+      // in toRankingShape is what makes it live rather than rewriting it.
+      const requirements = {
+        budget: params?.max_price ? String(params.max_price) : '',
+        constraints: (params?.direct_only === true || String(params?.direct_only) === 'true') ? ['direct_or_fewest_changes'] : [],
+        partySize: String(params?.adults || params?.guests || 1),
+        accommodationPreference: String(params?.style || '').trim()
+      };
+      const shaped = kept.map(travelSearch.toRankingShape);
+      const ranked = kind === 'flights'
+        ? travelRanking.rankFlights(shaped, {}, requirements)
+        : travelRanking.rankHotels(shaped, {}, requirements);
+      // Date-matched options always outrank indicative ones, whatever the score: a cheaper
+      // price for the wrong week is not a better option, it is a different question.
+      ranked.sort((a, b) => (Number(b.matchesRequestedDates) - Number(a.matchesRequestedDates)) || (b.score - a.score));
+
+      const searched = kind === 'flights'
+        ? `${params.from} to ${params.to || params.destination}${params?.depart_date ? ` ${params.depart_date}` : ''}${params?.return_date ? `–${params.return_date}` : ''}`
+        : `${params.location || params.city}${params?.check_in ? ` ${params.check_in}` : ''}${params?.check_out ? `–${params.check_out}` : ''}`;
+
+      return {
+        success: true,
+        kind,
+        options: ranked,
+        datesMatched: ranked.filter(o => o.matchesRequestedDates).length,
+        indicative: ranked.filter(o => !o.matchesRequestedDates).length,
+        droppedByConstraints: dropped.map(d => ({ why: d.why, option: d.option.airline || d.option.name })),
+        research: researchText,
+        bookable: false,
+        text: travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) })
       };
     }
 
