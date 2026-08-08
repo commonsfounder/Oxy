@@ -332,6 +332,24 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  set_notification_preference: {
+    risk: 'low',
+    required: [],
+    optional: ['channel', 'category', 'urgent_only', 'quiet_hours', 'email_to'],
+    inputExample: { category: 'delivery', channel: 'in_app' },
+    paramHints: {
+      channel: 'auto (default) | push | email | in_app (show it in the app but do not interrupt) | off',
+      category: 'watch | digest | delivery | reply_needed | occasion | commitment — omit to set the default for everything',
+      urgent_only: 'true for "only send urgent things"',
+      quiet_hours: 'e.g. "22:00-07:00" — non-urgent notifications wait until it ends rather than being dropped',
+      email_to: 'a specific address to send to, if not the account address'
+    },
+    guidance: 'Use when the user says how they want to be told about things: "email me if that price drops" (channel:"email"), "don\'t email me about deliveries, just show those in the app" (category:"delivery", channel:"in_app"), "only send urgent things", "nothing after 10pm", "send me my morning brief even if I don\'t open the app" (category:"digest", channel:"email" or "push"). Relay the returned `unavailable` list honestly — if the user asks to be emailed and no email provider is configured, say that it will fall back to the in-app card until it is set up rather than implying the email will arrive. Do not invent channels: only push, email and the in-app card exist.',
+    successSummary: 'Notification preference updated',
+    failureSummary: 'Could not change that preference',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Spend awareness over the only two real sources that exist here: emailed receipts and
   // orders this system actually placed. There is deliberately no bank/card feed.
   find_spend: {

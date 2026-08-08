@@ -241,3 +241,35 @@ test('an approval waiting on the user outranks everything else', () => {
   assert.equal(digest.items[0].kind, 'approval');
   assert.equal(digest.items[0].ref.approvalId, 'ap1');
 });
+
+test('one watch reporting nine times is one line, not nine', () => {
+  // Real data: a single price watch had run nine times, and nine identical cards filled the
+  // digest and pushed a genuine birthday off it entirely.
+  const updates = Array.from({ length: 9 }, (_, i) => ({
+    id: `b${i}`, title: 'Track Brighton hotel price drops',
+    body: 'No reliable price drop was established.',
+    metadata: { status: 'triggered', scheduledTaskId: 'w1' },
+    created_at: hoursFromNow(-i - 1)
+  }));
+  const digest = buildDailyDigest({
+    now: NOW,
+    watchUpdates: updates,
+    occasions: [occasionInDays('Alisa', 3)]
+  });
+
+  const watchItems = digest.items.filter(i => i.kind === 'watch_update');
+  assert.equal(watchItems.length, 1);
+  assert.match(watchItems[0].detail, /9 updates from this watch/);
+  assert.ok(digest.items.some(i => i.kind === 'occasion'), 'the birthday must not be crowded out');
+});
+
+test('two genuinely different watches are still two lines', () => {
+  const digest = buildDailyDigest({
+    now: NOW,
+    watchUpdates: [
+      { id: 'b1', title: 'Parcel', body: 'Out for delivery.', metadata: { status: 'triggered', scheduledTaskId: 'w1' }, created_at: hoursFromNow(-1) },
+      { id: 'b2', title: 'Hotel price', body: 'Now £86.', metadata: { status: 'triggered', scheduledTaskId: 'w2' }, created_at: hoursFromNow(-2) }
+    ]
+  });
+  assert.equal(digest.items.filter(i => i.kind === 'watch_update').length, 2);
+});

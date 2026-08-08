@@ -277,12 +277,32 @@ function buildDailyDigest({
     ...occasions.map(occasion => normalizeOccasionItem(occasion, reference))
   ].filter(Boolean).map(item => ({ ...item, urgency: tierOf(item.priority) }));
 
+  // Collapse repeats of the SAME underlying thing before ranking. Found against real data: a
+  // single price watch that had run nine times filled nine of the twelve slots with identical
+  // "Track Brighton hotel price drops" cards and pushed a real birthday off the digest
+  // entirely. One watch is one line, however many times it has reported.
   const deduped = [];
   const seen = new Set();
+  const bySubject = new Map();
   for (const item of items.sort((a, b) => b.priority - a.priority || a.sortTime - b.sortTime)) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
+    // Only watch updates repeat this way; a reminder and a calendar event are distinct
+    // objects even when they share a title.
+    const subject = item.kind === 'watch_update' || item.kind === 'watch_problem'
+      ? `${item.kind}:${item.ref?.scheduledTaskId || item.title.toLowerCase()}`
+      : null;
+    if (subject) {
+      const existing = bySubject.get(subject);
+      if (existing) { existing.repeats = (existing.repeats || 1) + 1; continue; }
+      bySubject.set(subject, item);
+    }
     deduped.push(item);
+  }
+  for (const item of deduped) {
+    if (item.repeats > 1) {
+      item.detail = `${item.detail} (${item.repeats} updates from this watch)`;
+    }
   }
 
   const focused = focus === 'urgent' ? deduped.filter(i => i.urgency === 'now')

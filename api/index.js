@@ -102,6 +102,9 @@ const receipts = require('./services/receipts');
 const watches = require('./services/watches');
 const travelSearch = require('./services/travel-search');
 const travelRanking = require('./services/travel-ranking');
+const notifications = require('./services/notifications');
+const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
+const { sendEmail: sendEmailService } = require('./services/email');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -4363,6 +4366,57 @@ async function executeAction(userId, action, params, context = {}) {
       };
     }
 
+    // How the user controls being interrupted. Deliberately four knobs, not a settings panel:
+    // which channel, which categories, urgent-only, and when to stay quiet.
+    case 'set_notification_preference': {
+      const scope = String(params?.category || '').trim().toLowerCase();
+      const channel = String(params?.channel || '').trim().toLowerCase();
+      const updates = [];
+
+      if (channel) {
+        const valid = ['auto', 'push', 'email', 'in_app', 'off'];
+        if (!valid.includes(channel)) return { success: false, error: `channel must be one of ${valid.join(', ')}` };
+        const key = scope ? notifications.PREF.category(notifications.normalizeCategory(scope)) : notifications.PREF.channel;
+        await setPreferenceValue(userId, key, channel);
+        updates.push(scope ? `${scope} notifications: ${channel}` : `default channel: ${channel}`);
+      }
+      if (params?.urgent_only !== undefined) {
+        const value = params.urgent_only === true || String(params.urgent_only) === 'true';
+        await setPreferenceValue(userId, notifications.PREF.urgentOnly, String(value));
+        updates.push(value ? 'only urgent things' : 'not just urgent things');
+      }
+      if (params?.quiet_hours !== undefined) {
+        const raw = String(params.quiet_hours || '').trim();
+        if (raw && !notifications.parseQuietHours(raw)) {
+          return { success: false, error: 'quiet_hours must look like "22:00-07:00"' };
+        }
+        await setPreferenceValue(userId, notifications.PREF.quietHours, raw);
+        updates.push(raw ? `quiet hours ${raw}` : 'no quiet hours');
+      }
+      if (params?.email_to) {
+        await setPreferenceValue(userId, notifications.PREF.emailTo, String(params.email_to).trim());
+        updates.push(`email to ${params.email_to}`);
+      }
+      if (!updates.length) return { success: false, error: 'Nothing to change — say which channel, category, quiet hours or urgency level.' };
+
+      // Report what can actually deliver, so "email me if the price drops" cannot look
+      // configured when no email provider is set up.
+      const prefs = await getPreferenceMap(userId);
+      const { data: userRow } = await supabase.from('users').select('email, email_verified').eq('user_id', userId).maybeSingle();
+      const emailTo = prefs[notifications.PREF.emailTo] || (userRow?.email_verified ? userRow.email : '');
+      const { count: deviceCount } = await supabase.from('devices').select('*', { count: 'exact', head: true }).eq('user_id', userId);
+      const available = availableChannels({ hasPushDevices: (deviceCount || 0) > 0, emailTo });
+      const blocked = describeUnavailable({ hasPushDevices: (deviceCount || 0) > 0, emailTo });
+
+      return {
+        success: true,
+        preferences: notifications.describePreference(prefs),
+        available,
+        unavailable: blocked,
+        text: `Updated: ${updates.join('; ')}.${blocked.length ? ` Be aware — ${blocked.join('; ')}, so anything routed there will fall back to the in-app card until that is set up.` : ''}`
+      };
+    }
+
     // Spend and receipts. Two real sources only — receipts in the connected mailbox, and
     // orders this system actually placed and saw confirmed. There is no bank feed, and the
     // summary text says so every time rather than implying completeness.
@@ -4666,6 +4720,36 @@ async function executeAction(userId, action, params, context = {}) {
       return dispatch(userId, action, enrichedParams);
   }
 }
+
+// Proactive outbound delivery, wired to the real senders. Everything Millie notices in the
+// background now becomes a durable notification_events row that a sweep tries to actually
+// deliver — rather than a briefing card the user only sees if they open the app.
+const notificationDelivery = createDeliveryRuntime({
+  supabase,
+  sendPush: async (userId, payload) => {
+    const result = await sendPushToUser(userId, { title: payload.title, body: payload.body, kind: payload.category });
+    // sendPushToUser reports { sent: 0, skipped: true } when APNs is not configured. That is
+    // not a delivery, and must not be recorded as one.
+    return { ok: Number(result?.sent) > 0, error: result?.skipped ? 'Apple push is not configured' : result?.error };
+  },
+  sendEmail: async ({ to, subject, text }) => {
+    const result = await sendEmailService({ to, subject, text, html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>` });
+    // `dev: true` is api/services/email.js's no-op mode when RESEND_API_KEY is absent — it
+    // logs and returns ok. Passed through deliberately so the runtime can reject it.
+    return { ok: result?.ok !== false, dev: result?.dev === true, providerRef: result?.id || null };
+  },
+  createBriefing,
+  getPreferenceMap,
+  getUserEmail: async (userId) => {
+    const { data } = await supabase.from('users').select('email, email_verified').eq('user_id', userId).maybeSingle();
+    // An unverified address is not somewhere we send unsolicited mail.
+    return data?.email && data.email_verified ? data.email : '';
+  },
+  countPushDevices: async (userId) => {
+    const { count } = await supabase.from('devices').select('*', { count: 'exact', head: true }).eq('user_id', userId);
+    return count || 0;
+  }
+});
 
 const executeActions = createActionRunner({
   executeAction,
@@ -8056,6 +8140,7 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
               : `I checked “${claimed.title}”.`,
           500
         );
+        const runStatus = waiting ? 'waiting_approval' : failed ? 'failed' : conditionTriggered ? 'triggered' : 'completed';
         await createBriefing(userId, {
           kind: 'scheduled_task',
           title: claimed.title,
@@ -8064,9 +8149,34 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
           metadata: {
             scheduledTaskId: claimed.id,
             taskId: persistedTask.id,
-            status: waiting ? 'waiting_approval' : failed ? 'failed' : conditionTriggered ? 'triggered' : 'completed'
-          }
+            status: runStatus
+          },
+          // The notification runtime owns channel choice from here — letting createBriefing
+          // also fire its own push would be a second, uncontrolled attempt at the same event.
+          push: false
         }).catch(error => logger.warn?.(`[scheduled] briefing failed for ${claimed.id}: ${error.message}`));
+
+        // A background run that produced real news becomes a durable outbound notification,
+        // not just a card in the app. Deduped on the watch AND the state it observed, so one
+        // real transition is one alert however many times the sweep re-runs.
+        const evaluation = afterRun?.watch_state?.lastEvaluation;
+        await notificationDelivery.raise(userId, {
+          category: /deliver|parcel|track/i.test(claimed.title) ? 'delivery' : 'watch',
+          urgency: notifications.gradeUrgency({
+            category: 'watch',
+            exception: failed || evaluation?.kind === 'blocked',
+            thresholdCrossed: evaluation?.kind === 'threshold_met',
+            terminalState: evaluation?.terminal === true
+          }),
+          title: claimed.title,
+          body: spoken,
+          dedupeKey: notifications.dedupeKeyFor({
+            category: 'watch',
+            scheduledTaskId: claimed.id,
+            state: evaluation?.reason || runStatus
+          }),
+          sourceRef: { scheduledTaskId: claimed.id, taskId: persistedTask.id, status: runStatus }
+        }).catch(error => logger.warn?.(`[scheduled] notification failed for ${claimed.id}: ${error.message}`));
       }
       runs += 1;
     } catch (error) {
@@ -8123,6 +8233,22 @@ async function runProactiveSweep(logger = console) {
     const userSummary = await runProactiveForUser(user.user_id, logger);
     mergeProactiveSummary(summary, userSummary);
     summary.scheduledRuns += await runScheduledTasksForUser(user.user_id, logger, new Date());
+    // Everything raised above (and anything deferred by quiet hours that is now due) gets a
+    // real delivery attempt on the same sweep.
+    try {
+      const delivery = await notificationDelivery.deliverPending(user.user_id);
+      if (delivery?.results?.length) {
+        summary.notificationsDelivered = (summary.notificationsDelivered || 0) +
+          delivery.results.filter(r => r.status === 'delivered').length;
+        summary.notificationsUndelivered = (summary.notificationsUndelivered || 0) +
+          delivery.results.filter(r => r.status !== 'delivered').length;
+        if (delivery.unavailable?.length) {
+          logger.warn?.(`[notify] ${user.user_id}: ${delivery.unavailable.join('; ')}`);
+        }
+      }
+    } catch (e) {
+      logger.error?.(`[notify] delivery sweep failed for ${user.user_id}: ${e.message}`);
+    }
   }
 
   // Scheduled routines (Phase 4 of the aside-parity roadmap) — reuses the existing
@@ -11183,4 +11309,5 @@ module.exports.checkMillieSendCap = checkMillieSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
 module.exports.executeActions = executeActions;
 module.exports.runScheduledTasksForUser = runScheduledTasksForUser;
+module.exports.notificationDelivery = notificationDelivery;
 module.exports.isScheduledRunNoteworthy = isScheduledRunNoteworthy;

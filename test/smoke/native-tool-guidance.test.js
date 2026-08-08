@@ -93,10 +93,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // Plus 1 more for the morning digest: daily_digest, and 3 for the people layer:
 // remember_person, find_people, forget_person_detail, and 1 for spend awareness: find_spend.
 // Plus 3 for general watches: update_scheduled_task, record_watch_observation, and guidance
-// newly added to the previously-bare list_scheduled_tasks.)
-test('exactly 53 contracts define guidance, and every one appears verbatim in its native description', () => {
+// newly added to the previously-bare list_scheduled_tasks. Plus 1 for proactive outbound
+// delivery: set_notification_preference.)
+test('exactly 54 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 53);
+  assert.equal(withGuidance.length, 54);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -457,4 +458,11 @@ test('travel: plan_itinerary now composes with the real searches instead of avoi
   assert.match(desc, /call search_flights and\/or search_hotels FIRST and plan around what they actually return/);
   assert.match(desc, /carry their "observed, not held" caveat into the plan/);
   assert.doesNotMatch(desc, /they only build a browser link and return no real prices/);
+});
+
+test('notifications: the user is never told a message will arrive on a channel that cannot send', () => {
+  const desc = nativeDescriptions().set_notification_preference.description;
+  assert.match(desc, /Relay the returned `unavailable` list honestly/);
+  assert.match(desc, /rather than implying the email will arrive/);
+  assert.match(desc, /Do not invent channels: only push, email and the in-app card exist/);
 });
