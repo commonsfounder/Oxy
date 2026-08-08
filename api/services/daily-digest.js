@@ -16,6 +16,7 @@
 
 const { normalizeEvent, normalizeApproval } = require('./life-briefing');
 const { daysUntil, formatMonthDay } = require('./occasions');
+const commitmentLogic = require('./commitments');
 
 // A morning digest is about today. life-briefing's 48h calendar horizon is right for a
 // card that sits on screen all day; for "what's on my plate" an event 40 hours out is
@@ -208,6 +209,31 @@ function normalizeWatchUpdate(briefing = {}, now = new Date()) {
   };
 }
 
+// Something the user themselves promised is the highest-value thing a digest can carry: it is
+// the only category where they are the blocker AND someone else may be waiting. Overdue
+// outranks everything except a pending approval and an imminent meeting.
+function normalizeCommitmentItem(commitment = {}, now = new Date()) {
+  if (!commitment.what || commitment.status !== 'open') return null;
+  const overdue = commitmentLogic.isOverdue(commitment, now);
+  const dueToday = commitmentLogic.isDueToday(commitment, now);
+  // A promise with no date, or one due next week, is not on TODAY's plate.
+  if (!overdue && !dueToday) return null;
+
+  const person = clean(commitment.person_name, 60);
+  return {
+    id: `commitment:${commitment.id || commitment.what}`,
+    kind: 'commitment',
+    title: clean(commitment.what, 140),
+    detail: person
+      ? `You told ${person} you'd ${clean(commitment.what, 120)} — ${commitmentLogic.describeDue(commitment, now)}`
+      : `You said you'd ${clean(commitment.what, 120)} — ${commitmentLogic.describeDue(commitment, now)}`,
+    priority: overdue ? 92 : 78,
+    sortTime: commitment.due_at ? new Date(commitment.due_at).getTime() : Number.MAX_SAFE_INTEGER,
+    ref: { commitmentId: commitment.id || null, personName: person || null, threadId: commitment.thread_id || null },
+    followUp: person ? `Draft the message to ${firstName(person)}` : `Mark "${clean(commitment.what, 50)}" done`
+  };
+}
+
 // Calendar and approvals go through life-briefing's own normalizers so the ranking matches
 // the Home card exactly; only the shape is adapted (digest items carry refs/follow-ups).
 function adaptBriefingItem(item, extra = {}) {
@@ -257,6 +283,7 @@ function tierOf(priority) {
 function buildDailyDigest({
   replyNeeded = [],
   occasions = [],
+  commitments = [],
   scheduledTasks = [],
   watchUpdates = [],
   calendarEvents = [],
@@ -273,6 +300,7 @@ function buildDailyDigest({
     ...calendarEvents.map(event => normalizeCalendarItem(event, reference, timeZone)),
     ...replyNeeded.map(item => normalizeReplyItem(item, reference)),
     ...scheduledTasks.map(task => normalizeReminderItem(task, reference, timeZone)),
+    ...commitments.map(commitment => normalizeCommitmentItem(commitment, reference)),
     ...watchUpdates.map(update => normalizeWatchUpdate(update, reference)),
     ...occasions.map(occasion => normalizeOccasionItem(occasion, reference))
   ].filter(Boolean).map(item => ({ ...item, urgency: tierOf(item.priority) }));
@@ -365,6 +393,7 @@ module.exports = {
   normalizeOccasionItem,
   normalizeReminderItem,
   normalizeWatchUpdate,
+  normalizeCommitmentItem,
   normalizeCalendarItem,
   normalizeApprovalItem
 };

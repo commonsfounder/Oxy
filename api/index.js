@@ -103,6 +103,7 @@ const watches = require('./services/watches');
 const travelSearch = require('./services/travel-search');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
+const commitments = require('./services/commitments');
 const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
 const { sendEmail: sendEmailService } = require('./services/email');
 const agentContinuity = require('./services/agent-continuity');
@@ -3935,11 +3936,12 @@ async function executeAction(userId, action, params, context = {}) {
       const coverage = {};
 
       const watchSince = new Date(now.getTime() - dailyDigest.WATCH_UPDATE_MAX_AGE_HOURS * 3600000).toISOString();
-      const [replyResult, occasionResult, scheduledResult, watchResult, calendarEvents, approvalResult] = await Promise.all([
+      const [replyResult, occasionResult, commitmentResult, scheduledResult, watchResult, calendarEvents, approvalResult] = await Promise.all([
         // Real thread-level judgment, not a stored list — someone may have replied since
         // yesterday, in which case they correctly drop off today's digest.
         executeAction(userId, 'find_reply_needed', { max_threads: 15 }).catch(e => ({ success: false, error: e.message })),
         executeAction(userId, 'find_occasions', {}).catch(e => ({ success: false, error: e.message })),
+        supabase.from('commitments').select('*').eq('user_id', userId).eq('status', 'open').limit(50),
         scheduledTasks.listScheduledTasks(userId).catch(e => ({ success: false, error: e.message })),
         supabase.from('briefings')
           .select('id, kind, title, body, metadata, read, created_at')
@@ -3974,6 +3976,7 @@ async function executeAction(userId, action, params, context = {}) {
       const digest = dailyDigest.buildDailyDigest({
         replyNeeded: replyResult?.items || [],
         occasions: occasionResult?.items || [],
+        commitments: commitmentResult?.data || [],
         scheduledTasks: scheduledList,
         watchUpdates,
         calendarEvents: calendarEvents || [],
@@ -4363,6 +4366,116 @@ async function executeAction(userId, action, params, context = {}) {
         research: researchText,
         bookable: false,
         text: travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) })
+      };
+    }
+
+    // ── Commitments ───────────────────────────────────────────────────────────────────
+    // What the user said they would do. Linked to the people layer and the scheduler rather
+    // than re-implementing either.
+    case 'track_commitment': {
+      const what = String(params?.what || '').trim().slice(0, commitments.MAX_WHAT);
+      if (!what) return { success: false, error: 'track_commitment needs what was promised' };
+
+      const personName = String(params?.person_name || '').trim();
+      let participantId = null;
+      if (personName) {
+        const resolved = await people.resolvePerson(supabase, userId, { name: personName, email: params?.person_email });
+        if (resolved.person) participantId = resolved.person.id;
+      }
+
+      const whenText = String(params?.due || '').trim();
+      const parsed = whenText ? commitments.extractDueDate(whenText, new Date()) : { dueAt: null, dateOnly: false };
+      const explicitDue = params?.due_at && !Number.isNaN(Date.parse(params.due_at)) ? new Date(params.due_at) : null;
+      const dueAt = explicitDue || parsed.dueAt;
+
+      const row = {
+        user_id: userId,
+        what,
+        participant_id: participantId,
+        person_name: personName || null,
+        due_at: dueAt ? dueAt.toISOString() : null,
+        due_is_date_only: explicitDue ? false : parsed.dateOnly,
+        source: ['stated', 'sent_email', 'email_context'].includes(params?.source) ? params.source : 'stated',
+        source_ref: params?.source_ref || null,
+        thread_id: params?.thread_id || null,
+        updated_at: new Date().toISOString()
+      };
+
+      // Re-stating the same promise updates it (a new date, a named person) rather than
+      // creating a second obligation.
+      const { data: existing } = await supabase.from('commitments')
+        .select('id').eq('user_id', userId).eq('status', 'open')
+        .ilike('what', escapeIlikePattern(what)).maybeSingle();
+
+      const { data, error } = existing?.id
+        ? await supabase.from('commitments').update(row).eq('id', existing.id).select('*').single()
+        : await supabase.from('commitments').insert(row).select('*').single();
+      if (error) return { success: false, error: error.message };
+
+      return {
+        success: true,
+        commitment: data,
+        updated: Boolean(existing?.id),
+        text: `Noted: ${commitments.describeCommitment(data)}.`
+      };
+    }
+
+    case 'find_commitments': {
+      const personFilter = String(params?.person_name || '').trim();
+      const scope = String(params?.scope || 'open').trim().toLowerCase();
+      let query = supabase.from('commitments').select('*').eq('user_id', userId);
+      if (scope !== 'all') query = query.eq('status', scope === 'done' ? 'done' : 'open');
+      if (personFilter) query = query.ilike('person_name', `%${escapeIlikePattern(personFilter)}%`);
+      const { data, error } = await query.order('due_at', { ascending: true, nullsFirst: false }).limit(50);
+      if (error) return { success: false, error: error.message };
+
+      const now = new Date();
+      let items = data || [];
+      if (String(params?.overdue_only) === 'true' || params?.overdue_only === true) {
+        items = items.filter(c => commitments.isOverdue(c, now));
+      }
+      return {
+        success: true,
+        commitments: commitments.sortCommitments(items, now).map(c => ({
+          id: c.id, what: c.what, personName: c.person_name, dueAt: c.due_at,
+          status: c.status, overdue: commitments.isOverdue(c, now),
+          dueToday: commitments.isDueToday(c, now), threadId: c.thread_id, source: c.source
+        })),
+        text: commitments.formatCommitmentList(items, { now, person: personFilter })
+      };
+    }
+
+    case 'resolve_commitment': {
+      const query = String(params?.what || params?.id || '').trim();
+      if (!query) return { success: false, error: 'Say which commitment — what was it?' };
+      const outcome = params?.outcome === 'cancelled' ? 'cancelled' : 'done';
+
+      let row = null;
+      if (/^[0-9a-f-]{36}$/i.test(query)) {
+        const { data } = await supabase.from('commitments').select('*').eq('id', query).eq('user_id', userId).maybeSingle();
+        row = data;
+      } else {
+        const { data } = await supabase.from('commitments').select('*')
+          .eq('user_id', userId).eq('status', 'open')
+          .ilike('what', `%${escapeIlikePattern(query)}%`).limit(2);
+        if (data?.length > 1) {
+          return { success: false, error: `More than one matches "${query}": ${data.map(c => c.what).join('; ')}. Which one?` };
+        }
+        row = data?.[0] || null;
+      }
+      if (!row) return { success: false, error: `I don't have an open commitment matching "${query}".` };
+
+      const { error } = await supabase.from('commitments').update({
+        status: outcome,
+        resolved_at: new Date().toISOString(),
+        // Recorded so an auto-resolution can always be told apart from the user saying so.
+        resolved_by: String(params?.resolved_by || 'user').slice(0, 40),
+        updated_at: new Date().toISOString()
+      }).eq('id', row.id);
+      if (error) return { success: false, error: error.message };
+      return {
+        success: true,
+        text: outcome === 'cancelled' ? `Dropped: ${row.what}.` : `Marked done: ${row.what}.`
       };
     }
 

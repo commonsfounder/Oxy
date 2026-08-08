@@ -130,7 +130,7 @@ const ACTION_CONTRACTS = {
       body: 'a polished, complete email draft — never a terse literal fragment of what the user said',
       tone: 'e.g. casual, warm, professional, apologetic, direct'
     },
-    guidance: `If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made. ${EMAIL_TONE_GUIDANCE} ${PERSONAL_IDENTITY_GUIDANCE}`,
+    guidance: `If the user gives enough substance, draft the full email body with an appropriate greeting, natural structure, and sign-off. Match any requested tone. Do not ask for a subject. Do not use stiff cliches. For Gmail replies, use the provided full thread context, sender details, memory about the sender, and user communication preferences; include thread_id/in_reply_to/references when available. Match both the user tone and the thread formality: professional for business threads, casual for casual threads. Do not add fake warmth or unnecessary pleasantries, and stop when the point is made. ${EMAIL_TONE_GUIDANCE} ${PERSONAL_IDENTITY_GUIDANCE} If the email you just sent contains a promise the USER has now made — "I'll send the documents tomorrow", "you'll have it by Friday" — call track_commitment straight after it is actually sent, with source:"sent_email" and this thread_id, so it can be surfaced later and chased if it is still outstanding. Only for a real undertaking with a concrete action, never for a pleasantry.`,
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
@@ -329,6 +329,48 @@ const ACTION_CONTRACTS = {
     guidance: 'Use for "whose birthday is coming up?", "when is X\'s birthday?", or before helping with a gift so you have the real relationship/notes on file rather than guessing. Always call this rather than answering from memory of the conversation — it is the only way to get a genuinely current, sorted answer. If a gift is then discussed ("what should I get her?", "find something under £50"), use the relationship/notes this returns plus web_search for real, current product options — never invent stock, price, or availability — and hand off to run_browser_task for an actual purchase; never say something was bought until that flow confirms it. Honest when nothing is saved rather than inventing a plausible-sounding answer.',
     successSummary: 'Checked occasions',
     failureSummary: 'Could not check occasions',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  // ── Commitments ────────────────────────────────────────────────────────────────────
+  track_commitment: {
+    risk: 'low',
+    required: ['what'],
+    optional: ['person_name', 'person_email', 'due', 'due_at', 'source', 'thread_id', 'source_ref'],
+    inputExample: { what: 'send the case study', person_name: 'Mia', due: 'Tuesday' },
+    paramHints: {
+      what: 'the action itself in the user\'s own words, e.g. "send the documents" — not a paraphrase and not a whole sentence',
+      person_name: 'who it was promised to, only if there is one',
+      due: 'the timing the user actually said, e.g. "tomorrow", "Friday", "tonight" — leave out if they gave none',
+      source: 'stated (default) | sent_email when it came from a message that was actually sent'
+    },
+    guidance: 'Use when the user genuinely commits to doing something: "I\'ll send that tonight", "tell James I\'ll get it to him tomorrow", "I need to pay Mum back Friday", "I promised I\'d call him this week". Be conservative — an undertaking plus a CONCRETE action is a commitment; "I\'ll have a look", "I might", "I\'ll try to" are not, and must not be tracked. Never invent a deadline: if the user gave no timing, leave due out entirely rather than guessing one, because a wrong date turns into a wrong "overdue". Capture it when they say it, and also right after an email you sent on their behalf contained a promise (source:"sent_email" with the thread_id), never from merely reading their inbox. Re-stating the same promise updates it rather than creating a second.',
+    successSummary: 'Commitment tracked',
+    failureSummary: 'Could not track that',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  find_commitments: {
+    risk: 'low',
+    required: [],
+    optional: ['person_name', 'scope', 'overdue_only'],
+    inputExample: { overdue_only: true },
+    paramHints: { scope: 'open (default) | done | all', person_name: 'to answer "what do I owe Ben?"' },
+    guidance: 'Use for "what have I promised people?", "am I forgetting anything I said I\'d do?", "what\'s overdue?", "what do I owe Ben?". Report what it returns in its order — overdue first — and do not add urgency it does not claim. A commitment with no due date is not late; say it has no date rather than implying it is outstanding.',
+    successSummary: 'Commitments checked',
+    failureSummary: 'Could not check commitments',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  resolve_commitment: {
+    risk: 'low',
+    required: [],
+    optional: ['what', 'id', 'outcome', 'resolved_by'],
+    inputExample: { what: 'send the case study' },
+    paramHints: { outcome: 'done (default) | cancelled for "I\'m not doing that any more"' },
+    guidance: 'Use when the user says they have done it ("I already did that", "sent it") or no longer intends to ("forget that one"). Only resolve on real evidence — the user saying so, or an outbound message that genuinely covers it. Never close a commitment because it looks stale or because something vaguely related happened; a silently-wrong "done" is worse than a reminder they do not need. To move a deadline rather than close it, call track_commitment again with the same wording and the new date.',
+    successSummary: 'Commitment resolved',
+    failureSummary: 'Could not resolve that',
     confirmation: 'none',
     executionMode: 'direct'
   },
