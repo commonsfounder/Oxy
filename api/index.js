@@ -142,6 +142,13 @@ const {
   senderLabel: cleanupSenderLabel,
   summarizeCleanupResult
 } = require('./services/gmail-cleanup');
+const {
+  isObviouslyNoReplyNeeded,
+  latestMessagePerThread,
+  buildReplyNeededPrompt,
+  parseReplyNeededResponse,
+  formatReplyNeededSummary
+} = require('./services/reply-needed');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -3743,6 +3750,64 @@ async function executeAction(userId, action, params, context = {}) {
         unsubscribeFailed,
         needsBrowserUnsubscribe,
         text
+      };
+    }
+
+    // "Who's waiting on me?" — a THREAD-level judgment (does this thread's current state need
+    // something from the user), genuinely different from emailTriageSignals' message-level
+    // "is this urgent/promotional" question, so it gets its own classifier
+    // (api/services/reply-needed.js) rather than overloading the existing one. The cheap
+    // pre-filter reuses the same signal shape (List-Unsubscribe, automated-sender wording,
+    // receipt/order language) so obvious noise never reaches the LLM judgment call.
+    case 'find_reply_needed': {
+      const maxThreads = Math.max(1, Math.min(Number(params?.max_threads) || 20, 40));
+      const searchResult = await dispatch(userId, 'search_emails', { query: 'in:inbox', max_results: 100 });
+      if (!searchResult?.success) {
+        return { success: false, error: searchResult?.error || 'Could not search your inbox.' };
+      }
+      const emails = searchResult.emails || [];
+      const latestPerThread = latestMessagePerThread(emails).filter(email => !isObviouslyNoReplyNeeded(email));
+      const candidates = latestPerThread.slice(0, maxThreads);
+
+      if (!candidates.length) {
+        return { success: true, items: [], text: formatReplyNeededSummary([]) };
+      }
+
+      const threadContexts = [];
+      for (const email of candidates) {
+        try {
+          const thread = await googleConnector.getThreadContext(userId, email.threadId);
+          threadContexts.push({
+            threadId: email.threadId,
+            senderName: email.senderName,
+            senderAddress: email.senderAddress,
+            subject: email.subject,
+            date: email.date,
+            threadText: thread?.text || email.body || email.snippet || ''
+          });
+        } catch {
+          // A thread we can't fetch can't be judged — skip it rather than guessing.
+        }
+      }
+      if (!threadContexts.length) {
+        return { success: true, items: [], text: formatReplyNeededSummary([]) };
+      }
+
+      let items = [];
+      try {
+        const prompt = buildReplyNeededPrompt(threadContexts, {});
+        const judgment = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: {} });
+        items = parseReplyNeededResponse(judgment.text || '', threadContexts);
+      } catch (e) {
+        return { success: false, error: `Could not judge which threads need a response: ${e.message}` };
+      }
+
+      return {
+        success: true,
+        items,
+        scanned: emails.length,
+        threadsConsidered: threadContexts.length,
+        text: formatReplyNeededSummary(items)
       };
     }
 

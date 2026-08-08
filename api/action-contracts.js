@@ -246,6 +246,20 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // Thread-level "does this need something from the user" judgment — deliberately not the
+  // same question as email triage (is this message urgent/promotional). Unread does not mean
+  // needs-reply; read does not mean handled.
+  find_reply_needed: {
+    risk: 'low',
+    required: [],
+    optional: ['max_threads'],
+    inputExample: { max_threads: 20 },
+    guidance: 'Use for "who\'s waiting on me?", "is anyone waiting on me?", "what have I ignored?", "catch me up on what I need to answer", or a recurring "every morning tell me who I owe a reply to". Judges each thread on whether ITS CURRENT STATE needs a reply or a small concrete action from the user — not on unread/read status, and not on a fixed "older than N days" rule. A thread the user already substantively answered is excluded even if the other person hasn\'t replied again; a thread where the user\'s own last message was an unfulfilled commitment ("I\'ll send this over") still counts, because the user is the blocker. Newsletters, receipts, and automated notifications never count, even unread. When the result includes multiple items and the user asks to draft replies "to all of them" (or similar), call send_email once per thread that needs a REPLY (not one that needs a non-reply action) — each draft grounded ONLY in that thread\'s own content (never blend context between threads). Attempt a real draft for every such thread using what the thread already contains: acknowledging receipt, confirming a detail the sender already stated, or answering a question the thread itself answers all count as "enough to draft" — do not decline an entire batch, or an individual thread, just because one fact you don\'t have yet (a decision, a number, a date) would make it more complete; write the best honest draft around that gap instead (e.g. leave a placeholder or a short bracketed note for the missing piece) and only ask the user outright when a thread\'s reply cannot be written in any real form without a specific fact only they have (e.g. proposing a time when none was suggested). One thread needing a quick question back is never a reason to skip drafting the others. Sends stay review-gated per send_email\'s own guidance; that review is expected, not a problem to route around. For a recurring version, pair this with create_scheduled_task (recurrence:\'daily\', no condition needed — every run re-judges the real current inbox state, it does not replay a stored list).',
+    successSummary: 'Checked who needs a response',
+    failureSummary: 'Could not check who needs a response',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',

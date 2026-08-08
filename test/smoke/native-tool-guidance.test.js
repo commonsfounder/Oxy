@@ -71,7 +71,7 @@ test('confirmation is never copied into a native tool description — nothing re
 });
 
 // ── Guidance survives, natively, verbatim ──────────────────────────────────────────────────
-// (38 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
+// (39 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
 // 2026-08-07 (commit 1) when the prompt restructure moved tool-specific disambiguation rules —
 // trains vs directions, music vs calendar, place vs shopping, messaging register, email tone,
 // forget_memory scope — out of the numbered static prompt and onto the tool they actually
@@ -79,10 +79,13 @@ test('confirmation is never copied into a native tool description — nothing re
 // plus 1 more added 2026-08-08 on find_appointment_options — steering the model to
 // run_browser_task instead of retrying a tool that only ever talks to the sandbox provider,
 // plus 4 more added 2026-08-08 for real inbox cleanup: archive_emails, label_emails,
-// unsubscribe_email, clean_inbox.)
-test('exactly 38 contracts define guidance, and every one appears verbatim in its native description', () => {
+// unsubscribe_email, clean_inbox, plus 1 more added 2026-08-08 for find_reply_needed
+// ("who's waiting on me?"). create_scheduled_task and run_browser_task's EXISTING guidance
+// were also extended the same day for delivery-tracking watches, but that's the same contract
+// gaining more text, not a new one, so it doesn't change this count.)
+test('exactly 39 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 38);
+  assert.equal(withGuidance.length, 39);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
