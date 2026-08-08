@@ -99,13 +99,34 @@ test('clear watch cancellation becomes a safe stop action', () => {
   assert.equal(buildWatchCancellation('cancel the watch for hotel prices'), 'hotel prices');
 });
 
-test('an appointment request starts the appointment flow', () => {
-  const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');
+test('an appointment request starts the appointment flow when a real provider is connected', () => {
+  const routed = inferDeterministicAction(
+    'Millie, get me a dentist appointment next week after work',
+    { appointmentProviderConnected: true }
+  );
   assert.equal(routed.reason, 'appointment_booking');
   assert.deepEqual(routed.actions, [{
     type: 'find_appointment_options',
     input: { request: 'Millie, get me a dentist appointment next week after work' }
   }]);
+});
+
+// Regression: find_appointment_options only ever talks to the sandbox provider (see
+// getAppointmentBookingService in api/index.js) — there's no real one, and production never
+// sets appointmentProviderConnected. Routing straight to it anyway used to turn every real
+// "book me a dentist appointment" into a scripted dead end ("I need an appointment booking
+// connection...") with the model never getting a turn to try run_browser_task instead.
+test('an appointment request falls through to the model when no provider is connected (no options passed at all)', () => {
+  const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');
+  assert.equal(routed, null);
+});
+
+test('an appointment request falls through to the model when appointmentProviderConnected is explicitly false', () => {
+  const routed = inferDeterministicAction(
+    'get me a dentist appointment next week after work',
+    { appointmentProviderConnected: false }
+  );
+  assert.equal(routed, null);
 });
 
 test('nearest McDonald’s routes to find_place, not Uber', () => {

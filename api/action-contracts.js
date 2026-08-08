@@ -93,6 +93,7 @@ const ACTION_CONTRACTS = {
     required: ['request'],
     optional: ['task_id'],
     inputExample: { request: 'dentist appointment next week after work' },
+    guidance: 'This only works when a real appointment-booking connection is configured — today that is not the normal case, so expect it to fail with a "not connected" error. Do not repeat this call after that error and do not tell the user booking is impossible. Instead use run_browser_task to book directly through the business\'s own real website: find the business first if you don\'t have it, then treat the booking as a normal multi-step order (find the slot, fill the form, confirm through the same review-before-payment flow).',
     successSummary: 'Appointment options found',
     failureSummary: 'Appointment search paused',
     confirmation: 'none',
@@ -665,7 +666,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Order task failed',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists. If the user says "wrong price", "that\'s wrong", or gives any price correction, always re-check the exact same retailer/site that produced the previous price — never drift to the brand\'s own website or a different retailer.'
+    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists. If the user says "wrong price", "that\'s wrong", or gives any price correction, always re-check the exact same retailer/site that produced the previous price — never drift to the brand\'s own website or a different retailer. Also use this for booking a real appointment through a business\'s own website (a dentist, salon, restaurant, or anywhere with an online booking page) — treat finding and confirming a slot the same way as finding and confirming an order, including the same review-before-payment step. find_appointment_options is not a working alternative for this today.'
   },
   // The second half of the two-phase flow above — only ever called on a turn AFTER the user
   // has explicitly approved a review_required result from run_browser_task. executionMode:

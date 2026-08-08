@@ -309,7 +309,15 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
-  if (/\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
+  // find_appointment_options only ever talks to the sandbox provider (see
+  // getAppointmentBookingService in api/index.js) — there is no real one yet. Routing
+  // straight to it regardless, with no fallback on failure, used to turn every real
+  // "book me a dentist appointment" into a scripted dead end before the model ever got a
+  // turn. Only take this deterministic path when a provider is actually connected
+  // (today: sandbox/test runs); otherwise fall through to the model, which has
+  // run_browser_task available for a genuine online booking.
+  if (options?.appointmentProviderConnected &&
+      /\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
     return {
       reason: 'appointment_booking',
       spoken: "I'll look for a time that fits.",

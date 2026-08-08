@@ -71,14 +71,16 @@ test('confirmation is never copied into a native tool description — nothing re
 });
 
 // ── Guidance survives, natively, verbatim ──────────────────────────────────────────────────
-// (33 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
+// (34 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
 // 2026-08-07 (commit 1) when the prompt restructure moved tool-specific disambiguation rules —
 // trains vs directions, music vs calendar, place vs shopping, messaging register, email tone,
 // forget_memory scope — out of the numbered static prompt and onto the tool they actually
-// govern, plus 1 more added 2026-08-07 (commit 2) on create_agent_task, the ownership mechanism.)
-test('exactly 33 contracts define guidance, and every one appears verbatim in its native description', () => {
+// govern, plus 1 more added 2026-08-07 (commit 2) on create_agent_task, the ownership mechanism,
+// plus 1 more added 2026-08-08 on find_appointment_options — steering the model to
+// run_browser_task instead of retrying a tool that only ever talks to the sandbox provider.)
+test('exactly 34 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 33);
+  assert.equal(withGuidance.length, 34);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -94,6 +96,17 @@ test('browser purchases: run_browser_task, confirm_browser_payment guidance surv
   assert.match(decls.run_browser_task.description, /NEVER call confirm_browser_payment yourself/);
   assert.match(decls.run_browser_task.description, /only after the user explicitly agrees to the price/);
   assert.match(decls.confirm_browser_payment.description, /Only call this after the user has explicitly said yes to the price/);
+});
+
+// ── 2026-08-08: find_appointment_options only talks to a sandbox provider that isn't
+// connected in production — steer the model to the tool that actually works instead of
+// retrying a dead end or telling the user booking is impossible. ─────────────────────────
+test('appointment booking: find_appointment_options points at run_browser_task as the real path', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.find_appointment_options.description, /Do not repeat this call after that error/);
+  assert.match(decls.find_appointment_options.description, /use run_browser_task to book directly through the business's own real website/);
+  assert.match(decls.run_browser_task.description, /booking a real appointment through a business's own website/);
+  assert.match(decls.run_browser_task.description, /find_appointment_options is not a working alternative for this today/);
 });
 
 test('credentials: run_browser_task and confirm_credential_use guidance survives natively', () => {

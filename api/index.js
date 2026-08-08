@@ -8137,7 +8137,10 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       return;
     }
 
-    const deterministicAction = contextualTurn || inferDeterministicAction(routingMessage, { settings });
+    const deterministicAction = contextualTurn || inferDeterministicAction(routingMessage, {
+      settings,
+      appointmentProviderConnected: Boolean(getAppointmentBookingService())
+    });
     devTiming('chat', 'intent_classification.end', {
       route: deterministicAction ? 'deterministic_action' : 'model',
       reason: deterministicAction?.reason || null,
