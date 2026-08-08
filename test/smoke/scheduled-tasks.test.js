@@ -4,7 +4,8 @@ const test = require('node:test');
 const {
   buildScheduledRunInstruction,
   scheduledConditionTriggered,
-  cleanScheduledResultText
+  cleanScheduledResultText,
+  isRecurringCadence
 } = require('../../api/services/scheduled-tasks');
 const { isScheduledRunNoteworthy } = require('../../api/index');
 
@@ -82,4 +83,26 @@ test('isScheduledRunNoteworthy tolerates a missing/malformed task without throwi
   assert.equal(isScheduledRunNoteworthy(null, {}), true);
   assert.equal(isScheduledRunNoteworthy(undefined, { conditionTriggered: false }), true);
   assert.equal(isScheduledRunNoteworthy({}, {}), true);
+});
+
+// ── isRecurringCadence: regression for createScheduledTask silently downgrading a real
+// recurring request. "starting today, check my calendar every morning" legitimately combines
+// recurrence:'daily' with a due_date pinning the first run — createScheduledTask used to
+// unconditionally overwrite resolvedRecurrence to 'once' whenever due_date was present,
+// discarding the requested cadence entirely. advanceScheduledTask branches on task.recurrence,
+// so a downgraded task would deactivate after its first run instead of rescheduling — a
+// "daily" watch fired exactly once and never again. Live-verified against real Supabase: after
+// the fix, recurrence:'daily' with a due_date survives creation and advances to the next real
+// occurrence (~23-24h out) after its first run, instead of the row going inactive. ───────────
+test('isRecurringCadence recognises daily and weekly as real repeating cadences', () => {
+  assert.equal(isRecurringCadence('daily'), true);
+  assert.equal(isRecurringCadence('weekly'), true);
+});
+
+test('isRecurringCadence treats once, poll, and anything else as not a repeating cadence', () => {
+  assert.equal(isRecurringCadence('once'), false);
+  assert.equal(isRecurringCadence('poll'), false);
+  assert.equal(isRecurringCadence(undefined), false);
+  assert.equal(isRecurringCadence(''), false);
+  assert.equal(isRecurringCadence('daily '), false, 'must not fuzzy-match — exact cadence values only');
 });

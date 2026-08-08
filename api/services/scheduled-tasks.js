@@ -141,6 +141,18 @@ const DEFAULT_POLL_MINUTES = 30;
 const DEFAULT_POLL_EXPIRY_DAYS = 30;
 const CLAIM_LEASE_MINUTES = 10;
 
+// Whether a recurrence value is a genuine repeating cadence — as opposed to 'once' (a
+// single occurrence) or 'poll' (handled separately, always driven by a condition). Used to
+// decide what a due_date is allowed to do: pin the first occurrence's timing, never silently
+// cancel a real recurrence. "starting today, check my calendar every morning" legitimately
+// combines recurrence:'daily' with a due_date for today's first run — a due_date must not
+// downgrade that to a one-shot, because advanceScheduledTask branches on task.recurrence and
+// would deactivate the task after its first run instead of rescheduling it, so a "daily"
+// watch would fire exactly once and never again.
+function isRecurringCadence(recurrence) {
+  return recurrence === 'daily' || recurrence === 'weekly';
+}
+
 async function createScheduledTask(userId, {
   title, instruction = null, recurrence = 'once', time, day_of_week, date, due_date,
   condition = null, interval_minutes, expires_at, budget_cap
@@ -152,7 +164,7 @@ async function createScheduledTask(userId, {
   // A condition ("when tickets go on sale") becomes a poll task: re-check on an interval
   // until the condition is met or it expires.
   let resolvedRecurrence = cleanCondition ? 'poll'
-    : (recurrence === 'daily' || recurrence === 'weekly' || recurrence === 'poll' ? recurrence : 'once');
+    : (isRecurringCadence(recurrence) || recurrence === 'poll' ? recurrence : 'once');
 
   let nextRunAt;
   let timeOfDay = time || null;
@@ -171,7 +183,7 @@ async function createScheduledTask(userId, {
   } else if (due_date) {
     nextRunAt = new Date(due_date);
     if (Number.isNaN(nextRunAt.getTime())) return { success: false, error: 'due_date is not a valid date.' };
-    resolvedRecurrence = 'once';
+    if (!isRecurringCadence(resolvedRecurrence)) resolvedRecurrence = 'once';
     timeOfDay = timeOfDay || `${pad2(nextRunAt.getUTCHours())}:${pad2(nextRunAt.getUTCMinutes())}`;
   } else {
     if (!timeOfDay) timeOfDay = '09:00';
@@ -326,6 +338,7 @@ module.exports = {
   buildScheduledRunInstruction,
   scheduledConditionTriggered,
   cleanScheduledResultText,
+  isRecurringCadence,
   createScheduledTask,
   listScheduledTasks,
   cancelScheduledTask,
