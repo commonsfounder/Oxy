@@ -154,6 +154,13 @@ const {
   modifyItinerary,
   itineraryToText
 } = require('./services/itinerary-engine');
+const {
+  isValidMonthDay,
+  daysUntil,
+  computeReminderDueDate,
+  formatMonthDay,
+  formatOccasionsSummary
+} = require('./services/occasions');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -3968,6 +3975,103 @@ async function executeAction(userId, action, params, context = {}) {
         itinerary: updated,
         resaved,
         text: `${updated.lastModification?.summary || 'Updated the itinerary.'}${resaved ? ` (re-saved to ${workspacePath})` : ''}\n\n${itineraryToText(updated)}`
+      };
+    }
+
+    // Durable birthday/occasion capture. Deliberately its own table (occasions), not the
+    // free-text memories table — "whose birthday is coming up?" needs a real date to sort on,
+    // not prose to re-parse on every request. select-then-insert-or-update rather than a DB
+    // upsert: the unique index is on lower(person_name), an expression PostgREST's on_conflict
+    // param can't target reliably, and birthdays are input rarely enough that the tiny race
+    // window is not worth the complexity.
+    case 'save_occasion': {
+      const personName = String(params?.person_name || '').trim();
+      const occasionType = (String(params?.occasion_type || 'birthday').trim().toLowerCase()) || 'birthday';
+      const month = Number(params?.month);
+      const day = Number(params?.day);
+      if (!personName) return { success: false, error: 'save_occasion requires person_name' };
+      if (!isValidMonthDay(month, day)) return { success: false, error: 'save_occasion requires a real month (1-12) and a day that exists in that month' };
+
+      const yearNum = Number(params?.year);
+      const year = Number.isInteger(yearNum) && yearNum > 1900 && yearNum <= new Date().getFullYear() ? yearNum : null;
+      const relationship = params?.relationship ? String(params.relationship).trim().slice(0, 100) : null;
+      const notes = params?.notes ? String(params.notes).trim().slice(0, 1000) : null;
+
+      const { data: existing, error: findError } = await supabase
+        .from('occasions')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('occasion_type', occasionType)
+        .ilike('person_name', escapeIlikePattern(personName))
+        .maybeSingle();
+      if (findError) return { success: false, error: findError.message };
+
+      const row = { user_id: userId, person_name: personName, occasion_type: occasionType, month, day, year, relationship, notes, updated_at: new Date().toISOString() };
+      const { error } = existing?.id
+        ? await supabase.from('occasions').update(row).eq('id', existing.id)
+        : await supabase.from('occasions').insert({ ...row, source: 'chat' });
+      if (error) return { success: false, error: error.message };
+
+      let reminderScheduled = false;
+      let reminderText = '';
+      const remindDaysBeforeNum = Number(params?.remind_days_before);
+      const wantsReminder = params?.remind_on_day === true || Number.isFinite(remindDaysBeforeNum);
+      if (wantsReminder) {
+        const offset = params?.remind_on_day === true ? 0 : Math.max(0, remindDaysBeforeNum);
+        const dueDate = computeReminderDueDate(month, day, offset, new Date());
+        const isBirthday = occasionType === 'birthday';
+        // Same composition pattern as the delivery-watch reminders: recurrence:'once' with a
+        // computed due_date, and the instruction tells Millie to re-arm itself for next year
+        // after firing — no new scheduler cadence needed (isRecurringCadence only supports
+        // daily/weekly today, and adding 'yearly' there is scheduler-internals work this pass
+        // is explicitly not meant to spend time on).
+        const created = await scheduledTasks.createScheduledTask(userId, {
+          title: `${personName}'s ${occasionType}`,
+          instruction: `Tell the user ${personName}'s ${occasionType} is coming up${offset > 0 ? ` in ${offset} day${offset === 1 ? '' : 's'}` : ' today'} (${formatMonthDay(month, day)}).${isBirthday ? ' Offer to help find and buy a gift if they want one: ask their budget if not already known, use web_search for real current options given what you know about the person (relationship, interests, past gifts if mentioned), and run_browser_task for an actual purchase — never say something was bought until that flow actually confirms it.' : ''} After delivering this reminder, call create_scheduled_task again with the same title, recurrence \'once\', and due_date set to exactly one year from today\'s date, so this keeps coming back every year without the user having to ask again.`,
+          recurrence: 'once',
+          due_date: dueDate.toISOString(),
+          time: '09:00'
+        });
+        reminderScheduled = Boolean(created?.success);
+        reminderText = reminderScheduled
+          ? ` I'll remind you ${offset > 0 ? `${offset} day${offset === 1 ? '' : 's'} before` : 'on the day'} (around ${formatMonthDay(dueDate.getUTCMonth() + 1, dueDate.getUTCDate())}).`
+          : ' (the reminder could not be set up — you can ask again separately.)';
+      }
+
+      return {
+        success: true,
+        occasion: { personName, occasionType, month, day, year, relationship, notes },
+        reminderScheduled,
+        text: `Saved ${personName}'s ${occasionType} (${formatMonthDay(month, day)}).${reminderText}`
+      };
+    }
+
+    case 'find_occasions': {
+      const personFilter = params?.person_name ? String(params.person_name).trim() : '';
+      let query = supabase.from('occasions').select('person_name, occasion_type, month, day, year, relationship, notes').eq('user_id', userId);
+      if (personFilter) query = query.ilike('person_name', `%${escapeIlikePattern(personFilter)}%`);
+      const { data, error } = await query;
+      if (error) return { success: false, error: error.message };
+
+      const items = (data || []).map(row => ({
+        personName: row.person_name,
+        occasionType: row.occasion_type,
+        month: row.month,
+        day: row.day,
+        year: row.year,
+        relationship: row.relationship,
+        notes: row.notes,
+        daysUntil: daysUntil(row.month, row.day)
+      }));
+
+      if (personFilter && !items.length) {
+        return { success: true, items: [], text: `I don't have a saved birthday or occasion for "${personFilter}".` };
+      }
+
+      return {
+        success: true,
+        items,
+        text: formatOccasionsSummary(items)
       };
     }
 

@@ -88,10 +88,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // deep-link output as real prices or availability. plan_itinerary is a distinct key from the
 // pre-existing plan_trip (a point-to-point route/train planner) — they briefly collided under
 // the same name during development, which silently discarded plan_itinerary's contract entirely
-// until the rename fixed it; the count here is the tripwire that would have caught that.)
-test('exactly 43 contracts define guidance, and every one appears verbatim in its native description', () => {
+// until the rename fixed it; the count here is the tripwire that would have caught that. Plus
+// 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.)
+test('exactly 45 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 43);
+  assert.equal(withGuidance.length, 45);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);

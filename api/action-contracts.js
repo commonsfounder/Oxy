@@ -300,6 +300,38 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // Durable occasion data (occasions table) — NOT the memories table, which is free-text
+  // only and can't reliably answer "whose birthday is coming up?" without re-parsing prose.
+  save_occasion: {
+    risk: 'low',
+    required: ['person_name', 'month', 'day'],
+    optional: ['occasion_type', 'year', 'relationship', 'notes', 'remind_days_before', 'remind_on_day'],
+    inputExample: { person_name: 'Alisa', occasion_type: 'birthday', month: 7, day: 12, remind_days_before: 14 },
+    paramHints: {
+      month: 'integer 1-12',
+      day: 'integer, valid for that month',
+      year: 'birth year, only if the user actually stated it — never guess an age',
+      relationship: 'e.g. "mum", "sister", "friend" — only if stated',
+      remind_days_before: 'integer number of days before the date to send a reminder, e.g. 14 for "a couple weeks before"',
+      remind_on_day: 'true only for "remind me on the day" with no lead time — do not combine with remind_days_before'
+    },
+    guidance: 'Use whenever the user states a birthday/anniversary ("Mum\'s birthday is October 8", "Alisa\'s birthday is 12 July") or explicitly asks you to remember one — this is what makes "whose birthday is coming up?" answerable later, so call it immediately when the date is stated, not just when asked to set a reminder. Only capture what was actually said: never invent a year/age from a guess, and do not aggressively ask everyone for their birthday — capture naturally when it comes up, or in bulk if the user offers a list. Re-saving the same person/occasion updates the existing entry rather than duplicating it, so correcting a mistake ("actually it\'s the 9th") is just calling this again. If the user gives a reminder preference ("remind me a couple weeks before", "remind me every year", "remind me on the day"), set remind_days_before (or remind_on_day) in THIS SAME call — it schedules the real reminder via create_scheduled_task internally and keeps re-arming itself yearly; do not call create_scheduled_task separately for this. If no reminder preference is given, still save the occasion but do not invent one.',
+    successSummary: 'Occasion saved',
+    failureSummary: 'Could not save that occasion',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  find_occasions: {
+    risk: 'low',
+    required: [],
+    optional: ['person_name'],
+    inputExample: { person_name: 'Mum' },
+    guidance: 'Use for "whose birthday is coming up?", "when is X\'s birthday?", or before helping with a gift so you have the real relationship/notes on file rather than guessing. Always call this rather than answering from memory of the conversation — it is the only way to get a genuinely current, sorted answer. If a gift is then discussed ("what should I get her?", "find something under £50"), use the relationship/notes this returns plus web_search for real, current product options — never invent stock, price, or availability — and hand off to run_browser_task for an actual purchase; never say something was bought until that flow confirms it. Honest when nothing is saved rather than inventing a plausible-sounding answer.',
+    successSummary: 'Checked occasions',
+    failureSummary: 'Could not check occasions',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',
