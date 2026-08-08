@@ -332,6 +332,23 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // The composed "what's on my plate" answer. Not a wrapper around get_calendar_events:
+  // it re-reads reply-needed threads, saved occasions, due/overdue reminders, background
+  // watch state changes, calendar and pending approvals, and ranks them together.
+  daily_digest: {
+    risk: 'low',
+    required: [],
+    optional: ['focus'],
+    inputExample: { focus: 'all' },
+    paramHints: {
+      focus: 'all (default) | urgent — only what needs them now | can_wait — only the low-priority tail'
+    },
+    guidance: 'Use for "what do I need to know today?", "what\'s on my plate?", "give me my morning brief", "anything I\'m forgetting?", "anything urgent?" and "what can wait?" (focus:"urgent" / focus:"can_wait" for the last two). Always call this rather than separately calling get_calendar_events, find_reply_needed and find_occasions and stitching them together yourself — it already composes all of those plus due/overdue reminders and real background-watch state changes, and it ranks them against each other so the user does not have to triage the answer. Relay the items in the order given and keep it short; do not pad it with things it deliberately left out, and do not invent urgency the result does not claim. Each item carries a ref (threadId, scheduledTaskId, personName, briefingId) — use it for the obvious follow-up rather than re-searching: "draft the reply to Mia" is send_email with that item\'s thread_id, "move that reminder" is create_scheduled_task/cancel_scheduled_task with that scheduledTaskId, "what\'s happening with the parcel?" is a fresh check of that watch. If coverage reports a source it could not check, say so plainly instead of implying the digest is complete. For "every morning tell me what I need to deal with", call create_scheduled_task with recurrence "daily", a morning time, and an instruction that says to call daily_digest and relay the result — never store a copy of today\'s digest text as the instruction, because each morning must be recomputed from that morning\'s real state.',
+    successSummary: 'Digest ready',
+    failureSummary: 'Could not build your digest',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',

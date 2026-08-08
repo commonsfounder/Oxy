@@ -96,6 +96,7 @@ const agentRuntime = require('./services/agent-runtime');
 const agentApprovals = require('./services/agent-approval-runtime');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-briefing');
+const dailyDigest = require('./services/daily-digest');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -3823,6 +3824,69 @@ async function executeAction(userId, action, params, context = {}) {
         threadsConsidered: threadContexts.length,
         text: formatReplyNeededSummary(items)
       };
+    }
+
+    // "What do I need to know today?" — composed from the capabilities that are already
+    // real, never a dump of every source. Everything here is re-read live on each call:
+    // that is what makes a recurring morning brief a genuine current-state digest rather
+    // than a stored summary replayed every day. Ranking/noise rules live in
+    // api/services/daily-digest.js; this case is purely the gathering.
+    case 'daily_digest': {
+      const focusRaw = String(params?.focus || 'all').trim().toLowerCase();
+      const focus = ['urgent', 'can_wait', 'all'].includes(focusRaw) ? focusRaw : 'all';
+      const now = new Date();
+      const coverage = {};
+
+      const watchSince = new Date(now.getTime() - dailyDigest.WATCH_UPDATE_MAX_AGE_HOURS * 3600000).toISOString();
+      const [replyResult, occasionResult, scheduledResult, watchResult, calendarEvents, approvalResult] = await Promise.all([
+        // Real thread-level judgment, not a stored list — someone may have replied since
+        // yesterday, in which case they correctly drop off today's digest.
+        executeAction(userId, 'find_reply_needed', { max_threads: 15 }).catch(e => ({ success: false, error: e.message })),
+        executeAction(userId, 'find_occasions', {}).catch(e => ({ success: false, error: e.message })),
+        scheduledTasks.listScheduledTasks(userId).catch(e => ({ success: false, error: e.message })),
+        supabase.from('briefings')
+          .select('id, kind, title, body, metadata, read, created_at')
+          .eq('user_id', userId)
+          .eq('kind', 'scheduled_task')
+          // Unread only: once the user has seen a parcel update it stops being news, which
+          // is also what makes a resolved item disappear from the next run.
+          .eq('read', false)
+          .gte('created_at', watchSince)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        gatherCalendarContext(userId).catch(() => []),
+        agentApprovals.listPendingApprovals(supabase, userId).catch(e => ({ approvals: [], error: e.message }))
+      ]);
+
+      if (replyResult?.success) coverage.email = { ok: true };
+      else coverage.email = { ok: false, reason: replyResult?.error || 'your inbox was unreachable' };
+      if (scheduledResult?.success) coverage.reminders = { ok: true };
+      else coverage.reminders = { ok: false, reason: scheduledResult?.error || 'reminders were unreachable' };
+      coverage.calendar = calendarEvents?.length ? { ok: true } : { ok: true, empty: true };
+      if (watchResult?.error) coverage.watches = { ok: false, reason: watchResult.error.message || 'watch updates were unreachable' };
+
+      const scheduledList = scheduledResult?.tasks || [];
+      // A recurring digest is itself a scheduled task whose run writes a briefing row.
+      // Without this its own output would show up in tomorrow's digest as something on the
+      // user's plate.
+      const digestTaskIds = new Set(
+        scheduledList.filter(task => String(task.instruction || '').includes(dailyDigest.DIGEST_MARKER)).map(task => task.id)
+      );
+      const watchUpdates = (watchResult?.data || []).filter(row => !digestTaskIds.has(row?.metadata?.scheduledTaskId));
+
+      const digest = dailyDigest.buildDailyDigest({
+        replyNeeded: replyResult?.items || [],
+        occasions: occasionResult?.items || [],
+        scheduledTasks: scheduledList,
+        watchUpdates,
+        calendarEvents: calendarEvents || [],
+        approvals: approvalResult?.approvals || [],
+        coverage,
+        focus,
+        now
+      });
+
+      return { success: true, ...digest };
     }
 
     // Real trip planning. Named plan_itinerary, not plan_trip: plan_trip already exists

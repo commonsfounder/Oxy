@@ -89,10 +89,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // pre-existing plan_trip (a point-to-point route/train planner) — they briefly collided under
 // the same name during development, which silently discarded plan_itinerary's contract entirely
 // until the rename fixed it; the count here is the tripwire that would have caught that. Plus
-// 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.)
-test('exactly 45 contracts define guidance, and every one appears verbatim in its native description', () => {
+// 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.
+// Plus 1 more for the morning digest: daily_digest.)
+test('exactly 46 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 45);
+  assert.equal(withGuidance.length, 46);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -170,6 +171,29 @@ test('delivery tracking: a blocked/unreadable carrier page must be reported hone
 
 test('run_browser_task guidance also covers reading a real courier tracking page', () => {
   assert.match(nativeDescriptions().run_browser_task.description, /read a REAL courier tracking page for a delivery watch/);
+});
+
+test('morning digest: daily_digest is steered to compose rather than have the model stitch sources itself', () => {
+  const desc = nativeDescriptions().daily_digest.description;
+  assert.match(desc, /what do I need to know today\?/);
+  assert.match(desc, /what's on my plate\?/);
+  assert.match(desc, /Always call this rather than separately calling get_calendar_events, find_reply_needed and find_occasions/);
+  assert.match(desc, /ranks them against each other so the user does not have to triage the answer/);
+});
+
+test('morning digest: follow-ups are steered at the real refs, and coverage gaps must be admitted', () => {
+  const desc = nativeDescriptions().daily_digest.description;
+  assert.match(desc, /Each item carries a ref \(threadId, scheduledTaskId, personName, briefingId\)/);
+  assert.match(desc, /"draft the reply to Mia" is send_email with that item's thread_id/);
+  assert.match(desc, /a source it could not check, say so plainly/);
+  assert.match(desc, /do not invent urgency the result does not claim/);
+});
+
+test('morning digest: a recurring brief must recompute, never store a copy of today\'s text', () => {
+  const desc = nativeDescriptions().daily_digest.description;
+  assert.match(desc, /recurrence "daily"/);
+  assert.match(desc, /never store a copy of today's digest text as the instruction/);
+  assert.match(desc, /each morning must be recomputed from that morning's real state/);
 });
 
 test('calendar read-vs-write: the write-only guidance survives, and the read action has no such restriction', () => {
