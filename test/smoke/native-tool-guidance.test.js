@@ -126,6 +126,42 @@ test('scheduled watches: create_scheduled_task and cancel_scheduled_task guidanc
   assert.match(decls.cancel_scheduled_task.description, /Cancel only the matching background watch/);
 });
 
+// ── 2026-08-08: delivery/tracking watches reuse create_scheduled_task + run_browser_task —
+// no fake track_package action, no scheduler changes. ──────────────────────────────────────
+test('delivery tracking: create_scheduled_task teaches resolving tracking info, real page reads, state comparison, and notification-intent matching', () => {
+  const decls = nativeDescriptions();
+  assert.match(decls.create_scheduled_task.description, /resolve the tracking URL\/number yourself first/);
+  assert.match(decls.create_scheduled_task.description, /searching recent order\/shipping emails \(search_emails\)/);
+  assert.match(decls.create_scheduled_task.description, /use run_browser_task to read the REAL current page; never invent a status/);
+  assert.match(decls.create_scheduled_task.description, /label created, awaiting carrier, collected, in transit, at depot, customs, delayed, delivery attempted, out for delivery, delivered, returned to sender, exception/);
+  assert.match(decls.create_scheduled_task.description, /workspace_read the last state you saved for this shipment/);
+  assert.match(decls.create_scheduled_task.description, /never on every poll just because a timestamp on the page moved/);
+});
+
+test('delivery tracking: notification intent is matched to phrasing, not a single generic "keep checking" rule', () => {
+  const decls = nativeDescriptions();
+  const desc = decls.create_scheduled_task.description;
+  assert.match(desc, /"tell me when it arrives" only triggers on delivered/);
+  assert.match(desc, /"tell me if it's delayed" only triggers on a delay\/exception/);
+  assert.match(desc, /"tell me when it's out for delivery" only triggers at that stage/);
+  assert.match(desc, /"keep me updated" triggers on any meaningful transition/);
+});
+
+test('delivery tracking: an ongoing watch re-arms itself after a non-terminal change and stops for real at a terminal one', () => {
+  const desc = nativeDescriptions().create_scheduled_task.description;
+  assert.match(desc, /ALSO call create_scheduled_task again in the same run before finishing/);
+  assert.match(desc, /never keep checking a delivered parcel forever/);
+});
+
+test('delivery tracking: a blocked/unreadable carrier page must be reported honestly, never an invented status', () => {
+  const desc = nativeDescriptions().create_scheduled_task.description;
+  assert.match(desc, /login wall, CAPTCHA, blocked.*never report an invented or stale status/s);
+});
+
+test('run_browser_task guidance also covers reading a real courier tracking page', () => {
+  assert.match(nativeDescriptions().run_browser_task.description, /read a REAL courier tracking page for a delivery watch/);
+});
+
 test('calendar read-vs-write: the write-only guidance survives, and the read action has no such restriction', () => {
   const decls = nativeDescriptions();
   assert.match(decls.create_calendar_event.description, /Never use for read-only calendar language/);
