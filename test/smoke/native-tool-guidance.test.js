@@ -91,10 +91,10 @@ test('confirmation is never copied into a native tool description — nothing re
 // until the rename fixed it; the count here is the tripwire that would have caught that. Plus
 // 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.
 // Plus 1 more for the morning digest: daily_digest, and 3 for the people layer:
-// remember_person, find_people, forget_person_detail.)
-test('exactly 49 contracts define guidance, and every one appears verbatim in its native description', () => {
+// remember_person, find_people, forget_person_detail, and 1 for spend awareness: find_spend.)
+test('exactly 50 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 49);
+  assert.equal(withGuidance.length, 50);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -386,4 +386,18 @@ test('people layer: a correction is one call, and forgetting removes the narrowe
   assert.match(remember, /"Alisa prefers gold, not silver" is ONE call with facts:"prefers gold" and replaces:"silver"/);
   const forget = nativeDescriptions().forget_person_detail.description;
   assert.match(forget, /Remove the narrowest thing the user asked to remove — never delete a whole person to drop one fact/);
+});
+
+test('spend: find_spend must never let a total be relayed as complete spending', () => {
+  const desc = nativeDescriptions().find_spend.description;
+  assert.match(desc, /Relay the returned figure and its caveat TOGETHER/);
+  assert.match(desc, /There is no bank or card feed in this product/);
+  assert.match(desc, /card and cash purchases without an emailed receipt are genuinely invisible/);
+});
+
+test('spend: unreadable totals, currencies and categories are never filled in with a guess', () => {
+  const desc = nativeDescriptions().find_spend.description;
+  assert.match(desc, /do not fill them in with a plausible number/);
+  assert.match(desc, /Different currencies are never converted or added together/);
+  assert.match(desc, /cannot be classified confidently, say which records were excluded rather than guessing/);
 });

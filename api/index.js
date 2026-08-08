@@ -98,6 +98,7 @@ const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-briefing');
 const dailyDigest = require('./services/daily-digest');
 const people = require('./services/people');
+const receipts = require('./services/receipts');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -4159,6 +4160,144 @@ async function executeAction(userId, action, params, context = {}) {
         success: true,
         items,
         text: formatOccasionsSummary(items)
+      };
+    }
+
+    // Spend and receipts. Two real sources only — receipts in the connected mailbox, and
+    // orders this system actually placed and saw confirmed. There is no bank feed, and the
+    // summary text says so every time rather than implying completeness.
+    case 'find_spend': {
+      const merchantFilter = String(params?.merchant || '').trim();
+      const since = String(params?.since || '').trim();
+      const before = String(params?.before || '').trim();
+      const categoryQuery = String(params?.category || '').trim().toLowerCase();
+      const textQuery = String(params?.query || '').trim();
+      const sources = String(params?.sources || 'all').trim().toLowerCase();
+      const wantEmail = sources !== 'millie';
+      const wantMillie = sources !== 'email';
+      const cap = Math.max(1, Math.min(Number(params?.max_results) || 60, 150));
+
+      let emailSearched = false;
+      let emailError = '';
+      let scanned = 0;
+      let skipped = 0;
+
+      if (wantEmail) {
+        // A receipt-shaped Gmail query, then the real extractor decides — the query narrows
+        // what is fetched, it is not itself the classifier.
+        const terms = ['receipt', 'invoice', '"order confirmation"', '"your order"', '"payment received"', '"thanks for your order"', 'refund'];
+        const parts = [`{${terms.join(' ')}}`];
+        if (merchantFilter) parts.push(`(from:${merchantFilter} OR "${merchantFilter}")`);
+        else if (textQuery) parts.push(`"${textQuery.replace(/"/g, '')}"`);
+        const sinceToken = buildCleanupQuery({ since }).match(/after:(\S+)/)?.[1];
+        const beforeToken = buildCleanupQuery({ before }).match(/before:(\S+)/)?.[1];
+        if (sinceToken) parts.push(`after:${sinceToken}`);
+        if (beforeToken) parts.push(`before:${beforeToken}`);
+
+        const searchResult = await dispatch(userId, 'search_emails', { query: parts.join(' '), max_results: cap });
+        if (searchResult?.success) {
+          emailSearched = true;
+          const emails = searchResult.emails || [];
+          scanned = emails.length;
+          for (const email of emails) {
+            const extracted = receipts.extractReceipt(email);
+            if (!extracted) { skipped += 1; continue; }
+            // Persisting normalized records is what makes a second "find that receipt" fast
+            // and lets a purchase be recognised later without re-mining the mailbox. The
+            // dedupe indexes make a rescan idempotent rather than double-counting.
+            const row = {
+              source: extracted.source,
+              merchant: extracted.merchant,
+              merchant_domain: extracted.merchantDomain,
+              purchased_at: extracted.purchasedAt,
+              total_amount: extracted.totalAmount,
+              currency: extracted.currency,
+              order_id: extracted.orderId,
+              description: extracted.description,
+              items: extracted.items?.length ? extracted.items : null,
+              status: extracted.status,
+              refund_amount: extracted.refundAmount,
+              tracking_url: extracted.trackingUrl,
+              source_ref: extracted.sourceRef,
+              source_thread_id: extracted.sourceThreadId,
+              raw_total_text: extracted.rawTotalText,
+              extraction_confidence: extracted.extractionConfidence,
+              updated_at: new Date().toISOString()
+            };
+            // upsertPurchase, not a raw upsert: both dedupe indexes are partial, which
+            // Postgres will not accept as an ON CONFLICT target. It also folds a second
+            // document about an order already on file (shipping note, refund) into that
+            // record instead of counting the order twice.
+            await receipts.upsertPurchase(supabase, userId, row);
+          }
+        } else {
+          emailError = searchResult?.error || 'your mailbox was unreachable';
+        }
+      }
+
+      let query = supabase.from('purchases').select('*').eq('user_id', userId);
+      if (!wantEmail) query = query.eq('source', 'millie_browser');
+      if (!wantMillie) query = query.eq('source', 'email_receipt');
+      if (merchantFilter) query = query.ilike('merchant', `%${escapeIlikePattern(merchantFilter)}%`);
+      // "What did that sock order cost?" is not a merchant question — the only thing the user
+      // remembers is what the thing was, which lives in the description (Millie's own order
+      // goal) or the receipt's subject line. Without this, a real recorded order was
+      // unfindable by the most natural way to ask about it.
+      if (textQuery) {
+        const safe = escapeIlikePattern(textQuery);
+        query = query.or(`merchant.ilike.%${safe}%,description.ilike.%${safe}%`);
+      }
+      if (since && !Number.isNaN(Date.parse(since))) query = query.gte('purchased_at', new Date(since).toISOString());
+      if (before && !Number.isNaN(Date.parse(before))) query = query.lte('purchased_at', new Date(before).toISOString());
+      const { data, error } = await query.order('purchased_at', { ascending: false }).limit(cap);
+      if (error) return { success: false, error: error.message };
+
+      let items = data || [];
+      let unclassified = 0;
+      if (categoryQuery) {
+        const kept = [];
+        for (const purchase of items) {
+          const verdict = receipts.classifyCategory(purchase.merchant, purchase.description);
+          if (verdict.confident && verdict.category === categoryQuery) kept.push(purchase);
+          else if (!verdict.confident) unclassified += 1;
+        }
+        items = kept;
+      }
+
+      return {
+        success: true,
+        purchases: items.map(p => ({
+          id: p.id,
+          merchant: p.merchant,
+          amount: p.total_amount,
+          currency: p.currency,
+          purchasedAt: p.purchased_at,
+          orderId: p.order_id,
+          description: p.description,
+          items: p.items || [],
+          status: p.status,
+          source: p.source,
+          threadId: p.source_thread_id,
+          messageId: p.source === 'email_receipt' ? p.source_ref : null,
+          trackingUrl: p.tracking_url,
+          observedTotalText: p.raw_total_text,
+          confidence: p.extraction_confidence
+        })),
+        summary: receipts.summarizeSpend(items),
+        coverage: {
+          emailSearched,
+          emailError: emailError || null,
+          emailsScanned: scanned,
+          emailsWithoutUsableReceipt: skipped,
+          bankFeed: false
+        },
+        lines: items.slice(0, 12).map(receipts.formatPurchaseLine),
+        text: receipts.formatSpendSummary(items, {
+          since, merchant: merchantFilter,
+          sources: wantEmail ? ['email_receipt', 'millie_browser'] : ['millie_browser'],
+          emailSearched: wantEmail ? emailSearched : true,
+          emailError, unclassified, categoryQuery
+        })
       };
     }
 

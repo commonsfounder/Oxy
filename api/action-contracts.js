@@ -332,6 +332,27 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // Spend awareness over the only two real sources that exist here: emailed receipts and
+  // orders this system actually placed. There is deliberately no bank/card feed.
+  find_spend: {
+    risk: 'low',
+    required: [],
+    optional: ['merchant', 'query', 'since', 'before', 'category', 'sources', 'max_results'],
+    inputExample: { merchant: 'Amazon', since: '2026-07-01', before: '2026-08-01' },
+    paramHints: {
+      since: 'ISO date — resolve relative wording ("last month", "since June") to a real date yourself',
+      before: 'ISO date',
+      category: 'only one of: clothes, groceries, tech, food, travel, subscriptions — omit unless the user actually asked by category',
+      sources: 'all (default) | email — only emailed receipts | millie — only orders placed through Millie',
+      merchant: 'a merchant name or sender domain, e.g. "Nike" or "apple.com"',
+      query: 'what the thing WAS, when the user remembers the item rather than the shop — e.g. "socks" for "what did that sock order cost?"'
+    },
+    guidance: 'Use for "how much have I spent recently?", "what did I spend on Amazon last month?", "how much have I spent through Millie?" (sources:"millie"), "find that receipt" / "find my Apple receipt" (merchant), "what did that sock order cost?" (query:"socks" — use query, not merchant, when the user names the ITEM rather than the shop), "how much did that order cost?" and "what subscriptions or recurring charges are showing up in my email?". It searches the connected mailbox for real receipts, extracts merchant/date/total/order id/items only where the email genuinely states them, and combines that with orders Millie itself placed and saw confirmed. Relay the returned figure and its caveat TOGETHER — never state a total as if it were complete spending. There is no bank or card feed in this product, so card and cash purchases without an emailed receipt are genuinely invisible; if the user asks for total spending, say that plainly rather than implying the number is everything. Records whose total could not be read from a labelled total line are counted separately and excluded from the sum — do not fill them in with a plausible number. Different currencies are never converted or added together. If a category question cannot be classified confidently, say which records were excluded rather than guessing what they were. Each result carries threadId/messageId for the source email, so "show me that receipt" can point at the real message.',
+    successSummary: 'Spend checked',
+    failureSummary: 'Could not check your spending',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // ── People layer ───────────────────────────────────────────────────────────────────
   // Durable answers to "who is this person to me, how do I reach them, what matters about
   // them" — so tone, gift context, recipient selection and "her"/"my manager" stop being

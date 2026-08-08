@@ -27,6 +27,7 @@ const { getAgentCard } = require('./agent-card');
 const { getVaultCredential, saveVaultCredential, normalizeSite } = require('./vault-credentials');
 const { recordTaskStep } = require('./task-steps');
 const { recordTaskEntity } = require('./task-entities');
+const receipts = require('./receipts');
 const { randomUUID } = require('node:crypto');
 const axios = require('axios');
 // Whole-layer kill-switch: OXY_BROWSER_RECIPES=false → the loop is exactly today's all-vision path.
@@ -4837,6 +4838,9 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           return { type: 'ask', question: 'The order looks ready, but I can\'t see a payment button on screen yet — want me to keep going, or check the cart yourself?' };
         }
         session.pendingPaymentLabel = payEl.text;
+        // Kept so a confirmed order can be recorded with the total the user actually
+        // reviewed, rather than re-guessing one off the confirmation page.
+        session.pendingPaymentTotal = decision.total || '';
         return { type: 'ready_for_payment', summary: decision.summary, total: decision.total || '', ...rfpExtra };
       }
 
@@ -4881,6 +4885,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
 
       if (matchesPaymentKeyword(target.text)) {
         session.pendingPaymentLabel = target.text;
+        session.pendingPaymentTotal = '';
         return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
       }
 
@@ -5592,6 +5597,58 @@ async function classifyPaymentOutcome(page) {
   return 'unknown';
 }
 
+// A purchase Millie actually placed is recorded the moment the confirmation page is seen —
+// not left to be rediscovered from a receipt email later, which may never arrive, may go to
+// a mailbox that isn't connected, and in any case makes Millie unable to answer "what did
+// that order cost?" about something it did itself.
+//
+// Everything stored is observed, never assumed: the total is the one the user actually
+// reviewed before confirming (falling back to a labelled total on the confirmation page),
+// the order id is read from that page, and the merchant is the site the session was on. If
+// no total can be read, the row is still written with a null amount — a real order with an
+// unknown total is the truth; a guessed number would not be.
+async function recordConfirmedPurchase(userId, session, confirmationText = '') {
+  try {
+    const merchantHost = String(session?.site || '').replace(/^www\./, '');
+    if (!merchantHost) return null;
+    const haystack = `${confirmationText}`.slice(0, 20000);
+    const reviewed = receipts.parseAmount(session?.pendingPaymentTotal || '');
+    const pageTotalMatch = haystack.match(/(?:order\s+total|grand\s+total|total\s+(?:paid|charged|cost)|total|amount\s+(?:paid|charged)|you\s+paid)\s*[:\-–]?\s*([£$€¥]\s?\d[\d,]*(?:\.\d{2})?)/i);
+    const total = reviewed || (pageTotalMatch ? receipts.parseAmount(pageTotalMatch[1]) : null);
+    const orderId = receipts.extractOrderId(haystack);
+    const label = merchantHost.split('.')[0];
+
+    const { id } = await receipts.upsertPurchase(getSupabase(), userId, {
+      source: 'millie_browser',
+      merchant: label.charAt(0).toUpperCase() + label.slice(1),
+      merchant_domain: merchantHost,
+      purchased_at: new Date().toISOString(),
+      total_amount: total ? total.amount : null,
+      currency: total ? total.currency : null,
+      order_id: orderId,
+      description: String(session?.goal || '').slice(0, 400) || null,
+      status: 'confirmed',
+      source_ref: String(session?.page?.url?.() || '').slice(0, 500) || null,
+      raw_total_text: total ? total.raw : null,
+      extraction_confidence: total && orderId ? 'high' : 'medium',
+      updated_at: new Date().toISOString()
+    });
+    return id || null;
+  } catch {
+    // Recording is bookkeeping — it must never turn a successful order into a failure.
+    return null;
+  }
+}
+
+async function readPageText(page) {
+  const texts = [];
+  for (const frame of page.frames()) {
+    const body = await frame.evaluate(() => (document.body ? document.body.innerText : '') || '').catch(() => '');
+    if (body) texts.push(body.slice(0, 20000));
+  }
+  return texts.join('\n');
+}
+
 const CONFIRM_WATCH_BUDGET_MS = envInt('OXY_BROWSER_CONFIRM_WATCH_MS', 45000);
 const MAX_PAY_CLICKS = 3;
 
@@ -5626,9 +5683,10 @@ async function confirmPayment(userId, onProgress = () => {}) {
     // if the order already landed, report that instead of risking a double submission.
     if (await classifyPaymentOutcome(session.page) === 'confirmed') {
       const text = `Done — the order went through (${session.pendingPaymentLabel}).`;
+      const purchaseId = await recordConfirmedPurchase(userId, session, await readPageText(session.page));
       await persistStorage(userId, session);
       await closeSession(userId);
-      return { type: 'done', text };
+      return { type: 'done', text, purchaseId };
     }
 
     const card = await getAgentCard(getSupabase(), userId).catch(() => null);
@@ -5660,9 +5718,10 @@ async function confirmPayment(userId, onProgress = () => {}) {
       const state = await classifyPaymentOutcome(session.page);
       if (state === 'confirmed') {
         const text = `Done — placed the order (${clickedLabel}).`;
+        const purchaseId = await recordConfirmedPurchase(userId, session, await readPageText(session.page));
         await persistStorage(userId, session);
         await closeSession(userId);
-        return { type: 'done', text };
+        return { type: 'done', text, purchaseId };
       }
       if (state === 'declined') {
         touchSession(userId);
@@ -5906,6 +5965,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 }
 
 module.exports = {
+  recordConfirmedPurchase,
   primeWarmBrowser,
   primeFastpaths,
   primeLearnedRecipes,
