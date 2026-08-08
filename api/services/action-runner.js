@@ -7,6 +7,33 @@ const {
 const { diagnoseConnectorIssue } = require('./connector-health');
 const { buildPendingReviewResult, MONEY_ACTION_TYPES } = require('./pending-review');
 
+// Logging an already-computed action result is an audit/analytics concern, never the
+// security enforcement itself (that's the review-gate check above, independent of this) —
+// so a failure here must never affect the action's own result or crash the batch it's part
+// of. This used to be inlined per call site as `await log().catch(...)`, which assumed
+// `log()` always returns a real Promise. It doesn't: `logAction` in production is wired to
+// `supabase.from('action_log').insert(...)`, and Supabase's query builder is a thenable
+// (has `.then`) but does NOT implement `.catch` as an own method, so `log().catch` was
+// `undefined` and calling it threw a synchronous TypeError — before `await` ever ran. That
+// throw wasn't caught by anything in the sequential loop, so it escaped `executeActions`
+// entirely; callers (agent-orchestrator.js) then mapped the WHOLE batch for that iteration
+// to a failure, including actions that had already executed successfully. A plain
+// try/await/catch here (instead of chaining `.catch` on the callback's return value) works
+// for a real Promise, a Supabase-style thenable, or a callback that throws synchronously —
+// and swallowing the error via console.warn is what "non-fatal" means in practice, matching
+// what the old `.catch(err => console.warn(...))` was already trying (and failing) to do.
+async function safeLogAction(trace, label, fn) {
+  try {
+    if (trace) {
+      await trace.run(label, fn);
+    } else {
+      await fn();
+    }
+  } catch (err) {
+    console.warn('[action-runner] log failed:', err?.message || err);
+  }
+}
+
 function createActionRunner({
   executeAction,
   invalidateUserContextCache = () => {},
@@ -62,12 +89,7 @@ function createActionRunner({
           result = applyActionContractResultMetadata(action, result);
         }
 
-        const log = () => logAction(userId, action, result);
-        if (trace) {
-          await trace.run(`action_log.insert.${action.type}`, log);
-        } else {
-          await log();
-        }
+        await safeLogAction(trace, `action_log.insert.${action.type}`, () => logAction(userId, action, result));
         if (callbacks.onActionComplete) callbacks.onActionComplete(action, result);
         return { action: action.type, result, input: action.input };
       }));
@@ -113,14 +135,7 @@ function createActionRunner({
         }
       }
 
-      const log = () => logAction(userId, action, result);
-      if (trace) {
-        await trace.run(`action_log.insert.${action.type}`, log).catch(err =>
-          console.warn('[action-runner] log failed:', err.message)
-        );
-      } else {
-        await log().catch(err => console.warn('[action-runner] log failed:', err.message));
-      }
+      await safeLogAction(trace, `action_log.insert.${action.type}`, () => logAction(userId, action, result));
       if (callbacks.onActionComplete) callbacks.onActionComplete(action, result);
       const entry = { action: action.type, result, input: action.input };
       results.push(entry);

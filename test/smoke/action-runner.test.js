@@ -231,3 +231,108 @@ test('action runner does not look up a linked card for non-money review actions'
 
   assert.deepEqual(lookups, []);
 });
+
+// ── Regression: a logging failure must never fail the action it's logging, or crash the
+// batch. `logAction` in production is wired to `supabase.from('action_log').insert(...)`,
+// whose return value is a THENABLE (has `.then`) but does NOT implement `.catch` as an own
+// method — chaining `.catch` on it (the old code) threw a synchronous TypeError, which
+// escaped every background/scheduled/routine/resume call site (none of them pass a trace),
+// mapping the whole batch for that iteration to a false failure even when actions upstream
+// had already succeeded. Fixed in api/services/action-runner.js via safeLogAction, which
+// always goes through a real try/await/catch instead of assuming `.catch` exists.
+function fakeSupabaseBuilder() {
+  // Mimics supabase-js's PostgrestFilterBuilder: thenable, but `.catch` is not an own method.
+  return { then(resolve) { resolve(); } };
+}
+
+test('a logAction that returns a thenable-without-.catch (Supabase-shaped) does not fail the action, sequential mode, no trace', async () => {
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
+    setPendingAction: async () => {},
+    logAction: () => fakeSupabaseBuilder(),
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'calculate', input: { expression: '1+1' } }
+  ], { sequential: true }, null);
+
+  assert.equal(result[0].result.success, true);
+  assert.equal(result[0].result.text, 'ok:calculate');
+});
+
+test('a logAction that returns a thenable-without-.catch does not fail the action, parallel mode, no trace', async () => {
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
+    setPendingAction: async () => {},
+    logAction: () => fakeSupabaseBuilder(),
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'calculate', input: { expression: '1+1' } }
+  ], {}, null);
+
+  assert.equal(result[0].result.success, true);
+});
+
+test('a logAction that rejects is non-fatal and does not touch the action result, with or without a trace', async () => {
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
+    setPendingAction: async () => {},
+    logAction: async () => { throw new Error('db connection lost'); },
+    invalidateUserContextCache: () => {}
+  });
+
+  const noTrace = await executeActions('user-1', [{ type: 'calculate', input: { expression: '1+1' } }], { sequential: true }, null);
+  assert.equal(noTrace[0].result.success, true);
+
+  const trace = { async run(label, fn) { return fn(); } };
+  const withTrace = await executeActions('user-1', [{ type: 'calculate', input: { expression: '1+1' } }], { sequential: true }, trace);
+  assert.equal(withTrace[0].result.success, true);
+});
+
+test('one action\'s logging failure in a multi-action sequential batch does not poison the other actions\' results', async () => {
+  // This is the batch-poisoning shape of the real bug: before the fix, a synchronous throw
+  // from the FIRST action's log step escaped executeActions entirely, and the caller
+  // (agent-orchestrator.js) mapped the whole batch to failure — including the second action,
+  // which never even ran yet, and any action before it that had already succeeded.
+  let logCalls = 0;
+  const executeActions = createActionRunner({
+    executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
+    setPendingAction: async () => {},
+    logAction: () => {
+      logCalls += 1;
+      if (logCalls === 1) return fakeSupabaseBuilder(); // first action's log is Supabase-shaped
+      throw new Error('second log failed for a different reason'); // second fails differently
+    },
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'action_a', input: {} },
+    { type: 'action_b', input: {} }
+  ], { sequential: true }, null);
+
+  assert.equal(result.length, 2);
+  assert.equal(result[0].result.success, true, 'first action must not be poisoned by the second action\'s later log failure');
+  assert.equal(result[1].result.success, true, 'second action must not be poisoned by its own log failure');
+});
+
+test('a logging failure is reported via console.warn, not silently dropped with no trace of it happening', async () => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const executeActions = createActionRunner({
+      executeAction: async () => ({ success: true }),
+      setPendingAction: async () => {},
+      logAction: async () => { throw new Error('db connection lost'); },
+      invalidateUserContextCache: () => {}
+    });
+    await executeActions('user-1', [{ type: 'calculate', input: {} }], { sequential: true }, null);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some(w => w.includes('log failed') && w.includes('db connection lost')));
+});

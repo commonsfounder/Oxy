@@ -10208,3 +10208,4 @@ module.exports.buildIntervalBriefing = buildIntervalBriefing;
 module.exports.checkMillieSendCap = checkMillieSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
 module.exports.executeActions = executeActions;
+module.exports.runScheduledTasksForUser = runScheduledTasksForUser;
