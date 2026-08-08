@@ -332,6 +332,60 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // ── People layer ───────────────────────────────────────────────────────────────────
+  // Durable answers to "who is this person to me, how do I reach them, what matters about
+  // them" — so tone, gift context, recipient selection and "her"/"my manager" stop being
+  // rediscovered from scratch each conversation.
+  remember_person: {
+    risk: 'low',
+    required: [],
+    optional: ['person_name', 'relationship', 'email', 'phone', 'facts', 'replaces', 'fact_kind', 'business_name', 'different_person'],
+    inputExample: { person_name: 'Alisa', relationship: 'girlfriend', facts: 'prefers gold jewellery' },
+    paramHints: {
+      person_name: 'the name the user actually calls them ("Mum", "Alisa", "James Whitfield")',
+      relationship: 'their relationship TO THE USER — e.g. "girlfriend", "manager", "tutor", "mum". Only if stated',
+      facts: 'one or more short things worth remembering, separated by semicolons — only what the user actually said or what an assistant task genuinely needs',
+      replaces: 'the outdated fact this corrects, e.g. "silver" when the user says she prefers gold — removes it in the same call so the two never both sit on file',
+      fact_kind: 'note (default) | preference',
+      different_person: 'true only when the user says this is NOT the person you matched, e.g. "that\'s a different James" — forces a new record instead of updating the existing one'
+    },
+    guidance: 'Use when the user states who someone is or something durable about them — "Alisa is my girlfriend", "Ben is my manager", "Mum likes gardening", "James is my tutor, keep it formal with him" — and when a correction lands ("Alisa prefers gold, not silver" is ONE call with facts:"prefers gold" and replaces:"silver"). Capture naturally when it comes up; never interrogate the user for contact details or hoover up private facts just because they appeared in an email. Store what the user explicitly said, or what an actual assistant task needs (how to address someone, how to reach them, what to buy them) — not everything that could be extracted. An email address or phone number is the strong identity signal: pass it whenever you have one, because that is what makes "Alisa", her address and her saved birthday resolve to one person instead of three. If the name matches more than one saved person, this refuses and returns the candidates rather than guessing — ask which one, and pass different_person:true only if the user says it is someone new. For "Ben isn\'t my manager anymore" or "forget that preference", use forget_person_detail instead.',
+    successSummary: 'Noted',
+    failureSummary: 'Could not save that',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  find_people: {
+    risk: 'low',
+    required: [],
+    optional: ['query', 'relationship', 'email', 'phone'],
+    inputExample: { query: 'Mia' },
+    paramHints: {
+      query: 'a name, or the word the user used for them',
+      relationship: 'use this for relationship references — "my manager", "my tutor" — rather than putting them in query'
+    },
+    guidance: 'Use before acting on a person, not only when asked about them directly: "who is Mia again?", "email my manager" (resolve the real address first — never guess a recipient), "what do I normally get Alisa?", "reply to James more formally, he\'s my tutor", and any "her"/"him"/"them" that refers to a person you do not already have in this conversation. It returns the relationship, known email/phone handles, saved notes/preferences and linked birthdays/anniversaries, so use it to pick the right recipient, match the right tone, and ground gift suggestions in what you actually know rather than a generic guess. If it comes back ambiguous, ask which person rather than picking one. If it returns nothing, say so and ask — do not invent a relationship or an address.',
+    successSummary: 'Found',
+    failureSummary: 'Could not look that up',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  forget_person_detail: {
+    risk: 'low',
+    required: [],
+    optional: ['person_name', 'facts', 'clear_relationship', 'delete_person', 'email', 'phone'],
+    inputExample: { person_name: 'Ben', clear_relationship: true },
+    paramHints: {
+      facts: 'the specific thing(s) to forget — "forget that preference" means the preference, not the person',
+      clear_relationship: 'true for "Ben isn\'t my manager anymore"',
+      delete_person: 'true only when the user wants the whole person forgotten'
+    },
+    guidance: 'Use for "Ben isn\'t my manager anymore" (clear_relationship), "forget that preference" / "she doesn\'t like that anymore" (facts), and "forget about X entirely" (delete_person). Remove the narrowest thing the user asked to remove — never delete a whole person to drop one fact. For a correction that replaces one fact with another ("prefers gold, not silver"), use remember_person with replaces instead, so the new fact and the removal happen together.',
+    successSummary: 'Forgotten',
+    failureSummary: 'Could not forget that',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // The composed "what's on my plate" answer. Not a wrapper around get_calendar_events:
   // it re-reads reply-needed threads, saved occasions, due/overdue reminders, background
   // watch state changes, calendar and pending approvals, and ranks them together.

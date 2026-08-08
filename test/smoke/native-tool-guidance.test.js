@@ -90,10 +90,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // the same name during development, which silently discarded plan_itinerary's contract entirely
 // until the rename fixed it; the count here is the tripwire that would have caught that. Plus
 // 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.
-// Plus 1 more for the morning digest: daily_digest.)
-test('exactly 46 contracts define guidance, and every one appears verbatim in its native description', () => {
+// Plus 1 more for the morning digest: daily_digest, and 3 for the people layer:
+// remember_person, find_people, forget_person_detail.)
+test('exactly 49 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 46);
+  assert.equal(withGuidance.length, 49);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -355,4 +356,34 @@ test('every native declaration still has a name, a non-empty description, and an
     assert.ok(decl.description && decl.description.length > 0, `${decl.name} has an empty description`);
     assert.equal(decl.parameters.type, 'OBJECT');
   }
+});
+
+test('people layer: find_people is steered at resolution before acting, not just at direct questions', () => {
+  const desc = nativeDescriptions().find_people.description;
+  assert.match(desc, /who is Mia again\?/);
+  assert.match(desc, /"email my manager" \(resolve the real address first — never guess a recipient\)/);
+  assert.match(desc, /any "her"\/"him"\/"them" that refers to a person you do not already have/);
+  assert.match(desc, /If it comes back ambiguous, ask which person rather than picking one/);
+  assert.match(desc, /do not invent a relationship or an address/);
+});
+
+test('people layer: remember_person teaches handle-first identity and refuses to guess between namesakes', () => {
+  const desc = nativeDescriptions().remember_person.description;
+  assert.match(desc, /An email address or phone number is the strong identity signal/);
+  assert.match(desc, /resolve to one person instead of three/);
+  assert.match(desc, /this refuses and returns the candidates rather than guessing/);
+  assert.match(desc, /different_person:true only if the user says it is someone new/);
+});
+
+test('people layer: capture is bounded — stated facts and task-relevant ones, not everything extractable', () => {
+  const desc = nativeDescriptions().remember_person.description;
+  assert.match(desc, /never interrogate the user for contact details or hoover up private facts/);
+  assert.match(desc, /not everything that could be extracted/);
+});
+
+test('people layer: a correction is one call, and forgetting removes the narrowest thing', () => {
+  const remember = nativeDescriptions().remember_person.description;
+  assert.match(remember, /"Alisa prefers gold, not silver" is ONE call with facts:"prefers gold" and replaces:"silver"/);
+  const forget = nativeDescriptions().forget_person_detail.description;
+  assert.match(forget, /Remove the narrowest thing the user asked to remove — never delete a whole person to drop one fact/);
 });

@@ -97,6 +97,7 @@ const agentApprovals = require('./services/agent-approval-runtime');
 const agentProjectRuntime = require('./services/agent-project-runtime');
 const { buildLifeBriefing, formatLifeBriefing } = require('./services/life-briefing');
 const dailyDigest = require('./services/daily-digest');
+const people = require('./services/people');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
 const { connectorForAction } = require('./services/connector-health');
@@ -4070,7 +4071,29 @@ async function executeAction(userId, action, params, context = {}) {
         .maybeSingle();
       if (findError) return { success: false, error: findError.message };
 
+      // Link the occasion to the canonical person so "get Alisa something for her birthday"
+      // connects recipient + occasion + preferences. Deliberately non-blocking: if the name
+      // is ambiguous (two Alisas) nothing is merged and the occasion still saves with
+      // participant_id null — a wrong link is worse than no link.
+      let participantId = null;
+      try {
+        const resolved = await people.resolvePerson(supabase, userId, { name: personName });
+        if (resolved.person) {
+          participantId = resolved.person.id;
+          if (relationship && !resolved.person.relationship) {
+            await supabase.from('participants').update({ relationship, updated_at: new Date().toISOString() }).eq('id', participantId);
+          }
+        } else if (!resolved.ambiguous) {
+          const created = await people.upsertPerson(supabase, userId, { name: personName, relationship, source: 'learned' });
+          if (created.success) participantId = created.person.id;
+        }
+      } catch {
+        // The people layer is an enrichment here, never a precondition for saving a birthday.
+      }
+
       const row = { user_id: userId, person_name: personName, occasion_type: occasionType, month, day, year, relationship, notes, updated_at: new Date().toISOString() };
+      // Only ever set the link, never clear one that already resolved on an earlier save.
+      if (participantId) row.participant_id = participantId;
       const { error } = existing?.id
         ? await supabase.from('occasions').update(row).eq('id', existing.id)
         : await supabase.from('occasions').insert({ ...row, source: 'chat' });
@@ -4137,6 +4160,81 @@ async function executeAction(userId, action, params, context = {}) {
         items,
         text: formatOccasionsSummary(items)
       };
+    }
+
+    // ── People layer ──────────────────────────────────────────────────────────────────
+    // Built on participants/participant_addresses (see api/services/people.js for why
+    // that, and not a new table). These three cases are thin: all the identity-resolution
+    // rules — handles beat names, ambiguous names are never merged — live in the service.
+    case 'remember_person': {
+      const result = await people.upsertPerson(supabase, userId, {
+        name: params?.person_name || params?.name,
+        relationship: params?.relationship,
+        email: params?.email,
+        phone: params?.phone,
+        businessName: params?.business_name,
+        facts: params?.facts ?? params?.note,
+        removeFacts: params?.replaces,
+        forceNew: params?.different_person === true || String(params?.different_person) === 'true',
+        factKind: params?.fact_kind
+      });
+      if (result.ambiguous) {
+        return {
+          success: false,
+          ambiguous: true,
+          candidates: result.candidates,
+          error: `${result.error} Say which one you mean, or that this is a different person.`
+        };
+      }
+      if (!result.success) return result;
+
+      const profile = (await people.loadProfiles(supabase, userId, [result.person]))[0];
+      const changes = [
+        result.created ? 'added' : 'updated',
+        result.factsRemoved ? `${result.factsRemoved} thing${result.factsRemoved === 1 ? '' : 's'} forgotten` : '',
+        result.factsAdded ? `${result.factsAdded} noted` : ''
+      ].filter(Boolean).join(', ');
+      return { success: true, person: profile, created: result.created, text: `${people.formatProfile(profile)} (${changes}).` };
+    }
+
+    case 'find_people': {
+      const query = String(params?.query || params?.person_name || '').trim();
+      const result = await people.findPeople(supabase, userId, {
+        query,
+        relationship: params?.relationship,
+        email: params?.email,
+        phone: params?.phone
+      });
+      return {
+        success: true,
+        people: result.profiles,
+        ambiguous: Boolean(result.ambiguous),
+        text: people.formatPeopleSummary(result.profiles, { ambiguous: result.ambiguous, query: query || params?.relationship || '' })
+      };
+    }
+
+    case 'forget_person_detail': {
+      const query = String(params?.person_name || params?.query || '').trim();
+      const resolved = await people.resolvePerson(supabase, userId, { name: query, email: params?.email, phone: params?.phone });
+      if (resolved.ambiguous) {
+        return { success: false, ambiguous: true, error: `More than one person matches "${query}". Which one?` };
+      }
+      if (!resolved.person) return { success: false, error: `I don't have anyone saved as "${query}".` };
+
+      const result = await people.forgetPersonDetail(supabase, userId, {
+        participantId: resolved.person.id,
+        facts: params?.facts ?? params?.fact,
+        clearRelationship: params?.clear_relationship === true || String(params?.clear_relationship) === 'true',
+        deletePerson: params?.delete_person === true || String(params?.delete_person) === 'true'
+      });
+      if (!result.success) return result;
+      const name = resolved.person.display_name;
+      const text = result.deleted ? `Forgot ${name} entirely.`
+        : [
+          result.relationshipCleared ? `${name} is no longer recorded with that relationship` : '',
+          result.factsRemoved ? `forgot ${result.factsRemoved} thing${result.factsRemoved === 1 ? '' : 's'} about ${name}` : ''
+        ].filter(Boolean).join('; ') || `Nothing to forget about ${name}.`;
+      return { success: true, ...result, text };
     }
 
     case 'find_appointment_options': {
@@ -5201,18 +5299,27 @@ async function getUserContext(userId, trace = null) {
     return cached.context;
   }
 
-  const [connectors, memories, actionLog, delegatedTasks] = trace
+  // Names + relationships only (never the saved notes/preferences — those stay behind an
+  // explicit find_people lookup rather than being pasted into every request). This is what
+  // makes "email my manager" and a bare "her" resolvable without a tool round-trip.
+  const loadKnownPeople = () => supabase.from('participants')
+    .select('display_name, relationship').eq('user_id', userId)
+    .order('updated_at', { ascending: false, nullsFirst: false }).limit(12);
+
+  const [connectors, memories, actionLog, delegatedTasks, knownPeople] = trace
     ? await Promise.all([
       trace.run('supabase.user_context.connectors', () => supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true)),
       trace.run('supabase.user_context.memories', () => supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5)),
       trace.run('supabase.user_context.action_log', () => supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8)),
-      trace.run('supabase.user_context.agent_tasks', () => supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6))
+      trace.run('supabase.user_context.agent_tasks', () => supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6)),
+      trace.run('supabase.user_context.participants', loadKnownPeople)
     ])
     : await Promise.all([
       supabase.from('connectors').select('connector_id').eq('user_id', userId).eq('enabled', true),
       supabase.from('memories').select('content').eq('user_id', userId).order('created_at', { ascending: false }).limit(5),
       supabase.from('action_log').select('action, status, error, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(8),
-      supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6)
+      supabase.from('agent_tasks').select('goal, status, autonomy, updated_at').eq('user_id', userId).neq('status', 'recipe').in('status', ['pending', 'running', 'paused', 'failed']).order('updated_at', { ascending: false }).limit(6),
+      loadKnownPeople()
     ]);
 
   const active = (connectors.data || []).map(c => c.connector_id).join(', ') || 'none';
@@ -5253,10 +5360,13 @@ async function getUserContext(userId, trace = null) {
     .filter(line => line.length > 10)
     .join(' | ') || 'none';
 
+  const peopleLine = people.peopleContextLine(knownPeople.data || []);
+
   const context = [
     "LIVE USER CONTEXT:",
     "Active connectors: " + active,
     "Messaging patterns: " + patterns,
+    "Known people: " + (peopleLine || 'none saved yet') + " (use find_people for their contact details, notes and saved dates)",
     "Key facts: " + memoryLines,
     "Active delegated goals: " + activeGoals,
     "Recent action outcomes: " + recentActions
