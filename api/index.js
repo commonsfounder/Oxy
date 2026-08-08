@@ -135,6 +135,13 @@ const {
   createSandboxAppointmentProvider,
   createSandboxCalendar
 } = require('./services/appointment-booking');
+const {
+  buildCleanupQuery,
+  classifyForCleanup,
+  dedupeSendersForUnsubscribe,
+  senderLabel: cleanupSenderLabel,
+  summarizeCleanupResult
+} = require('./services/gmail-cleanup');
 
 const stripeClient = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
 
@@ -3668,6 +3675,74 @@ async function executeAction(userId, action, params, context = {}) {
         nativeExecution: 'reminder',
         cardText: title,
         deepLink: `x-apple-reminderkit://`
+      };
+    }
+
+    // Orchestrates real Gmail search + the shared triage classifier (emailTriageSignals,
+    // not a second parallel one) + the real archive/unsubscribe mutation primitives in
+    // connectors/google.js. See api/services/gmail-cleanup.js for the pure decision logic.
+    case 'clean_inbox': {
+      const { sender, since, before, query, unsubscribe_senders } = params || {};
+      const searchQuery = buildCleanupQuery({ sender, since, before, query });
+      const cap = Math.max(1, Math.min(Number(params?.max_results) || 300, 500));
+
+      const searchResult = await dispatch(userId, 'search_emails', { query: searchQuery, max_results: cap });
+      if (!searchResult?.success) {
+        return { success: false, error: searchResult?.error || 'Could not search your inbox for that.' };
+      }
+      const emails = searchResult.emails || [];
+      if (!emails.length) {
+        return { success: true, archived: 0, preserved: 0, unsubscribed: [], text: 'Nothing matched that in your inbox — there was nothing to clean up.' };
+      }
+
+      const classified = emails.map(email => {
+        const signal = emailTriageSignals(email, '');
+        return { email, signal, decision: classifyForCleanup(email, signal) };
+      });
+      const toArchive = classified.filter(c => c.decision.archive);
+      const preservedCount = classified.length - toArchive.length;
+
+      let archived = 0;
+      let archiveFailed = 0;
+      if (toArchive.length) {
+        const archiveResult = await dispatch(userId, 'archive_emails', { message_ids: toArchive.map(c => c.email.id) });
+        archived = archiveResult?.modified || 0;
+        archiveFailed = (archiveResult?.failed || []).length;
+      }
+
+      const unsubscribed = [];
+      const unsubscribeFailed = [];
+      const needsBrowserUnsubscribe = [];
+      if (unsubscribe_senders !== false) {
+        const targets = dedupeSendersForUnsubscribe(toArchive.filter(c => c.decision.unsubscribeCandidate));
+        for (const target of targets) {
+          const result = await dispatch(userId, 'unsubscribe_email', { message_id: target.email.id });
+          const label = cleanupSenderLabel(target.email);
+          if (result?.success) unsubscribed.push({ sender: label, method: result.method });
+          else if (result?.needsBrowser) needsBrowserUnsubscribe.push({ sender: label, url: result.url });
+          else unsubscribeFailed.push({ sender: label, reason: result?.error || 'unknown error' });
+        }
+      }
+
+      const text = summarizeCleanupResult({
+        scanned: emails.length,
+        archived,
+        archiveFailed,
+        preservedCount,
+        unsubscribed,
+        unsubscribeFailed,
+        needsBrowserUnsubscribe
+      });
+      return {
+        success: true,
+        scanned: emails.length,
+        archived,
+        archiveFailed,
+        preserved: preservedCount,
+        unsubscribed,
+        unsubscribeFailed,
+        needsBrowserUnsubscribe,
+        text
       };
     }
 
@@ -7511,6 +7586,12 @@ function emailTriageSignals(email = {}, message = '') {
   if (/\b(today|tomorrow|tonight|asap|urgent|deadline|due|expires?|by \d|before \d|appointment|meeting|interview)\b/i.test(haystack)) add(2, 'time-sensitive');
   if (/\b(security|sign-?in|login|password|verification|suspicious|fraud|payment failed|failed payment|declined|overdue|disruption|cancelled|delayed|problem with your order|action required)\b/i.test(haystack)) add(4, 'needs attention');
   if (/\b(school|teacher|university|work|manager|client|invoice|contract|doctor|dentist|gp|travel|flight|train|hotel)\b/i.test(haystack)) add(2, 'personal/work signal');
+  // Transactional mail (receipts, order/shipping/booking confirmations, refunds) is very
+  // often sent from an automated-looking address (order-confirm@, noreply@, tracking@) —
+  // without this, a genuine receipt would collect only the automated-sender penalty below
+  // and read identically to a marketing newsletter. This is content-based, not sender-based,
+  // so it can't be spoofed by simply not looking like a "no-reply" address either way.
+  if (/\b(receipt|invoice|order confirm(?:ed|ation)?|order number|order #\d|tracking number|has shipped|out for delivery|been delivered|refund|return label|booking confirm(?:ed|ation)?|confirmation number|e-ticket|boarding pass|itinerary)\b/i.test(haystack)) add(3, 'receipt or confirmation');
 
   const automatedSender = /\b(no-?reply|noreply|donotreply|mailer-daemon|notification|notifications|alerts?|digest|newsletter|marketing)\b/i.test(sender);
   if (automatedSender) low(2, 'automated sender');
@@ -7521,8 +7602,15 @@ function emailTriageSignals(email = {}, message = '') {
   }
   if (/^(re:|fwd:)/i.test(subject) && !automatedSender) add(1, 'conversation thread');
 
-  const category = lowSignals.some(s => /job alert/.test(s)) ? 'job alerts'
-    : lowSignals.some(s => /bulk|promotional|automated/.test(s)) ? 'bulk updates'
+  // "Automated sender" alone must not be treated the same as genuinely bulk/promotional
+  // content — a delivery-tracking or booking-confirmation email is just as automated as a
+  // newsletter, but it isn't junk. Only fold the sender-shape signal into 'bulk updates' when
+  // nothing else redeems the message (no positive signal fired at all); real bulk/promotional
+  // CONTENT (newsletter/offer/unsubscribe wording) always counts on its own.
+  const hasBulkContent = lowSignals.includes('bulk or promotional');
+  const hasOnlyAutomatedSenderPenalty = lowSignals.includes('automated sender') && signals.length === 0;
+  const category = lowSignals.includes('generic job alert') ? 'job alerts'
+    : (hasBulkContent || hasOnlyAutomatedSenderPenalty) ? 'bulk updates'
       : score >= 3 ? 'actionable messages'
         : 'other messages';
 
@@ -10198,6 +10286,7 @@ module.exports.shouldUseAgenticLoopForMessage = shouldUseAgenticLoopForMessage;
 module.exports.shouldIgnoreModelAuthoredActions = shouldIgnoreModelAuthoredActions;
 module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
+module.exports.emailTriageSignals = emailTriageSignals;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
 module.exports.safeAgentTaskSummary = safeAgentTaskSummary;
 module.exports.approvedActionSucceeded = approvedActionSucceeded;

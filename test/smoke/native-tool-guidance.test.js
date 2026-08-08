@@ -71,16 +71,18 @@ test('confirmation is never copied into a native tool description — nothing re
 });
 
 // ── Guidance survives, natively, verbatim ──────────────────────────────────────────────────
-// (34 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
+// (38 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
 // 2026-08-07 (commit 1) when the prompt restructure moved tool-specific disambiguation rules —
 // trains vs directions, music vs calendar, place vs shopping, messaging register, email tone,
 // forget_memory scope — out of the numbered static prompt and onto the tool they actually
 // govern, plus 1 more added 2026-08-07 (commit 2) on create_agent_task, the ownership mechanism,
 // plus 1 more added 2026-08-08 on find_appointment_options — steering the model to
-// run_browser_task instead of retrying a tool that only ever talks to the sandbox provider.)
-test('exactly 34 contracts define guidance, and every one appears verbatim in its native description', () => {
+// run_browser_task instead of retrying a tool that only ever talks to the sandbox provider,
+// plus 4 more added 2026-08-08 for real inbox cleanup: archive_emails, label_emails,
+// unsubscribe_email, clean_inbox.)
+test('exactly 38 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 34);
+  assert.equal(withGuidance.length, 38);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);

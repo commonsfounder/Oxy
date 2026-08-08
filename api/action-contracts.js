@@ -186,6 +186,66 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Email search failed',
     confirmation: 'none'
   },
+  // Real Gmail mutation: archiving removes the INBOX label — the message still exists and
+  // stays searchable, it just isn't in the inbox view. Reversible, low-risk; never trashes
+  // or permanently deletes. No confirmation needed for the same reason "search" doesn't:
+  // the risk is low and the action is exactly what was asked for.
+  archive_emails: {
+    risk: 'low',
+    required: ['message_ids'],
+    inputExample: { message_ids: ['18abc123', '18abc456'] },
+    guidance: 'Bulk-archives real Gmail messages by removing the INBOX label — reversible, not deletion. Pass every message id you want archived in one call rather than calling this once per message.',
+    successSummary: 'Emails archived',
+    failureSummary: 'Archive failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  // Also how mark-read/unread works (UNREAD is just another label) — no separate action
+  // needed for that.
+  label_emails: {
+    risk: 'low',
+    required: ['message_ids'],
+    optional: ['add_labels', 'remove_labels'],
+    inputExample: { message_ids: ['18abc123'], add_labels: ['RECEIPTS'], remove_labels: ['UNREAD'] },
+    guidance: 'Bulk add/remove real Gmail labels. To mark read, remove_labels:["UNREAD"]; to mark unread, add_labels:["UNREAD"]. Low-risk and reversible — safe to do directly.',
+    successSummary: 'Labels updated',
+    failureSummary: 'Label update failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  unsubscribe_email: {
+    risk: 'low',
+    required: ['message_id'],
+    inputExample: { message_id: '18abc123' },
+    guidance: 'Real, tiered unsubscribe for one message\'s mailing list: a genuine RFC 8058 one-click POST when the provider declares support, or a real email sent to a mailto: unsubscribe address. Only ever reports success for one of those two things actually completing — never for merely finding or opening a link. If the result has needsBrowser:true, the unsubscribe link needs a real page visit to finish: follow up with run_browser_task on the given url and confirm the page shows an actual success message before telling the user it worked. Prefer clean_inbox over calling this directly for a broad request ("unsubscribe from X", "clean my inbox") — it already finds every matching message and handles unsubscribing per distinct sender.',
+    successSummary: 'Unsubscribed',
+    failureSummary: 'Unsubscribe failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  // The natural-language entry point for "clean my inbox" / "archive this junk" /
+  // "unsubscribe me from X and clear the old emails" — orchestrates a real Gmail search, the
+  // EXISTING shared triage classifier (not a second one), real bulk archive, and real
+  // per-sender unsubscribe attempts in one call, so a 200-email cleanup doesn't need 200
+  // conversational turns.
+  clean_inbox: {
+    risk: 'low',
+    required: [],
+    optional: ['sender', 'since', 'before', 'unsubscribe_senders', 'query', 'max_results'],
+    inputExample: {
+      sender: 'optional — e.g. "temu.com" or "Temu" to scope to one sender',
+      since: 'optional ISO date — only mail after this date',
+      before: 'optional ISO date — only mail before this date (e.g. "older than a month")',
+      unsubscribe_senders: 'optional boolean, default true — also attempt to unsubscribe from matched mailing lists',
+      max_results: 300
+    },
+    paramHints: { since: 'ISO date', before: 'ISO date' },
+    guidance: 'Use for any broad cleanup request — "clean my inbox", "archive all this junk", "get rid of these promotional emails", "archive newsletters older than a month", "unsubscribe from X and clear the old emails". Classifies every matched message individually (a sender is never treated as globally junk — one promotional email from a retailer does not mean their receipts get archived too) and only touches what is clearly promotional/bulk; anything that looks like it needs attention is left alone. Never guesses required fields into existence — call it with whatever scope the user actually gave (sender/date range) or no scope at all for a general cleanup, do not ask for a full spec before doing it. Report the real counts back (archived/preserved/unsubscribed/failed) — never a generic "done, inbox cleaned".',
+    successSummary: 'Inbox cleaned up',
+    failureSummary: 'Inbox cleanup failed',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',

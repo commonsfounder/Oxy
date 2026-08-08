@@ -11,8 +11,80 @@ const SUPPORTED_ACTIONS = [
   // Deliberately NOT registered in action-contracts.js — this is never offered to the
   // agent/tool-calling loop as an option, only ever called directly by the dashboard's
   // "handle this email" endpoint. See buildEmailActionPlan in api/index.js for why.
-  'get_email_action_links'
+  'get_email_action_links',
+  // Real Gmail mutation primitives (inbox cleanup) — see api/services/gmail-cleanup.js for
+  // the classification/orchestration layer that decides WHAT to archive/unsubscribe; these
+  // three only ever do WHAT they're told, against the real Gmail API.
+  'archive_emails', 'label_emails', 'unsubscribe_email'
 ];
+
+// Comfortably under Gmail's own 1000-ids-per-batchModify-call cap — chunking this small
+// means one bad id in a huge request doesn't force re-doing thousands of already-valid
+// ones, and keeps the per-chunk verification pass below to a reasonable number of extra
+// API calls.
+const BATCH_CHUNK_SIZE = 250;
+// How many ids per chunk to re-fetch afterward and check the mutation actually landed —
+// batchModify returns 204 with no body, so a 2xx response alone is not proof of anything;
+// Google's own docs note some ids in a batch can silently fail to apply. Sampling is a
+// deliberate cost/confidence tradeoff: full verification of a 1000-message chunk would be
+// 1000 extra GET calls for one cleanup request.
+const VERIFY_SAMPLE_SIZE = 5;
+
+function chunk(list, size) {
+  const out = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+function normalizeMessageIds(value) {
+  const list = Array.isArray(value) ? value : (value ? [value] : []);
+  return list.map(id => String(id || '').trim()).filter(Boolean);
+}
+
+// Bulk-modifies message labels (archive is removeLabelIds:['INBOX']; mark read/unread and
+// custom labels are add/removeLabelIds too) in chunks, then VERIFIES a sample of the
+// successful chunk actually changed state by re-fetching those ids — batchModify returns 204
+// with no per-id detail, and Google's own docs note some ids in a batch can silently fail to
+// apply, so a 2xx alone is not proof.
+async function bulkModifyMessages(headers, ids, { addLabelIds = [], removeLabelIds = [] }, { expectPresent = [], expectAbsent = [] } = {}) {
+  const chunks = chunk(ids, BATCH_CHUNK_SIZE);
+  const succeededIds = [];
+  const failedIds = [];
+
+  for (const group of chunks) {
+    try {
+      await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify',
+        { ids: group, addLabelIds, removeLabelIds },
+        { headers, timeout: 30000 });
+      succeededIds.push(...group);
+    } catch (e) {
+      failedIds.push(...group);
+    }
+  }
+
+  const sample = succeededIds.slice(0, VERIFY_SAMPLE_SIZE);
+  let confirmed = 0;
+  await Promise.all(sample.map(async id => {
+    try {
+      const resp = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}`,
+        { headers, params: { format: 'minimal' }, timeout: 15000 });
+      const labels = new Set(resp.data.labelIds || []);
+      const presentOk = expectPresent.every(l => labels.has(l));
+      const absentOk = expectAbsent.every(l => !labels.has(l));
+      if (presentOk && absentOk) confirmed += 1;
+    } catch {
+      // A verification fetch failing doesn't unwind the mutation (it already happened) — it
+      // just means this one sample can't confirm it. Reflected honestly in verified.checked
+      // vs verified.confirmed rather than assumed either way.
+    }
+  }));
+
+  return {
+    modified: succeededIds.length,
+    failedIds,
+    verified: { checked: sample.length, confirmed }
+  };
+}
 
 async function getTokens(userId) {
   try {
@@ -274,6 +346,11 @@ function messageToEmail(message = {}) {
     // Presence of a List-Unsubscribe header marks bulk/mailing-list mail (newsletters,
     // marketing). Personal 1:1 mail doesn't carry it — used to filter the dashboard feed.
     listUnsubscribe: getHeader(headers, 'List-Unsubscribe'),
+    // RFC 8058 one-click unsubscribe: when a sender declares this alongside a List-Unsubscribe
+    // URL, POSTing 'List-Unsubscribe=One-Click' to that URL is a real, provider-acknowledged
+    // unsubscribe — no page visit needed. Its absence means the URL (if any) is just a normal
+    // link that needs a real browser to complete.
+    listUnsubscribePost: getHeader(headers, 'List-Unsubscribe-Post'),
     body: extractMessageBody(message.payload)
   };
 }
@@ -502,6 +579,125 @@ async function execute(userId, action, params) {
         const email = messageToEmail(detail.data);
         const rawHtml = collectRawHtmlParts(detail.data.payload).join('\n');
         return { success: true, body: email.body, links: extractLinksFromHtml(rawHtml) };
+      }
+
+      // Real Gmail mutation: archiving = removing the INBOX label. Gmail has no separate
+      // "archive" concept — the message still exists, is still searchable, just isn't in the
+      // inbox view. This is the low-risk, reversible removal mechanism; nothing here ever
+      // calls the trash or permanent-delete endpoints.
+      case 'archive_emails': {
+        const ids = normalizeMessageIds(params?.message_ids ?? params?.messageIds ?? params?.message_id);
+        if (!ids.length) return { success: false, error: 'archive_emails requires message_ids' };
+        const result = await bulkModifyMessages(headers, ids, { removeLabelIds: ['INBOX'] }, { expectAbsent: ['INBOX'] });
+        return {
+          success: result.modified > 0,
+          modified: result.modified,
+          requested: ids.length,
+          failed: result.failedIds,
+          verified: result.verified,
+          text: result.modified > 0
+            ? `Archived ${result.modified} of ${ids.length} message${ids.length === 1 ? '' : 's'}.`
+            : 'Could not archive any of the requested messages.'
+        };
+      }
+
+      // Generic label mutation — also how mark read/unread works (UNREAD is just another
+      // label): remove_labels:['UNREAD'] marks read, add_labels:['UNREAD'] marks unread.
+      case 'label_emails': {
+        const ids = normalizeMessageIds(params?.message_ids ?? params?.messageIds ?? params?.message_id);
+        const addLabelIds = normalizeMessageIds(params?.add_labels ?? params?.addLabels).map(l => l.toUpperCase());
+        const removeLabelIds = normalizeMessageIds(params?.remove_labels ?? params?.removeLabels).map(l => l.toUpperCase());
+        if (!ids.length) return { success: false, error: 'label_emails requires message_ids' };
+        if (!addLabelIds.length && !removeLabelIds.length) return { success: false, error: 'label_emails requires add_labels and/or remove_labels' };
+        const result = await bulkModifyMessages(headers, ids, { addLabelIds, removeLabelIds }, {
+          expectPresent: addLabelIds,
+          expectAbsent: removeLabelIds
+        });
+        return {
+          success: result.modified > 0,
+          modified: result.modified,
+          requested: ids.length,
+          failed: result.failedIds,
+          verified: result.verified,
+          text: result.modified > 0
+            ? `Updated labels on ${result.modified} of ${ids.length} message${ids.length === 1 ? '' : 's'}.`
+            : 'Could not update labels on any of the requested messages.'
+        };
+      }
+
+      // Tiered real unsubscribe. Never reports success for merely finding a link — only for
+      // an action that actually completed: a real one-click POST acknowledged by the
+      // provider's own endpoint, or a real email genuinely sent to a mailto: unsubscribe
+      // address. Anything that needs a real page visit (no one-click support, or no
+      // List-Unsubscribe header at all but a body link exists) is reported as such rather
+      // than attempted with brittle in-process HTML parsing — that's what run_browser_task
+      // is for.
+      case 'unsubscribe_email': {
+        const messageId = params?.message_id || params?.messageId;
+        if (!messageId) return { success: false, error: 'unsubscribe_email requires message_id' };
+        const detail = await axios.get(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}`,
+          { headers, params: { format: 'full' }, timeout: 15000 });
+        const email = messageToEmail(detail.data);
+        const senderLabel = email.senderName || email.senderAddress || 'this sender';
+
+        if (!email.listUnsubscribe) {
+          const rawHtml = collectRawHtmlParts(detail.data.payload).join('\n');
+          const link = extractLinksFromHtml(rawHtml).find(l => /unsubscribe/i.test(l.label) || /unsubscribe/i.test(l.url));
+          if (link) {
+            return {
+              success: false,
+              needsBrowser: true,
+              url: link.url,
+              sender: email.senderAddress,
+              text: `Found an unsubscribe link in the email body from ${senderLabel}, but it needs a real page visit to complete.`
+            };
+          }
+          return { success: false, error: `No unsubscribe mechanism found in this email from ${senderLabel}.` };
+        }
+
+        const urlMatch = email.listUnsubscribe.match(/<\s*(https?:[^>\s]+)\s*>/i);
+        const mailtoMatch = email.listUnsubscribe.match(/<\s*mailto:([^>\s]+)\s*>/i);
+        const supportsOneClick = /one-click/i.test(email.listUnsubscribePost || '');
+
+        if (urlMatch && supportsOneClick) {
+          try {
+            const resp = await axios.post(urlMatch[1], 'List-Unsubscribe=One-Click', {
+              headers: { 'Content-Type': 'text/plain' },
+              timeout: 15000,
+              validateStatus: () => true
+            });
+            if (resp.status >= 200 && resp.status < 300) {
+              return { success: true, method: 'one-click', sender: email.senderAddress, text: `Unsubscribed from ${senderLabel} — confirmed by the provider's own one-click endpoint.` };
+            }
+            return { success: false, error: `${senderLabel}'s unsubscribe endpoint returned status ${resp.status}.` };
+          } catch (e) {
+            return { success: false, error: `One-click unsubscribe to ${senderLabel} failed: ${e.message}` };
+          }
+        }
+
+        if (mailtoMatch) {
+          const to = mailtoMatch[1].split('?')[0].trim();
+          try {
+            await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+              { raw: buildMime(to, 'Unsubscribe', 'Please unsubscribe me from this mailing list.') },
+              { headers, timeout: 15000 });
+            return { success: true, method: 'mailto', sender: email.senderAddress, text: `Sent an unsubscribe request to ${senderLabel} (${to}).` };
+          } catch (e) {
+            return { success: false, error: `Could not send the unsubscribe email to ${to}: ${e.message}` };
+          }
+        }
+
+        if (urlMatch) {
+          return {
+            success: false,
+            needsBrowser: true,
+            url: urlMatch[1],
+            sender: email.senderAddress,
+            text: `${senderLabel}'s unsubscribe link needs a real page visit to complete — no one-click support declared.`
+          };
+        }
+
+        return { success: false, error: `${senderLabel}'s List-Unsubscribe header had no usable URL or email address.` };
       }
 
       case 'search_emails': {
