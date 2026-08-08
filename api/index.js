@@ -4329,8 +4329,17 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: false, error: `The travel search found results but could not read them: ${e.message}`, research: researchText };
       }
 
-      const { kept, dropped } = travelSearch.applyConstraints(options, {
+      // Date provenance FIRST: the exact/adjacent/unknown grade is recomputed from what the
+      // source actually quoted, so nothing downstream can present an adjacent-date fare as
+      // satisfying the request.
+      const requestedDates = kind === 'flights'
+        ? { start: params?.depart_date || params?.date, end: params?.return_date }
+        : { start: params?.check_in || params?.checkin, end: params?.check_out || params?.checkout };
+      const dated = travelSearch.applyDateProvenance(options, requestedDates);
+
+      const { kept, dropped } = travelSearch.applyConstraints(dated, {
         maxPrice: Number(params?.max_price) || null,
+        maxPriceCurrency: String(params?.currency || 'GBP').toUpperCase(),
         directOnly: params?.direct_only === true || String(params?.direct_only) === 'true',
         maxStops: Number.isFinite(Number(params?.max_stops)) && params?.max_stops !== undefined ? Number(params.max_stops) : undefined,
         minRating: Number(params?.min_rating) || null
@@ -4351,7 +4360,10 @@ async function executeAction(userId, action, params, context = {}) {
         : travelRanking.rankHotels(shaped, {}, requirements);
       // Date-matched options always outrank indicative ones, whatever the score: a cheaper
       // price for the wrong week is not a better option, it is a different question.
-      ranked.sort((a, b) => (Number(b.matchesRequestedDates) - Number(a.matchesRequestedDates)) || (b.score - a.score));
+      // Exact beats unknown beats adjacent, whatever the score. A cheaper price for the wrong
+      // week is not a better option, it is an answer to a different question.
+      const dateRank = (o) => (o.dateMatch === 'exact' ? 0 : o.dateMatch === 'unknown' ? 1 : 2);
+      ranked.sort((a, b) => dateRank(a) - dateRank(b) || (b.score - a.score));
 
       const searched = kind === 'flights'
         ? `${params.from} to ${params.to || params.destination}${params?.depart_date ? ` ${params.depart_date}` : ''}${params?.return_date ? `–${params.return_date}` : ''}`
@@ -4361,8 +4373,11 @@ async function executeAction(userId, action, params, context = {}) {
         success: true,
         kind,
         options: ranked,
-        datesMatched: ranked.filter(o => o.matchesRequestedDates).length,
-        indicative: ranked.filter(o => !o.matchesRequestedDates).length,
+        datesMatched: ranked.filter(o => o.dateMatch === 'exact').length,
+        adjacentDates: ranked.filter(o => o.dateMatch === 'adjacent').length,
+        datesUnknown: ranked.filter(o => o.dateMatch === 'unknown').length,
+        indicative: ranked.filter(o => o.dateMatch !== 'exact').length,
+        currencies: [...new Set(ranked.map(o => o.currency).filter(Boolean))],
         droppedByConstraints: dropped.map(d => ({ why: d.why, option: d.option.airline || d.option.name })),
         research: researchText,
         bookable: false,

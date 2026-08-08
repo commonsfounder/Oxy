@@ -440,8 +440,8 @@ test('watches: the watch list must report a failing check rather than implying h
 test('travel: search_flights is described as a real search whose prices are observed, not held', () => {
   const desc = nativeDescriptions().search_flights.description;
   assert.match(desc, /performs a REAL web search/);
-  assert.match(desc, /prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability/);
-  assert.match(desc, /matchesRequestedDates is false are priced for DIFFERENT dates/);
+  assert.match(desc, /Prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability/);
+  // (The date rule itself moved to a three-way dateMatch grade; asserted in its own test.)
   assert.match(desc, /Never claim a flight is bookable or available/);
   // The old text told the model this tool was fake. That must be gone.
   assert.doesNotMatch(desc, /only opens a flight-search page as a link/);
@@ -510,4 +510,24 @@ test('calendar: replanning modifies the event instead of leaving the old time be
   assert.match(desc, /This MODIFIES the existing event/);
   assert.match(desc, /never create a new one to reschedule/);
   assert.match(desc, /If more than one event matches the description, it asks which/);
+});
+
+test('travel: only an exact date match may be presented as satisfying the request', () => {
+  const desc = nativeDescriptions().search_flights.description;
+  assert.match(desc, /dateMatch: "exact" means the source quoted that price FOR the requested dates/);
+  assert.match(desc, /only "exact" may be presented as satisfying the request/);
+  assert.match(desc, /give the closest sourced one as the closest, not as an answer/);
+  assert.match(desc, /prices in different currencies are never compared or added/);
+});
+
+test('travel: hotel availability and stay dates carry the same rule', () => {
+  const desc = nativeDescriptions().search_hotels.description;
+  assert.match(desc, /only "exact" was quoted for the requested stay/);
+  assert.match(desc, /neither may be offered as the price for those nights/);
+});
+
+test('travel: trip budgets may only rest on exact-date prices', () => {
+  const desc = nativeDescriptions().plan_itinerary.description;
+  assert.match(desc, /Budget arithmetic may only use options whose dateMatch is "exact"/);
+  assert.match(desc, /evidence about the route, not the price of this trip/);
 });

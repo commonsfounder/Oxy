@@ -80,8 +80,11 @@ Never invent a property, a price, or availability. If the results only give indi
 
 // ── Stage 2: structure only what the search actually said ──────────────────────────────
 
-const FLIGHT_SHAPE = '{"airline":"","stops":0,"durationMinutes":null,"priceAmount":0,"priceCurrency":"GBP","priceBasis":"return|one_way","quotedFor":"the exact dates/conditions this price applies to","matchesRequestedDates":true,"source":"the site that showed it","sourceUrl":"","caveat":""}';
-const HOTEL_SHAPE = '{"name":"","area":"","rating":null,"pricePerNight":0,"totalPrice":null,"priceCurrency":"GBP","quotedFor":"the exact dates this price applies to","matchesRequestedDates":true,"availabilityStated":false,"source":"the site that showed it","sourceUrl":"","caveat":""}';
+// observedStart/observedEnd are the dates the SOURCE actually quoted, in ISO form where the
+// text gives enough to know them. They are what makes "£133 for 17–20 September" checkable
+// against a request for 18–21 September, instead of relying on the extractor's own opinion.
+const FLIGHT_SHAPE = '{"airline":"","stops":0,"durationMinutes":null,"priceAmount":0,"priceCurrency":"GBP","priceBasis":"return|one_way","quotedFor":"the exact dates/conditions this price applies to","observedStart":"YYYY-MM-DD the source quoted, or null","observedEnd":"YYYY-MM-DD the source quoted, or null","matchesRequestedDates":true,"source":"the site that showed it","sourceUrl":"","caveat":""}';
+const HOTEL_SHAPE = '{"name":"","area":"","rating":null,"pricePerNight":0,"totalPrice":null,"priceCurrency":"GBP","quotedFor":"the exact dates this price applies to","observedStart":"YYYY-MM-DD check-in the source quoted, or null","observedEnd":"YYYY-MM-DD check-out the source quoted, or null","matchesRequestedDates":true,"availabilityStated":false,"source":"the site that showed it","sourceUrl":"","caveat":""}';
 
 function buildExtractionPrompt(kind, research, { departDate, returnDate, checkIn, checkOut } = {}) {
   const requested = kind === 'flights'
@@ -96,6 +99,7 @@ Return ONLY a JSON array, one element per option the text genuinely reports:
 
 Rules:
 - Drop any option with no stated price — an option with no price is not a search result.
+- observedStart/observedEnd: the dates the SOURCE quoted the price for, as YYYY-MM-DD, whenever the text makes them knowable. Use null when it genuinely does not say. Do NOT copy the requested dates here — these are what the source said.
 - matchesRequestedDates: true ONLY if the text says the price applies to ${requested}. If the text says the price is for different dates, or is an indicative "from" figure, set it to false.
 - ${kind === 'flights' ? 'stops: 0 for direct/nonstop, the stated number if connecting, null if the text does not say.' : 'availabilityStated: true only if the text actually says rooms are available for those dates.'}
 - caveat: copy any warning the source itself gave (fare conditions, "prices may change", baggage extra).
@@ -136,6 +140,8 @@ function parseTravelResults(kind, rawText) {
         currency: clean(entry.priceCurrency, 8).toUpperCase() || 'GBP',
         priceBasis: /one/i.test(String(entry.priceBasis)) ? 'one_way' : 'return',
         quotedFor: clean(entry.quotedFor, 160),
+        observedStart: clean(entry.observedStart, 30) || null,
+        observedEnd: clean(entry.observedEnd, 30) || null,
         matchesRequestedDates: entry.matchesRequestedDates === true,
         source,
         sourceUrl: clean(entry.sourceUrl, 400) || null,
@@ -155,6 +161,8 @@ function parseTravelResults(kind, rawText) {
         totalPrice: total,
         currency: clean(entry.priceCurrency, 8).toUpperCase() || 'GBP',
         quotedFor: clean(entry.quotedFor, 160),
+        observedStart: clean(entry.observedStart, 30) || null,
+        observedEnd: clean(entry.observedEnd, 30) || null,
         matchesRequestedDates: entry.matchesRequestedDates === true,
         availabilityStated: entry.availabilityStated === true,
         source,
@@ -167,15 +175,117 @@ function parseTravelResults(kind, rawText) {
   return options;
 }
 
+// ── Date provenance ────────────────────────────────────────────────────────────────────
+
+function isoDay(value) {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value ?? '').trim());
+  return match ? match[1] : null;
+}
+
+// The verdict is recomputed from the observed dates whenever they are known, rather than
+// trusted from the extractor. A £133 fare quoted for 17–20 September does not satisfy a
+// request for 18–21 September, and saying it does is the specific failure this exists to stop.
+// Returns 'exact' (the source quoted these dates), 'adjacent' (it quoted different ones), or
+// 'unknown' (the source never said, so nothing can be claimed either way).
+function gradeDateMatch(option = {}, requested = {}) {
+  const wantStart = isoDay(requested.start);
+  const wantEnd = isoDay(requested.end);
+  const gotStart = isoDay(option.observedStart);
+  const gotEnd = isoDay(option.observedEnd);
+
+  if (!wantStart) return option.matchesRequestedDates ? 'exact' : 'unknown';
+  if (!gotStart) {
+    // The source did not say. The extractor's claim alone is not enough to call it exact —
+    // "unknown" is the honest grade, and it is reported separately from a verified match.
+    return 'unknown';
+  }
+  if (gotStart !== wantStart) return 'adjacent';
+  if (wantEnd && gotEnd && gotEnd !== wantEnd) return 'adjacent';
+  return 'exact';
+}
+
+function daysApart(a, b) {
+  const left = isoDay(a);
+  const right = isoDay(b);
+  if (!left || !right) return null;
+  return Math.round(Math.abs(Date.parse(left) - Date.parse(right)) / 86400000);
+}
+
+// Attaches the grade and, for anything not exact, how far off it actually is — which is what
+// makes "the closest sourced fare I found was £133 for 17–20 September" possible.
+function applyDateProvenance(options = [], requested = {}) {
+  return options.map(option => {
+    const grade = gradeDateMatch(option, requested);
+    const offBy = grade === 'adjacent' ? daysApart(option.observedStart, requested.start) : null;
+    return {
+      ...option,
+      requestedStart: isoDay(requested.start),
+      requestedEnd: isoDay(requested.end),
+      dateMatch: grade,
+      // Only a verified exact match may claim to satisfy the request.
+      matchesRequestedDates: grade === 'exact',
+      offByDays: offBy
+    };
+  });
+}
+
+// ── Currency ───────────────────────────────────────────────────────────────────────────
+
+// Numbers in different currencies are never compared or summed. With no FX source configured,
+// the honest move is to keep them apart and say so — not to apply a rate nobody supplied.
+function groupByCurrency(options = []) {
+  const groups = new Map();
+  for (const option of options) {
+    const currency = option.currency || 'UNKNOWN';
+    if (!groups.has(currency)) groups.set(currency, []);
+    groups.get(currency).push(option);
+  }
+  return groups;
+}
+
+function cheapestPerCurrency(options = []) {
+  const out = [];
+  for (const [currency, group] of groupByCurrency(options)) {
+    const priced = group.filter(o => Number.isFinite(o.price ?? o.pricePerNight ?? o.totalPrice));
+    if (!priced.length) continue;
+    out.push(priced.reduce((best, o) => {
+      const value = (x) => x.price ?? x.pricePerNight ?? x.totalPrice;
+      return value(o) < value(best) ? o : best;
+    }));
+  }
+  return out;
+}
+
 // ── Constraints ────────────────────────────────────────────────────────────────────────
 
 // Hard filters the user actually stated. Applied AFTER extraction so a dropped option is
 // dropped for a stated reason, and the count of what was dropped can be reported.
-function applyConstraints(options = [], { maxPrice, directOnly, maxStops, minRating } = {}) {
+function applyConstraints(options = [], { maxPrice, maxPriceCurrency, directOnly, maxStops, minRating, guests, nights } = {}) {
   const dropped = [];
   const kept = options.filter(option => {
     const price = option.kind === 'flight' ? option.price : (option.pricePerNight || option.totalPrice);
+    // A budget is in a currency. Comparing "under £150" against a $179 fare by number alone
+    // would silently apply a 1:1 rate; with no FX source configured, a different currency is
+    // reported as uncheckable rather than quietly passed or quietly dropped.
+    // A budget is in a currency. Dropping everything priced in another one is honest but
+    // useless — live testing lost all ten real Prague hotels that way, because they were
+    // quoted in USD/EUR against a GBP budget. They are kept and flagged instead, so the user
+    // still sees the real options and is told the budget could not be checked against them.
+    const otherCurrency = Boolean(maxPrice && price && maxPriceCurrency && option.currency && option.currency !== maxPriceCurrency);
+    if (otherCurrency) {
+      option.budgetCheckable = false;
+      return true;
+    }
+    if (maxPrice && price) option.budgetCheckable = true;
     if (maxPrice && price && price > maxPrice) { dropped.push({ option, why: `over ${maxPrice}` }); return false; }
+    if (Number.isFinite(guests) && Number.isFinite(option.guests) && option.guests < guests) {
+      dropped.push({ option, why: `only sleeps ${option.guests}` });
+      return false;
+    }
+    if (Number.isFinite(nights) && Number.isFinite(option.nights) && option.nights !== nights) {
+      dropped.push({ option, why: `priced for ${option.nights} nights, not ${nights}` });
+      return false;
+    }
     if (option.kind === 'flight') {
       if (directOnly && option.stops !== 0) { dropped.push({ option, why: 'not direct' }); return false; }
       if (Number.isFinite(maxStops) && option.stops !== null && option.stops > maxStops) {
@@ -225,6 +335,17 @@ function describeHotel(option) {
 
 // The distinction that keeps this honest: options priced for the dates asked about, versus
 // indicative prices for other dates. They are never merged into one "cheapest" claim.
+function describeAdjacent(option, kind) {
+  const describe = kind === 'flights' ? describeFlight : describeHotel;
+  const when = option.observedStart
+    ? `${option.observedStart}${option.observedEnd ? ` to ${option.observedEnd}` : ''}`
+    : option.quotedFor || 'other dates';
+  const off = Number.isFinite(option.offByDays) && option.offByDays > 0
+    ? `, ${option.offByDays} day${option.offByDays === 1 ? '' : 's'} off`
+    : '';
+  return `${describe(option)} [for ${when}${off}]`;
+}
+
 function formatTravelResults(kind, options = [], { dropped = [], searched = '', constraintNote = '', researchFound = true } = {}) {
   if (!options.length) {
     // "The search found nothing" and "the search found pages but none of them stated a price
@@ -237,15 +358,39 @@ function formatTravelResults(kind, options = [], { dropped = [], searched = '', 
   }
 
   const describe = kind === 'flights' ? describeFlight : describeHotel;
-  const onDates = options.filter(o => o.matchesRequestedDates);
-  const indicative = options.filter(o => !o.matchesRequestedDates);
+  // Three genuinely different things, never merged: prices the source quoted FOR these dates,
+  // prices it quoted for other dates, and prices where it never said which dates apply.
+  const exact = options.filter(o => o.dateMatch === 'exact' || (!o.dateMatch && o.matchesRequestedDates));
+  const adjacent = options.filter(o => o.dateMatch === 'adjacent');
+  const unknown = options.filter(o => o.dateMatch === 'unknown' || (!o.dateMatch && !o.matchesRequestedDates));
 
   const parts = [];
-  if (onDates.length) {
-    parts.push(`For ${searched}: ${onDates.map(describe).join('; ')}.`);
+  if (exact.length) {
+    parts.push(`For ${searched}: ${exact.map(describe).join('; ')}.`);
+  } else {
+    // The sentence the whole feature turns on. Never let an adjacent fare stand in for one.
+    const closest = [...adjacent].sort((a, b) => (a.offByDays ?? 99) - (b.offByDays ?? 99))[0];
+    parts.push(closest
+      ? `I couldn't verify a priced result for ${searched}. The closest sourced one I found was ${describeAdjacent(closest, kind)}.`
+      : `I couldn't verify a priced result for ${searched}.`);
   }
-  if (indicative.length) {
-    parts.push(`${onDates.length ? 'Also found, but ' : 'Nothing was priced for exactly those dates. What I did find is '}priced for other dates or as indicative "from" fares: ${indicative.map(describe).join('; ')}.`);
+  if (adjacent.length && exact.length) {
+    parts.push(`Also found, priced for DIFFERENT dates: ${adjacent.map(o => describeAdjacent(o, kind)).join('; ')}.`);
+  } else if (adjacent.length > 1) {
+    parts.push(`Other sourced prices, all for different dates: ${adjacent.slice(1).map(o => describeAdjacent(o, kind)).join('; ')}.`);
+  }
+  if (unknown.length) {
+    parts.push(`These had a price but the source never said which dates it applies to: ${unknown.map(describe).join('; ')}.`);
+  }
+
+  // Mixed currencies are stated, never converted.
+  const currencies = [...new Set(options.map(o => o.currency).filter(Boolean))];
+  if (currencies.length > 1) {
+    parts.push(`Prices are in ${currencies.join(' and ')} — I have not converted between them, so they are not directly comparable.`);
+  }
+  const uncheckable = options.filter(o => o.budgetCheckable === false);
+  if (uncheckable.length) {
+    parts.push(`${uncheckable.length} of these ${uncheckable.length === 1 ? 'is' : 'are'} priced in a different currency from your budget, so I could not check ${uncheckable.length === 1 ? 'it' : 'them'} against it.`);
   }
   if (constraintNote) parts.push(constraintNote);
   if (dropped.length) {
@@ -264,8 +409,13 @@ module.exports = {
   buildExtractionPrompt,
   parseTravelResults,
   applyConstraints,
+  gradeDateMatch,
+  applyDateProvenance,
+  groupByCurrency,
+  cheapestPerCurrency,
   toRankingShape,
   describeFlight,
   describeHotel,
+  describeAdjacent,
   formatTravelResults
 };

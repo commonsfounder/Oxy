@@ -11,6 +11,10 @@ const {
   buildExtractionPrompt,
   parseTravelResults,
   applyConstraints,
+  gradeDateMatch,
+  applyDateProvenance,
+  groupByCurrency,
+  cheapestPerCurrency,
   toRankingShape,
   formatTravelResults
 } = require('../../api/services/travel-search');
@@ -125,12 +129,13 @@ test('every result set carries the observed-not-bookable caveat', () => {
 });
 
 test('options for other dates are reported separately, never as the price for these dates', () => {
+  // These fixtures carry no observedStart, so the grade is "unknown" — the source never
+  // pinned a date. That is reported as its own thing, and still never as an answer.
   const text = formatTravelResults('flights', parseTravelResults('flights', FLIGHT_JSON), { searched: '15–18 September' });
   assert.match(text, /For 15–18 September: easyJet, direct/);
-  assert.match(text, /priced for other dates or as indicative/);
+  assert.match(text, /the source never said which dates it applies to/);
   assert.match(text, /Lufthansa/);
-  // The £202 Lufthansa fare must not appear inside the on-dates sentence.
-  const onDatesSentence = text.split('Also found')[0];
+  const onDatesSentence = text.split('These had a price')[0];
   assert.doesNotMatch(onDatesSentence, /Lufthansa/);
 });
 
@@ -138,7 +143,7 @@ test('when nothing matches the requested dates, that is stated outright', () => 
   const text = formatTravelResults('flights', parseTravelResults('flights', JSON.stringify([
     { airline: 'Lufthansa', stops: 1, priceAmount: 202, priceCurrency: 'GBP', quotedFor: 'early September', matchesRequestedDates: false, source: 'Google Flights' }
   ])), { searched: '15–18 September' });
-  assert.match(text, /Nothing was priced for exactly those dates/);
+  assert.match(text, /couldn't verify a priced result for 15–18 September/);
 });
 
 test('a no-results search says so instead of producing plausible options', () => {
@@ -195,4 +200,159 @@ test('the extraction stage is constrained to the text it was handed', () => {
   assert.match(prompt, /Never add an option, a price, a property or an airline that is not in the text/);
   assert.match(prompt, /Drop any option with no stated price/);
   assert.match(prompt, /SEARCH TEXT HERE/);
+});
+
+
+// ── Exact-date integrity ───────────────────────────────────────────────────────────────
+// The failure this section exists to prevent: a £133 fare the source quoted for 17–20
+// September being presented as an answer to "18–21 September".
+
+const REQUESTED = { start: '2026-09-18', end: '2026-09-21' };
+
+function flight(extra = {}) {
+  return {
+    airline: 'easyJet', stops: 0, priceAmount: 133, priceCurrency: 'GBP', priceBasis: 'return',
+    source: 'Google Flights', matchesRequestedDates: true, ...extra
+  };
+}
+
+test('a fare quoted for adjacent dates is graded adjacent, whatever the extractor claimed', () => {
+  const [option] = applyDateProvenance(
+    parseTravelResults('flights', JSON.stringify([flight({ observedStart: '2026-09-17', observedEnd: '2026-09-20' })])),
+    REQUESTED
+  );
+  assert.equal(option.dateMatch, 'adjacent');
+  assert.equal(option.matchesRequestedDates, false, 'the extractor said true; the observed dates say otherwise');
+  assert.equal(option.offByDays, 1);
+});
+
+test('a fare quoted for exactly the requested dates is graded exact', () => {
+  const [option] = applyDateProvenance(
+    parseTravelResults('flights', JSON.stringify([flight({ observedStart: '2026-09-18', observedEnd: '2026-09-21' })])),
+    REQUESTED
+  );
+  assert.equal(option.dateMatch, 'exact');
+  assert.equal(option.matchesRequestedDates, true);
+});
+
+test('a matching outbound but a different return is still adjacent', () => {
+  const [option] = applyDateProvenance(
+    parseTravelResults('flights', JSON.stringify([flight({ observedStart: '2026-09-18', observedEnd: '2026-09-22' })])),
+    REQUESTED
+  );
+  assert.equal(option.dateMatch, 'adjacent');
+});
+
+test('a source that never stated its dates is "unknown", not "exact"', () => {
+  const [option] = applyDateProvenance(
+    parseTravelResults('flights', JSON.stringify([flight({ observedStart: null, observedEnd: null })])),
+    REQUESTED
+  );
+  assert.equal(option.dateMatch, 'unknown');
+  assert.equal(option.matchesRequestedDates, false, 'an unverifiable claim is not a verified match');
+});
+
+test('with no exact match, the answer says so and offers the closest as the CLOSEST', () => {
+  const options = applyDateProvenance(parseTravelResults('flights', JSON.stringify([
+    flight({ priceAmount: 133, observedStart: '2026-09-17', observedEnd: '2026-09-20' }),
+    flight({ airline: 'Lufthansa', stops: 1, priceAmount: 202, observedStart: '2026-09-03', observedEnd: '2026-09-06' })
+  ])), REQUESTED);
+  const text = formatTravelResults('flights', options, { searched: '18–21 September' });
+  assert.match(text, /couldn't verify a priced result for 18–21 September/);
+  assert.match(text, /closest sourced one I found was easyJet, direct — £133 return .*\[for 2026-09-17 to 2026-09-20, 1 day off\]/);
+  // And the adjacent fare is never phrased as satisfying the request.
+  assert.doesNotMatch(text, /For 18–21 September:/);
+});
+
+test('exact and adjacent are reported in separate sentences, never merged', () => {
+  const options = applyDateProvenance(parseTravelResults('flights', JSON.stringify([
+    flight({ priceAmount: 210, observedStart: '2026-09-18', observedEnd: '2026-09-21' }),
+    flight({ airline: 'Ryanair', priceAmount: 46, observedStart: '2026-09-17', observedEnd: '2026-09-20' })
+  ])), REQUESTED);
+  const text = formatTravelResults('flights', options, { searched: '18–21 September' });
+  const exactSentence = text.split('Also found')[0];
+  assert.match(exactSentence, /For 18–21 September: easyJet/);
+  assert.doesNotMatch(exactSentence, /Ryanair/, 'the cheaper wrong-week fare must not appear as an answer');
+  assert.match(text, /priced for DIFFERENT dates: Ryanair/);
+});
+
+test('a price whose dates the source never gave is reported as exactly that', () => {
+  const options = applyDateProvenance(
+    parseTravelResults('flights', JSON.stringify([flight({ observedStart: null })])), REQUESTED
+  );
+  const text = formatTravelResults('flights', options, { searched: '18–21 September' });
+  assert.match(text, /the source never said which dates it applies to/);
+});
+
+// ── Currency integrity ─────────────────────────────────────────────────────────────────
+test('a budget in one currency neither passes nor silently drops a price in another', () => {
+  const options = parseTravelResults('flights', JSON.stringify([
+    flight({ priceAmount: 140, priceCurrency: 'GBP' }),
+    flight({ airline: 'BA', priceAmount: 179, priceCurrency: 'USD' }),
+    flight({ airline: 'KLM', priceAmount: 175, priceCurrency: 'GBP' })
+  ]));
+  const { kept, dropped } = applyConstraints(options, { maxPrice: 150, maxPriceCurrency: 'GBP' });
+  // The over-budget GBP fare is genuinely out. The USD one is KEPT but flagged: no FX source
+  // is configured, so the budget cannot be checked against it — and dropping it would have
+  // thrown away a real option (live testing lost ten real hotels exactly this way).
+  assert.deepEqual(kept.map(o => o.airline).sort(), ['BA', 'easyJet']);
+  assert.equal(kept.find(o => o.airline === 'BA').budgetCheckable, false);
+  assert.equal(kept.find(o => o.airline === 'easyJet').budgetCheckable, true);
+  assert.deepEqual(dropped.map(d => d.option.airline), ['KLM']);
+});
+
+test('options the budget could not be checked against are called out in the answer', () => {
+  const options = applyDateProvenance(parseTravelResults('hotels', JSON.stringify([
+    { name: 'Hotel Praha', pricePerNight: 92, priceCurrency: 'EUR', observedStart: '2026-09-18', observedEnd: '2026-09-21', source: 'Booking.com' }
+  ])), REQUESTED);
+  const { kept } = applyConstraints(options, { maxPrice: 100, maxPriceCurrency: 'GBP' });
+  const text = formatTravelResults('hotels', kept, { searched: 'Prague 18–21 September' });
+  assert.match(text, /priced in a different currency from your budget, so I could not check/);
+});
+
+test('mixed currencies are stated and never converted in the answer', () => {
+  const options = applyDateProvenance(parseTravelResults('flights', JSON.stringify([
+    flight({ priceAmount: 133, priceCurrency: 'GBP', observedStart: '2026-09-18', observedEnd: '2026-09-21' }),
+    flight({ airline: 'BA', priceAmount: 179, priceCurrency: 'USD', observedStart: '2026-09-18', observedEnd: '2026-09-21' })
+  ])), REQUESTED);
+  const text = formatTravelResults('flights', options, { searched: '18–21 September' });
+  assert.match(text, /Prices are in GBP and USD — I have not converted between them/);
+});
+
+test('the cheapest is computed per currency, never across them', () => {
+  const options = parseTravelResults('flights', JSON.stringify([
+    flight({ priceAmount: 133, priceCurrency: 'GBP' }),
+    flight({ airline: 'BA', priceAmount: 100, priceCurrency: 'USD' }),
+    flight({ airline: 'KLM', priceAmount: 175, priceCurrency: 'GBP' })
+  ]));
+  assert.equal(groupByCurrency(options).size, 2);
+  const cheapest = cheapestPerCurrency(options);
+  assert.equal(cheapest.length, 2);
+  assert.deepEqual(cheapest.map(o => `${o.currency}:${o.price}`).sort(), ['GBP:133', 'USD:100']);
+});
+
+// ── Hotel stay integrity ───────────────────────────────────────────────────────────────
+test('a hotel priced for the wrong nights is not a match for the requested stay', () => {
+  const [option] = applyDateProvenance(parseTravelResults('hotels', JSON.stringify([{
+    name: 'Hotel Prague', pricePerNight: 92, priceCurrency: 'GBP',
+    observedStart: '2026-09-17', observedEnd: '2026-09-20',
+    matchesRequestedDates: true, availabilityStated: true, source: 'Booking.com'
+  }])), REQUESTED);
+  assert.equal(option.dateMatch, 'adjacent');
+  assert.equal(option.matchesRequestedDates, false);
+});
+
+test('a stay of the wrong length is dropped with a stated reason', () => {
+  const options = parseTravelResults('hotels', JSON.stringify([
+    { name: 'Two nights', pricePerNight: 80, priceCurrency: 'GBP', source: 'S' }
+  ])).map(o => ({ ...o, nights: 2 }));
+  const { kept, dropped } = applyConstraints(options, { nights: 3 });
+  assert.equal(kept.length, 0);
+  assert.match(dropped[0].why, /priced for 2 nights, not 3/);
+});
+
+test('the extraction prompt asks the source for its own dates, not the requested ones', () => {
+  const prompt = buildExtractionPrompt('flights', 'TEXT', { departDate: '2026-09-18', returnDate: '2026-09-21' });
+  assert.match(prompt, /observedStart\/observedEnd: the dates the SOURCE quoted/);
+  assert.match(prompt, /Do NOT copy the requested dates here/);
 });
