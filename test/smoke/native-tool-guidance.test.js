@@ -96,10 +96,10 @@ test('confirmation is never copied into a native tool description — nothing re
 // newly added to the previously-bare list_scheduled_tasks. Plus 1 for proactive outbound
 // delivery: set_notification_preference. Plus 3 for commitment tracking: track_commitment,
 // find_commitments, resolve_commitment. Plus 3 for the calendar: find_free_time,
-// schedule_block, move_calendar_event.)
-test('exactly 60 contracts define guidance, and every one appears verbatim in its native description', () => {
+// schedule_block, move_calendar_event. Plus 1 for calendar cancellation: cancel_calendar_event.)
+test('exactly 61 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 60);
+  assert.equal(withGuidance.length, 61);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);

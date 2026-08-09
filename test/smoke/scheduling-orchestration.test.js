@@ -61,12 +61,30 @@ function busy(id, startIso, endIso, title) {
 
 // A working day far enough ahead that "not in the past" never interferes.
 const FUTURE = new Date(Date.now() + 3 * 86400000);
-FUTURE.setUTCHours(9, 0, 0, 0);
-const dayIso = (h, m = 0) => {
-  const d = new Date(FUTURE);
-  d.setUTCHours(h, m, 0, 0);
-  return d.toISOString();
-};
+
+// scheduling.js computes working hours in Europe/London LOCAL time, correctly — free time
+// during BST is not the same UTC window as free time during GMT. Built the same way
+// commitments.js's localDayAt resolves a local wall-clock time to the right UTC instant, so
+// these fixtures stay correct across the DST boundary rather than assuming UTC == London.
+function londonIso(anchor, h, m = 0, timeZone = 'Europe/London') {
+  const key = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(anchor);
+  const naive = new Date(`${key}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }).formatToParts(naive).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const asUTC = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour), Number(parts.minute), Number(parts.second));
+  return new Date(naive.getTime() - (asUTC - naive.getTime())).toISOString();
+}
+const dayIso = (h, m = 0) => londonIso(FUTURE, h, m);
+// find_free_time's `from` is always the real "now", not FUTURE — so a search scoped to
+// `days: 1` only ever looks at TODAY. A busy fixture anchored 3 days out (as dayIso is, so
+// "not in the past" never interferes with the other tests here) sits entirely outside that
+// window and was never exercising "fully booked" at all; today was empty in the fixture, so
+// a real gap today was correctly reported free. Anchoring on today's own date is what
+// actually puts the busy interval inside a 1-day search.
+const todayIso = (h, m = 0) => londonIso(new Date(), h, m);
 
 test('"when am I free?" answers from real events, and never proposes a busy time', async () => {
   installFakeCalendar([busy('a', dayIso(10), dayIso(11), 'Standup')]);
@@ -90,7 +108,10 @@ test('an unreadable calendar produces no suggestions at all', async () => {
 });
 
 test('a fully-booked window says so instead of offering something', async () => {
-  installFakeCalendar([busy('a', dayIso(9), dayIso(18), 'Workshop')]);
+  // A 1-day search always scopes to TODAY (find_free_time's `from` is real "now"), so the
+  // busy fixture has to be on today too — dayIso is deliberately 3 days out for the other
+  // tests here and would sit entirely outside this window.
+  installFakeCalendar([busy('a', todayIso(9), todayIso(18), 'Workshop')]);
   const result = await app.executeAction(USER_ID, 'find_free_time', { duration_minutes: 120, days: 1 });
   assert.deepEqual(result.slots, []);
   assert.match(result.text, /calendar is full across it/);

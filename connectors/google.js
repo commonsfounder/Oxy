@@ -18,7 +18,14 @@ const SUPPORTED_ACTIONS = [
   'archive_emails', 'label_emails', 'unsubscribe_email',
   // Real calendar mutation. create_calendar_event existed; moving or resizing an event did
   // not, so "move it to 4pm" could only be done by creating a second event.
-  'update_calendar_event'
+  'update_calendar_event',
+  // Real cancellation. delete_calendar_event removes a single event (an instance or a whole
+  // non-recurring event); end_recurring_series ends a repeating series after a given
+  // occurrence without touching the ones already past. Neither is a "hide in Millie" —
+  // both change the real calendar, and both use Google's own attendee-notification
+  // semantics (sendUpdates) rather than silently vanishing a meeting someone else was
+  // invited to.
+  'delete_calendar_event', 'end_recurring_series'
 ];
 
 // Comfortably under Gmail's own 1000-ids-per-batchModify-call cap — chunking this small
@@ -713,6 +720,47 @@ function oneHourLater(value, timezone) {
   };
 }
 
+// The full event resource, not the trimmed shape get_calendar_events returns — cancellation
+// needs to see recurrence, attendees and status BEFORE deciding what a delete even means.
+async function fetchCalendarEvent(headers, eventId) {
+  const resp = await axios.get(
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+    { headers, timeout: 15000 }
+  );
+  return resp.data;
+}
+
+// RFC 5545 requires UNTIL's value type to match DTSTART's — a date-only (all-day) series
+// takes a bare YYYYMMDD, a timed one takes a full UTC datetime. Getting this wrong is a
+// silent 400 from Google, not a wrong result, so it is derived from the master event's own
+// start rather than assumed.
+function formatUntilUTC(date, allDay) {
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  if (allDay) return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`;
+  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T` +
+    `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+// Ends a recurring series after `untilDate` by adding/replacing UNTIL on its RRULE line —
+// this is how Google Calendar itself implements "this and following events" when a user
+// edits a series in the UI, so a client reading the result sees the same thing a human
+// cancellation would have produced. COUNT is dropped because RFC 5545 forbids UNTIL and
+// COUNT on the same rule. Lines that are not an RRULE (EXDATE, RDATE) pass through untouched.
+function trimRecurrenceUntil(recurrence = [], untilDate, allDay) {
+  const untilStr = formatUntilUTC(untilDate, allDay);
+  let touched = false;
+  const out = recurrence.map(line => {
+    if (!/^RRULE:/i.test(String(line))) return line;
+    touched = true;
+    const [prefix, paramsStr] = String(line).split(':');
+    const parts = (paramsStr || '').split(';')
+      .filter(part => part && !/^(COUNT|UNTIL)=/i.test(part));
+    parts.push(`UNTIL=${untilStr}`);
+    return `${prefix}:${parts.join(';')}`;
+  });
+  return { recurrence: out, touched };
+}
+
 function extractDocText(document = {}) {
   const content = document.body?.content || [];
   const lines = [];
@@ -1045,10 +1093,124 @@ async function execute(userId, action, params) {
           params: calendarParams,
           timeout: 15000
         });
-        const events = (resp.data.items || []).map(e => ({
-          id: e.id, title: e.summary, start: e.start?.dateTime || e.start?.date, end: e.end?.dateTime || e.end?.date
-        }));
+        const events = (resp.data.items || [])
+          // A cancelled instance of a recurring series still shows up in a singleEvents
+          // listing — surfacing it as a live event would let "cancel my meeting tomorrow"
+          // match something that is already cancelled.
+          .filter(e => e.status !== 'cancelled')
+          .map(e => ({
+            id: e.id,
+            title: e.summary,
+            start: e.start?.dateTime || e.start?.date,
+            end: e.end?.dateTime || e.end?.date,
+            attendees: (e.attendees || []).filter(a => !a.self).map(a => a.email).filter(Boolean),
+            // Present only on an occurrence of a recurring series (singleEvents:true expands
+            // the series into instances, each pointing back at the master by this field) —
+            // used to require clarification before a destructive delete on a repeating event.
+            recurringEventId: e.recurringEventId || null
+          }));
         return { success: true, events, when: params.when || null, text: summarizeCalendarEvents(events) };
+      }
+
+      // Cancels a REAL event — an instance, a whole non-recurring event, or (via event_id
+      // being the master) an entire series. Never a "hide in Millie": nothing about this
+      // event exists outside Google Calendar, so there is nothing else to hide it from.
+      // Attendee notification follows Google's own semantics rather than a guess: sendUpdates
+      // only fires when there is actually someone other than the organizer to tell.
+      case 'delete_calendar_event': {
+        const eventId = String(params?.event_id || '').trim();
+        if (!eventId) return { success: false, error: 'delete_calendar_event requires event_id' };
+
+        let existing;
+        try {
+          existing = await fetchCalendarEvent(headers, eventId);
+        } catch (err) {
+          if (err.response?.status === 404 || err.response?.status === 410) {
+            return { success: false, error: 'That event no longer exists.' };
+          }
+          throw err;
+        }
+        if (existing.status === 'cancelled') {
+          return { success: true, alreadyCancelled: true, eventId, text: 'That event was already cancelled.' };
+        }
+
+        const attendees = (existing.attendees || []).filter(a => !a.self);
+        const notify = params?.notify_attendees !== false;
+        const sendUpdates = attendees.length && notify ? 'all' : 'none';
+
+        await axios.delete(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+          { headers, timeout: 15000, params: { sendUpdates } }
+        );
+
+        const title = existing.summary || 'the event';
+        return {
+          success: true,
+          eventId,
+          title: existing.summary || null,
+          hadAttendees: attendees.length > 0,
+          notifiedAttendees: sendUpdates === 'all',
+          wasRecurringInstance: Boolean(existing.recurringEventId),
+          text: `Cancelled "${title}"${sendUpdates === 'all' ? ` and notified ${attendees.length} attendee${attendees.length === 1 ? '' : 's'}` : ''}.`
+        };
+      }
+
+      // Ends a recurring series after a given occurrence — "this and future" cancellation.
+      // event_id must be the SERIES id (an occurrence's recurringEventId, not the occurrence's
+      // own id); from_date is the first occurrence that should stop happening. Everything
+      // before from_date is left alone.
+      case 'end_recurring_series': {
+        const eventId = String(params?.event_id || '').trim();
+        const fromDate = params?.from_date;
+        if (!eventId || !fromDate) {
+          return { success: false, error: 'end_recurring_series requires event_id and from_date' };
+        }
+
+        let master;
+        try {
+          master = await fetchCalendarEvent(headers, eventId);
+        } catch (err) {
+          if (err.response?.status === 404 || err.response?.status === 410) {
+            return { success: false, error: 'That series no longer exists.' };
+          }
+          throw err;
+        }
+        if (!Array.isArray(master.recurrence) || !master.recurrence.length) {
+          return { success: false, error: 'That event is not part of a recurring series.' };
+        }
+
+        const cutoff = new Date(fromDate);
+        if (Number.isNaN(cutoff.getTime())) {
+          return { success: false, error: 'Could not read the date to end the series before.' };
+        }
+        // The cutoff is the END of the day BEFORE the given occurrence, so that occurrence
+        // and everything after it stop being generated while everything earlier survives.
+        cutoff.setUTCDate(cutoff.getUTCDate() - 1);
+        cutoff.setUTCHours(23, 59, 59, 0);
+        const allDay = Boolean(master.start?.date && !master.start?.dateTime);
+        const { recurrence, touched } = trimRecurrenceUntil(master.recurrence, cutoff, allDay);
+        if (!touched) {
+          return { success: false, error: 'Could not find a repeat rule on that series to end.' };
+        }
+
+        const attendees = (master.attendees || []).filter(a => !a.self);
+        const notify = params?.notify_attendees !== false;
+        const sendUpdates = attendees.length && notify ? 'all' : 'none';
+
+        await axios.patch(
+          `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}`,
+          { recurrence },
+          { headers, timeout: 15000, params: { sendUpdates } }
+        );
+
+        const title = master.summary || 'the series';
+        return {
+          success: true,
+          eventId,
+          hadAttendees: attendees.length > 0,
+          notifiedAttendees: sendUpdates === 'all',
+          text: `Ended "${title}" after this occurrence.`
+        };
       }
 
       case 'create_google_doc': {
@@ -1162,6 +1324,8 @@ module.exports = {
     calendarTime,
     oneHourLater,
     formatThreadText,
-    buildMime
+    buildMime,
+    formatUntilUTC,
+    trimRecurrenceUntil
   }
 };

@@ -4623,6 +4623,107 @@ async function executeAction(userId, action, params, context = {}) {
       };
     }
 
+    // Cancels a REAL event. This was a confirmed product gap: schedule_block/create_
+    // calendar_event/move_calendar_event existed and there was no way to undo any of them
+    // short of opening Google Calendar directly — cleaning up test events during the
+    // 2026-08-09 proving pass had to go around the product entirely.
+    //
+    // "Cancel my meeting tomorrow" resolves against the real calendar the same way
+    // move_calendar_event does (id, then title, restricted by date/attendee when given); an
+    // ambiguous match is refused rather than guessed, and a recurring occurrence with no
+    // stated scope stops for clarification rather than picking a scope on the user's behalf —
+    // deleting the wrong scope of a recurring series is not a reversible mistake.
+    case 'cancel_calendar_event': {
+      const eventId = String(params?.event_id || '').trim();
+      const titleQuery = String(params?.title || '').trim();
+      const attendeeQuery = String(params?.person_name || params?.attendee || '').trim();
+      const whenText = String(params?.when || params?.date || '').trim().toLowerCase();
+      const scope = ['this', 'future', 'series'].includes(String(params?.scope || '').toLowerCase())
+        ? params.scope.toLowerCase() : null;
+
+      if (!eventId && !titleQuery && !attendeeQuery && !whenText) {
+        return { success: false, error: 'Tell me which event — a title, a time, or who it\'s with.' };
+      }
+
+      const calendar = await dispatch(userId, 'get_calendar_events', { max_results: 100, days: 30 });
+      if (!calendar?.success) return { success: false, error: `I couldn't read your calendar (${calendar?.error || 'unreachable'}), so I won't cancel anything blind.` };
+      let events = calendar.events || [];
+
+      if (eventId) {
+        events = events.filter(e => e.id === eventId);
+      } else {
+        if (titleQuery) {
+          events = events.filter(e => String(e.title || '').toLowerCase().includes(titleQuery.toLowerCase()));
+        }
+        if (attendeeQuery) {
+          let attendeeEmail = attendeeQuery.toLowerCase();
+          // "the meeting with Ben" — resolve a name to an address through the same people
+          // layer commitments use, rather than substring-matching a first name against
+          // full email addresses (which would also match "ben.carter@..." for "Ben" AND
+          // for "Benedict", so both the name and the resolved address are checked).
+          if (!attendeeEmail.includes('@')) {
+            const resolved = await people.resolvePerson(supabase, userId, { name: attendeeQuery }).catch(() => null);
+            if (resolved?.person?.email) attendeeEmail = resolved.person.email.toLowerCase();
+          }
+          events = events.filter(e => (e.attendees || []).some(a => a.toLowerCase().includes(attendeeEmail)) ||
+            String(e.title || '').toLowerCase().includes(attendeeQuery.toLowerCase()));
+        }
+        if (whenText === 'today' || whenText === 'tomorrow') {
+          const dayKey = getLocalDateKey(new Date(Date.now() + (whenText === 'tomorrow' ? 86400000 : 0)));
+          events = events.filter(e => getLocalDateKey(new Date(e.start)) === dayKey);
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(whenText)) {
+          events = events.filter(e => getLocalDateKey(new Date(e.start)) === whenText);
+        }
+      }
+
+      if (!events.length) return { success: false, error: `I couldn't find an event matching that.` };
+      if (events.length > 1) {
+        return {
+          success: false,
+          ambiguous: true,
+          candidates: events.map(e => ({ id: e.id, title: e.title, start: e.start })),
+          error: `More than one event matches: ${events.map(e => `"${e.title}" at ${e.start}`).join('; ')}. Which one?`
+        };
+      }
+
+      const target = events[0];
+
+      // A recurring occurrence with no stated scope is exactly the ambiguity the current
+      // action model cannot safely resolve on its own — asking is the correct behaviour,
+      // not a fallback for one.
+      if (target.recurringEventId && !scope) {
+        return {
+          success: false,
+          needsClarification: true,
+          recurring: true,
+          eventId: target.id,
+          masterEventId: target.recurringEventId,
+          error: `"${target.title}" is part of a repeating series. Cancel just this one, this and every one after it, or the whole series?`
+        };
+      }
+
+      const notifyAttendees = params?.notify_attendees !== false;
+      let result;
+      if (target.recurringEventId && scope === 'future') {
+        result = await dispatch(userId, 'end_recurring_series', {
+          event_id: target.recurringEventId, from_date: target.start, notify_attendees: notifyAttendees
+        });
+      } else {
+        const idToDelete = target.recurringEventId && scope === 'series' ? target.recurringEventId : target.id;
+        result = await dispatch(userId, 'delete_calendar_event', { event_id: idToDelete, notify_attendees: notifyAttendees });
+      }
+      if (!result?.success) return { success: false, error: result?.error || 'The calendar would not cancel that.' };
+
+      return {
+        success: true,
+        eventId: target.id,
+        scope: scope || 'this',
+        hadAttendees: Boolean(result.hadAttendees),
+        notifiedAttendees: Boolean(result.notifiedAttendees),
+        text: result.text || `Cancelled "${target.title}".`
+      };
+    }
+
     // Sending is where a promise becomes real. Everything about commitments used to depend on
     // the user separately telling Millie "track this" — looksLikeCommitment and
     // matchesSentEvidence existed, were unit-tested, and were called from nowhere. So the

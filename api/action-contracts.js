@@ -379,6 +379,24 @@ const ACTION_CONTRACTS = {
     confirmation: 'review_required',
     executionMode: 'review'
   },
+  cancel_calendar_event: {
+    risk: 'high',
+    required: [],
+    optional: ['event_id', 'title', 'when', 'date', 'person_name', 'attendee', 'scope', 'notify_attendees'],
+    inputExample: { title: 'gym', when: 'tomorrow' },
+    paramHints: {
+      when: '"today" or "tomorrow" only — for any other date use date instead',
+      date: 'an explicit YYYY-MM-DD',
+      person_name: 'who the meeting is with, e.g. "Ben" — resolved through the people layer, not guessed',
+      scope: 'only set this once the user has answered which part of a recurring series — "this", "future", or "series". Leave it out on the first attempt against a recurring event.',
+      notify_attendees: 'leave true unless the user explicitly says not to tell the other attendees'
+    },
+    guidance: 'Use for "cancel my 3pm meeting", "delete that calendar block", "remove the meeting with Ben tomorrow" — this REMOVES the real event from Google Calendar, it does not just hide it. If more than one event matches, it refuses and asks which one rather than guessing — relay the candidates back to the user. If the match is one occurrence of a repeating series and no scope was given, it asks whether to cancel just this occurrence, this and future ones, or the whole series — do not choose a scope on the user\'s behalf; ask, then call again with the answer as scope. An event with real attendees notifies them through Google\'s own cancellation email unless the user said not to.',
+    successSummary: 'Event cancelled',
+    failureSummary: 'Could not cancel that',
+    confirmation: 'review_required',
+    executionMode: 'review'
+  },
   // ── Commitments ────────────────────────────────────────────────────────────────────
   track_commitment: {
     risk: 'low',
