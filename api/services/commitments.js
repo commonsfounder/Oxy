@@ -129,7 +129,7 @@ function matchesSentEvidence(commitment, evidence = {}) {
   if (!commitment || commitment.status !== 'open') return false;
   const recipient = String(evidence.to || '').toLowerCase();
   const person = String(commitment.person_name || '').toLowerCase();
-  const sameThread = evidence.threadId && commitment.thread_id && evidence.threadId === commitment.thread_id;
+  const sameThread = Boolean(evidence.threadId && commitment.thread_id && evidence.threadId === commitment.thread_id);
   const samePerson = person && recipient && (recipient.includes(person) || person.includes(recipient.split('@')[0]));
   if (!sameThread && !samePerson) return false;
 
@@ -146,7 +146,17 @@ function matchesSentEvidence(commitment, evidence = {}) {
   // end of play". Matching now runs on the promise's subject words, which exclude the timing
   // and glue vocabulary that every promise shares.
   if (!subject.words.size) return true;
-  return [...subject.words].some(word => body.includes(word));
+
+  // Found live: a brand-new, unrelated email to the SAME person falsely closed an old
+  // commitment because "board" appeared in both "the board pack" and "the board deck" — one
+  // shared word was enough. A shared thread is already strong evidence this message is about
+  // that particular promise, so any overlapping word is a fair sanity check on top of it.
+  // Matching by recipient alone is much weaker — two different promises to the same person
+  // often share one generic word — so every one of the promise's words has to show up, not
+  // just one.
+  return sameThread
+    ? [...subject.words].some(word => body.includes(word))
+    : [...subject.words].every(word => body.includes(word));
 }
 
 // ── What a real, sent email means ──────────────────────────────────────────────────────

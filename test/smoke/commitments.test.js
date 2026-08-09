@@ -134,6 +134,26 @@ test('a different promise on the same thread does not close the first one', () =
   }), true, 'the real thing still closes it');
 });
 
+test('two different promises to the SAME person are not conflated by one shared word', () => {
+  // Caught live: a brand-new, unrelated email to the same recipient closed an old commitment
+  // because "board" appears in both "the board pack" and "the board deck". No thread linkage
+  // here — matching purely by recipient — so every word of the promise must show up, not one.
+  const boardPack = { status: 'open', what: 'send the board pack', person_name: 'mia@example.com' };
+  assert.equal(matchesSentEvidence(boardPack, {
+    to: 'mia@example.com', threadId: 'unrelated-thread', subject: 'Board deck', body: 'Can you send me the board deck?'
+  }), false, 'a deck is not a pack, even though both are "board" something');
+  assert.equal(matchesSentEvidence(boardPack, {
+    to: 'mia@example.com', threadId: 'unrelated-thread', subject: 'Board pack', body: 'Sending the board pack now.'
+  }), true, 'the actual thing, even off-thread, still closes it');
+});
+
+test('on the RIGHT thread, one shared word is still enough — the thread already vouches for it', () => {
+  const boardPack = { status: 'open', what: 'send the board pack', thread_id: 'thr-1', person_name: 'mia@example.com' };
+  assert.equal(matchesSentEvidence(boardPack, {
+    threadId: 'thr-1', subject: 'Re: Board pack', body: 'Sending the board version across now.'
+  }), true);
+});
+
 test('a message to someone else does not close a commitment made to Mia', () => {
   assert.equal(matchesSentEvidence(SEND_DOCS, {
     threadId: 'other', to: 'ben@example.com', subject: 'Documents', body: 'Sending the documents.'
