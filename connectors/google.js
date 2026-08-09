@@ -622,6 +622,52 @@ function calendarWindow(params = {}) {
   };
 }
 
+const HAS_UTC_OFFSET = /(?:Z|[+-]\d{2}:\d{2})$/;
+
+// Google takes a time in one of two forms, and they mean different things:
+//   - an ABSOLUTE instant, where dateTime carries Z or an offset ("2026-08-10T13:00:00Z");
+//   - a LOCAL wall-clock time, where dateTime carries no offset and timeZone says how to
+//     read it ("2026-08-10T14:00:00" + Europe/London).
+//
+// What is never valid is taking an absolute instant, deleting its offset, and relabelling the
+// remaining digits as local. That is what this code used to do to every value it was given,
+// and it silently moved events by the zone's offset: schedule_block computes a real instant
+// and passes start.toISOString(), so booking "tomorrow at 14:00" during BST wrote 13:00 to
+// the calendar while the confirmation text still said 14:00. In winter, with London on UTC,
+// the same code is correct — which is why it survived.
+//
+// So: keep an offset when there is one, and only attach timeZone to a bare wall-clock time.
+// timeZone rides along in both cases, but it means different things. With an offset present
+// Google takes the instant from the offset and uses timeZone only as the event's DISPLAY
+// zone — which matters, because an event stored without one is labelled UTC and the
+// invitation email then reads "5pm UTC" to a London guest instead of 6pm. With no offset,
+// timeZone is what makes the wall-clock time mean anything at all.
+function calendarTime(value, timezone) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  return { dateTime: raw, timeZone: timezone };
+}
+
+// One hour after `value`, in the same form it arrived in — instant stays an instant,
+// wall clock stays wall clock (adding to the digits, which is what "an hour later" means
+// on a local clock).
+function oneHourLater(value, timezone) {
+  const raw = String(value ?? '').trim();
+  if (HAS_UTC_OFFSET.test(raw)) {
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return calendarTime(raw, timezone);
+    return calendarTime(new Date(d.getTime() + 3600000).toISOString(), timezone);
+  }
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return calendarTime(raw, timezone);
+  d.setHours(d.getHours() + 1);
+  const pad = n => String(n).padStart(2, '0');
+  return {
+    dateTime: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`,
+    timeZone: timezone
+  };
+}
+
 function extractDocText(document = {}) {
   const content = document.body?.content || [];
   const lines = [];
@@ -876,21 +922,8 @@ async function execute(userId, action, params) {
       case 'create_calendar_event': {
         const { title, start_date, end_date, description = '', timezone = 'Europe/London' } = params;
         if (!title || !start_date) return { success: false, error: 'create_calendar_event requires title and start_date' };
-        // Strip timezone offsets (Z, +01:00 etc) so Google uses the timeZone field for local interpretation
-        const toLocal = dt => String(dt).replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
-        const startLocal = toLocal(start_date);
-        // Default a missing end to one hour after the start (local-clock math, no TZ shift).
-        let endLocal = end_date ? toLocal(end_date) : null;
-        if (!endLocal) {
-          const d = new Date(startLocal);
-          if (!Number.isNaN(d.getTime())) {
-            d.setHours(d.getHours() + 1);
-            const pad = n => String(n).padStart(2, '0');
-            endLocal = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
-          } else {
-            endLocal = startLocal;
-          }
-        }
+        const startTime = calendarTime(start_date, timezone);
+        const endTime = end_date ? calendarTime(end_date, timezone) : oneHourLater(start_date, timezone);
         // Attendees make this a real invitation rather than a private block. sendUpdates:'all'
         // is what actually emails them; without it Google creates the event silently and the
         // guest never hears about it.
@@ -903,8 +936,8 @@ async function execute(userId, action, params) {
           {
             summary: title,
             description,
-            start: { dateTime: startLocal, timeZone: timezone },
-            end:   { dateTime: endLocal,   timeZone: timezone },
+            start: startTime,
+            end: endTime,
             ...(attendees.length ? { attendees } : {})
           },
           { headers, timeout: 15000, params: attendees.length ? { sendUpdates: 'all' } : undefined });
@@ -921,11 +954,10 @@ async function execute(userId, action, params) {
       case 'update_calendar_event': {
         const { event_id, title, start_date, end_date, timezone = 'Europe/London' } = params;
         if (!event_id) return { success: false, error: 'update_calendar_event requires event_id' };
-        const toLocal = dt => String(dt).replace(/Z$/, '').replace(/[+-]\d{2}:\d{2}$/, '');
         const patch = {};
         if (title) patch.summary = title;
-        if (start_date) patch.start = { dateTime: toLocal(start_date), timeZone: timezone };
-        if (end_date) patch.end = { dateTime: toLocal(end_date), timeZone: timezone };
+        if (start_date) patch.start = calendarTime(start_date, timezone);
+        if (end_date) patch.end = calendarTime(end_date, timezone);
         if (!Object.keys(patch).length) return { success: false, error: 'Nothing to change on that event.' };
 
         const updated = await axios.patch(
@@ -1072,6 +1104,8 @@ module.exports = {
     messageToEmail,
     normalizeLabelFilter,
     calendarWindow,
+    calendarTime,
+    oneHourLater,
     formatThreadText,
     buildMime
   }
