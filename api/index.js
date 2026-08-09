@@ -101,6 +101,7 @@ const people = require('./services/people');
 const receipts = require('./services/receipts');
 const watches = require('./services/watches');
 const travelSearch = require('./services/travel-search');
+const travelInventory = require('./services/travel-inventory');
 const travelRanking = require('./services/travel-ranking');
 const notifications = require('./services/notifications');
 const commitments = require('./services/commitments');
@@ -4359,6 +4360,34 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: false, error: 'search_hotels needs a location.' };
       }
 
+      // Real inventory first, when a provider is configured. This is the difference between
+      // "a page mentioned £133 for some nearby dates" and "here is a sellable fare for the
+      // dates you asked for". Grounded search below stays as the fallback rather than being
+      // replaced: with no provider key it is still the honest answer, and it is the only
+      // thing that works for routes or properties a single provider does not carry.
+      let inventoryOptions = [];
+      let inventoryNote = null;
+      if (travelInventory.isConfigured()) {
+        const found = kind === 'flights'
+          ? await travelInventory.searchFlights({
+            origin: String(params?.from || '').trim(),
+            destination: String(params?.to || params?.destination || '').trim(),
+            start: String(params?.depart_date || params?.date || '').trim(),
+            end: String(params?.return_date || '').trim(),
+            passengers: Math.max(1, Math.min(Number(params?.adults) || 1, 9))
+          })
+          : await travelInventory.searchStays({
+            latitude: Number(params?.latitude), longitude: Number(params?.longitude),
+            checkIn: String(params?.check_in || params?.checkin || '').trim(),
+            checkOut: String(params?.check_out || params?.checkout || '').trim(),
+            guests: Math.max(1, Math.min(Number(params?.guests) || 2, 12))
+          });
+        if (found.ok) inventoryOptions = found.options;
+        // A provider that errored is said out loud. Falling through to web search silently
+        // would turn "the travel API is down" into "these are your options".
+        else if (found.configured) inventoryNote = `Live inventory was unavailable (${found.reason}), so these are sourced from the web instead.`;
+      }
+
       let researchText = '';
       try {
         researchText = await webSearchBrain({ model: FAST_MODEL, prompt: research });
@@ -4391,7 +4420,10 @@ async function executeAction(userId, action, params, context = {}) {
       const requestedDates = kind === 'flights'
         ? { start: params?.depart_date || params?.date, end: params?.return_date }
         : { start: params?.check_in || params?.checkin, end: params?.check_out || params?.checkout };
-      const dated = travelSearch.applyDateProvenance(options, requestedDates);
+      // Inventory options go through exactly the same grading as web-sourced ones. They will
+      // almost always come out 'exact' — that is the point of asking a booking system — but
+      // the verdict is still computed from their observed dates rather than asserted.
+      const dated = travelSearch.applyDateProvenance([...inventoryOptions, ...options], requestedDates);
 
       const { kept, dropped } = travelSearch.applyConstraints(dated, {
         maxPrice: Number(params?.max_price) || null,
@@ -4436,8 +4468,17 @@ async function executeAction(userId, action, params, context = {}) {
         currencies: [...new Set(ranked.map(o => o.currency).filter(Boolean))],
         droppedByConstraints: dropped.map(d => ({ why: d.why, option: d.option.airline || d.option.name })),
         research: researchText,
+        // How many of these came from a booking system rather than from reading a page —
+        // the one distinction that decides whether a price can be acted on.
+        fromInventory: ranked.filter(o => o.inventory === true).length,
+        inventoryProvider: travelInventory.isConfigured() ? travelInventory.providerMode() : null,
+        // Search and booking stay separate: finding a sellable fare is not the same as
+        // holding one, and purchase still goes through the existing review path.
         bookable: false,
-        text: travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) })
+        text: [
+          travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) }),
+          inventoryNote
+        ].filter(Boolean).join(' ')
       };
     }
 
