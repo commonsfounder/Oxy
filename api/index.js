@@ -5002,7 +5002,13 @@ const notificationDelivery = createDeliveryRuntime({
     // not a delivery, and must not be recorded as one.
     return { ok: Number(result?.sent) > 0, error: result?.skipped ? 'Apple push is not configured' : result?.error };
   },
-  sendEmail: async ({ to, subject, text }) => {
+  sendEmail: async ({ userId, to, subject, text, provider }) => {
+    // The user's own connected mailbox. Costs no extra credential, and is the only reason
+    // proactive delivery reaches anyone at all before Resend is set up.
+    if (provider === 'gmail') {
+      const result = await googleConnector.execute(userId, 'send_email', { to, subject, body: text });
+      return { ok: result?.success === true, error: result?.error || null };
+    }
     const result = await sendEmailService({ to, subject, text, html: `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>` });
     // `dev: true` is api/services/email.js's no-op mode when RESEND_API_KEY is absent — it
     // logs and returns ok. Passed through deliberately so the runtime can reject it.
@@ -5015,6 +5021,7 @@ const notificationDelivery = createDeliveryRuntime({
     // An unverified address is not somewhere we send unsolicited mail.
     return data?.email && data.email_verified ? data.email : '';
   },
+  getMailbox: (userId) => googleConnector.getMailbox(userId),
   countPushDevices: async (userId) => {
     const { count } = await supabase.from('devices').select('*', { count: 'exact', head: true }).eq('user_id', userId);
     return count || 0;

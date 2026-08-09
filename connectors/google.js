@@ -90,34 +90,43 @@ async function bulkModifyMessages(headers, ids, { addLabelIds = [], removeLabelI
 }
 
 async function getTokens(userId) {
+  let disconnectedOnPurpose = false;
   try {
     const { data, error } = await supabase
       .from('connectors')
-      .select('tokens')
+      .select('tokens, enabled')
       .eq('user_id', userId)
       .eq('connector_id', 'google')
-      .eq('enabled', true)
       .limit(1);
 
-    if (!error && data?.length > 0 && data[0].tokens) return decryptTokens(data[0].tokens);
+    const row = !error && data?.length ? data[0] : null;
+    if (row?.enabled && row.tokens) return decryptTokens(row.tokens);
+    // A row that exists but is disabled is a deliberate disconnect (or a refresh that Google
+    // told us was revoked). Falling back to env here would silently re-connect the user to an
+    // account they just detached from.
+    if (row && !row.enabled) disconnectedOnPurpose = true;
   } catch (err) {
     console.error('[getTokens] DB error:', err.message);
   }
 
-  // Fall back to env vars (single-user setup), save to DB for next time
-  if (process.env.GMAIL_REFRESH_TOKEN) {
-    const tokens = {
-      refresh_token: process.env.GMAIL_REFRESH_TOKEN.replace(/^﻿/, '').trim(),
+  // Fall back to env vars (single-user setup). Deliberately NOT written to the connectors row
+  // here: this used to save-and-enable on sight, so a bad env value (the deployed
+  // GMAIL_REFRESH_TOKEN is truncated to 39 chars and Google answers invalid_grant) turned
+  // "not connected" into a row that claims to be connected and fails forever. getAccessToken
+  // persists these only once a refresh has actually succeeded, so what lands in the database
+  // is always a credential that worked at least once.
+  const envToken = String(process.env.GMAIL_REFRESH_TOKEN || '').replace(/^﻿/, '').trim();
+  if (envToken && !disconnectedOnPurpose) {
+    return {
+      refresh_token: envToken,
       client_id: process.env.GMAIL_CLIENT_ID,
       client_secret: process.env.GMAIL_CLIENT_SECRET
     };
-    try { await saveTokens(userId, tokens); } catch (err) {
-      console.error('[getTokens] failed to save env tokens:', err.message);
-    }
-    return tokens;
   }
 
-  throw new Error('Google connector not configured for this user');
+  throw new Error(disconnectedOnPurpose
+    ? 'Google is disconnected for this user. Reconnect Google from Settings.'
+    : 'Google connector not configured for this user');
 }
 
 async function saveTokens(userId, tokens) {
@@ -395,6 +404,45 @@ function formatThreadText(messages = []) {
     return `Message ${index + 1} — ${sender} — ${date}\nSubject: ${email.subject || '(No subject)'}\n${body}`;
   }).join('\n\n---\n\n').trim();
 }
+
+// Which mailbox are we actually authorized on, and can we send from it?
+//
+// This exists so proactive delivery has a destination it can trust without a separate
+// verification step: the address of the mailbox the user themselves connected is, by
+// construction, an address they own. Any OTHER address still has to be verified before we
+// mail it — that rule is about not mailing third parties, and it is untouched here.
+//
+// Cached briefly because the delivery sweep asks once per user per run and the answer only
+// changes when the connector is reconnected.
+const MAILBOX_TTL_MS = 10 * 60 * 1000;
+const mailboxCache = new Map();
+
+async function getMailbox(userId, { now = Date.now } = {}) {
+  const cached = mailboxCache.get(userId);
+  if (cached && cached.expiresAt > now()) return cached.value;
+
+  let value = null;
+  try {
+    const token = await getAccessToken(userId);
+    const resp = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000
+    });
+    const address = String(resp.data?.emailAddress || '').trim();
+    // gmail.modify covers messages.send, which is the scope this connector is granted.
+    // No address means no usable mailbox, however healthy the token looks.
+    if (address) value = { address, canSend: true };
+  } catch {
+    // Not connected, revoked, or Gmail is down. All of these mean "no mailbox right now",
+    // which the caller must treat as an unavailable channel rather than a failure to report.
+    value = null;
+  }
+
+  mailboxCache.set(userId, { value, expiresAt: now() + MAILBOX_TTL_MS });
+  return value;
+}
+
+function _clearMailboxCache() { mailboxCache.clear(); }
 
 async function getThreadContext(userId, threadId) {
   if (!threadId) return null;
@@ -927,7 +975,9 @@ module.exports = {
   SUPPORTED_ACTIONS,
   execute,
   getThreadContext,
+  getMailbox,
   _private: {
+    _clearMailboxCache,
     decodeBase64Url,
     stripHtml,
     extractMessageBody,

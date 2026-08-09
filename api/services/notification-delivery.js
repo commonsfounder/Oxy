@@ -6,29 +6,60 @@
 
 const notifications = require('./notifications');
 
+// Which transport actually carries an email right now.
+//
+// Resend is the dedicated provider and stays first when it is configured — it sends from
+// Millie's own identity. But a connected Google account ALREADY grants gmail.modify, which
+// includes messages.send, so a user with Gmail connected has a working outbound email path
+// with no extra credential at all. Treating that as a real provider is the difference
+// between "proactive delivery works once you sign up for Resend" and "proactive delivery
+// works". Mail sent this way leaves the user's own mailbox, which is why it is only ever
+// used to reach the user themselves — see the destination rules below.
+function resolveEmailProvider({ env = process.env, mailboxCanSend = false } = {}) {
+  if (env.RESEND_API_KEY) return 'resend';
+  if (mailboxCanSend) return 'gmail';
+  return null;
+}
+
+// Where a notification is allowed to land. In precedence order:
+//   1. an address the user explicitly set as their notification destination,
+//   2. their verified account address,
+//   3. the mailbox they connected — an address they demonstrably own, because we are holding
+//      their OAuth grant on it.
+// The third is the one that needs no separate verification step: the verification rule exists
+// to stop us mailing third parties, and delivering to a mailbox the user personally connected
+// is not that.
+function resolveEmailDestination({ prefEmailTo = '', verifiedEmail = '', mailboxAddress = '' } = {}) {
+  return String(prefEmailTo || verifiedEmail || mailboxAddress || '').trim();
+}
+
 // Which channels can actually deliver right now. Deliberately checked per-call rather than at
-// boot: adding RESEND_API_KEY should make email live without a redeploy of this logic, and a
-// channel with code but no credentials must never be offered as if it worked.
-function availableChannels({ env = process.env, hasPushDevices = false, emailTo = '' } = {}) {
+// boot: adding RESEND_API_KEY (or connecting Google) should make email live without a
+// redeploy of this logic, and a channel with code but no credentials must never be offered as
+// if it worked.
+function availableChannels({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false } = {}) {
   const available = [];
   if (env.APNS_BUNDLE_ID && env.APNS_KEY_ID && env.APNS_TEAM_ID && env.APNS_PRIVATE_KEY && hasPushDevices) {
     available.push('push');
   }
-  if (env.RESEND_API_KEY && emailTo) available.push('email');
+  if (resolveEmailProvider({ env, mailboxCanSend }) && emailTo) available.push('email');
   // The in-app card is always available: it is a row in this database, not a third party.
   available.push('in_app');
   return available;
 }
 
-function describeUnavailable({ env = process.env, hasPushDevices = false, emailTo = '' } = {}) {
+function describeUnavailable({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false } = {}) {
   const reasons = [];
   if (!env.APNS_BUNDLE_ID || !env.APNS_KEY_ID || !env.APNS_TEAM_ID || !env.APNS_PRIVATE_KEY) {
     reasons.push('push: Apple push credentials are not configured');
   } else if (!hasPushDevices) {
     reasons.push('push: no registered device');
   }
-  if (!env.RESEND_API_KEY) reasons.push('email: no email provider key is configured');
-  else if (!emailTo) reasons.push('email: no destination address is set');
+  if (!resolveEmailProvider({ env, mailboxCanSend })) {
+    reasons.push('email: no email provider is configured (set RESEND_API_KEY, or connect Google to send from your own mailbox)');
+  } else if (!emailTo) {
+    reasons.push('email: no destination address is set');
+  }
   return reasons;
 }
 
@@ -44,6 +75,10 @@ function createDeliveryRuntime({
   getPreferenceMap,
   getUserEmail,
   countPushDevices,
+  // Resolves the user's own connected mailbox: { address, canSend } or null. Optional so
+  // callers that genuinely have no mail connector keep working — they just get the Resend
+  // path, exactly as before.
+  getMailbox = async () => null,
   env = process.env,
   now = () => new Date()
 }) {
@@ -80,7 +115,7 @@ function createDeliveryRuntime({
     return error ? { ok: false, error: error.message } : { ok: true, id: data.id, created: true };
   }
 
-  async function deliverOne(userId, event, { prefs, available, emailTo }) {
+  async function deliverOne(userId, event, { prefs, available, emailTo, emailProvider = null }) {
     const decision = notifications.resolveDelivery({ event, prefs, available, now: now() });
     const stamp = now().toISOString();
 
@@ -100,7 +135,9 @@ function createDeliveryRuntime({
         result = await sendPush(userId, { title: event.title, body: event.body, category: event.category });
       } else if (decision.channel === 'email') {
         const shaped = notifications.formatNotificationEmail(event);
-        result = await sendEmail({ to: emailTo, subject: shaped.subject, text: shaped.text });
+        result = await sendEmail({
+          userId, to: emailTo, subject: shaped.subject, text: shaped.text, provider: emailProvider
+        });
       } else {
         const briefing = await createBriefing(userId, {
           kind: `notification_${event.category}`,
@@ -176,18 +213,26 @@ function createDeliveryRuntime({
     }
 
     const prefs = await getPreferenceMap(userId).catch(() => ({}));
-    const emailTo = prefs[notifications.PREF.emailTo] || await getUserEmail(userId).catch(() => '') || '';
+    const mailbox = await getMailbox(userId).catch(() => null);
+    const mailboxCanSend = Boolean(mailbox?.canSend && mailbox?.address);
+    const emailTo = resolveEmailDestination({
+      prefEmailTo: prefs[notifications.PREF.emailTo],
+      verifiedEmail: await getUserEmail(userId).catch(() => ''),
+      mailboxAddress: mailbox?.address
+    });
+    const emailProvider = resolveEmailProvider({ env, mailboxCanSend });
     const hasPushDevices = (await countPushDevices(userId).catch(() => 0)) > 0;
-    const available = availableChannels({ env, hasPushDevices, emailTo });
+    const available = availableChannels({ env, hasPushDevices, emailTo, mailboxCanSend });
 
     const results = [];
     for (const event of events) {
-      results.push(await deliverOne(userId, event, { prefs, available, emailTo }));
+      results.push(await deliverOne(userId, event, { prefs, available, emailTo, emailProvider }));
     }
     return {
       ok: true,
       available,
-      unavailable: describeUnavailable({ env, hasPushDevices, emailTo }),
+      emailProvider,
+      unavailable: describeUnavailable({ env, hasPushDevices, emailTo, mailboxCanSend }),
       collapsed: collapsed.length,
       results
     };
@@ -196,4 +241,10 @@ function createDeliveryRuntime({
   return { raise, deliverPending, deliverOne };
 }
 
-module.exports = { availableChannels, describeUnavailable, createDeliveryRuntime };
+module.exports = {
+  availableChannels,
+  describeUnavailable,
+  resolveEmailProvider,
+  resolveEmailDestination,
+  createDeliveryRuntime
+};

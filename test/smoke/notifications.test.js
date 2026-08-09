@@ -8,7 +8,10 @@ const {
   PREF, gradeUrgency, dedupeKeyFor, parseQuietHours, inQuietHours,
   resolveDelivery, collapseRelated, formatNotificationEmail, describePreference
 } = require('../../api/services/notifications');
-const { availableChannels, describeUnavailable, createDeliveryRuntime } = require('../../api/services/notification-delivery');
+const {
+  availableChannels, describeUnavailable, createDeliveryRuntime,
+  resolveEmailProvider, resolveEmailDestination
+} = require('../../api/services/notification-delivery');
 
 const EVENT = { id: 'e1', category: 'watch', urgency: 'normal', title: 'Brighton room', body: 'Now £86 a night.' };
 const NOW = new Date('2026-08-09T14:00:00Z');
@@ -32,6 +35,62 @@ test('push with credentials but no registered device is not available', () => {
   const env = { APNS_BUNDLE_ID: 'b', APNS_KEY_ID: 'k', APNS_TEAM_ID: 't', APNS_PRIVATE_KEY: 'p' };
   assert.equal(availableChannels({ env, hasPushDevices: false, emailTo: '' }).includes('push'), false);
   assert.match(describeUnavailable({ env, hasPushDevices: false }).join(' '), /no registered device/);
+});
+
+// ── The user's own connected mailbox is a real email provider ──────────────────────────
+// Before this, "email" meant "Resend", so a user with Google connected — already holding a
+// gmail.modify grant, which includes messages.send — was told no channel was configured.
+test('a connected mailbox makes email available with no extra credential', () => {
+  assert.equal(resolveEmailProvider({ env: {}, mailboxCanSend: false }), null);
+  assert.equal(resolveEmailProvider({ env: {}, mailboxCanSend: true }), 'gmail');
+  // Resend stays first when it is genuinely configured: it sends from Millie's own identity
+  // rather than out of the user's mailbox.
+  assert.equal(resolveEmailProvider({ env: { RESEND_API_KEY: 'k' }, mailboxCanSend: true }), 'resend');
+
+  const viaMailbox = availableChannels({ env: {}, hasPushDevices: false, emailTo: 'me@gmail.com', mailboxCanSend: true });
+  assert.deepEqual(viaMailbox, ['email', 'in_app']);
+});
+
+test('with neither Resend nor a mailbox, email says so instead of silently vanishing', () => {
+  const reasons = describeUnavailable({ env: {}, hasPushDevices: false, emailTo: '', mailboxCanSend: false }).join(' ');
+  assert.match(reasons, /RESEND_API_KEY/);
+  assert.match(reasons, /connect Google/);
+});
+
+test('the connected mailbox is a destination of last resort, never an override', () => {
+  // An explicit preference wins, then a verified account address. The mailbox address is used
+  // only when there is nothing else — it needs no verification because holding the user's
+  // OAuth grant on that mailbox IS proof they own it.
+  assert.equal(resolveEmailDestination({
+    prefEmailTo: 'chosen@x.com', verifiedEmail: 'acct@x.com', mailboxAddress: 'box@gmail.com'
+  }), 'chosen@x.com');
+  assert.equal(resolveEmailDestination({
+    verifiedEmail: 'acct@x.com', mailboxAddress: 'box@gmail.com'
+  }), 'acct@x.com');
+  assert.equal(resolveEmailDestination({ mailboxAddress: 'box@gmail.com' }), 'box@gmail.com');
+  assert.equal(resolveEmailDestination({}), '');
+});
+
+test('delivery routes through the mailbox provider when Resend is absent', async () => {
+  const { runtime, rows, calls } = runtimeWith({
+    env: {},
+    emailTo: '',                                   // no verified account address
+    mailbox: { address: 'me@gmail.com', canSend: true }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.emailProvider, 'gmail');
+  assert.ok(calls.includes('email:gmail:me@gmail.com'), `expected a gmail send, got ${calls.join(',')}`);
+  assert.equal([...rows.values()][0].status, 'delivered');
+});
+
+test('no mailbox and no Resend still means no email channel', async () => {
+  const { runtime, calls } = runtimeWith({ env: {}, emailTo: '', mailbox: null });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.emailProvider, null);
+  assert.equal(result.available.includes('email'), false);
+  assert.ok(calls.includes('in_app'));
 });
 
 // ── Routing ────────────────────────────────────────────────────────────────────────────
@@ -178,11 +237,17 @@ function runtimeWith(overrides = {}) {
           return Promise.resolve({ data: null });
         },
         then(resolve) {
-          if (api._update && api._filters.id) {
-            const row = rows.get(api._filters.id);
-            if (row) Object.assign(row, api._update);
+          if (api._update) {
+            if (api._filters.id) {
+              const row = rows.get(api._filters.id);
+              if (row) Object.assign(row, api._update);
+            }
+            return Promise.resolve({ data: [], error: null }).then(resolve);
           }
-          return Promise.resolve({ data: [], error: null }).then(resolve);
+          // The sweep's list query: everything still owed to this user. Without this the
+          // fake answered "nothing pending" and deliverPending could never be exercised.
+          const pending = [...rows.values()].filter(r => ['pending', 'deferred'].includes(r.status));
+          return Promise.resolve({ data: pending, error: null }).then(resolve);
         }
       };
       return api;
@@ -191,10 +256,11 @@ function runtimeWith(overrides = {}) {
   const runtime = createDeliveryRuntime({
     supabase,
     sendPush: async () => { calls.push('push'); return { ok: false, error: 'Apple push is not configured' }; },
-    sendEmail: async (args) => { calls.push(`email:${args.to}`); return overrides.emailResult ?? { ok: true, providerRef: 'resend-1' }; },
+    sendEmail: async (args) => { calls.push(`email:${args.provider || 'resend'}:${args.to}`); return overrides.emailResult ?? { ok: true, providerRef: 'resend-1' }; },
     createBriefing: async () => { calls.push('in_app'); return { id: 'b1' }; },
     getPreferenceMap: async () => overrides.prefs || {},
     getUserEmail: async () => overrides.emailTo ?? 'user@example.com',
+    getMailbox: async () => overrides.mailbox ?? null,
     countPushDevices: async () => overrides.devices ?? 0,
     env: overrides.env || {},
     now: () => NOW
@@ -229,7 +295,7 @@ test('a delivery is only recorded once a provider actually accepted it', async (
   const result = await runtime.deliverOne('u1', event, { prefs: {}, available: ['email'], emailTo: 'user@example.com' });
   assert.equal(result.status, 'delivered');
   assert.equal(result.channel, 'email');
-  assert.ok(calls.includes('email:user@example.com'));
+  assert.ok(calls.includes('email:resend:user@example.com'));
 });
 
 test('a failed attempt stays pending for retry and only fails for good after the cap', async () => {
