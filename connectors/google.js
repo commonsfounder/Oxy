@@ -44,6 +44,75 @@ function normalizeMessageIds(value) {
   return list.map(id => String(id || '').trim()).filter(Boolean);
 }
 
+// Gmail's built-in labels are their own ids. Everything else the user has ("Receipts",
+// "Travel") is an opaque id like `Label_12`, and the display name is NOT accepted anywhere
+// the API wants a labelId.
+const SYSTEM_LABEL_IDS = new Set([
+  'INBOX', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT',
+  'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'
+]);
+// Gmail refuses to add or remove these itself — they describe where a message came from.
+const UNSETTABLE_LABEL_IDS = new Set(['SENT', 'DRAFT']);
+
+// Turns whatever the caller said into real Gmail label ids.
+//
+// This is the difference between "label these Receipts" working and failing silently: the
+// previous behaviour uppercased every name and handed it over as an id, so a system label
+// happened to work and a user label could never work at all — batchModify just 400s and the
+// whole chunk is reported as failed.
+//
+// `create` is on for labels being ADDED (asking to file mail under a label that doesn't exist
+// yet plainly means create it) and off for labels being REMOVED (removing a label that was
+// never there is a no-op, not a reason to make one).
+async function resolveLabelIds(headers, names, { create = false, cache = {} } = {}) {
+  const wanted = normalizeMessageIds(names);
+  if (!wanted.length) return { ids: [], unresolved: [], created: [], refused: [] };
+
+  const ids = [];
+  const unresolved = [];
+  const created = [];
+
+  const passthrough = [];
+  const needsLookup = [];
+  for (const name of wanted) {
+    const upper = name.toUpperCase();
+    if (SYSTEM_LABEL_IDS.has(upper)) passthrough.push(upper);
+    // An id we were handed directly (Gmail's own form) needs no resolution.
+    else if (/^Label_\d+$/.test(name)) passthrough.push(name);
+    else needsLookup.push(name);
+  }
+  ids.push(...passthrough);
+
+  if (needsLookup.length) {
+    if (!cache.labels) {
+      const resp = await axios.get('https://gmail.googleapis.com/gmail/v1/users/me/labels', { headers, timeout: 15000 });
+      cache.labels = resp.data.labels || [];
+    }
+    for (const name of needsLookup) {
+      const match = cache.labels.find(l => String(l.name || '').toLowerCase() === name.toLowerCase());
+      if (match) { ids.push(match.id); continue; }
+      if (!create) { unresolved.push(name); continue; }
+      try {
+        const made = await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/labels',
+          { name, labelListVisibility: 'labelShow', messageListVisibility: 'show' },
+          { headers, timeout: 15000 });
+        cache.labels.push(made.data);
+        ids.push(made.data.id);
+        created.push(made.data.name);
+      } catch {
+        unresolved.push(name);
+      }
+    }
+  }
+
+  return {
+    ids: ids.filter(id => !UNSETTABLE_LABEL_IDS.has(id)),
+    unresolved,
+    created,
+    refused: ids.filter(id => UNSETTABLE_LABEL_IDS.has(id))
+  };
+}
+
 // Bulk-modifies message labels (archive is removeLabelIds:['INBOX']; mark read/unread and
 // custom labels are add/removeLabelIds too) in chunks, then VERIFIES a sample of the
 // successful chunk actually changed state by re-fetching those ids — batchModify returns 204
@@ -673,22 +742,41 @@ async function execute(userId, action, params) {
       // label): remove_labels:['UNREAD'] marks read, add_labels:['UNREAD'] marks unread.
       case 'label_emails': {
         const ids = normalizeMessageIds(params?.message_ids ?? params?.messageIds ?? params?.message_id);
-        const addLabelIds = normalizeMessageIds(params?.add_labels ?? params?.addLabels).map(l => l.toUpperCase());
-        const removeLabelIds = normalizeMessageIds(params?.remove_labels ?? params?.removeLabels).map(l => l.toUpperCase());
+        const addNames = normalizeMessageIds(params?.add_labels ?? params?.addLabels);
+        const removeNames = normalizeMessageIds(params?.remove_labels ?? params?.removeLabels);
         if (!ids.length) return { success: false, error: 'label_emails requires message_ids' };
-        if (!addLabelIds.length && !removeLabelIds.length) return { success: false, error: 'label_emails requires add_labels and/or remove_labels' };
-        const result = await bulkModifyMessages(headers, ids, { addLabelIds, removeLabelIds }, {
-          expectPresent: addLabelIds,
-          expectAbsent: removeLabelIds
+        if (!addNames.length && !removeNames.length) return { success: false, error: 'label_emails requires add_labels and/or remove_labels' };
+
+        // Names in, real Gmail label ids out. Adding may create; removing never does.
+        const cache = {};
+        const add = await resolveLabelIds(headers, addNames, { create: true, cache });
+        const remove = await resolveLabelIds(headers, removeNames, { create: false, cache });
+
+        if (!add.ids.length && !remove.ids.length) {
+          const refused = [...add.refused, ...remove.refused];
+          if (refused.length) {
+            return { success: false, error: `Gmail does not let anything add or remove ${refused.join(', ')} — that label reflects where the message came from.` };
+          }
+          return { success: false, error: `No such label: ${[...add.unresolved, ...remove.unresolved].join(', ')}` };
+        }
+
+        const result = await bulkModifyMessages(headers, ids, { addLabelIds: add.ids, removeLabelIds: remove.ids }, {
+          expectPresent: add.ids,
+          expectAbsent: remove.ids
         });
+        // A label we could not resolve is not a thing we did. Reported alongside the counts so
+        // a partly-applied request never reads as a clean success.
+        const skipped = [...add.unresolved, ...remove.unresolved, ...add.refused, ...remove.refused];
         return {
           success: result.modified > 0,
           modified: result.modified,
           requested: ids.length,
           failed: result.failedIds,
           verified: result.verified,
+          created: add.created,
+          skippedLabels: skipped,
           text: result.modified > 0
-            ? `Updated labels on ${result.modified} of ${ids.length} message${ids.length === 1 ? '' : 's'}.`
+            ? `Updated labels on ${result.modified} of ${ids.length} message${ids.length === 1 ? '' : 's'}.${add.created.length ? ` Created the label ${add.created.join(', ')}.` : ''}${skipped.length ? ` Could not apply: ${skipped.join(', ')}.` : ''}`
             : 'Could not update labels on any of the requested messages.'
         };
       }

@@ -4,9 +4,13 @@
 // after the mutation reflects the change; one-click POSTs go to the real configured URL;
 // mailto unsubscribes actually call messages/send) rather than a static {data:{}} stub — the
 // point is to prove the mutation + verification logic is correct, not just that a call was
-// made. No real Google API access is available in this environment (OXY_TOKEN_ENCRYPTION_KEY
-// isn't set locally), so this is the realistic ceiling for this test suite; see the final
-// report for what that does and doesn't prove.
+// made.
+//
+// A fake is still only as good as its fidelity to the real API. The label tests below exist
+// because this fake used to accept any string as a labelId, so "add the label Receipts"
+// passed here for months while failing every single time against real Gmail, which only
+// accepts opaque ids (Label_1) for user labels. The fake now rejects unknown ids the way
+// Gmail does. These primitives have since been exercised against the live account.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,12 +25,14 @@ let mailbox;
 let sentEmails;
 let oneClickLog;
 let failChunksContaining; // Set of ids — any batchModify chunk containing one of these throws
+let userLabels;          // The account's own labels, as Gmail reports them: opaque ids + display names
 
 function resetFakeMailbox() {
   mailbox = new Map();
   sentEmails = [];
   oneClickLog = [];
   failChunksContaining = new Set();
+  userLabels = [{ id: 'Label_1', name: 'Receipts' }];
 }
 
 function seedMessage(id, { labelIds = ['INBOX'], headers = [], snippet = '', threadId = null } = {}) {
@@ -41,6 +47,7 @@ function seedMessage(id, { labelIds = ['INBOX'], headers = [], snippet = '', thr
 
 const mockAxios = {
   async get(url, config) {
+    if (url.endsWith('/users/me/labels')) return { data: { labels: userLabels } };
     const match = url.match(/\/messages\/([^/?]+)$/);
     if (match) {
       const msg = mailbox.get(match[1]);
@@ -56,8 +63,25 @@ const mockAxios = {
     throw new Error(`mockAxios.get: unhandled URL ${url}`);
   },
   async post(url, body, config) {
+    if (url.endsWith('/users/me/labels')) {
+      const created = { id: `Label_${userLabels.length + 1}`, name: body.name };
+      userLabels.push(created);
+      return { data: created };
+    }
     if (url.endsWith('/messages/batchModify')) {
       const { ids = [], addLabelIds = [], removeLabelIds = [] } = body;
+      // Real Gmail rejects the whole call if any labelId does not exist — which is exactly
+      // what a display name like "RECEIPTS" is. Without this the fake would happily accept
+      // names and the bug under test would be invisible.
+      const known = new Set([...userLabels.map(l => l.id),
+        'INBOX', 'SPAM', 'TRASH', 'UNREAD', 'STARRED', 'IMPORTANT', 'SENT', 'DRAFT',
+        'CATEGORY_PERSONAL', 'CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS']);
+      const bad = [...addLabelIds, ...removeLabelIds].find(l => !known.has(l));
+      if (bad) {
+        const err = new Error('Invalid label');
+        err.response = { status: 400, data: { error: { message: `Invalid label: ${bad}` } } };
+        throw err;
+      }
       if (ids.some(id => failChunksContaining.has(id))) {
         const err = new Error('Simulated batchModify failure');
         err.response = { status: 500, data: { error: { message: 'Simulated failure' } } };
@@ -174,11 +198,67 @@ test('label_emails marks a message read by removing UNREAD, verified against rea
   assert.ok(mailbox.get('m1').labelIds.includes('INBOX'), 'marking read must not also archive it');
 });
 
-test('label_emails adds a custom label without touching unrelated labels', async () => {
+// Gmail's own labels are their own ids; every label the USER made is an opaque id like
+// Label_1, and the display name is rejected wherever a labelId is expected. This was found
+// against the real account: "label this Millie Test" failed 100% of the time while INBOX
+// worked, because every name was simply uppercased and passed through as an id.
+test('label_emails resolves a custom label name to its real Gmail id', async () => {
   seedMessage('m1', { labelIds: ['INBOX'] });
-  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], add_labels: ['RECEIPTS'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], add_labels: ['Receipts'] });
   assert.equal(result.success, true);
-  assert.deepEqual(new Set(mailbox.get('m1').labelIds), new Set(['INBOX', 'RECEIPTS']));
+  assert.deepEqual(new Set(mailbox.get('m1').labelIds), new Set(['INBOX', 'Label_1']));
+  assert.deepEqual(result.created, [], 'a label that already exists is not recreated');
+});
+
+test('label_emails matches an existing label regardless of the casing asked for', async () => {
+  seedMessage('m1', { labelIds: ['INBOX'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], add_labels: ['receipts'] });
+  assert.equal(result.success, true);
+  assert.ok(mailbox.get('m1').labelIds.includes('Label_1'));
+  assert.equal(userLabels.length, 1, 'a casing difference must not manufacture a second label');
+});
+
+test('filing mail under a label that does not exist yet creates it', async () => {
+  seedMessage('m1', { labelIds: ['INBOX'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], add_labels: ['Travel'] });
+  assert.equal(result.success, true);
+  assert.deepEqual(result.created, ['Travel']);
+  const made = userLabels.find(l => l.name === 'Travel');
+  assert.ok(made && mailbox.get('m1').labelIds.includes(made.id));
+});
+
+test('REMOVING a label that does not exist is refused, not quietly created', async () => {
+  // The asymmetry is deliberate: "file this under Travel" means make Travel if needed;
+  // "take Travel off this" cannot sensibly mean "first create Travel".
+  seedMessage('m1', { labelIds: ['INBOX'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], remove_labels: ['Nonexistent'] });
+  assert.equal(result.success, false);
+  assert.match(result.error, /No such label: Nonexistent/);
+  assert.equal(userLabels.some(l => l.name === 'Nonexistent'), false);
+});
+
+test('system labels still pass straight through', async () => {
+  seedMessage('m1', { labelIds: ['INBOX', 'UNREAD'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], remove_labels: ['unread'] });
+  assert.equal(result.success, true);
+  assert.equal(mailbox.get('m1').labelIds.includes('UNREAD'), false);
+});
+
+test('SENT and DRAFT are refused rather than sent to Gmail to be rejected', async () => {
+  seedMessage('m1', { labelIds: ['INBOX'] });
+  const result = await google.execute('user-1', 'label_emails', { message_ids: ['m1'], add_labels: ['SENT'] });
+  assert.equal(result.success, false);
+  assert.match(result.error, /where the message came from/);
+});
+
+test('a label that could not be resolved is named in the result, not swallowed', async () => {
+  seedMessage('m1', { labelIds: ['INBOX'] });
+  const result = await google.execute('user-1', 'label_emails', {
+    message_ids: ['m1'], add_labels: ['Receipts'], remove_labels: ['Nonexistent']
+  });
+  assert.equal(result.success, true, 'the part that could be done was done');
+  assert.deepEqual(result.skippedLabels, ['Nonexistent']);
+  assert.match(result.text, /Could not apply: Nonexistent/);
 });
 
 // ── unsubscribe_email: tiered, verified terminal state ─────────────────────────────────
