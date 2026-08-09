@@ -269,12 +269,57 @@ async function getAccessToken(userId) {
   return updated.access_token;
 }
 
+// Mail headers are ASCII. A subject with a £ in it has to be encoded (RFC 2047) or the
+// receiving client guesses an 8-bit charset and renders mojibake — the first real proactive
+// notification this account sent arrived as "Brighton room dropped below Ã‚Â£80". The BODY
+// was fine, because that part declares charset=utf-8; only the header was raw.
+//
+// An encoded-word is capped at 75 characters including the ~12 characters of wrapper, so a
+// long subject becomes several words on continuation lines. Chunking is done on code points,
+// never mid-character, since a split multi-byte sequence would corrupt exactly what this is
+// here to protect.
+const ENCODED_WORD_PAYLOAD_BYTES = 45; // multiple of 3, so each chunk base64s without padding
+
+function encodeMimeHeader(value) {
+  const text = String(value ?? '');
+  if (/^[\x20-\x7E]*$/.test(text)) return text;
+
+  const chunks = [];
+  let current = '';
+  let bytes = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char, 'utf8');
+    if (bytes + size > ENCODED_WORD_PAYLOAD_BYTES) {
+      chunks.push(current);
+      current = '';
+      bytes = 0;
+    }
+    current += char;
+    bytes += size;
+  }
+  if (current) chunks.push(current);
+
+  return chunks
+    .map(chunk => `=?UTF-8?B?${Buffer.from(chunk, 'utf8').toString('base64')}?=`)
+    .join('\r\n ');
+}
+
 function buildMime(to, subject, body, options = {}) {
-  const headers = [`To: ${to}`, `Subject: ${subject}`];
+  const headers = [
+    `To: ${to}`,
+    `Subject: ${encodeMimeHeader(subject)}`,
+    'MIME-Version: 1.0'
+  ];
   if (options.inReplyTo) headers.push(`In-Reply-To: ${options.inReplyTo}`);
   if (options.references) headers.push(`References: ${options.references}`);
-  const msg = [...headers, 'Content-Type: text/plain; charset=utf-8', '', body].join('\n');
-  return Buffer.from(msg).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const msg = [
+    ...headers,
+    'Content-Type: text/plain; charset=utf-8',
+    'Content-Transfer-Encoding: 8bit',
+    '',
+    body
+  ].join('\r\n');
+  return Buffer.from(msg, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 function decodeBase64Url(data = '') {

@@ -148,6 +148,46 @@ test('Gmail replies include threading headers in raw MIME', () => {
   assert.match(decoded, /Sounds good\./);
 });
 
+// ── Non-ASCII subjects ─────────────────────────────────────────────────────────────────
+// The first proactive notification this account ever sent arrived titled
+// "Brighton room dropped below Ã‚Â£80". Headers are ASCII; the £ was written as raw UTF-8
+// bytes and the client guessed latin-1. For a UK product every price alert hits this.
+test('a subject with a £ in it is RFC 2047 encoded, not sent as raw bytes', () => {
+  const decoded = decodeBase64Url(buildMime('a@b.com', 'Brighton room dropped below £80', 'Body.'));
+  assert.match(decoded, /^Subject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=/m);
+  assert.equal(/Subject:.*£/.test(decoded), false, 'the raw character must not survive in the header');
+
+  // And it has to decode back to exactly what was asked for.
+  const word = decoded.match(/^Subject: (.*)$/m)[1];
+  const rebuilt = word.split(/\r\n /).map(w =>
+    Buffer.from(w.replace(/^=\?UTF-8\?B\?/, '').replace(/\?=$/, ''), 'base64').toString('utf8')).join('');
+  assert.equal(rebuilt, 'Brighton room dropped below £80');
+});
+
+test('a plain ASCII subject is left exactly as it is', () => {
+  const decoded = decodeBase64Url(buildMime('a@b.com', 'Re: Plan', 'Body.'));
+  assert.match(decoded, /^Subject: Re: Plan$/m);
+});
+
+test('a long non-ASCII subject splits on character boundaries, never mid-character', () => {
+  const subject = '£10 off your essentials — ' + 'naïve café £'.repeat(8);
+  const decoded = decodeBase64Url(buildMime('a@b.com', subject, 'Body.'));
+  const word = decoded.match(/^Subject: ([\s\S]*?)\r\nMIME-Version/m)[1];
+  const rebuilt = word.split(/\r\n /).map(w =>
+    Buffer.from(w.replace(/^=\?UTF-8\?B\?/, '').replace(/\?=$/, ''), 'base64').toString('utf8')).join('');
+  assert.equal(rebuilt, subject, 'a split multi-byte character would corrupt exactly what this protects');
+  for (const w of word.split(/\r\n /)) {
+    assert.ok(w.length <= 75, `encoded-word over the RFC limit: ${w.length}`);
+  }
+});
+
+test('the body still declares utf-8 so it renders as sent', () => {
+  const decoded = decodeBase64Url(buildMime('a@b.com', 'Plain', 'Total: £74 a night.'));
+  assert.match(decoded, /Content-Type: text\/plain; charset=utf-8/);
+  assert.match(decoded, /MIME-Version: 1\.0/);
+  assert.match(decoded, /Total: £74 a night\./);
+});
+
 test('Gmail thread context includes every message body', () => {
   const text = formatThreadText([
     { from: 'A <a@example.com>', subject: 'One', date: 'today', body: 'First body' },
