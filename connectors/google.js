@@ -781,9 +781,19 @@ async function execute(userId, action, params) {
         }
         const payload = { raw: buildMime(to, subject, body, { inReplyTo, references }) };
         if (threadId) payload.threadId = threadId;
-        await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
+        const sent = await axios.post('https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
           payload, { headers, timeout: 15000 });
-        return { success: true, text: `Email sent to ${to}` };
+        // Gmail's own ids for what it accepted. These are the evidence a commitment is linked
+        // to — "the user promised this in THIS message on THIS thread" — so they have to come
+        // back from the send rather than be reconstructed afterwards.
+        return {
+          success: true,
+          messageId: sent.data?.id || null,
+          threadId: sent.data?.threadId || threadId || null,
+          to,
+          subject,
+          text: `Email sent to ${to}`
+        };
       }
 
       case 'get_emails': {

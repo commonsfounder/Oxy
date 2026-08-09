@@ -143,6 +143,100 @@ function matchesSentEvidence(commitment, evidence = {}) {
   return body.includes(action.toLowerCase()) && nounHit;
 }
 
+// ── What a real, sent email means ──────────────────────────────────────────────────────
+
+// The commitment is the SENTENCE the user wrote, not the whole email. Storing the body would
+// put a paragraph of pleasantries into a to-do list.
+function extractCommitmentSentence(text = '') {
+  return String(text || '')
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(sentence => sentence.trim())
+    .find(sentence => looksLikeCommitment(sentence)) || null;
+}
+
+// Words that say WHEN or merely glue a sentence together. They carry no information about
+// what was promised, so they must not make two different promises look alike: without this,
+// "I'll send the invoice tomorrow" and "I'll send the contract tomorrow" both reduce to
+// {will, tomorrow} and the second would be swallowed as a duplicate of the first.
+const TIME_AND_GLUE = new Set([
+  'will', 'shall', 'going', 'gonna', 'about', 'just', 'then', 'once', 'when', 'also', 'with',
+  'today', 'tonight', 'tomorrow', 'morning', 'afternoon', 'evening', 'week', 'weekend',
+  'later', 'soon', 'asap', 'first', 'thing', 'next', 'this', 'that', 'them', 'they', 'your',
+  'yours', 'over', 'across', 'back', 'straight', 'right', 'away', 'monday', 'tuesday',
+  'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
+]);
+
+// What a promise is ABOUT: the action verb, plus the meaningful words that follow it.
+// Everything before the verb is the undertaking ("I will"), which is identical across every
+// commitment and therefore useless for telling them apart.
+function commitmentSubject(text = '') {
+  const value = clean(text).toLowerCase();
+  const match = value.match(CONCRETE_ACTION);
+  if (!match) return null;
+  const object = value.slice(value.indexOf(match[0]) + match[0].length);
+  const words = object.split(/\s+/)
+    .map(word => word.replace(/[^a-z0-9]/g, ''))
+    .filter(word => word.length > 3 && !TIME_AND_GLUE.has(word) && !CONCRETE_ACTION.test(word));
+  return { action: match[0], words: new Set(words) };
+}
+
+// Two phrasings of the same promise on the same thread are one promise — this is what stops
+// an edited draft, or a retry after a transport error, from producing a second row. Matched
+// on overlap rather than equality, because a reworded draft is not word-for-word: "I will
+// send the case study tomorrow" and "Quick correction: I will send you the case study
+// tomorrow morning" are the same undertaking.
+function duplicatesExisting(sentence, open = [], { threadId = null } = {}) {
+  const candidate = commitmentSubject(sentence);
+  if (!candidate) return false;
+  return open.some(existing => {
+    if (existing.status !== 'open') return false;
+    // Same conversation, or no thread on either side to distinguish them by. Promising the
+    // same thing to someone else is a second, real obligation.
+    if (threadId && existing.thread_id && existing.thread_id !== threadId) return false;
+    const other = commitmentSubject(existing.what);
+    if (!other || other.action !== candidate.action) return false;
+    // Nothing specific on either side: same verb on the same thread is as much as we know.
+    if (!candidate.words.size && !other.words.size) return true;
+    return [...candidate.words].some(word => other.words.has(word));
+  });
+}
+
+// The whole point of this module, finally connected to something real: given an email that
+// was ACTUALLY SENT (approved by the user, accepted by Gmail) and the commitments currently
+// open, decide what to record and what to close.
+//
+// Pure on purpose — every judgement about a real-world obligation is testable without a
+// mailbox. The caller is responsible for only invoking this on a send that genuinely
+// succeeded; a draft, a queued message, or a failed attempt must never reach here.
+function reconcileSentEmail({ sent = {}, open = [], now = new Date(), timeZone = process.env.TIMEZONE || 'Europe/London' } = {}) {
+  const body = String(sent.body || '');
+  const evidence = {
+    to: sent.to, subject: sent.subject, body, threadId: sent.threadId
+  };
+
+  // Closing comes first: an email that discharges a promise is evidence about that promise.
+  const resolves = open.filter(commitment => matchesSentEvidence(commitment, evidence));
+
+  // Capturing is independent — "here's the case study, and I'll send the deck Friday"
+  // both closes one thing and opens another.
+  const sentence = extractCommitmentSentence(body);
+  let capture = null;
+  if (sentence && !duplicatesExisting(sentence, open, { threadId: sent.threadId })) {
+    const due = extractDueDate(sentence, now, timeZone);
+    capture = {
+      what: clean(sentence),
+      dueAt: due.dueAt,
+      dueIsDateOnly: due.dateOnly,
+      threadId: sent.threadId || null,
+      personEmail: sent.to || null,
+      source: 'sent_email',
+      sourceRef: { messageId: sent.messageId || null, threadId: sent.threadId || null, subject: sent.subject || null }
+    };
+  }
+
+  return { capture, resolves };
+}
+
 // ── Formatting ─────────────────────────────────────────────────────────────────────────
 
 function describeDue(commitment, now = new Date(), timeZone = process.env.TIMEZONE || 'Europe/London') {
@@ -195,6 +289,9 @@ module.exports = {
   isOverdue,
   isDueToday,
   matchesSentEvidence,
+  extractCommitmentSentence,
+  commitmentSubject,
+  reconcileSentEmail,
   describeDue,
   describeCommitment,
   sortCommitments,

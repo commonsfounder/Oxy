@@ -7,7 +7,8 @@ const test = require('node:test');
 
 const {
   looksLikeCommitment, extractDueDate, isOverdue, isDueToday,
-  matchesSentEvidence, describeDue, sortCommitments, formatCommitmentList
+  matchesSentEvidence, describeDue, sortCommitments, formatCommitmentList,
+  reconcileSentEmail
 } = require('../../api/services/commitments');
 const { normalizeCommitmentItem, buildDailyDigest } = require('../../api/services/daily-digest');
 
@@ -131,6 +132,138 @@ test('an already-resolved commitment cannot be re-resolved by evidence', () => {
   assert.equal(matchesSentEvidence({ ...SEND_DOCS, status: 'done' }, {
     threadId: 'thr-1', body: 'send the documents'
   }), false);
+});
+
+// ── Reconciling a real, sent email ─────────────────────────────────────────────────────
+// looksLikeCommitment and matchesSentEvidence were correct and unit-tested for a while
+// without being called from anywhere: nothing captured a promise from a message the user
+// actually sent, and nothing ever closed one. This is that seam.
+test('a reply the user approved and sent captures the promise it contains', () => {
+  const { capture, resolves } = reconcileSentEmail({
+    sent: {
+      to: 'mia@example.com', subject: 'Re: Case study', threadId: 'thr-9', messageId: 'msg-1',
+      body: 'Thanks for chasing. I will send the case study tomorrow, first thing.'
+    },
+    open: [],
+    now: NOW
+  });
+  assert.equal(resolves.length, 0);
+  assert.ok(capture, 'a promise in a sent message is a promise');
+  assert.equal(capture.what, 'I will send the case study tomorrow, first thing.');
+  assert.equal(capture.threadId, 'thr-9');
+  assert.equal(capture.personEmail, 'mia@example.com');
+  assert.equal(capture.source, 'sent_email');
+  assert.equal(capture.sourceRef.messageId, 'msg-1');
+  assert.equal(capture.dueIsDateOnly, true);
+});
+
+test('the commitment stored is the sentence, not the whole email', () => {
+  const { capture } = reconcileSentEmail({
+    sent: {
+      to: 'mia@example.com', threadId: 't', body:
+        'Hi Mia, lovely to meet you last week and thanks again for the introduction. ' +
+        'I will send the case study tomorrow. ' +
+        'Hope the rest of your week goes well.'
+    },
+    open: [], now: NOW
+  });
+  assert.equal(capture.what, 'I will send the case study tomorrow.');
+});
+
+test('a hedge in a sent email is still not a commitment', () => {
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', body: "I'll try to get the case study over to you this week." },
+    open: [], now: NOW
+  });
+  assert.equal(capture, null);
+});
+
+test('editing the draft and sending again does not create a second commitment', () => {
+  const open = [{
+    id: 'c1', status: 'open', thread_id: 'thr-9', what: 'I will send the case study tomorrow'
+  }];
+  const { capture } = reconcileSentEmail({
+    sent: {
+      to: 'mia@example.com', threadId: 'thr-9',
+      // Reworded, same promise — a retry or an edited draft.
+      body: 'Quick correction: I will send you the case study tomorrow morning.'
+    },
+    open, now: NOW
+  });
+  assert.equal(capture, null, 'the same promise on the same thread is one promise');
+});
+
+test('promising a DIFFERENT thing on the same thread is a second commitment', () => {
+  // The trap in overlap matching: "tomorrow" and "will" are in every promise ever made, so
+  // matching on them would swallow a genuinely new obligation.
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', what: 'I will send the invoice tomorrow' }];
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', threadId: 'thr-9', body: 'I will send the contract tomorrow.' },
+    open, now: NOW
+  });
+  assert.ok(capture, 'a different document is a different promise');
+  assert.match(capture.what, /contract/);
+});
+
+test('the same words to a DIFFERENT thread are a different promise', () => {
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', what: 'I will send the case study tomorrow' }];
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'ben@example.com', threadId: 'thr-77', body: 'I will send the case study tomorrow.' },
+    open, now: NOW
+  });
+  assert.ok(capture, 'promising the same thing to someone else is a second obligation');
+});
+
+test('actually sending the thing closes the commitment', () => {
+  const open = [{
+    id: 'c1', status: 'open', thread_id: 'thr-9', person_name: 'Mia',
+    what: 'I will send the case study tomorrow'
+  }];
+  const { resolves } = reconcileSentEmail({
+    sent: {
+      to: 'mia@example.com', threadId: 'thr-9', messageId: 'msg-2',
+      subject: 'Case study', body: 'Here it is — sending the case study across now as promised.'
+    },
+    open, now: NOW
+  });
+  assert.deepEqual(resolves.map(r => r.id), ['c1']);
+});
+
+test('the recipient saying thanks does not close anything', () => {
+  // Not evidence the work happened. This is the failure the whole module is shaped to avoid.
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', person_name: 'Mia', what: 'I will send the case study tomorrow' }];
+  const { resolves } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', threadId: 'thr-9', subject: 'Re: Case study', body: 'No problem at all, thanks!' },
+    open, now: NOW
+  });
+  assert.equal(resolves.length, 0);
+});
+
+test('one email can close one promise and open another', () => {
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', person_name: 'Mia', what: 'I will send the case study tomorrow' }];
+  const { capture, resolves } = reconcileSentEmail({
+    sent: {
+      to: 'mia@example.com', threadId: 'thr-9',
+      subject: 'Case study',
+      body: 'Sending the case study now. I will also share the deck on Friday.'
+    },
+    open, now: NOW
+  });
+  assert.deepEqual(resolves.map(r => r.id), ['c1']);
+  assert.ok(capture);
+  assert.match(capture.what, /share the deck on Friday/);
+});
+
+test('a promise made near midnight is due on the right local day', () => {
+  // The UTC-vs-local boundary that previously made "tomorrow" read as "due today".
+  const lateEvening = new Date('2026-08-09T23:30:00Z');
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', body: 'I will send the case study tomorrow.' },
+    open: [], now: lateEvening, timeZone: 'Europe/London'
+  });
+  assert.equal(isDueToday(
+    { status: 'open', due_at: capture.dueAt.toISOString() }, lateEvening, 'Europe/London'
+  ), false, 'a promise for tomorrow is not already due today');
 });
 
 // ── Presentation ───────────────────────────────────────────────────────────────────────

@@ -2732,6 +2732,62 @@ function resolveNativeMessageContact(contact, nativeHints) {
   };
 }
 
+// Files a genuinely-sent email against the user's open commitments: records the promise it
+// contains, and closes any promise it discharges.
+//
+// The evidence rules live in api/services/commitments.js and are deliberately strict. What
+// this function adds is the part that cannot be pure: resolving the recipient to a real
+// person, and writing the result down. It is only ever called after Gmail accepted the send.
+async function reconcileCommitmentsForSentEmail(userId, sent) {
+  const { data: open } = await supabase.from('commitments')
+    .select('*').eq('user_id', userId).eq('status', 'open');
+
+  const { capture, resolves } = commitments.reconcileSentEmail({ sent, open: open || [], now: new Date() });
+
+  const resolved = [];
+  for (const commitment of resolves) {
+    const { data } = await supabase.from('commitments').update({
+      status: 'done',
+      resolved_at: new Date().toISOString(),
+      // Named so a later reader can tell WHY this closed. "The user said so" and "we watched
+      // them send it" are different degrees of certainty and should not look alike.
+      resolved_by: 'sent_email',
+      source_ref: { ...(commitment.source_ref || {}), resolvedByMessageId: sent.messageId || null },
+      updated_at: new Date().toISOString()
+    }).eq('id', commitment.id).eq('user_id', userId).select('*').single();
+    if (data) resolved.push(data);
+  }
+
+  let captured = null;
+  if (capture) {
+    let participantId = null;
+    let personName = null;
+    if (capture.personEmail) {
+      const person = await people.resolvePerson(supabase, userId, { email: capture.personEmail }).catch(() => null);
+      if (person?.person) {
+        participantId = person.person.id;
+        personName = person.person.display_name || person.person.name || null;
+      }
+    }
+    const { data } = await supabase.from('commitments').insert({
+      user_id: userId,
+      what: capture.what,
+      participant_id: participantId,
+      person_name: personName || capture.personEmail || null,
+      due_at: capture.dueAt ? capture.dueAt.toISOString() : null,
+      due_is_date_only: capture.dueIsDateOnly,
+      status: 'open',
+      source: capture.source,
+      source_ref: capture.sourceRef,
+      thread_id: capture.threadId,
+      updated_at: new Date().toISOString()
+    }).select('*').single();
+    captured = data || null;
+  }
+
+  return { captured, resolved };
+}
+
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
@@ -4524,6 +4580,35 @@ async function executeAction(userId, action, params, context = {}) {
         success: true, eventId: target.id,
         text: `Moved "${target.title}" to ${scheduling.describeSlot({ start, end })}.`
       };
+    }
+
+    // Sending is where a promise becomes real. Everything about commitments used to depend on
+    // the user separately telling Millie "track this" — looksLikeCommitment and
+    // matchesSentEvidence existed, were unit-tested, and were called from nowhere. So the
+    // send is intercepted here: the message goes out first, and only a send Gmail actually
+    // accepted is allowed to change what the user is on the hook for.
+    case 'send_email': {
+      const result = await dispatch(userId, 'send_email', enrichedParams);
+      // A failed send promises nothing and discharges nothing. This is the rule that stops
+      // "I tried to send it" from ever reading as done.
+      if (!result?.success) return result;
+
+      try {
+        const bookkeeping = await reconcileCommitmentsForSentEmail(userId, {
+          to: result.to || enrichedParams?.to || enrichedParams?.email || enrichedParams?.recipient,
+          subject: result.subject || enrichedParams?.subject,
+          body: enrichedParams?.body || enrichedParams?.message || enrichedParams?.content,
+          threadId: result.threadId,
+          messageId: result.messageId
+        });
+        if (bookkeeping.captured) result.commitmentCaptured = bookkeeping.captured;
+        if (bookkeeping.resolved.length) result.commitmentsResolved = bookkeeping.resolved;
+      } catch (err) {
+        // The email really did go. Failing to file it must not turn a successful send into a
+        // reported failure.
+        console.warn('[commitments] post-send bookkeeping failed:', err.message);
+      }
+      return result;
     }
 
     // ── Commitments ───────────────────────────────────────────────────────────────────
