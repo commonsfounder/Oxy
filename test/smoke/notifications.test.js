@@ -199,6 +199,50 @@ test('three alerts about one parcel collapse into the one that says what happene
   assert.equal(kept[0].id, '2');
 });
 
+// ── The digest wins over a separate alert about the same thing ─────────────────────────
+test('a commitment already named in the digest does not also arrive on its own', () => {
+  const kept = collapseRelated([
+    {
+      id: 'digest', category: 'digest', title: 'Two things need you today',
+      body: '...', dedupe_key: 'digest|day:2026-08-09',
+      source_ref: { covers: ['commitment:c1', 'thread:t9'] }
+    },
+    {
+      id: 'commit', category: 'commitment', title: 'Send Mia the case study',
+      body: 'Due today.', dedupe_key: 'commitment|commitment:c1',
+      source_ref: { commitmentId: 'c1' }
+    }
+  ]);
+  assert.deepEqual(kept.map(k => k.id), ['digest'],
+    'the same sentence twice in one morning is what makes proactive software feel like nagging');
+});
+
+test('a thing the digest does NOT mention still gets its own notification', () => {
+  const kept = collapseRelated([
+    { id: 'digest', category: 'digest', title: 'One thing needs you today', body: '', dedupe_key: 'd', source_ref: { covers: ['commitment:c1'] } },
+    { id: 'other', category: 'commitment', title: 'Pay the invoice', body: '', dedupe_key: 'o', source_ref: { commitmentId: 'c2' } }
+  ]);
+  assert.deepEqual(kept.map(k => k.id).sort(), ['digest', 'other']);
+});
+
+test('a digest ALREADY SENT this morning still speaks for what it covered', () => {
+  // The duplicate that survived the first version of this rule: the digest had already been
+  // delivered, so it was no longer in the pending set, and the commitment alert raised an
+  // hour later went out on its own repeating a line the user had read at breakfast.
+  const kept = collapseRelated(
+    [{ id: 'commit', category: 'commitment', title: 'Send the board pack', body: '', dedupe_key: 'c', source_ref: { commitmentId: 'c1' } }],
+    { alreadyCovered: ['commitment:c1'] }
+  );
+  assert.deepEqual(kept, [], 'which duplicate you get must not depend on sweep timing');
+});
+
+test('with no digest pending, everything is judged on its own merits', () => {
+  const kept = collapseRelated([
+    { id: 'commit', category: 'commitment', title: 'Send Mia the case study', body: '', dedupe_key: 'c', source_ref: { commitmentId: 'c1' } }
+  ]);
+  assert.deepEqual(kept.map(k => k.id), ['commit']);
+});
+
 test('unrelated notifications are not collapsed together', () => {
   const kept = collapseRelated([
     { id: '1', title: 'Parcel', body: '', dedupe_key: 'a', source_ref: { scheduledTaskId: 'w1' } },
@@ -221,6 +265,7 @@ function runtimeWith(overrides = {}) {
         eq(col, val) { api._filters[col] = val; return api; },
         in() { return api; },
         or() { return api; },
+        gte() { api._gte = true; return api; },
         order() { return api; },
         limit() { return api; },
         maybeSingle() {
@@ -243,6 +288,13 @@ function runtimeWith(overrides = {}) {
               if (row) Object.assign(row, api._update);
             }
             return Promise.resolve({ data: [], error: null }).then(resolve);
+          }
+          // The lookback for digests already delivered today.
+          if (api._gte) {
+            return Promise.resolve({
+              data: [...rows.values()].filter(r => r.category === 'digest' && r.status === 'delivered'),
+              error: null
+            }).then(resolve);
           }
           // The sweep's list query: everything still owed to this user. Without this the
           // fake answered "nothing pending" and deliverPending could never be exercised.

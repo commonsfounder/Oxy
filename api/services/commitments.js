@@ -135,23 +135,42 @@ function matchesSentEvidence(commitment, evidence = {}) {
 
   // The action word has to actually appear in what was sent, so replying "thanks" on the
   // thread does not close "send the documents".
-  const action = (clean(commitment.what).match(CONCRETE_ACTION) || [])[0];
-  if (!action) return false;
+  const subject = commitmentSubject(commitment.what);
+  if (!subject) return false;
   const body = `${evidence.subject || ''} ${evidence.body || ''}`.toLowerCase();
-  const nouns = clean(commitment.what).toLowerCase().split(/\s+/).filter(w => w.length > 3 && !CONCRETE_ACTION.test(w));
-  const nounHit = nouns.length === 0 || nouns.some(noun => body.includes(noun));
-  return body.includes(action.toLowerCase()) && nounHit;
+  if (!body.includes(subject.action.toLowerCase())) return false;
+
+  // And it has to be about the same THING. This used to accept any word over three letters
+  // from the commitment, which meant "today", "before" and "play" all counted — so on a live
+  // thread "I will send the revised slides today" closed "send the board pack today, before
+  // end of play". Matching now runs on the promise's subject words, which exclude the timing
+  // and glue vocabulary that every promise shares.
+  if (!subject.words.size) return true;
+  return [...subject.words].some(word => body.includes(word));
 }
 
 // ── What a real, sent email means ──────────────────────────────────────────────────────
 
-// The commitment is the SENTENCE the user wrote, not the whole email. Storing the body would
-// put a paragraph of pleasantries into a to-do list.
+// The commitment is what was PROMISED, not the whole email and not the whole sentence.
+//
+// Two trims matter. Storing the body would put a paragraph of pleasantries into a to-do list.
+// And storing the sentence verbatim keeps the undertaking in it — "I will send the board pack
+// today" — which then reads back through the digest's own phrasing as "You told Mia you'd
+// I will send the board pack today". Everything downstream already supplies the "you'd", so
+// what is stored is the action: "send the board pack today".
 function extractCommitmentSentence(text = '') {
-  return String(text || '')
+  const sentence = String(text || '')
     .split(/(?<=[.!?])\s+|\n+/)
-    .map(sentence => sentence.trim())
-    .find(sentence => looksLikeCommitment(sentence)) || null;
+    .map(part => part.trim())
+    .find(part => looksLikeCommitment(part));
+  if (!sentence) return null;
+
+  const undertaking = sentence.match(UNDERTAKING);
+  if (!undertaking) return clean(sentence);
+  // Drops the preamble before the promise ("One more thing — ") along with the undertaking.
+  const action = sentence.slice(sentence.indexOf(undertaking[0]) + undertaking[0].length);
+  const trimmed = action.replace(/^[\s,:—–-]+/, '').replace(/^(also|then|just|please)\b[\s,]*/i, '').trim();
+  return clean(trimmed || sentence);
 }
 
 // Words that say WHEN or merely glue a sentence together. They carry no information about
@@ -163,7 +182,10 @@ const TIME_AND_GLUE = new Set([
   'today', 'tonight', 'tomorrow', 'morning', 'afternoon', 'evening', 'week', 'weekend',
   'later', 'soon', 'asap', 'first', 'thing', 'next', 'this', 'that', 'them', 'they', 'your',
   'yours', 'over', 'across', 'back', 'straight', 'right', 'away', 'monday', 'tuesday',
-  'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
+  'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  // Politeness and idiom. "end of play" put "play" in the subject of a board-pack promise.
+  'before', 'after', 'around', 'play', 'again', 'still', 'quick', 'quickly', 'sorry',
+  'really', 'please', 'thanks', 'anything', 'something', 'everything', 'promised'
 ]);
 
 // What a promise is ABOUT: the action verb, plus the meaningful words that follow it.

@@ -148,11 +148,43 @@ function resolveDelivery({ event, prefs = {}, available = [], now = new Date(), 
 
 // ── Related-event collapsing ───────────────────────────────────────────────────────────
 
+// Everything a pending event is "about", in the same vocabulary the digest uses to say what
+// it already covers.
+function subjectsOf(event = {}) {
+  const ref = event.source_ref || {};
+  const subjects = [];
+  if (ref.commitmentId) subjects.push(`commitment:${ref.commitmentId}`);
+  if (ref.scheduledTaskId) subjects.push(`task:${ref.scheduledTaskId}`);
+  if (ref.threadId) subjects.push(`thread:${ref.threadId}`);
+  return subjects;
+}
+
 // "Parcel changed", "watch triggered" and "out for delivery" are one thing that happened.
 // Collapses pending events that share a subject, keeping the most specific body.
-function collapseRelated(events = []) {
-  const bySubject = new Map();
+//
+// The digest gets a second, stronger rule: it is a single message that already names several
+// things, so anything else waiting to be sent about one of those things is folded into it.
+// Otherwise a commitment due today arrives once as its own alert and again inside the
+// morning digest — the same sentence, twice, which is exactly what makes proactive software
+// feel like nagging.
+// `alreadyCovered` carries the subjects of digests that have ALREADY been sent today. Without
+// it the fold only worked when the digest happened to still be pending in the same sweep: a
+// commitment alert raised an hour after the morning digest went out was delivered on its own,
+// repeating a line the user had already read. Which duplicate you get should not depend on
+// sweep timing.
+function collapseRelated(events = [], { alreadyCovered = [] } = {}) {
+  const coveredByDigest = new Set(alreadyCovered);
   for (const event of events) {
+    if (normalizeCategory(event.category) !== 'digest') continue;
+    for (const subject of event.source_ref?.covers || []) coveredByDigest.add(subject);
+  }
+  const remaining = coveredByDigest.size
+    ? events.filter(event => normalizeCategory(event.category) === 'digest' ||
+        !subjectsOf(event).some(subject => coveredByDigest.has(subject)))
+    : events;
+
+  const bySubject = new Map();
+  for (const event of remaining) {
     const subject = event.source_ref?.scheduledTaskId || event.source_ref?.threadId || event.dedupe_key;
     const existing = bySubject.get(subject);
     if (!existing) { bySubject.set(subject, event); continue; }
@@ -203,6 +235,7 @@ module.exports = {
   inQuietHours,
   resolveDelivery,
   collapseRelated,
+  subjectsOf,
   formatNotificationEmail,
   describePreference
 };

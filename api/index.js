@@ -8317,6 +8317,29 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
     if (emailNudges) summary.briefings += emailNudges.count || 0;
     if (calendarNudges) summary.briefings += calendarNudges.count || 0;
 
+    // The digest is the one proactive message that is genuinely worth sending unprompted, and
+    // it was the one thing never raised as a notification — it existed only as a card the
+    // user had to open the app to find. Raised once per LOCAL day (the dedupe key carries the
+    // date), so re-running the sweep all morning re-words it rather than re-sending it, and
+    // it declares what it covers so a separate alert about the same commitment folds into it.
+    try {
+      const digest = await executeAction(userId, 'daily_digest', {});
+      const shaped = digest?.success ? dailyDigest.formatDigestNotification(digest) : null;
+      if (shaped) {
+        await notificationDelivery.raise(userId, {
+          category: 'digest',
+          urgency: notifications.gradeUrgency({ category: 'digest' }),
+          title: shaped.title,
+          body: shaped.body,
+          dedupeKey: notifications.dedupeKeyFor({ category: 'digest', dateKey: getLocalDateKey(now) }),
+          sourceRef: { covers: dailyDigest.digestCovers(digest), digestDate: getLocalDateKey(now) }
+        });
+        summary.digestsRaised = (summary.digestsRaised || 0) + 1;
+      }
+    } catch (error) {
+      logger.warn?.(`[digest] could not raise the daily digest for ${userId}: ${error.message}`);
+    }
+
     // For money-making persistent tasks, proactively advance or report using account
     try {
       const tasks = await taskManager.listTasks(userId, null);

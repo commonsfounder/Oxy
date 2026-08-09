@@ -54,9 +54,19 @@ function clean(value, max = 200) {
 }
 
 function firstName(value) {
-  const name = clean(value, 80);
-  if (!name || name.includes('@')) return name;
+  const name = displayPerson(value);
+  if (!name) return name;
   return name.split(' ')[0];
+}
+
+// A commitment captured from a sent email records the recipient's ADDRESS, because that is
+// what the mailbox gave us and what later evidence is matched against. Reading it back at the
+// user as "You told chizigamonyewuchi@gmail.com you'd send the board pack" is nobody's idea
+// of a useful sentence, so the local part is used for display while the row keeps the address.
+function displayPerson(value) {
+  const name = clean(value, 80);
+  if (!name.includes('@')) return name;
+  return clean(name.split('@')[0].replace(/[._+-]+/g, ' '), 60);
 }
 
 function daysBetween(from, to) {
@@ -219,7 +229,7 @@ function normalizeCommitmentItem(commitment = {}, now = new Date()) {
   // A promise with no date, or one due next week, is not on TODAY's plate.
   if (!overdue && !dueToday) return null;
 
-  const person = clean(commitment.person_name, 60);
+  const person = displayPerson(commitment.person_name);
   return {
     id: `commitment:${commitment.id || commitment.what}`,
     kind: 'commitment',
@@ -381,8 +391,58 @@ function formatDigest(items = [], { focus = 'all', coverage = {}, hidden = 0 } =
   return `${body}${more}${gaps}`;
 }
 
+const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function countWord(n) { return COUNT_WORDS[n] || String(n); }
+
+// The digest as something a person would want to receive, rather than the in-app card text.
+// The distinction matters: an outbound message arrives with no surrounding interface, so it
+// has to say what it is, lead with what actually needs doing, and be skimmable. Returns null
+// when there is nothing worth interrupting someone for — an empty digest is a fine thing to
+// see in the app and a bad thing to be emailed.
+function formatDigestNotification(digest = {}) {
+  const items = digest.items || [];
+  if (!items.length) return null;
+
+  const pressing = items.filter(item => item.urgency === 'now' || item.urgency === 'today');
+  const later = items.filter(item => item.urgency === 'soon');
+  const lead = pressing.length ? pressing : items;
+
+  const count = countWord(lead.length);
+  const title = lead.length === 1
+    ? 'One thing needs you today'
+    : `${count.charAt(0).toUpperCase()}${count.slice(1)} things need you today`;
+
+  const lines = lead.map(item => `• ${item.detail}`);
+  if (pressing.length && later.length) {
+    lines.push('');
+    lines.push(`When you get a chance: ${later.map(item => item.title).join('; ')}.`);
+  }
+  if (digest.hidden > 0) lines.push(`(+${digest.hidden} more in the app.)`);
+
+  const gaps = describeGaps(digest.coverage || {}).trim();
+  if (gaps) lines.push(gaps);
+
+  return { title, body: lines.join('\n') };
+}
+
+// What this digest has already told the user about, so a separate alert about the same thing
+// can be folded into it rather than arriving twice. Keyed the same way the notification
+// runtime keys its own subjects.
+function digestCovers(digest = {}) {
+  const covers = [];
+  for (const item of digest.items || []) {
+    const ref = item.ref || {};
+    if (ref.commitmentId) covers.push(`commitment:${ref.commitmentId}`);
+    if (ref.scheduledTaskId) covers.push(`task:${ref.scheduledTaskId}`);
+    if (ref.threadId) covers.push(`thread:${ref.threadId}`);
+  }
+  return [...new Set(covers)];
+}
+
 module.exports = {
   DIGEST_MARKER,
+  formatDigestNotification,
+  digestCovers,
   CALENDAR_HORIZON_HOURS,
   OCCASION_HORIZON_DAYS,
   WATCH_UPDATE_MAX_AGE_HOURS,

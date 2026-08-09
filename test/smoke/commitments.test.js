@@ -122,6 +122,18 @@ test('a vaguely-related reply on the same thread is NOT evidence', () => {
   }), true, 'the action and subject both appear — the model still decides, this only gates it');
 });
 
+test('a different promise on the same thread does not close the first one', () => {
+  // Caught live: "I will send the revised slides today" closed "send the board pack today,
+  // before end of play", because today/before/play were all treated as meaningful terms.
+  const boardPack = { status: 'open', what: 'send the board pack today, before end of play', thread_id: 'thr-1', person_name: 'Mia' };
+  assert.equal(matchesSentEvidence(boardPack, {
+    threadId: 'thr-1', subject: 'Slides', body: 'Also — I will send the revised slides today, before end of play.'
+  }), false, 'slides are not a board pack');
+  assert.equal(matchesSentEvidence(boardPack, {
+    threadId: 'thr-1', subject: 'Board pack', body: 'Sending the board pack across now.'
+  }), true, 'the real thing still closes it');
+});
+
 test('a message to someone else does not close a commitment made to Mia', () => {
   assert.equal(matchesSentEvidence(SEND_DOCS, {
     threadId: 'other', to: 'ben@example.com', subject: 'Documents', body: 'Sending the documents.'
@@ -149,7 +161,9 @@ test('a reply the user approved and sent captures the promise it contains', () =
   });
   assert.equal(resolves.length, 0);
   assert.ok(capture, 'a promise in a sent message is a promise');
-  assert.equal(capture.what, 'I will send the case study tomorrow, first thing.');
+  // The undertaking is stripped: everything downstream already supplies the "you'd", so
+  // storing "I will send…" reads back as "You told Mia you'd I will send…".
+  assert.equal(capture.what, 'send the case study tomorrow, first thing.');
   assert.equal(capture.threadId, 'thr-9');
   assert.equal(capture.personEmail, 'mia@example.com');
   assert.equal(capture.source, 'sent_email');
@@ -157,7 +171,7 @@ test('a reply the user approved and sent captures the promise it contains', () =
   assert.equal(capture.dueIsDateOnly, true);
 });
 
-test('the commitment stored is the sentence, not the whole email', () => {
+test('the commitment stored is the promise, not the whole email', () => {
   const { capture } = reconcileSentEmail({
     sent: {
       to: 'mia@example.com', threadId: 't', body:
@@ -167,7 +181,17 @@ test('the commitment stored is the sentence, not the whole email', () => {
     },
     open: [], now: NOW
   });
-  assert.equal(capture.what, 'I will send the case study tomorrow.');
+  assert.equal(capture.what, 'send the case study tomorrow.');
+});
+
+test('preamble before the promise is dropped along with the undertaking', () => {
+  // Real capture from the live mailbox produced "One more thing — I will send the board pack
+  // today", which the digest rendered as "You told Mia you'd One more thing — I will send…".
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', body: 'One more thing — I will send the board pack today, before end of play.' },
+    open: [], now: NOW
+  });
+  assert.equal(capture.what, 'send the board pack today, before end of play.');
 });
 
 test('a hedge in a sent email is still not a commitment', () => {

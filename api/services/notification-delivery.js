@@ -202,7 +202,17 @@ function createDeliveryRuntime({
       .limit(limit);
     if (error) return { ok: false, error: error.message };
 
-    const events = notifications.collapseRelated(rows || []);
+    // Digests already sent today still speak for what they covered — see collapseRelated.
+    const since = new Date(now().getTime() - 24 * 3600000).toISOString();
+    const { data: sentDigests } = await supabase.from('notification_events')
+      .select('source_ref')
+      .eq('user_id', userId)
+      .eq('category', 'digest')
+      .eq('status', 'delivered')
+      .gte('delivered_at', since);
+    const alreadyCovered = (sentDigests || []).flatMap(row => row.source_ref?.covers || []);
+
+    const events = notifications.collapseRelated(rows || [], { alreadyCovered });
     const collapsed = (rows || []).filter(row => !events.some(kept => kept.id === row.id));
     for (const dropped of collapsed) {
       await supabase.from('notification_events').update({

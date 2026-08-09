@@ -11,8 +11,58 @@ const {
   normalizeOccasionItem,
   normalizeReminderItem,
   normalizeWatchUpdate,
+  formatDigestNotification,
+  digestCovers,
   DIGEST_MARKER
 } = require('../../api/services/daily-digest');
+
+// ── The digest as an outbound message ──────────────────────────────────────────────────
+// An outbound message arrives with no surrounding interface, so it has to say what it is and
+// lead with what actually needs doing. "commitment_due event triggered" is not that.
+test('the outbound digest reads like an assistant, not an event log', () => {
+  const shaped = formatDigestNotification({
+    items: [
+      { urgency: 'today', title: 'Send Mia the case study', detail: "Send Mia the case study — you told her you'd send it today", ref: { commitmentId: 'c1' } },
+      { urgency: 'now', title: 'Interview', detail: 'Interview at 2pm', ref: {} }
+    ],
+    hidden: 0,
+    coverage: {}
+  });
+  assert.equal(shaped.title, 'Two things need you today');
+  assert.match(shaped.body, /^• /m);
+  assert.match(shaped.body, /you told her you'd send it today/);
+  assert.equal(/event triggered|commitment_due/i.test(shaped.body), false);
+});
+
+test('one item reads as one item', () => {
+  const shaped = formatDigestNotification({ items: [{ urgency: 'today', title: 'Pay the invoice', detail: 'Pay the invoice — due today', ref: {} }] });
+  assert.equal(shaped.title, 'One thing needs you today');
+});
+
+test('an empty digest is not something to interrupt someone with', () => {
+  // Fine to see in the app; a bad thing to be emailed.
+  assert.equal(formatDigestNotification({ items: [] }), null);
+  assert.equal(formatDigestNotification({}), null);
+});
+
+test('the outbound digest still admits what it could not check', () => {
+  const shaped = formatDigestNotification({
+    items: [{ urgency: 'today', title: 'A thing', detail: 'A thing — due today', ref: {} }],
+    coverage: { gmail: { ok: false, reason: 'the mailbox was unreachable' } }
+  });
+  assert.match(shaped.body, /could not check gmail/i);
+});
+
+test('the digest declares what it covers so nothing arrives twice', () => {
+  const covers = digestCovers({
+    items: [
+      { ref: { commitmentId: 'c1' } },
+      { ref: { scheduledTaskId: 'w7', threadId: 't3' } },
+      { ref: {} }
+    ]
+  });
+  assert.deepEqual(covers.sort(), ['commitment:c1', 'task:w7', 'thread:t3']);
+});
 
 const NOW = new Date('2026-08-08T08:00:00.000Z');
 
