@@ -5,9 +5,11 @@
 // is idempotent and safe to call repeatedly — ensureMillieIdentity always returns
 // the existing identity/handles if they're already there, never duplicates them.
 //
-// Phone provisioning can fail (Twilio not configured, no numbers available in the
+// Phone provisioning can fail (no provider configured, no numbers available in the
 // user's region, etc.) without blocking email provisioning or user signup — each
-// channel is attempted and recorded independently.
+// channel is attempted and recorded independently. The phone vendor is not baked in
+// here: provisioning is injected, and the resulting handle records which provider
+// issued the number (see connectors/phone-provider.js).
 
 function normalizeUserIdForAddress(userId) {
   return String(userId || '')
@@ -62,7 +64,10 @@ async function ensurePhoneHandle(supabase, identityId, userId, provisionPhoneNum
       millie_identity_id: identityId,
       channel_type: 'phone_sms',
       handle_value: provisioned.phoneNumber,
-      provider: 'twilio',
+      // Recorded from the provisioning result, never hardcoded: this row is what tells a
+      // later send which vendor actually owns this number. Hardcoding it would strand
+      // every existing number the day MILLIE_PHONE_PROVIDER changes.
+      provider: provisioned.provider || 'twilio',
       provider_ref: provisioned.providerRef || null,
       status: 'active'
     }).select().single();

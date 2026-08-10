@@ -493,11 +493,24 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
   }
 });
 
-app.post('/webhooks/millie-sms', express.urlencoded({ extended: false }), async (req, res) => {
-  res.status(200).send('<Response></Response>'); // Twilio expects TwiML or empty 200
+// The optional :provider segment exists for migrations. Numbers already in the field keep
+// posting to whichever URL they were provisioned with, so during a vendor switch the old
+// provider's numbers can be pointed at /webhooks/millie-sms/twilio while new ones use the
+// bare path. With one provider configured, the bare path is all that's used.
+app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.urlencoded({ extended: false }), async (req, res) => {
+  const { parseInboundSms, inboundAck } = require('../connectors/phone-provider');
+  const providerName = req.params?.provider || undefined;
   try {
-    const { parseInboundSmsPayload } = require('../connectors/millie-sms-twilio');
-    const normalized = parseInboundSmsPayload(req.body);
+    const ack = inboundAck(providerName);
+    res.status(200).type(ack.contentType).send(ack.body);
+  } catch {
+    // An unrecognised provider in the URL must not leave the caller hanging.
+    res.status(200).send('');
+    log('warn', 'millie_sms.inbound.unknown_provider', { provider: providerName });
+    return;
+  }
+  try {
+    const normalized = parseInboundSms(req.body, providerName);
     if (!normalized?.toAddress || !normalized.fromAddress) return;
 
     const { data: handles } = await supabase
@@ -2948,7 +2961,7 @@ async function executeAction(userId, action, params, context = {}) {
       const { ensureMillieIdentity, getActiveHandle } = require('./services/millie-identity');
       const { findOrCreateParticipant } = require('./services/participants');
       const { getOrCreateConversation, appendEvent } = require('./services/external-conversations');
-      const { sendMillieSms } = require('../connectors/millie-sms-twilio');
+      const { sendSms } = require('../connectors/phone-provider');
 
       const cap = await checkMillieSendCap(userId, 'phone_sms');
       if (!cap.allowed) return { success: false, error: cap.message };
@@ -2967,7 +2980,9 @@ async function executeAction(userId, action, params, context = {}) {
 
       let sendResult;
       try {
-        sendResult = await sendMillieSms({ from: phoneHandle.handle_value, to, body });
+        // Driven by the provider that issued this number, not by whatever
+        // MILLIE_PHONE_PROVIDER currently says.
+        sendResult = await sendSms({ from: phoneHandle.handle_value, to, body, provider: phoneHandle.provider });
       } catch (err) {
         return { success: false, error: `Couldn't send that: ${err.message}` };
       }
@@ -6407,7 +6422,7 @@ app.post('/millie/provision', async (req, res) => {
     const { userId } = req.body || {};
     if (!requireMatchingUser(req, res, userId)) return;
     const { ensureMillieIdentity } = require('./services/millie-identity');
-    const { provisionPhoneNumber } = require('../connectors/millie-sms-twilio');
+    const { provisionPhoneNumber } = require('../connectors/phone-provider');
     const { identity, handles } = await ensureMillieIdentity(supabase, userId, {
       attemptPhone: true,
       provisionPhoneNumber
