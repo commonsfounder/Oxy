@@ -349,7 +349,10 @@ const SESSION_IDLE_MS = 20 * 60 * 1000;
 const liveSessions = new Map();
 
 function createSession(userId, session) {
-  const record = { ...session, lastActivityAt: Date.now() };
+  // userId is kept on the record, not just used as the map key: the document actions
+  // (download/upload) must scope every store read and write by owner, and reaching back to
+  // the map key from inside the loop would be an easy place to get that wrong.
+  const record = { userId, ...session, lastActivityAt: Date.now() };
   liveSessions.set(userId, record);
   return record;
 }
@@ -1076,7 +1079,7 @@ function renderElementLine(el) {
   return `#${el.id}${tag} "${el.text}"`;
 }
 
-function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null) {
+function buildDecisionPrompt(goal, history, elements, correction = '', goalContext = null, availableDocuments = []) {
   const historyText = history.length
     ? history.map((entry, i) => `${i + 1}. ${entry}`).join('\n')
     : '(nothing yet)';
@@ -1094,8 +1097,15 @@ function buildDecisionPrompt(goal, history, elements, correction = '', goalConte
     if (parts.length) contextBlock = `\nEXTRACTED CONTEXT FROM USER GOAL: ${parts.join(' | ')}\nPrioritize matching size/color and look for any coupons, codes, BOGO, sales, or deals that match the prefs. Surface them in "done" or "ask".\n`;
   }
 
+  // The model can only upload a document it can see listed here, by id. Filenames are shown
+  // for judgement but are never the selector — see browser-documents.js for why.
+  const documentsBlock = (availableDocuments || []).length
+    ? `\nAVAILABLE DOCUMENTS (the user's own files you may upload, by id):\n${availableDocuments
+        .map(d => `- id=${d.id} · ${d.filename}${d.label ? ` (${d.label})` : ''}`).join('\n')}\n`
+    : '';
+
   return `You are controlling a real web browser to help with this goal: "${goal}"
-${contextBlock}
+${contextBlock}${documentsBlock}
 You can SEE the current page in the attached screenshot. Every clickable element has a
 small numbered badge drawn on it; the number is its element id and matches the list
 below. LOOK at the screenshot first — find the thing you need (search box, address
@@ -1158,6 +1168,17 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"ask","question":"<short question for the user>"}
 {"action":"done","summary":"<short summary answering the goal>","productName":"<item name as shown on the page, if any>","price":"<price as shown on the page, if any>"}
 {"action":"ready_for_payment","summary":"<what's in the cart>","total":"<price as shown on the page>","productName":"<item name as shown on the page, if any>","colorOptions":["<only if the page shows distinct selectable color/size options>"]}
+{"action":"download","elementId":<number>,"note":"<what this file is, e.g. the application form>"}
+{"action":"upload","documentId":"<id of a document listed in AVAILABLE DOCUMENTS>"}
+
+PAPERWORK. Many goals are not shopping — applying for something, claiming, renewing,
+disputing. Those turn on files:
+"download" clicks the element and saves whatever file it produces into the user's documents.
+Use it for an application form, a policy schedule, a returns label, a statement.
+"upload" puts one of the user's OWN stored documents into the page's file field. You may
+ONLY name a documentId that appears in AVAILABLE DOCUMENTS below — never invent one, and
+never pick a document by how its filename reads. If the page needs a file you do not have,
+"ask" for it instead of uploading something that merely sounds close.
 
 NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
 to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click.
@@ -1265,7 +1286,7 @@ function parseModelDecision(rawText) {
       return { action: 'invalid', error: 'Could not parse model response as JSON.' };
     }
   }
-  const validActions = new Set(['click', 'fill', 'select', 'back', 'wait', 'ask', 'done', 'ready_for_payment']);
+  const validActions = new Set(['click', 'fill', 'select', 'back', 'wait', 'ask', 'done', 'ready_for_payment', 'download', 'upload']);
   if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
@@ -1607,6 +1628,8 @@ const BROWSER_PROVIDER = (process.env.OXY_BROWSER_PROVIDER || 'openai').toLowerC
 // {action:'invalid'}. Fall back to Gemini for the step instead of dying: a step on the
 // second-best model beats a failed order. OXY_BROWSER_PROVIDER_FALLBACK=false to disable.
 async function decideNextAction(goal, history, elements, screenshotB64, correction = '', goalContext = null, opts = {}) {
+  // opts.availableDocuments reaches buildDecisionPrompt so "upload" can only ever name a
+  // document the user actually owns.
   try {
     return await decideNextActionVia(BROWSER_PROVIDER, goal, history, elements, screenshotB64, correction, goalContext, opts);
   } catch (err) {
@@ -1616,10 +1639,11 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
   }
 }
 
-async function decideNextActionVia(provider, goal, history, elements, screenshotB64, correction = '', goalContext = null, { textOnly = false } = {}) {
+async function decideNextActionVia(provider, goal, history, elements, screenshotB64, correction = '', goalContext = null, opts = {}) {
+  const { textOnly = false } = opts;
   const promptText = textOnly
     ? buildTextOnlyDecisionPrompt(goal, history, elements, correction, goalContext)
-    : buildDecisionPrompt(goal, history, elements, correction, goalContext);
+    : buildDecisionPrompt(goal, history, elements, correction, goalContext, opts.availableDocuments || []);
   const effectiveScreenshot = textOnly ? null : screenshotB64;
 
   // Very rough token estimator for cost tracking (image tokens dominate)
@@ -4526,7 +4550,15 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           if (screenshot && process.env.OXY_DEBUG_SCREENSHOT_DIR) {
             require('fs').writeFile(`${process.env.OXY_DEBUG_SCREENSHOT_DIR}/step-${steps}.jpg`, Buffer.from(screenshot, 'base64'), () => {});
           }
-          decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext));
+          // Loaded once per session, lazily: most goals never touch a file, and paying for
+          // a documents query on every ordering turn would be waste. Once loaded it stays
+          // on the session so the list is stable across steps of the same task.
+          if (session.availableDocuments === undefined) {
+            session.availableDocuments = await require('./documents')
+              .findDocuments(getSupabase(), session.userId, { limit: 25 })
+              .catch(() => []);
+          }
+          decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext, { availableDocuments: session.availableDocuments || [] }));
         }
         pendingCorrection = ''; // consumed — only applies to the one retry it was raised for
         session.transientBrowserRetries = 0;
@@ -4577,6 +4609,65 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         session.history.push(`Step ${steps}: went back to the previous page${why}`);
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0;
+        continue;
+      }
+
+      // Files off the page and into the document store. Not an ordering concept: this is
+      // equally "download the application form", "save the policy schedule", "get the
+      // returns label". See browser-documents.js.
+      if (decision.action === 'download') {
+        const { captureDownload } = require('./browser-documents');
+        const dlTarget = elements[decision.locatorIndex] || target;
+        const result = await captureDownload(
+          session.page,
+          async () => {
+            const handle = await session.page.evaluateHandle(
+              ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+              { selector: CLICKABLE_SELECTOR, idx: dlTarget?.locatorIndex ?? decision.locatorIndex }
+            ).then((h) => h.asElement()).catch(() => null);
+            if (handle) await handle.click({ timeout: 10000 }).catch(() => {});
+          },
+          {
+            supabase: getSupabase(),
+            userId: session.userId,
+            agentTaskId: session.agentTaskId || null,
+            label: decision.note || null
+          }
+        ).catch((err) => ({ ok: false, notes: err.message }));
+
+        if (!result.ok) {
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: tried to download but ${result.notes}`);
+          if (consecutiveBadDecisions >= 3) return STUCK();
+          continue;
+        }
+        session.documents = [...(session.documents || []), result.document];
+        session.history.push(`Step ${steps}: saved "${result.document.filename}" (${result.byteSize} bytes) to your documents`);
+        consecutiveBadDecisions = 0;
+        consecutiveWaits = 0;
+        continue;
+      }
+
+      // ...and back out again into a website's file field. Resolved by document id only —
+      // never by filename — for the same reason email attachments are.
+      if (decision.action === 'upload') {
+        const { uploadDocument } = require('./browser-documents');
+        try {
+          const fileInput = await session.page.locator('input[type="file"]').first();
+          const result = await uploadDocument(fileInput, getSupabase(), session.userId, {
+            documentId: decision.documentId || decision.document_id,
+            agentTaskId: session.agentTaskId || null
+          });
+          session.history.push(`Step ${steps}: uploaded "${result.document.filename}"`);
+          consecutiveBadDecisions = 0;
+          consecutiveWaits = 0;
+        } catch (err) {
+          // A refused upload (wrong workflow, missing id) is information for the model, not
+          // a reason to abandon the task.
+          consecutiveBadDecisions += 1;
+          session.history.push(`Step ${steps}: could not upload — ${err.message}`);
+          if (consecutiveBadDecisions >= 3) return STUCK();
+        }
         continue;
       }
 
