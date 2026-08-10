@@ -16,7 +16,7 @@ function extractAddress(value) {
   return (match ? match[1] : String(value || '')).trim().toLowerCase();
 }
 
-async function sendMillieEmail({ from, to, subject, body, inReplyTo, references }) {
+async function sendMillieEmail({ from, to, subject, body, inReplyTo, references, attachments = [] }) {
   const key = process.env.RESEND_API_KEY;
   if (!key) throw new Error('RESEND_API_KEY is not configured — Millie cannot send email yet.');
   const text = `${body}\n\n${MILLIE_EMAIL_SIGNATURE_LINE}`;
@@ -28,6 +28,11 @@ async function sendMillieEmail({ from, to, subject, body, inReplyTo, references 
     to,
     subject,
     text,
+    // Resend takes attachments as { filename, content } with content base64-encoded.
+    // Resolution and the workflow guard happen upstream in document-attachments.js — by
+    // the time bytes reach here the decision about WHICH file has already been made and
+    // reviewed.
+    ...(attachments.length ? { attachments } : {}),
     ...(Object.keys(headers).length ? { headers } : {})
   }, {
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
@@ -48,7 +53,11 @@ function parseInboundPayload(payload) {
     body: String(data.text || data.html || ''),
     providerMessageId: data.email_id || data.id || null,
     inReplyTo: data.headers?.['in-reply-to'] || data.headers?.['In-Reply-To'] || null,
-    references: data.headers?.references || data.headers?.References || null
+    references: data.headers?.references || data.headers?.References || null,
+    // Left as the provider's own shape; document-attachments.js normalizes the byte
+    // encoding, since providers disagree on whether content arrives base64, as a Buffer,
+    // or as a byte array.
+    attachments: Array.isArray(data.attachments) ? data.attachments : []
   };
 }
 

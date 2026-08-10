@@ -487,7 +487,25 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
       needsDecision: decision === 'ask',
       rawProviderPayload: parsedPayload
     });
-    log('info', 'millie_email.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
+
+    // Files on the email become documents in their own right, carrying which conversation
+    // and which participant they arrived from — so "the policy schedule they sent me" is
+    // answerable later. Deliberately after appendEvent: a failure to store an attachment
+    // must never cost us the record that the message itself arrived.
+    let storedAttachments = [];
+    try {
+      const { ingestEmailAttachments } = require('./services/document-attachments');
+      storedAttachments = await ingestEmailAttachments(supabase, identity.user_id, normalized.attachments, {
+        conversationId: conversation.id,
+        participantId: participant.id,
+        providerMessageId: normalized.providerMessageId,
+        agentTaskId: conversation.request_task_id || null
+      });
+    } catch (attachmentError) {
+      log('warn', 'millie_email.inbound.attachments_failed', { error: attachmentError.message });
+    }
+
+    log('info', 'millie_email.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision, attachments: storedAttachments.length });
   } catch (err) {
     log('error', 'millie_email.inbound.error', { error: err.message });
   }
@@ -2924,9 +2942,29 @@ async function executeAction(userId, action, params, context = {}) {
       });
 
       const subject = String(params?.subject || '').trim() || 'A message from Millie';
+
+      // Attachments are resolved by document id only — never by filename. See
+      // document-attachments.js for why: a fuzzy name match is one step from emailing
+      // someone's passport to a stranger. A document pinned to a different workflow is
+      // refused unless this turn says otherwise.
+      const { resolveAttachmentsForSend } = require('./services/document-attachments');
+      let attachments = [];
+      let attachedDocuments = [];
+      try {
+        const resolved = await resolveAttachmentsForSend(supabase, userId, {
+          documentIds: params?.attach_document_ids || [],
+          requestTaskId,
+          allowCrossWorkflow: params?.allow_cross_workflow === true
+        });
+        attachments = resolved.attachments;
+        attachedDocuments = resolved.documents;
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+
       let sendResult;
       try {
-        sendResult = await sendMillieEmail({ from: emailHandle.handle_value, to, subject, body });
+        sendResult = await sendMillieEmail({ from: emailHandle.handle_value, to, subject, body, attachments });
       } catch (err) {
         return { success: false, error: `Couldn't send that: ${err.message}` };
       }
@@ -2942,10 +2980,15 @@ async function executeAction(userId, action, params, context = {}) {
         body
       });
 
+      const attachmentNames = attachedDocuments.map(d => d.filename);
       return {
         success: true,
-        text: `Sent to ${to} from Millie's email.`,
-        cardText: `To ${to} · ${body}`,
+        text: attachmentNames.length
+          ? `Sent to ${to} from Millie's email, with ${attachmentNames.join(', ')}.`
+          : `Sent to ${to} from Millie's email.`,
+        // Every filename is named on the card: the review gate is the last place a wrong
+        // attachment can be caught by a human, so it must not be summarised away.
+        cardText: `To ${to} · ${body}${attachmentNames.length ? ` · Attaching: ${attachmentNames.join(', ')}` : ''}`,
         actionSummary: 'Message sent',
         conversationId: conversation.id
       };

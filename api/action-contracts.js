@@ -140,13 +140,14 @@ const ACTION_CONTRACTS = {
   send_millie_email: {
     risk: 'medium',
     required: ['to', 'body'],
-    optional: ['subject', 'request_task_id'],
+    optional: ['subject', 'request_task_id', 'attach_document_ids', 'allow_cross_workflow'],
     aliases: { to: ['email', 'recipient'], body: ['message', 'content', 'text'] },
     inputExample: {
       to: 'business or contact email address',
       subject: 'optional subject inferred from the body if omitted',
       body: 'the message to send, on the user\'s behalf',
-      request_task_id: 'optional id of the ongoing request this belongs to'
+      request_task_id: 'optional id of the ongoing request this belongs to',
+      attach_document_ids: ['document id from find_documents — never a filename']
     },
     guidance: MILLIE_IDENTITY_GUIDANCE,
     successSummary: 'Message sent from Millie',
