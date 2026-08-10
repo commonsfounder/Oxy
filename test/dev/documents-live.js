@@ -13,23 +13,30 @@ require('dotenv').config();
 const assert = require('node:assert/strict');
 const { createSupabaseServiceClient } = require('../../runtime');
 const {
-  storeDocument, getDocumentBytes, findDocuments, setExtraction,
-  readExtraction, deleteDocument, DOCUMENTS_BUCKET
+  storeDocument, getDocumentBytes, findDocuments, extractDocument, getDocumentText,
+  getDocumentFields, addRepresentation, createDerivedDocument, getDocumentVersions,
+  deleteDocument, DOCUMENTS_BUCKET
 } = require('../../api/services/documents');
+const { zipSync, strToU8 } = require('fflate');
 
 const USER_ID = process.argv[2] || 'demo-test-user';
 const MARK = `live-doc-${Date.now()}`;
-const BYTES = Buffer.from(`%PDF-1.4 ${MARK} pretend policy schedule\n`);
+// A real DOCX, so extraction has something genuine to read.
+const BYTES = Buffer.from(zipSync({
+  'word/document.xml': strToU8(`<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:r><w:t>${MARK} Chizi Monyewuchi</w:t></w:r></w:p><w:p><w:r><w:t>Senior Engineer</w:t></w:r></w:p></w:body></w:document>`)
+}));
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 (async () => {
   const supabase = createSupabaseServiceClient();
   let documentId = null;
+  let derivedId = null;
 
   try {
     console.log(`[1] storing a ${BYTES.length}-byte file for ${USER_ID}...`);
     const { document, deduped } = await storeDocument(supabase, USER_ID, {
-      filename: `${MARK}.pdf`,
-      mimeType: 'application/pdf',
+      filename: `${MARK}.docx`,
+      mimeType: DOCX_MIME,
       bytes: BYTES,
       source: 'upload',
       label: MARK
@@ -45,7 +52,7 @@ const BYTES = Buffer.from(`%PDF-1.4 ${MARK} pretend policy schedule\n`);
 
     console.log('[3] dedupe: storing the identical bytes again...');
     const again = await storeDocument(supabase, USER_ID, {
-      filename: `${MARK}-copy.pdf`, mimeType: 'application/pdf', bytes: BYTES, source: 'upload'
+      filename: `${MARK}-copy.docx`, mimeType: DOCX_MIME, bytes: BYTES, source: 'upload'
     });
     assert.equal(again.deduped, true);
     assert.equal(again.document.id, documentId);
@@ -56,20 +63,53 @@ const BYTES = Buffer.from(`%PDF-1.4 ${MARK} pretend policy schedule\n`);
     assert.equal(found.length, 1);
     console.log(`    ok — found "${found[0].filename}"`);
 
-    console.log('[5] encrypted extraction round-trip...');
-    await setExtraction(supabase, documentId, { text: `${MARK} extracted body`, fields: { marker: MARK }, status: 'done' });
-    const extraction = await readExtraction(supabase, USER_ID, documentId);
-    assert.equal(extraction.text, `${MARK} extracted body`);
-    assert.equal(extraction.status, 'done');
-    const { data: raw } = await supabase.from('documents').select('extracted_encrypted').eq('id', documentId).single();
-    assert.ok(!JSON.stringify(raw.extracted_encrypted).includes('extracted body'), 'extraction was stored in the clear');
-    console.log('    ok — decrypts correctly, and is genuinely ciphertext at rest');
+    console.log('[5] extraction: real DOCX read, stored as a representation...');
+    const extraction = await extractDocument(supabase, USER_ID, documentId);
+    assert.equal(extraction.status, 'done', `expected extraction to succeed, got ${extraction.status}: ${extraction.notes || ''}`);
+    const { text, producer } = await getDocumentText(supabase, USER_ID, documentId);
+    assert.match(text, new RegExp(MARK));
+    assert.match(text, /Senior Engineer/);
+    console.log(`    ok — producer=${producer}, ${text.length} chars`);
 
-    console.log('[6] cross-user access is refused...');
+    console.log('[6] the original is byte-identical after extraction...');
+    const after = await getDocumentBytes(supabase, USER_ID, documentId);
+    assert.ok(BYTES.equals(after.bytes), 'extraction modified the stored original');
+    console.log('    ok — original untouched');
+
+    console.log('[7] representation content is ciphertext at rest...');
+    const { data: repRows } = await supabase.from('document_representations').select('content_encrypted').eq('document_id', documentId);
+    assert.ok(repRows.length >= 1);
+    assert.ok(!JSON.stringify(repRows).includes('Senior Engineer'), 'representation was stored in the clear');
+    console.log('    ok — genuinely encrypted');
+
+    console.log('[8] low-confidence fields are withheld...');
+    await addRepresentation(supabase, documentId, {
+      kind: 'fields', producer: 'vision-ocr', confidence: 0.6,
+      content: { fields: { total: { value: '42.00', confidence: 0.95 }, account: { value: '80080O', confidence: 0.4 } } }
+    });
+    const { fields, withheld } = await getDocumentFields(supabase, USER_ID, documentId);
+    assert.equal(fields.total.value, '42.00');
+    assert.equal(fields.account, undefined, 'a 0.4-confidence OCR read must not become a fact');
+    assert.equal(withheld.account.value, '80080O');
+    console.log('    ok — 1 accepted, 1 withheld');
+
+    console.log('[9] derived version: original survives...');
+    const derived = await createDerivedDocument(supabase, USER_ID, documentId, {
+      bytes: Buffer.from(`${MARK} tailored version`), filename: `${MARK}-tailored.docx`, label: `${MARK} tailored`
+    });
+    derivedId = derived.id;
+    assert.equal(derived.version, 2);
+    assert.equal(derived.root_document_id, documentId);
+    const versions = await getDocumentVersions(supabase, USER_ID, documentId);
+    assert.deepEqual(versions.map(v => v.version), [1, 2]);
+    console.log(`    ok — v1 + v2 under one root`);
+
+    console.log('[10] cross-user access is refused...');
     await assert.rejects(() => getDocumentBytes(supabase, 'definitely-not-this-user', documentId), /not found/i);
     console.log('    ok — refused');
 
-    console.log('[7] deleting document + blob...');
+    console.log('[11] deleting documents + blobs...');
+    if (derivedId) { await deleteDocument(supabase, USER_ID, derivedId); derivedId = null; }
     await deleteDocument(supabase, USER_ID, documentId);
     documentId = null;
     const { data: gone } = await supabase.from('documents').select('id').eq('label', MARK);
@@ -81,8 +121,8 @@ const BYTES = Buffer.from(`%PDF-1.4 ${MARK} pretend policy schedule\n`);
     console.error('\nFAIL —', err.message);
     process.exitCode = 1;
   } finally {
-    if (documentId) {
-      await deleteDocument(supabase, USER_ID, documentId).catch(() => {});
+    for (const leftover of [documentId, derivedId].filter(Boolean)) {
+      await deleteDocument(supabase, USER_ID, leftover).catch(() => {});
       console.log('(cleaned up leftover document)');
     }
   }

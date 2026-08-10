@@ -6,8 +6,13 @@ const {
   getDocumentBytes,
   findDocuments,
   attachDocumentToTask,
-  setExtraction,
-  readExtraction,
+  addRepresentation,
+  getRepresentations,
+  getDocumentText,
+  getDocumentFields,
+  extractDocument,
+  createDerivedDocument,
+  getDocumentVersions,
   deleteDocument,
   checksumOf,
   DOCUMENTS_BUCKET
@@ -28,7 +33,7 @@ function withKey(fn) {
 
 // Fake Supabase with just enough of the query builder + a Storage double.
 function fakeSupabase() {
-  const state = { documents: [], blobs: new Map() };
+  const state = { documents: [], document_representations: [], blobs: new Map() };
   let idSeq = 0;
 
   function table(name) {
@@ -49,7 +54,23 @@ function fakeSupabase() {
     q.maybeSingle = async () => ({ data: rows()[0] || null, error: null });
     q.single = async () => ({ data: rows()[0] || null, error: null });
     q.insert = (row) => {
-      const withId = { id: `doc-${++idSeq}`, created_at: new Date().toISOString(), last_used_at: new Date().toISOString(), ...row };
+      // `version: 1` mirrors the schema default (documents.version int not null default 1).
+      // Without it the fake returns undefined where Postgres returns 1, and version logic
+      // appears broken when it is only unmodelled.
+      const withId = { id: `doc-${++idSeq}`, created_at: new Date().toISOString(), last_used_at: new Date().toISOString(), version: 1, ...row };
+      state[name].push(withId);
+      return { select: () => ({ single: async () => ({ data: withId, error: null }) }) };
+    };
+    q.upsert = (row, { onConflict } = {}) => {
+      const keys = String(onConflict || '').split(',').map(k => k.trim()).filter(Boolean);
+      const existing = keys.length
+        ? state[name].find(r => keys.every(k => r[k] === row[k]))
+        : null;
+      if (existing) {
+        Object.assign(existing, row);
+        return { select: () => ({ single: async () => ({ data: existing, error: null }) }) };
+      }
+      const withId = { id: `${name}-${++idSeq}`, created_at: new Date().toISOString(), ...row };
       state[name].push(withId);
       return { select: () => ({ single: async () => ({ data: withId, error: null }) }) };
     };
@@ -204,41 +225,6 @@ test('a document can be attached to the work it belongs to after the fact', asyn
   assert.equal(forTask.length, 1);
 });
 
-test('extracted text is encrypted at rest and round-trips through readExtraction', async () => {
-  const supabase = fakeSupabase();
-  await withKey(async () => {
-    const { document } = await storeDocument(supabase, 'chizi', {
-      filename: 'payslip.pdf', mimeType: 'application/pdf', bytes: PDF, source: 'upload'
-    });
-    await setExtraction(supabase, document.id, {
-      text: 'Gross pay 4,200.00',
-      fields: { grossPay: '4200.00' },
-      status: 'done'
-    });
-
-    const row = supabase._state.documents.find(d => d.id === document.id);
-    assert.equal(row.extraction_status, 'done');
-    // The sensitive part must not be sitting in the clear.
-    assert.ok(!JSON.stringify(row.extracted_encrypted).includes('4,200.00'));
-
-    const extraction = await readExtraction(supabase, 'chizi', document.id);
-    assert.equal(extraction.text, 'Gross pay 4,200.00');
-    assert.equal(extraction.fields.grossPay, '4200.00');
-  });
-});
-
-test('a document with no extraction yet reads back as pending rather than throwing', async () => {
-  const supabase = fakeSupabase();
-  const extraction = await withKey(async () => {
-    const { document } = await storeDocument(supabase, 'chizi', {
-      filename: 'scan.png', mimeType: 'image/png', bytes: Buffer.from('png'), source: 'upload'
-    });
-    return readExtraction(supabase, 'chizi', document.id);
-  });
-  assert.equal(extraction.status, 'pending');
-  assert.equal(extraction.text, '');
-});
-
 test('deleteDocument removes the row and the underlying blob together', async () => {
   const supabase = fakeSupabase();
   const { document } = await withKey(() => storeDocument(supabase, 'chizi', {
@@ -278,12 +264,12 @@ test('extraction refuses to store in the clear when the encryption key is missin
   delete process.env.OXY_TOKEN_ENCRYPTION_KEY;
   try {
     await assert.rejects(
-      () => setExtraction(supabase, document.id, { text: 'passport number 12345', status: 'done' }),
+      () => addRepresentation(supabase, document.id, {
+        kind: 'text', producer: 'test', content: { text: 'passport number 12345' }
+      }),
       /OXY_TOKEN_ENCRYPTION_KEY/
     );
-    const row = supabase._state.documents.find(d => d.id === document.id);
-    assert.equal(row.extracted_encrypted, undefined, 'nothing may be written when it cannot be encrypted');
-    assert.equal(row.extraction_status, 'pending', 'and the status must not claim success');
+    assert.equal(supabase._state.document_representations.length, 0, 'nothing may be written when it cannot be encrypted');
   } finally {
     if (old === undefined) delete process.env.OXY_TOKEN_ENCRYPTION_KEY;
     else process.env.OXY_TOKEN_ENCRYPTION_KEY = old;
@@ -303,4 +289,145 @@ test('storeDocument rejects a file with no bytes rather than indexing an empty d
     })),
     /empty/i
   );
+});
+
+// ── Representations: readings alongside the original, never instead of it ──────────────
+
+const REAL_DOCX = (() => {
+  const { zipSync, strToU8 } = require('fflate');
+  const xml = '<?xml version="1.0"?><w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Chizi Monyewuchi</w:t></w:r></w:p><w:p><w:r><w:t>Senior Engineer</w:t></w:r></w:p></w:body></w:document>';
+  return Buffer.from(zipSync({ 'word/document.xml': strToU8(xml) }));
+})();
+
+test('extractDocument reads a DOCX and stores it as a representation, leaving the original bytes untouched', async () => {
+  const supabase = fakeSupabase();
+  await withKey(async () => {
+    const { document } = await storeDocument(supabase, 'chizi', {
+      filename: 'cv.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: REAL_DOCX, source: 'upload', label: 'CV'
+    });
+
+    const result = await extractDocument(supabase, 'chizi', document.id);
+    assert.equal(result.status, 'done');
+
+    const { text, producer } = await getDocumentText(supabase, 'chizi', document.id);
+    assert.match(text, /Chizi Monyewuchi/);
+    assert.match(text, /Senior Engineer/);
+    assert.equal(producer, 'docx-fflate');
+
+    // The whole point: extraction is additive. The original file is byte-identical after.
+    const { bytes } = await getDocumentBytes(supabase, 'chizi', document.id);
+    assert.ok(REAL_DOCX.equals(bytes), 'extraction must never modify the stored original');
+  });
+});
+
+test('an unreadable file leaves the document usable and only marks the extraction failed', async () => {
+  const supabase = fakeSupabase();
+  await withKey(async () => {
+    const { document } = await storeDocument(supabase, 'chizi', {
+      filename: 'broken.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: Buffer.from('not actually a zip'), source: 'upload'
+    });
+
+    const result = await extractDocument(supabase, 'chizi', document.id);
+    assert.equal(result.status, 'failed');
+    assert.ok(result.notes, 'the failure must explain itself');
+
+    // Still retrievable and still sendable — an unreadable scan is a file you can email.
+    const { bytes } = await getDocumentBytes(supabase, 'chizi', document.id);
+    assert.equal(bytes.toString(), 'not actually a zip');
+    assert.equal(supabase._state.document_representations.length, 0);
+  });
+});
+
+test('a format we cannot read is marked unsupported, not silently extracted as empty', async () => {
+  const supabase = fakeSupabase();
+  const result = await withKey(async () => {
+    const { document } = await storeDocument(supabase, 'chizi', {
+      filename: 'archive.zip', mimeType: 'application/zip', bytes: Buffer.from('PK'), source: 'upload'
+    });
+    return extractDocument(supabase, 'chizi', document.id);
+  });
+  assert.equal(result.status, 'unsupported');
+});
+
+test('low-confidence fields are withheld rather than becoming facts', async () => {
+  const supabase = fakeSupabase();
+  await withKey(async () => {
+    const { document } = await storeDocument(supabase, 'chizi', {
+      filename: 'receipt.png', mimeType: 'image/png', bytes: Buffer.from('png'), source: 'upload'
+    });
+    await addRepresentation(supabase, document.id, {
+      kind: 'fields', producer: 'vision-ocr', confidence: 0.6,
+      content: { fields: {
+        total: { value: '42.00', confidence: 0.95 },
+        accountNumber: { value: '80080O', confidence: 0.4 }
+      } }
+    });
+
+    const { fields, withheld } = await getDocumentFields(supabase, 'chizi', document.id);
+    assert.equal(fields.total.value, '42.00');
+    // An OCR misread of 0 as O must not surface as a known account number.
+    assert.equal(fields.accountNumber, undefined);
+    assert.equal(withheld.accountNumber.value, '80080O');
+    assert.equal(withheld.accountNumber.confidence, 0.4);
+
+    // ...but a caller that explicitly lowers the bar still sees it, with confidence attached.
+    const relaxed = await getDocumentFields(supabase, 'chizi', document.id, { minConfidence: 0.3 });
+    assert.equal(relaxed.fields.accountNumber.value, '80080O');
+  });
+});
+
+test('re-running the same producer replaces its reading; a different producer coexists', async () => {
+  const supabase = fakeSupabase();
+  await withKey(async () => {
+    const { document } = await storeDocument(supabase, 'chizi', {
+      filename: 'scan.pdf', mimeType: 'application/pdf', bytes: PDF, source: 'upload'
+    });
+    await addRepresentation(supabase, document.id, { kind: 'text', producer: 'pdf-text-layer', confidence: 0.1, content: { text: '' } });
+    await addRepresentation(supabase, document.id, { kind: 'text', producer: 'pdf-text-layer', confidence: 0.1, content: { text: 'second run' } });
+    await addRepresentation(supabase, document.id, { kind: 'text', producer: 'vision-ocr', confidence: 0.8, content: { text: 'OCR reading' } });
+
+    const reps = await getRepresentations(supabase, 'chizi', document.id, 'text');
+    assert.equal(reps.length, 2, 'same producer replaced itself, different producer was kept');
+
+    // Highest confidence wins, so OCR beats an empty text layer without the caller
+    // needing to know which producers exist.
+    const best = await getDocumentText(supabase, 'chizi', document.id);
+    assert.equal(best.text, 'OCR reading');
+    assert.equal(best.producer, 'vision-ocr');
+  });
+});
+
+test('a tailored CV is a new version, and the original survives intact', async () => {
+  const supabase = fakeSupabase();
+  await withKey(async () => {
+    const original = (await storeDocument(supabase, 'chizi', {
+      filename: 'cv.docx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      bytes: REAL_DOCX, source: 'upload', label: 'CV', agentTaskId: 'task-apply-1'
+    })).document;
+
+    const tailored = await createDerivedDocument(supabase, 'chizi', original.id, {
+      bytes: Buffer.from('tailored cv bytes'),
+      filename: 'cv-acme.docx',
+      label: 'CV — Acme application'
+    });
+
+    assert.equal(tailored.version, 2);
+    assert.equal(tailored.root_document_id, original.id);
+    assert.equal(tailored.derived_from_document_id, original.id);
+    assert.equal(tailored.source, 'generated');
+    // Derived work inherits the workflow it belongs to, so it stays attached to the application.
+    assert.equal(tailored.agent_task_id, 'task-apply-1');
+
+    // The original is untouched — same bytes, same version.
+    const { bytes } = await getDocumentBytes(supabase, 'chizi', original.id);
+    assert.ok(REAL_DOCX.equals(bytes));
+
+    const versions = await getDocumentVersions(supabase, 'chizi', original.id);
+    assert.deepEqual(versions.map(v => v.version), [1, 2]);
+  });
 });

@@ -1,6 +1,7 @@
 'use strict';
 const crypto = require('crypto');
 const { encryptTokens, decryptTokens, isEncryptedTokenEnvelope } = require('./token-crypto');
+const { extractorFor } = require('./document-extraction');
 
 // Files, as a first-class thing Millie can hold.
 //
@@ -155,28 +156,154 @@ async function attachDocumentToTask(supabase, userId, documentId, agentTaskId) {
   return data;
 }
 
-async function setExtraction(supabase, documentId, { text = '', fields = null, status = 'done' } = {}) {
-  const envelope = encryptTokens({ text, fields });
-  // encryptTokens returns the object UNCHANGED when OXY_TOKEN_ENCRYPTION_KEY is missing
-  // outside production — a deliberate convenience for connector tokens, and the wrong trade
-  // here. A document extraction is a passport number or a payslip, so refuse rather than
-  // quietly write it in the clear. Better to have no extraction than a plaintext one.
+// --- Representations -----------------------------------------------------------------
+// A document is the original file; everything we work out about it is an attributed
+// representation alongside it. Extraction never touches the stored bytes, and re-reading a
+// document with a better extractor adds a reading rather than destroying the old one.
+
+async function addRepresentation(supabase, documentId, {
+  kind, producer, producerVersion = '1', confidence = null, content, notes = null
+} = {}) {
+  const envelope = encryptTokens(content);
+  // encryptTokens returns its input UNCHANGED when OXY_TOKEN_ENCRYPTION_KEY is missing
+  // outside production — a reasonable convenience for connector tokens, and the wrong trade
+  // here. A representation holds passport numbers and payslip figures, so refuse rather
+  // than quietly write plaintext. Better no reading than a plaintext one.
   if (!isEncryptedTokenEnvelope(envelope)) {
-    throw new Error('Refusing to store document extraction unencrypted — set OXY_TOKEN_ENCRYPTION_KEY (32-byte hex).');
+    throw new Error('Refusing to store a document representation unencrypted — set OXY_TOKEN_ENCRYPTION_KEY (32-byte hex).');
   }
-  const { error } = await supabase.from('documents')
-    .update({ extracted_encrypted: envelope, extraction_status: status })
-    .eq('id', documentId);
-  if (error) throw new Error(`Couldn't record extraction: ${error.message}`);
+  const row = {
+    document_id: documentId,
+    kind,
+    producer,
+    producer_version: producerVersion,
+    confidence,
+    content_encrypted: envelope,
+    notes
+  };
+  // Re-running the same producer replaces its own previous reading; a different producer
+  // coexists with it. The unique index (document_id, kind, producer) is what makes that true.
+  const { data, error } = await supabase.from('document_representations')
+    .upsert(row, { onConflict: 'document_id,kind,producer' })
+    .select()
+    .single();
+  if (error) throw new Error(`Couldn't store that reading: ${error.message}`);
+  return data;
 }
 
-async function readExtraction(supabase, userId, documentId) {
-  const document = await getDocument(supabase, userId, documentId);
-  if (!document.extracted_encrypted) {
-    return { status: document.extraction_status, text: '', fields: null };
+async function getRepresentations(supabase, userId, documentId, kind = null) {
+  await getDocument(supabase, userId, documentId); // scope check before reading contents
+  let q = supabase.from('document_representations').select('*').eq('document_id', documentId);
+  if (kind) q = q.eq('kind', kind);
+  const { data } = await q;
+  return (data || []).map(row => ({ ...row, content: decryptTokens(row.content_encrypted) }));
+}
+
+// The best available linear reading: highest confidence wins, so a real text layer beats an
+// OCR guess of the same document without the caller having to know which producers exist.
+async function getDocumentText(supabase, userId, documentId) {
+  const reps = await getRepresentations(supabase, userId, documentId, 'text');
+  if (!reps.length) return { text: '', confidence: 0, producer: null };
+  const best = reps.sort((a, b) => Number(b.confidence || 0) - Number(a.confidence || 0))[0];
+  return { text: best.content?.text || '', confidence: Number(best.confidence || 0), producer: best.producer, notes: best.notes };
+}
+
+// Low-confidence values must not become facts. The default floor is deliberately high: a
+// caller that wants to see uncertain readings has to ask for them explicitly, and gets them
+// with their confidence attached so it can still tell the difference.
+async function getDocumentFields(supabase, userId, documentId, { minConfidence = 0.9 } = {}) {
+  const reps = await getRepresentations(supabase, userId, documentId, 'fields');
+  const accepted = {};
+  const withheld = {};
+  for (const rep of reps) {
+    for (const [name, entry] of Object.entries(rep.content?.fields || {})) {
+      const confidence = Number(entry?.confidence ?? 0);
+      const record = { value: entry?.value, confidence, producer: rep.producer };
+      if (confidence >= minConfidence) accepted[name] = record;
+      else withheld[name] = record;
+    }
   }
-  const decrypted = decryptTokens(document.extracted_encrypted);
-  return { status: document.extraction_status, text: decrypted.text || '', fields: decrypted.fields || null };
+  return { fields: accepted, withheld };
+}
+
+// Runs the right extractor for the file and records what it found. Deliberately does not
+// throw on a failed read: an unreadable scan is still a file the user can send to an
+// insurer, so the document stays usable and only its extraction_status reflects the failure.
+async function extractDocument(supabase, userId, documentId, { visionExtract = null } = {}) {
+  const { document, bytes } = await getDocumentBytes(supabase, userId, documentId);
+  const extractor = extractorFor(document.mime_type);
+
+  if (!extractor) {
+    await supabase.from('documents').update({ extraction_status: 'unsupported' }).eq('id', documentId);
+    return { status: 'unsupported', notes: `No extractor for ${document.mime_type}.` };
+  }
+
+  const result = extractor.kind === 'image'
+    ? await extractor.run(bytes, document.mime_type, visionExtract)
+    : await extractor.run(bytes);
+
+  if (!result.ok) {
+    await supabase.from('documents').update({ extraction_status: 'failed' }).eq('id', documentId);
+    return { status: 'failed', notes: result.notes, producer: result.producer };
+  }
+
+  if (result.text) {
+    await addRepresentation(supabase, documentId, {
+      kind: 'text', producer: result.producer, producerVersion: result.producerVersion,
+      confidence: result.confidence, content: { text: result.text }, notes: result.notes
+    });
+  }
+  if (result.fields) {
+    await addRepresentation(supabase, documentId, {
+      kind: 'fields', producer: result.producer, producerVersion: result.producerVersion,
+      confidence: result.confidence, content: { fields: result.fields }, notes: result.notes
+    });
+  }
+
+  await supabase.from('documents').update({ extraction_status: 'done' }).eq('id', documentId);
+  return { status: 'done', producer: result.producer, confidence: result.confidence, notes: result.notes };
+}
+
+// A tailored CV is a NEW document derived from the original, never an edit of it. The
+// original's bytes, representations and provenance all survive untouched, and both versions
+// stay findable together through root_document_id.
+async function createDerivedDocument(supabase, userId, sourceDocumentId, {
+  bytes, filename, mimeType = null, label = null, source = 'generated', sourceRef = null
+} = {}) {
+  const source_doc = await getDocument(supabase, userId, sourceDocumentId);
+  const rootId = source_doc.root_document_id || source_doc.id;
+
+  const { data: siblings } = await supabase.from('documents').select('version').eq('root_document_id', rootId);
+  const nextVersion = Math.max(source_doc.version || 1, ...(siblings || []).map(s => s.version || 1)) + 1;
+
+  const { document } = await storeDocument(supabase, userId, {
+    filename: filename || source_doc.filename,
+    mimeType: mimeType || source_doc.mime_type,
+    bytes,
+    source,
+    sourceRef,
+    label: label || source_doc.label,
+    agentTaskId: source_doc.agent_task_id,
+    participantId: source_doc.participant_id,
+    conversationId: source_doc.conversation_id
+  });
+
+  const { data, error } = await supabase.from('documents')
+    .update({ version: nextVersion, root_document_id: rootId, derived_from_document_id: source_doc.id })
+    .eq('id', document.id)
+    .select()
+    .single();
+  if (error) throw new Error(`Couldn't record that new version: ${error.message}`);
+  return data;
+}
+
+async function getDocumentVersions(supabase, userId, documentId) {
+  const document = await getDocument(supabase, userId, documentId);
+  const rootId = document.root_document_id || document.id;
+  const { data } = await supabase.from('documents').select('*').eq('user_id', userId).eq('root_document_id', rootId);
+  const all = [document, ...(data || [])];
+  const unique = [...new Map(all.map(d => [d.id, d])).values()];
+  return unique.sort((a, b) => (a.version || 1) - (b.version || 1));
 }
 
 async function touchDocument(supabase, documentId) {
@@ -202,8 +329,13 @@ module.exports = {
   getDocumentBytes,
   findDocuments,
   attachDocumentToTask,
-  setExtraction,
-  readExtraction,
+  addRepresentation,
+  getRepresentations,
+  getDocumentText,
+  getDocumentFields,
+  extractDocument,
+  createDerivedDocument,
+  getDocumentVersions,
   touchDocument,
   deleteDocument
 };
