@@ -12,10 +12,19 @@
 // PROVIDER CHOICE (audited August 2026, not inherited):
 //   - Amadeus Self-Service, the obvious 2025 answer, closed to new developers in August 2026.
 //   - Kiwi Tequila became invite-only partner access in 2026.
-//   - Duffel remains genuinely self-serve: sign up, get a key, flights from 300+ airlines and
-//     ~2M properties through Stays, one REST API, UK company, prices in GBP/EUR natively.
+//   - Duffel remains genuinely self-serve for FLIGHTS: sign up, get a key, real inventory
+//     from 300+ airlines immediately, one REST API, UK company, prices in GBP/EUR natively.
 // So the adapter below speaks Duffel. It is kept behind a narrow interface because that
 // audit will go stale too — a second provider means another `normalize*` pair, not a rewrite.
+//
+// STAYS (HOTELS) IS NOT THE SAME DEAL — verified against Duffel's own docs, not assumed from
+// "flights + hotels, one API" marketing copy. A DUFFEL_ACCESS_TOKEN unlocks real flight
+// inventory the moment it exists. Stays is different: test mode works immediately with the
+// same token (Duffel's own fictional test hotels, at fixed test coordinates), but REAL hotel
+// inventory requires separately requesting Stays access via duffel.com/contact-us and being
+// approved — it is not self-serve. searchFlights and searchStays are kept as fully independent
+// exports for exactly this reason: a token can be live-capable for one and test-only for the
+// other, and the two must never be assumed to unlock together.
 //
 // What this module will NOT do: invent a response. With no key configured it reports that it
 // is unconfigured and the caller falls back to grounded search, which is honest about being
@@ -130,14 +139,23 @@ function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, mode, 
 
 function normalizeStay(result = {}, { requestedStart, requestedEnd, guests, mode, observedAt } = {}) {
   const accommodation = result.accommodation || {};
-  const cheapest = (accommodation.rooms || [])
+
+  // Duffel documents cheapest_rate_total_amount/currency as always present on a search
+  // result — "you will always know the cheapest rate" — so that is the primary source.
+  // accommodation.rooms[].rates[] is NOT documented as guaranteed on the initial search
+  // response (Duffel's own guide leaves this unspecified, and other hotel APIs commonly
+  // require a separate per-property rates fetch before real rate objects appear — the same
+  // two-stage shape travel-search.js's grounded search already had to account for). Flattening
+  // rooms/rates is kept only as a fallback for whatever a future response shape might add.
+  const cheapestField = toNumber(result.cheapest_rate_total_amount);
+  const cheapestFromRooms = (accommodation.rooms || [])
     .flatMap(room => room.rates || [])
     .map(rate => ({ amount: toNumber(rate.total_amount), currency: rate.total_currency }))
     .filter(rate => rate.amount)
     .sort((a, b) => a.amount - b.amount)[0];
 
-  const total = cheapest?.amount || toNumber(result.cheapest_rate_total_amount);
-  const currency = String(cheapest?.currency || result.cheapest_rate_currency || 'GBP').toUpperCase();
+  const total = cheapestField || cheapestFromRooms?.amount;
+  const currency = String(result.cheapest_rate_currency || cheapestFromRooms?.currency || 'GBP').toUpperCase();
   const name = String(accommodation.name || '').trim();
   if (!name || !total) return null;
 
@@ -246,6 +264,14 @@ async function searchStays({
   try {
     response = await send(`${DUFFEL_BASE}/stays/search`, body);
   } catch (error) {
+    // A token that is genuinely live for flights can still be test-only for Stays — real
+    // hotel inventory needs Stays access requested and approved separately (duffel.com/
+    // contact-us), it is not unlocked just by having a working DUFFEL_ACCESS_TOKEN. Surfaced
+    // distinctly so this reads as "ask for Stays access", not a generic provider failure that
+    // looks identical to an expired key or a network problem.
+    if (providerMode(env) === 'live' && isLikelyStaysAccessError(error)) {
+      return failed('this Duffel account is not yet approved for live Stays (hotel) access — request it at duffel.com/contact-us. Flights are unaffected.');
+    }
     return failed(describeProviderError(error));
   }
 
@@ -269,11 +295,23 @@ function describeProviderError(error) {
   return error?.message || 'the travel provider could not be reached';
 }
 
+// A best-effort recognizer, not a documented Duffel error code — this account has never had
+// Stays access to observe the real shape of that failure against. Deliberately conservative:
+// only a 403 whose own error text actually mentions Stays/access is treated as the specific
+// "not approved for Stays" case; anything else — including a plain 401, which is what an
+// actually-bad or expired token looks like — still falls through to the generic message
+// rather than misdiagnosing a real credential problem as a missing-approval one.
+function isLikelyStaysAccessError(error) {
+  if (error?.response?.status !== 403) return false;
+  const text = JSON.stringify(error?.response?.data || '').toLowerCase();
+  return text.includes('stay') || text.includes('access');
+}
+
 module.exports = {
   isConfigured,
   providerMode,
   describeUnconfigured,
   searchFlights,
   searchStays,
-  _private: { normalizeFlightOffer, normalizeStay, describeProviderError, nightsBetween }
+  _private: { normalizeFlightOffer, normalizeStay, describeProviderError, isLikelyStaysAccessError, nightsBetween }
 };

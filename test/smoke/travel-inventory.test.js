@@ -157,7 +157,10 @@ const STAY_RESPONSE = {
   }
 };
 
-test('a stay carries the dates, the guests, and both prices people compare on', async () => {
+test('with no top-level cheapest_rate field, the cheapest room rate is flattened out as a fallback', async () => {
+  // Duffel documents cheapest_rate_total_amount as always present, but rooms[].rates[] as
+  // NOT guaranteed on the initial search response — this exercises the defensive fallback
+  // for a shape Duffel's docs don't actually promise, in case a future response omits it.
   const result = await inventory.searchStays({
     latitude: 50.087, longitude: 14.421, checkIn: '2026-09-18', checkOut: '2026-09-21',
     guests: 2, env: LIVE, now: NOW, post: async () => STAY_RESPONSE
@@ -183,6 +186,62 @@ test('a stay with no sellable rate is not an option', async () => {
     post: async () => ({ data: { data: { results: [{ accommodation: { name: 'Sold Out Inn', rooms: [] } }] } } })
   });
   assert.deepEqual(result.options, []);
+});
+
+test('the documented top-level cheapest_rate fields are the primary source, not a fallback', async () => {
+  // "You will always know the cheapest rate" — Duffel's own guarantee. This is what a real
+  // search result looks like: rooms/rates may be absent entirely on the initial response.
+  const result = await inventory.searchStays({
+    latitude: 50.087, longitude: 14.421, checkIn: '2026-09-18', checkOut: '2026-09-21',
+    guests: 2, env: LIVE, now: NOW,
+    post: async () => ({
+      data: {
+        data: {
+          results: [{
+            cheapest_rate_total_amount: '286.50',
+            cheapest_rate_currency: 'EUR',
+            accommodation: { name: 'Hotel Josef', rating: 4, location: { address: { city_name: 'Prague' } } }
+          }]
+        }
+      }
+    })
+  });
+  const [stay] = result.options;
+  assert.equal(stay.totalPrice, 286.5);
+  assert.equal(stay.currency, 'EUR');
+});
+
+// ── Stays needs separate real-inventory access, even with a working token ──────────────
+test('a live token without Stays access is diagnosed distinctly from a generic provider error', async () => {
+  const result = await inventory.searchStays({
+    latitude: 50.087, longitude: 14.421, checkIn: '2026-09-18', checkOut: '2026-09-21',
+    env: LIVE, now: NOW,
+    post: async () => { throw { response: { status: 403, data: { errors: [{ title: 'Forbidden', message: 'This account does not have Stays access' }] } } }; }
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /not yet approved for live Stays/);
+  assert.match(result.reason, /duffel\.com\/contact-us/);
+  assert.match(result.reason, /Flights are unaffected/);
+});
+
+test('a plain 403/401 with no stays/access wording stays a generic error, not misdiagnosed', async () => {
+  const result = await inventory.searchStays({
+    latitude: 50.087, longitude: 14.421, checkIn: '2026-09-18', checkOut: '2026-09-21',
+    env: LIVE, now: NOW,
+    post: async () => { throw { response: { status: 401, data: { errors: [{ title: 'Unauthorized', message: 'invalid token' }] } } }; }
+  });
+  assert.doesNotMatch(result.reason, /Stays/);
+  assert.match(result.reason, /Unauthorized/);
+});
+
+test('a test-mode token is never diagnosed as missing Stays access — it always has test access', () => {
+  const { isLikelyStaysAccessError } = inventory._private;
+  // The distinct message only applies to a LIVE token; searchStays itself gates on
+  // providerMode(env) === 'live' before ever consulting this, but the recognizer's own
+  // shape is tested here independent of that gate.
+  assert.equal(isLikelyStaysAccessError({ response: { status: 403, data: { errors: [{ message: 'no stays access' }] } } }), true);
+  assert.equal(isLikelyStaysAccessError({ response: { status: 401, data: {} } }), false);
+  assert.equal(isLikelyStaysAccessError({ response: { status: 403, data: { errors: [{ message: 'rate limit exceeded' }] } } }), false);
 });
 
 // ── Failure is reported as failure ─────────────────────────────────────────────────────
