@@ -125,6 +125,36 @@ async function verify2FA(userId, password) {
   }
 }
 
+// Telegram's own convention for "the account's own chat with itself" — every client (the
+// official apps included) surfaces this as "Saved Messages". gramJS resolves the string 'me'
+// to InputPeerSelf() without a contacts lookup, so it needs no destination resolution beyond
+// having an authenticated session — there is no name to fuzzy-match and no chance of picking
+// the wrong contact. This is deliberately the ONLY destination proactive notifications ever
+// use: nothing here sends to an entry from the user's own contact list.
+const SELF_DESTINATION = 'me';
+
+// Is this session genuinely authenticated right now, and who does it belong to? Calling
+// getMe() (rather than just checking a stored session string exists) is the same principle
+// as connectors/google.js's getMailbox: a session that LOOKS present but has been logged out
+// elsewhere must read as unavailable, not silently fail the first time a notification tries
+// to use it.
+async function getSelfDestination(userId) {
+  const tokens = await getStoredTokens(userId);
+  if (!tokens.session) return null;
+
+  let client;
+  try {
+    client = await buildClient(tokens.session);
+    const me = await client.getMe();
+    const displayName = `${me.firstName || ''} ${me.lastName || ''}`.trim() || me.username || 'you';
+    return { destination: SELF_DESTINATION, displayName, canSend: true };
+  } catch {
+    return null;
+  } finally {
+    if (client) await client.disconnect().catch(() => {});
+  }
+}
+
 // ── Actions ───────────────────────────────────────────────────────────────────
 
 async function execute(userId, action, params) {
@@ -143,6 +173,13 @@ async function execute(userId, action, params) {
         if (!contact || !message) return { success: false, error: 'send_telegram requires contact and message' };
         const search = normalizeContactSearch(contact);
         if (!search) return { success: false, error: 'send_telegram requires a valid contact name' };
+
+        // "Send myself a note" / a proactive notification — SELF_DESTINATION needs no
+        // contacts lookup, so it is checked before fetching or fuzzy-matching the real list.
+        if (['me', 'self', 'saved messages', 'myself'].includes(search)) {
+          const sent = await client.sendMessage(SELF_DESTINATION, { message });
+          return { success: true, messageId: sent?.id ?? null, text: 'Sent to your Telegram Saved Messages' };
+        }
 
         const result = await client.invoke(new Api.contacts.GetContacts({ hash: BigInt(0) }));
         const match = result.users.find(u => {
@@ -178,4 +215,7 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute, startAuth, verifyCode, verify2FA };
+module.exports = {
+  SUPPORTED_ACTIONS, execute, startAuth, verifyCode, verify2FA, getSelfDestination,
+  _private: { normalizeContactSearch, SELF_DESTINATION }
+};

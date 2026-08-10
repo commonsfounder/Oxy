@@ -4867,15 +4867,31 @@ async function executeAction(userId, action, params, context = {}) {
     // which channel, which categories, urgent-only, and when to stay quiet.
     case 'set_notification_preference': {
       const scope = String(params?.category || '').trim().toLowerCase();
+      const urgencyScope = String(params?.urgency || '').trim().toLowerCase();
       const channel = String(params?.channel || '').trim().toLowerCase();
       const updates = [];
 
+      if (scope && urgencyScope) {
+        return { success: false, error: 'Set a preference by category or by urgency, not both at once.' };
+      }
       if (channel) {
-        const valid = ['auto', 'push', 'email', 'in_app', 'off'];
+        const valid = ['auto', ...notifications.CHANNELS, 'off'];
         if (!valid.includes(channel)) return { success: false, error: `channel must be one of ${valid.join(', ')}` };
-        const key = scope ? notifications.PREF.category(notifications.normalizeCategory(scope)) : notifications.PREF.channel;
+        const key = scope ? notifications.PREF.category(notifications.normalizeCategory(scope))
+          : urgencyScope ? notifications.PREF.urgency(notifications.normalizeUrgency(urgencyScope))
+            : notifications.PREF.channel;
         await setPreferenceValue(userId, key, channel);
-        updates.push(scope ? `${scope} notifications: ${channel}` : `default channel: ${channel}`);
+        updates.push(scope ? `${scope} notifications: ${channel}`
+          : urgencyScope ? `${urgencyScope} notifications: ${channel}`
+            : `default channel: ${channel}`);
+      }
+      if (params?.fallback !== undefined) {
+        const raw = String(params.fallback || '').trim().toLowerCase();
+        const list = raw.split(',').map(c => c.trim()).filter(Boolean);
+        const bad = list.find(c => !notifications.CHANNELS.includes(c) || c === 'in_app');
+        if (bad) return { success: false, error: `fallback channels must be one of ${notifications.CHANNELS.filter(c => c !== 'in_app').join(', ')}` };
+        await setPreferenceValue(userId, notifications.PREF.fallback, list.join(','));
+        updates.push(raw ? `falls back to ${list.join(', ')} if the chosen channel fails` : 'no fallback channel');
       }
       if (params?.urgent_only !== undefined) {
         const value = params.urgent_only === true || String(params.urgent_only) === 'true';
@@ -4894,23 +4910,27 @@ async function executeAction(userId, action, params, context = {}) {
         await setPreferenceValue(userId, notifications.PREF.emailTo, String(params.email_to).trim());
         updates.push(`email to ${params.email_to}`);
       }
-      if (!updates.length) return { success: false, error: 'Nothing to change — say which channel, category, quiet hours or urgency level.' };
+      if (!updates.length) return { success: false, error: 'Nothing to change — say which channel, category, urgency, fallback, quiet hours or destination.' };
 
-      // Report what can actually deliver, so "email me if the price drops" cannot look
-      // configured when no email provider is set up.
+      // Report what can actually deliver, so "email me if the price drops" or "urgent
+      // things on Telegram" cannot look configured when the underlying channel is not.
       const prefs = await getPreferenceMap(userId);
       const { data: userRow } = await supabase.from('users').select('email, email_verified').eq('user_id', userId).maybeSingle();
-      const emailTo = prefs[notifications.PREF.emailTo] || (userRow?.email_verified ? userRow.email : '');
+      const mailbox = await googleConnector.getMailbox(userId).catch(() => null);
+      const mailboxCanSend = Boolean(mailbox?.canSend && mailbox?.address);
+      const emailTo = prefs[notifications.PREF.emailTo] || (userRow?.email_verified ? userRow.email : '') || mailbox?.address || '';
+      const telegramDest = await telegram.getSelfDestination(userId).catch(() => null);
+      const telegramCanSend = Boolean(telegramDest?.canSend);
       const { count: deviceCount } = await supabase.from('devices').select('*', { count: 'exact', head: true }).eq('user_id', userId);
-      const available = availableChannels({ hasPushDevices: (deviceCount || 0) > 0, emailTo });
-      const blocked = describeUnavailable({ hasPushDevices: (deviceCount || 0) > 0, emailTo });
+      const available = availableChannels({ hasPushDevices: (deviceCount || 0) > 0, emailTo, mailboxCanSend, telegramCanSend });
+      const blocked = describeUnavailable({ hasPushDevices: (deviceCount || 0) > 0, emailTo, mailboxCanSend, telegramCanSend });
 
       return {
         success: true,
         preferences: notifications.describePreference(prefs),
         available,
         unavailable: blocked,
-        text: `Updated: ${updates.join('; ')}.${blocked.length ? ` Be aware — ${blocked.join('; ')}, so anything routed there will fall back to the in-app card until that is set up.` : ''}`
+        text: `Updated: ${updates.join('; ')}.${blocked.length ? ` Be aware — ${blocked.join('; ')}, so anything routed there will fall back until that is set up.` : ''}`
       };
     }
 
@@ -5241,6 +5261,10 @@ const notificationDelivery = createDeliveryRuntime({
     // logs and returns ok. Passed through deliberately so the runtime can reject it.
     return { ok: result?.ok !== false, dev: result?.dev === true, providerRef: result?.id || null };
   },
+  sendTelegram: async (userId, { text }) => {
+    const result = await telegram.execute(userId, 'send_telegram', { contact: 'me', message: text });
+    return { ok: result?.success === true, error: result?.error || null };
+  },
   createBriefing,
   getPreferenceMap,
   getUserEmail: async (userId) => {
@@ -5249,6 +5273,7 @@ const notificationDelivery = createDeliveryRuntime({
     return data?.email && data.email_verified ? data.email : '';
   },
   getMailbox: (userId) => googleConnector.getMailbox(userId),
+  getTelegram: (userId) => telegram.getSelfDestination(userId),
   countPushDevices: async (userId) => {
     const { count } = await supabase.from('devices').select('*', { count: 'exact', head: true }).eq('user_id', userId);
     return count || 0;

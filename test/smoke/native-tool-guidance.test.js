@@ -465,8 +465,15 @@ test('travel: plan_itinerary now composes with the real searches instead of avoi
 test('notifications: the user is never told a message will arrive on a channel that cannot send', () => {
   const desc = nativeDescriptions().set_notification_preference.description;
   assert.match(desc, /Relay the returned `unavailable` list honestly/);
-  assert.match(desc, /rather than implying the email will arrive/);
-  assert.match(desc, /Do not invent channels: only push, email and the in-app card exist/);
+  assert.match(desc, /rather than implying it will arrive there/);
+  assert.match(desc, /Do not invent channels: only push, email, Telegram and the in-app card exist/);
+});
+
+test('notifications: an explicit channel preference is exclusive unless a fallback is set', () => {
+  const desc = nativeDescriptions().set_notification_preference.description;
+  assert.match(desc, /it does NOT silently fall back to whatever else happens to be configured/);
+  assert.match(desc, /"Telegram only" actually means only Telegram/);
+  assert.match(desc, /Never set both category and urgency in the same call/);
 });
 
 test('commitments: capture is steered conservative, and deadlines are never invented', () => {

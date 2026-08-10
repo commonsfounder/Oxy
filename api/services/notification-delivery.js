@@ -34,21 +34,25 @@ function resolveEmailDestination({ prefEmailTo = '', verifiedEmail = '', mailbox
 }
 
 // Which channels can actually deliver right now. Deliberately checked per-call rather than at
-// boot: adding RESEND_API_KEY (or connecting Google) should make email live without a
-// redeploy of this logic, and a channel with code but no credentials must never be offered as
-// if it worked.
-function availableChannels({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false } = {}) {
+// boot: adding RESEND_API_KEY (or connecting Google, or authenticating Telegram) should make
+// a channel live without a redeploy of this logic, and a channel with code but no credentials
+// must never be offered as if it worked.
+function availableChannels({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false, telegramCanSend = false } = {}) {
   const available = [];
   if (env.APNS_BUNDLE_ID && env.APNS_KEY_ID && env.APNS_TEAM_ID && env.APNS_PRIVATE_KEY && hasPushDevices) {
     available.push('push');
   }
   if (resolveEmailProvider({ env, mailboxCanSend }) && emailTo) available.push('email');
+  // Telegram needs no per-call destination resolution the way email does — the destination
+  // is always the user's own Saved Messages, never a contact — so "can it send" IS "is it
+  // available", unlike email's separate provider/destination split.
+  if (telegramCanSend) available.push('telegram');
   // The in-app card is always available: it is a row in this database, not a third party.
   available.push('in_app');
   return available;
 }
 
-function describeUnavailable({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false } = {}) {
+function describeUnavailable({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false, telegramCanSend = false } = {}) {
   const reasons = [];
   if (!env.APNS_BUNDLE_ID || !env.APNS_KEY_ID || !env.APNS_TEAM_ID || !env.APNS_PRIVATE_KEY) {
     reasons.push('push: Apple push credentials are not configured');
@@ -60,6 +64,7 @@ function describeUnavailable({ env = process.env, hasPushDevices = false, emailT
   } else if (!emailTo) {
     reasons.push('email: no destination address is set');
   }
+  if (!telegramCanSend) reasons.push('telegram: not connected (authenticate via /auth/telegram/start)');
   return reasons;
 }
 
@@ -71,6 +76,7 @@ function createDeliveryRuntime({
   supabase,
   sendPush,
   sendEmail,
+  sendTelegram,
   createBriefing,
   getPreferenceMap,
   getUserEmail,
@@ -79,6 +85,8 @@ function createDeliveryRuntime({
   // callers that genuinely have no mail connector keep working — they just get the Resend
   // path, exactly as before.
   getMailbox = async () => null,
+  // Is Telegram genuinely authenticated right now? { canSend } or null — mirrors getMailbox.
+  getTelegram = async () => null,
   env = process.env,
   now = () => new Date()
 }) {
@@ -138,6 +146,9 @@ function createDeliveryRuntime({
         result = await sendEmail({
           userId, to: emailTo, subject: shaped.subject, text: shaped.text, provider: emailProvider
         });
+      } else if (decision.channel === 'telegram') {
+        const shaped = notifications.formatNotificationTelegram(event);
+        result = await sendTelegram(userId, { text: shaped.text });
       } else {
         const briefing = await createBriefing(userId, {
           kind: `notification_${event.category}`,
@@ -232,7 +243,9 @@ function createDeliveryRuntime({
     });
     const emailProvider = resolveEmailProvider({ env, mailboxCanSend });
     const hasPushDevices = (await countPushDevices(userId).catch(() => 0)) > 0;
-    const available = availableChannels({ env, hasPushDevices, emailTo, mailboxCanSend });
+    const telegram = await getTelegram(userId).catch(() => null);
+    const telegramCanSend = Boolean(telegram?.canSend);
+    const available = availableChannels({ env, hasPushDevices, emailTo, mailboxCanSend, telegramCanSend });
 
     const results = [];
     for (const event of events) {
@@ -242,7 +255,7 @@ function createDeliveryRuntime({
       ok: true,
       available,
       emailProvider,
-      unavailable: describeUnavailable({ env, hasPushDevices, emailTo, mailboxCanSend }),
+      unavailable: describeUnavailable({ env, hasPushDevices, emailTo, mailboxCanSend, telegramCanSend }),
       collapsed: collapsed.length,
       results
     };

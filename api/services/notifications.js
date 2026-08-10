@@ -14,17 +14,27 @@
 
 const CATEGORIES = ['watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'other'];
 const URGENCIES = ['urgent', 'normal', 'low'];
-const CHANNELS = ['push', 'email', 'in_app'];
+const CHANNELS = ['push', 'email', 'telegram', 'in_app'];
 const MAX_ATTEMPTS = 3;
 
 // Preference keys, kept deliberately few. Everything is expressible as: which channel, which
-// categories, urgent-only, and when to stay quiet.
+// categories, which urgency, an optional fallback, and when to stay quiet.
 const PREF = {
   channel: 'notify.channel',
+  // Only consulted when an EXPLICIT preference (category, urgency, or global) named a
+  // channel that turned out to be unavailable. "Telegram only" has to actually mean only
+  // Telegram — falling back to email just because it happens to be configured would make
+  // "don't email me" a preference the runtime doesn't actually keep. Comma-separated,
+  // tried in order; in_app is always the last resort beneath it and needs no listing.
+  fallback: 'notify.fallback',
   urgentOnly: 'notify.urgent_only',
   quietHours: 'notify.quiet_hours',
   emailTo: 'notify.email_to',
-  category: (category) => `notify.category.${category}`
+  category: (category) => `notify.category.${category}`,
+  // "Send urgent alerts to Telegram" — a preference about how serious something is, not
+  // what kind of thing it is. Checked between category (most specific) and the blanket
+  // channel preference (least specific).
+  urgency: (urgency) => `notify.urgency.${urgency}`
 };
 
 function clean(value, max = 400) {
@@ -114,7 +124,10 @@ function resolveDelivery({ event, prefs = {}, available = [], now = new Date(), 
 
   const globalPref = String(prefs[PREF.channel] || 'auto').toLowerCase();
   const categoryPref = String(prefs[PREF.category(category)] || '').toLowerCase();
-  const effective = categoryPref || globalPref;
+  const urgencyPref = String(prefs[PREF.urgency(urgency)] || '').toLowerCase();
+  // Most specific wins: "price watches via Telegram" beats "urgent things via Telegram"
+  // beats "everything via Telegram".
+  const effective = categoryPref || urgencyPref || globalPref;
 
   if (effective === 'off') {
     return { deliver: false, status: 'suppressed', reason: `${category} notifications are turned off` };
@@ -136,11 +149,24 @@ function resolveDelivery({ event, prefs = {}, available = [], now = new Date(), 
     return { deliver: false, status: 'deferred', deliverAfter: nextQuietEnd(now, quiet, timeZone), reason: 'quiet hours' };
   }
 
-  // Preference order: what the user asked for, else push, else email, else the in-app card.
-  // The in-app channel is last because it is the one that does NOT reach them.
-  const preferred = CHANNELS.includes(effective) ? [effective] : [];
-  const order = [...preferred, 'push', 'email', 'in_app'];
-  for (const channel of order) {
+  if (CHANNELS.includes(effective)) {
+    if (available.includes(effective)) return { deliver: true, channel: effective };
+    // An explicit choice is not a suggestion. "Telegram only" must not silently leak to
+    // email just because email happens to be configured — that would make the preference
+    // a lie. Only a channel the user actually opted into as a fallback is tried next, and
+    // only after that does the in-app card catch it, because in-app is the one channel
+    // that does not reach them and is never itself a stated preference here.
+    const fallbackChannels = String(prefs[PREF.fallback] || '')
+      .split(',').map(c => c.trim().toLowerCase()).filter(c => CHANNELS.includes(c) && c !== 'in_app');
+    for (const channel of fallbackChannels) {
+      if (available.includes(channel)) return { deliver: true, channel, fellBackFrom: effective };
+    }
+    if (available.includes('in_app')) return { deliver: true, channel: 'in_app', fellBackFrom: effective };
+    return { deliver: false, status: 'failed', reason: `${effective} is not available and no fallback is configured` };
+  }
+
+  // No explicit preference ('auto') — the default priority order.
+  for (const channel of ['push', 'email', 'telegram', 'in_app']) {
     if (available.includes(channel)) return { deliver: true, channel };
   }
   return { deliver: false, status: 'failed', reason: 'no notification channel is configured' };
@@ -207,17 +233,32 @@ function formatNotificationEmail(event) {
   };
 }
 
+// Telegram messages are read in a chat, not a mail client — no subject line to carry the
+// title, so it leads the message instead. Kept short of Telegram's own 4096-character cap
+// with headroom to spare; nothing here has ever been close to that length.
+function formatNotificationTelegram(event) {
+  const title = clean(event.title, 140);
+  const body = clean(event.body, 1500);
+  return { text: `${title}\n\n${body}` };
+}
+
 function describePreference(prefs = {}) {
   const channel = prefs[PREF.channel] || 'auto';
+  const fallback = prefs[PREF.fallback];
   const quiet = prefs[PREF.quietHours];
   const urgentOnly = String(prefs[PREF.urgentOnly] || '') === 'true';
-  const overrides = Object.entries(prefs)
+  const categoryOverrides = Object.entries(prefs)
     .filter(([key]) => key.startsWith('notify.category.'))
     .map(([key, value]) => `${key.replace('notify.category.', '').replace('_', ' ')}: ${value}`);
+  const urgencyOverrides = Object.entries(prefs)
+    .filter(([key]) => key.startsWith('notify.urgency.'))
+    .map(([key, value]) => `${key.replace('notify.urgency.', '')}: ${value}`);
   const bits = [`channel ${channel}`];
+  if (fallback) bits.push(`falls back to ${fallback}`);
   if (urgentOnly) bits.push('urgent only');
   if (quiet) bits.push(`quiet ${quiet}`);
-  if (overrides.length) bits.push(overrides.join(', '));
+  if (categoryOverrides.length) bits.push(categoryOverrides.join(', '));
+  if (urgencyOverrides.length) bits.push(urgencyOverrides.join(', '));
   return bits.join(' · ');
 }
 
@@ -237,5 +278,6 @@ module.exports = {
   collapseRelated,
   subjectsOf,
   formatNotificationEmail,
+  formatNotificationTelegram,
   describePreference
 };

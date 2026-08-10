@@ -442,16 +442,18 @@ const ACTION_CONTRACTS = {
   set_notification_preference: {
     risk: 'low',
     required: [],
-    optional: ['channel', 'category', 'urgent_only', 'quiet_hours', 'email_to'],
+    optional: ['channel', 'category', 'urgency', 'fallback', 'urgent_only', 'quiet_hours', 'email_to'],
     inputExample: { category: 'delivery', channel: 'in_app' },
     paramHints: {
-      channel: 'auto (default) | push | email | in_app (show it in the app but do not interrupt) | off',
+      channel: 'auto (default) | push | email | telegram | in_app (show it in the app but do not interrupt) | off',
       category: 'watch | digest | delivery | reply_needed | occasion | commitment — omit to set the default for everything',
+      urgency: 'urgent | normal | low — an alternative to category for "send URGENT things via X" rather than "send THIS KIND of thing via X". Never set both category and urgency in the same call.',
+      fallback: 'comma-separated channel(s) to try if the chosen channel is unavailable, e.g. "email" for "use email if Telegram fails". Without this, an explicit channel choice is exclusive — it does NOT silently fall back to whatever else happens to be configured, so "Telegram only" actually means only Telegram.',
       urgent_only: 'true for "only send urgent things"',
       quiet_hours: 'e.g. "22:00-07:00" — non-urgent notifications wait until it ends rather than being dropped',
-      email_to: 'a specific address to send to, if not the account address'
+      email_to: 'a specific address to send to, if not the account address or connected mailbox'
     },
-    guidance: 'Use when the user says how they want to be told about things: "email me if that price drops" (channel:"email"), "don\'t email me about deliveries, just show those in the app" (category:"delivery", channel:"in_app"), "only send urgent things", "nothing after 10pm", "send me my morning brief even if I don\'t open the app" (category:"digest", channel:"email" or "push"). Relay the returned `unavailable` list honestly — if the user asks to be emailed and no email provider is configured, say that it will fall back to the in-app card until it is set up rather than implying the email will arrive. Do not invent channels: only push, email and the in-app card exist.',
+    guidance: 'Use when the user says how they want to be told about things: "email me if that price drops" (channel:"email"), "use Telegram for price watches but email my morning brief" (two calls: category:"watch" channel:"telegram", then category:"digest" channel:"email"), "don\'t email me — Telegram only" (channel:"telegram", no fallback), "send urgent alerts to Telegram" (urgency:"urgent" channel:"telegram"), "use email if Telegram fails" (channel:"telegram" fallback:"email"), "only send urgent things", "nothing after 10pm". An explicit channel choice is exclusive: it does NOT silently fall back to whatever else happens to be configured, so "Telegram only" actually means only Telegram unless the user also names a fallback. Never set both category and urgency in the same call — category is "this KIND of thing", urgency is "things THIS SERIOUS", and they answer different requests. Relay the returned `unavailable` list honestly — if a channel is not actually configured, say what it will do instead (fall back, or land in the app) rather than implying it will arrive there. Do not invent channels: only push, email, Telegram and the in-app card exist.',
     successSummary: 'Notification preference updated',
     failureSummary: 'Could not change that preference',
     confirmation: 'none',

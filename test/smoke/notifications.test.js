@@ -6,7 +6,7 @@ const test = require('node:test');
 
 const {
   PREF, gradeUrgency, dedupeKeyFor, parseQuietHours, inQuietHours,
-  resolveDelivery, collapseRelated, formatNotificationEmail, describePreference
+  resolveDelivery, collapseRelated, formatNotificationEmail, formatNotificationTelegram, describePreference
 } = require('../../api/services/notifications');
 const {
   availableChannels, describeUnavailable, createDeliveryRuntime,
@@ -29,6 +29,16 @@ test('a channel with code but no credentials is never offered', () => {
     hasPushDevices: true, emailTo: 'a@b.com'
   });
   assert.deepEqual(full, ['push', 'email', 'in_app']);
+});
+
+test('an authenticated Telegram session makes the channel available with no separate destination step', () => {
+  // Unlike email, Telegram needs no per-call destination resolution — the destination is
+  // always Saved Messages, never a contact — so "can it send" alone gates availability.
+  const off = availableChannels({ env: {}, hasPushDevices: false, telegramCanSend: false });
+  assert.equal(off.includes('telegram'), false);
+  const on = availableChannels({ env: {}, hasPushDevices: false, telegramCanSend: true });
+  assert.deepEqual(on, ['telegram', 'in_app']);
+  assert.match(describeUnavailable({ env: {}, telegramCanSend: false }).join(' '), /telegram: not connected/);
 });
 
 test('push with credentials but no registered device is not available', () => {
@@ -93,6 +103,83 @@ test('no mailbox and no Resend still means no email channel', async () => {
   assert.ok(calls.includes('in_app'));
 });
 
+// ── Telegram through the SAME runtime as email/push/in-app ─────────────────────────────
+// The instruction that shaped this: not a separate Telegram notification subsystem — one
+// runtime, one dedupe key space, one delivery record per event, regardless of which channel
+// ends up carrying it.
+test('a watch trigger with the channel set to telegram reaches Telegram and nothing else', async () => {
+  const { runtime, rows, calls } = runtimeWith({
+    env: {}, emailTo: 'user@example.com', telegram: { canSend: true },
+    prefs: { [PREF.category('watch')]: 'telegram' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'Brighton room', body: 'Now £86.', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.results[0].channel, 'telegram');
+  assert.equal([...rows.values()][0].status, 'delivered');
+  assert.equal([...rows.values()][0].channel, 'telegram');
+  assert.equal(calls.some(c => c.startsWith('email:')), false, 'not also emailed — one trigger, one channel, unless configured otherwise');
+  assert.equal(calls.some(c => c === 'in_app'), false);
+});
+
+test('Telegram not connected: describeUnavailable says so and the event still reaches the app', async () => {
+  const { runtime, rows } = runtimeWith({ env: {}, emailTo: '', telegram: null });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.match(result.unavailable.join(' '), /telegram: not connected/);
+  assert.equal([...rows.values()][0].channel, 'in_app');
+});
+
+test('Telegram running but rejecting the send is a failure, exactly like any other provider', async () => {
+  const { runtime, rows } = runtimeWith({
+    env: {}, telegram: { canSend: true }, telegramResult: { ok: false, error: 'FLOOD_WAIT' },
+    prefs: { [PREF.channel]: 'telegram' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.notEqual(result.results[0].status, 'delivered');
+  assert.match([...rows.values()][0].last_error, /FLOOD_WAIT/);
+});
+
+test('email-as-fallback actually fires when Telegram is unavailable, and only then', async () => {
+  const { runtime, rows, calls } = runtimeWith({
+    env: { RESEND_API_KEY: 'k' }, emailTo: 'user@example.com', telegram: null,
+    prefs: { [PREF.channel]: 'telegram', [PREF.fallback]: 'email' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.results[0].channel, 'email');
+  assert.equal([...rows.values()][0].channel, 'email');
+  assert.ok(calls.some(c => c.startsWith('email:resend:')));
+});
+
+test('quiet hours still defer a Telegram-routed notification, same as any other channel', () => {
+  const prefs = { [PREF.channel]: 'telegram', [PREF.quietHours]: '22:00-07:00' };
+  const lateNight = new Date('2026-08-09T22:30:00Z');
+  const decision = resolveDelivery({ event: EVENT, prefs, available: ['telegram', 'in_app'], now: lateNight, timeZone: 'UTC' });
+  assert.equal(decision.deliver, false);
+  assert.equal(decision.status, 'deferred');
+});
+
+test('something urgent still reaches Telegram during quiet hours', () => {
+  const prefs = { [PREF.channel]: 'telegram', [PREF.quietHours]: '22:00-07:00' };
+  const decision = resolveDelivery({
+    event: { ...EVENT, urgency: 'urgent' }, prefs, available: ['telegram', 'in_app'],
+    now: new Date('2026-08-09T23:00:00Z'), timeZone: 'UTC'
+  });
+  assert.equal(decision.deliver, true);
+  assert.equal(decision.channel, 'telegram');
+});
+
+test('re-raising the same event dedupes to one row regardless of which channel will carry it', async () => {
+  const { runtime, rows } = runtimeWith({
+    env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'Quiet', body: 'B', dedupeKey: 'k1' });
+  const again = await runtime.raise('u1', { category: 'watch', title: 'Quiet', body: 'B', dedupeKey: 'k1' });
+  assert.ok(again.duplicate || again.updated);
+  assert.equal(rows.size, 1);
+});
+
 // ── Routing ────────────────────────────────────────────────────────────────────────────
 test('with nothing configured everything falls back to the in-app card', () => {
   const decision = resolveDelivery({ event: EVENT, available: ['in_app'], now: NOW });
@@ -131,6 +218,69 @@ test('"only send urgent things" holds back the rest', () => {
   assert.equal(resolveDelivery({ event: EVENT, prefs, available: ['email'], now: NOW }).status, 'suppressed');
   const urgent = resolveDelivery({ event: { ...EVENT, urgency: 'urgent' }, prefs, available: ['email'], now: NOW });
   assert.equal(urgent.deliver, true);
+});
+
+// ── Telegram participates in the SAME routing as everything else ───────────────────────
+test('"send my alerts on Telegram" routes everything there', () => {
+  const prefs = { [PREF.channel]: 'telegram' };
+  const decision = resolveDelivery({ event: EVENT, prefs, available: ['email', 'telegram', 'in_app'], now: NOW });
+  assert.equal(decision.channel, 'telegram');
+});
+
+test('"use Telegram for price watches but email my morning brief" — per-category, same as email/in_app before it', () => {
+  const prefs = { [PREF.category('watch')]: 'telegram', [PREF.category('digest')]: 'email' };
+  assert.equal(resolveDelivery({ event: EVENT, prefs, available: ['email', 'telegram', 'in_app'], now: NOW }).channel, 'telegram');
+  assert.equal(resolveDelivery({
+    event: { ...EVENT, category: 'digest' }, prefs, available: ['email', 'telegram', 'in_app'], now: NOW
+  }).channel, 'email');
+});
+
+test('"send urgent alerts to Telegram" routes by urgency, not category', () => {
+  const prefs = { [PREF.urgency('urgent')]: 'telegram' };
+  assert.equal(resolveDelivery({
+    event: { ...EVENT, urgency: 'urgent' }, prefs, available: ['email', 'telegram', 'in_app'], now: NOW
+  }).channel, 'telegram');
+  // A normal-urgency event on the same account is untouched by the urgent-only override.
+  assert.equal(resolveDelivery({ event: EVENT, prefs, available: ['email', 'telegram', 'in_app'], now: NOW }).channel, 'email');
+});
+
+test('a category preference is more specific than an urgency preference', () => {
+  const prefs = { [PREF.category('watch')]: 'telegram', [PREF.urgency('urgent')]: 'email' };
+  const decision = resolveDelivery({
+    event: { ...EVENT, category: 'watch', urgency: 'urgent' }, prefs, available: ['email', 'telegram', 'in_app'], now: NOW
+  });
+  assert.equal(decision.channel, 'telegram', 'watch (category) is more specific than urgent (urgency)');
+});
+
+// ── "Don't email me — Telegram only" must actually mean only Telegram ──────────────────
+test('an explicit channel choice does not silently leak to whatever else happens to be configured', () => {
+  const prefs = { [PREF.channel]: 'telegram' };
+  // Telegram is NOT in available (session expired, say) — email IS available, but the user
+  // said Telegram, not "Telegram, or whatever works". Falling through to email here would
+  // make "don't email me" a preference the runtime doesn't actually keep.
+  const decision = resolveDelivery({ event: EVENT, prefs, available: ['email', 'in_app'], now: NOW });
+  assert.equal(decision.channel, 'in_app', 'only the universal last resort, never an unrequested channel');
+});
+
+test('"use email if Telegram fails" opts into exactly that fallback, and no other', () => {
+  const prefs = { [PREF.channel]: 'telegram', [PREF.fallback]: 'email' };
+  const decision = resolveDelivery({ event: EVENT, prefs, available: ['push', 'email', 'in_app'], now: NOW });
+  assert.equal(decision.channel, 'email');
+  assert.equal(decision.fellBackFrom, 'telegram');
+});
+
+test('a fallback that is also unavailable still stops at in_app, not a third guess', () => {
+  const prefs = { [PREF.channel]: 'telegram', [PREF.fallback]: 'email' };
+  const decision = resolveDelivery({ event: EVENT, prefs, available: ['push', 'in_app'], now: NOW });
+  assert.equal(decision.channel, 'in_app');
+});
+
+test('with no fallback configured and the chosen channel truly unavailable, it fails rather than defaulting to in_app silently mislabeled', () => {
+  const prefs = { [PREF.channel]: 'telegram' };
+  const decision = resolveDelivery({ event: EVENT, prefs, available: [], now: NOW });
+  assert.equal(decision.deliver, false);
+  assert.equal(decision.status, 'failed');
+  assert.match(decision.reason, /telegram is not available/);
 });
 
 // ── Quiet hours defer, they do not drop ────────────────────────────────────────────────
@@ -309,10 +459,12 @@ function runtimeWith(overrides = {}) {
     supabase,
     sendPush: async () => { calls.push('push'); return { ok: false, error: 'Apple push is not configured' }; },
     sendEmail: async (args) => { calls.push(`email:${args.provider || 'resend'}:${args.to}`); return overrides.emailResult ?? { ok: true, providerRef: 'resend-1' }; },
+    sendTelegram: async (_userId, args) => { calls.push(`telegram:${args.text}`); return overrides.telegramResult ?? { ok: true }; },
     createBriefing: async () => { calls.push('in_app'); return { id: 'b1' }; },
     getPreferenceMap: async () => overrides.prefs || {},
     getUserEmail: async () => overrides.emailTo ?? 'user@example.com',
     getMailbox: async () => overrides.mailbox ?? null,
+    getTelegram: async () => overrides.telegram ?? null,
     countPushDevices: async () => overrides.devices ?? 0,
     env: overrides.env || {},
     now: () => NOW
@@ -382,6 +534,11 @@ test('the outbound email says why it arrived and how to stop it', () => {
   assert.equal(shaped.subject, 'Mia is waiting');
   assert.match(shaped.text, /She asked about next week\./);
   assert.match(shaped.text, /because you asked to be told about reply needed updates/);
+});
+
+test('the outbound Telegram message leads with the title — no subject line to carry it', () => {
+  const shaped = formatNotificationTelegram({ category: 'watch', title: 'Brighton room dropped', body: 'Now £74 a night.' });
+  assert.equal(shaped.text, 'Brighton room dropped\n\nNow £74 a night.');
 });
 
 test('preferences read back as a sentence, not a settings dump', () => {
