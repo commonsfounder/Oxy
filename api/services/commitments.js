@@ -121,17 +121,42 @@ function isDueToday(commitment, now = new Date(), timeZone = process.env.TIMEZON
 
 // ── Resolution ─────────────────────────────────────────────────────────────────────────
 
+// How confident the identity match itself is, independent of what the message says. Ordered
+// most to least stable:
+//   thread       — the same real conversation. Not an identity claim at all, but stronger
+//                   than one: the context IS the promise.
+//   participant  — the same person, by the people layer's own stable id. Two people can
+//                   share a nickname; the same person can be reached at more than one
+//                   address. An id match is real identity; a string match is a guess about it.
+//   address      — last resort: no thread, and no participant record to anchor to (a
+//                   commitment captured before resolution existed, or a recipient with no
+//                   saved contact). The recipient address matches the one the commitment was
+//                   filed under, EXACTLY — never a substring, never a display-name guess.
+//   none         — nothing ties this message to this commitment. Refused, not guessed.
+function evidenceIdentity(commitment, evidence = {}) {
+  if (evidence.threadId && commitment.thread_id && evidence.threadId === commitment.thread_id) {
+    return 'thread';
+  }
+  if (commitment.participant_id && evidence.participantId && commitment.participant_id === evidence.participantId) {
+    return 'participant';
+  }
+  const recipient = String(evidence.to || '').trim().toLowerCase();
+  const recorded = String(commitment.person_name || '').trim().toLowerCase();
+  if (recipient && recorded && recipient === recorded && recipient.includes('@')) {
+    return 'address';
+  }
+  return 'none';
+}
+
 // Evidence strong enough to close a commitment without asking. Deliberately narrow: an
 // outbound message to the right person about the right thing, or the user saying so. A
 // vaguely-related email is NOT evidence — silently marking something done that was not done
 // is the one failure this feature cannot afford.
 function matchesSentEvidence(commitment, evidence = {}) {
   if (!commitment || commitment.status !== 'open') return false;
-  const recipient = String(evidence.to || '').toLowerCase();
-  const person = String(commitment.person_name || '').toLowerCase();
-  const sameThread = Boolean(evidence.threadId && commitment.thread_id && evidence.threadId === commitment.thread_id);
-  const samePerson = person && recipient && (recipient.includes(person) || person.includes(recipient.split('@')[0]));
-  if (!sameThread && !samePerson) return false;
+
+  const identity = evidenceIdentity(commitment, evidence);
+  if (identity === 'none') return false;
 
   // The action word has to actually appear in what was sent, so replying "thanks" on the
   // thread does not close "send the documents".
@@ -147,14 +172,13 @@ function matchesSentEvidence(commitment, evidence = {}) {
   // and glue vocabulary that every promise shares.
   if (!subject.words.size) return true;
 
-  // Found live: a brand-new, unrelated email to the SAME person falsely closed an old
-  // commitment because "board" appeared in both "the board pack" and "the board deck" — one
-  // shared word was enough. A shared thread is already strong evidence this message is about
-  // that particular promise, so any overlapping word is a fair sanity check on top of it.
-  // Matching by recipient alone is much weaker — two different promises to the same person
-  // often share one generic word — so every one of the promise's words has to show up, not
-  // just one.
-  return sameThread
+  // A shared thread is already strong evidence this message is about that particular
+  // promise, so any overlapping subject word is a fair sanity check on top of it. Identity
+  // alone — even a real participant id, even an exact address — is NOT: "send Mia the board
+  // deck" and an unrelated "Board meeting agenda attached" share both the recipient and a
+  // word, and are still two different things. Off-thread, every one of the promise's words
+  // has to show up, not just one.
+  return identity === 'thread'
     ? [...subject.words].some(word => body.includes(word))
     : [...subject.words].every(word => body.includes(word));
 }
@@ -243,7 +267,11 @@ function duplicatesExisting(sentence, open = [], { threadId = null } = {}) {
 function reconcileSentEmail({ sent = {}, open = [], now = new Date(), timeZone = process.env.TIMEZONE || 'Europe/London' } = {}) {
   const body = String(sent.body || '');
   const evidence = {
-    to: sent.to, subject: sent.subject, body, threadId: sent.threadId
+    to: sent.to, subject: sent.subject, body, threadId: sent.threadId,
+    // The caller resolves this through the real people layer — pure code has no database to
+    // ask. Absent (rather than guessed) whenever the recipient could not be resolved to a
+    // saved person, which correctly drops evidenceIdentity to the address/none tiers.
+    participantId: sent.participantId || null
   };
 
   // Closing comes first: an email that discharges a promise is evidence about that promise.
@@ -321,6 +349,7 @@ module.exports = {
   isOverdue,
   isDueToday,
   matchesSentEvidence,
+  evidenceIdentity,
   extractCommitmentSentence,
   commitmentSubject,
   reconcileSentEmail,

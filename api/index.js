@@ -2743,7 +2743,25 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
   const { data: open } = await supabase.from('commitments')
     .select('*').eq('user_id', userId).eq('status', 'open');
 
-  const { capture, resolves } = commitments.reconcileSentEmail({ sent, open: open || [], now: new Date() });
+  // Resolve the recipient to a stable person identity ONCE, through the real people layer —
+  // used both to judge which open commitment this message discharges (a real id, not a
+  // string guess about who "Mia" is) and, if it also makes a new promise, to link that
+  // promise the same way. Resolving here rather than inside two separate lookups means a
+  // failed/ambiguous resolution can't quietly disagree with itself between the two.
+  let participantId = null;
+  let personDisplayName = null;
+  const recipient = String(sent.to || '').trim();
+  if (recipient) {
+    const person = await people.resolvePerson(supabase, userId, { email: recipient }).catch(() => null);
+    if (person?.person) {
+      participantId = person.person.id;
+      personDisplayName = person.person.display_name || person.person.name || null;
+    }
+  }
+
+  const { capture, resolves } = commitments.reconcileSentEmail({
+    sent: { ...sent, participantId }, open: open || [], now: new Date()
+  });
 
   const resolved = [];
   for (const commitment of resolves) {
@@ -2753,7 +2771,14 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
       // Named so a later reader can tell WHY this closed. "The user said so" and "we watched
       // them send it" are different degrees of certainty and should not look alike.
       resolved_by: 'sent_email',
-      source_ref: { ...(commitment.source_ref || {}), resolvedByMessageId: sent.messageId || null },
+      source_ref: {
+        ...(commitment.source_ref || {}),
+        resolvedByMessageId: sent.messageId || null,
+        // Which identity tier actually closed it — thread/participant/address. Kept on the
+        // row so a false-positive class, if one is ever found again, can be queried for
+        // directly instead of re-derived from scratch.
+        resolvedByIdentity: commitments.evidenceIdentity(commitment, { threadId: sent.threadId, participantId, to: sent.to })
+      },
       updated_at: new Date().toISOString()
     }).eq('id', commitment.id).eq('user_id', userId).select('*').single();
     if (data) resolved.push(data);
@@ -2761,20 +2786,11 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
 
   let captured = null;
   if (capture) {
-    let participantId = null;
-    let personName = null;
-    if (capture.personEmail) {
-      const person = await people.resolvePerson(supabase, userId, { email: capture.personEmail }).catch(() => null);
-      if (person?.person) {
-        participantId = person.person.id;
-        personName = person.person.display_name || person.person.name || null;
-      }
-    }
     const { data } = await supabase.from('commitments').insert({
       user_id: userId,
       what: capture.what,
       participant_id: participantId,
-      person_name: personName || capture.personEmail || null,
+      person_name: personDisplayName || capture.personEmail || null,
       due_at: capture.dueAt ? capture.dueAt.toISOString() : null,
       due_is_date_only: capture.dueIsDateOnly,
       status: 'open',

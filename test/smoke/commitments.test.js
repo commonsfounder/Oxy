@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const {
   looksLikeCommitment, extractDueDate, isOverdue, isDueToday,
-  matchesSentEvidence, describeDue, sortCommitments, formatCommitmentList,
+  matchesSentEvidence, evidenceIdentity, describeDue, sortCommitments, formatCommitmentList,
   reconcileSentEmail
 } = require('../../api/services/commitments');
 const { normalizeCommitmentItem, buildDailyDigest } = require('../../api/services/daily-digest');
@@ -164,6 +164,89 @@ test('an already-resolved commitment cannot be re-resolved by evidence', () => {
   assert.equal(matchesSentEvidence({ ...SEND_DOCS, status: 'done' }, {
     threadId: 'thr-1', body: 'send the documents'
   }), false);
+});
+
+// ── Identity hardening ──────────────────────────────────────────────────────────────────
+// The live scenario almost closed "send Mia the board deck" from an unrelated email, because
+// evidence used to be matched on raw strings — a substring of a display name, a recipient
+// address — rather than stable identity. matchesSentEvidence now resolves an explicit
+// identity tier first (thread > participant id > exact address > none) and only THEN checks
+// whether the message is about the right thing; these are the adversarial cases that tier
+// exists for.
+test('evidenceIdentity ranks a real participant id above a raw address, and both above nothing', () => {
+  const commitment = { thread_id: 'thr-1', participant_id: 'p-mia', person_name: 'mia@example.com' };
+  assert.equal(evidenceIdentity(commitment, { threadId: 'thr-1' }), 'thread');
+  assert.equal(evidenceIdentity(commitment, { participantId: 'p-mia' }), 'participant');
+  assert.equal(evidenceIdentity(commitment, { to: 'mia@example.com' }), 'address');
+  assert.equal(evidenceIdentity(commitment, { to: 'someone-else@example.com' }), 'none');
+});
+
+test('a participant id match is real identity — a substring of a display name is not', () => {
+  // "Ben" matching "ben.carter@..." by string, or "Benedict" matching "Ben", used to be how
+  // this worked at all. Neither is identity. Only a real people-layer id counts now.
+  const commitment = { participant_id: 'p-ben', person_name: 'Ben' };
+  assert.equal(evidenceIdentity(commitment, { to: 'ben.carter@example.com' }), 'none');
+  assert.equal(evidenceIdentity(commitment, { participantId: 'p-ben' }), 'participant');
+  assert.equal(evidenceIdentity(commitment, { participantId: 'p-someone-else' }), 'none');
+});
+
+test('the canonical false positive: same recipient, one shared word, must not resolve — even via participant id', () => {
+  // "Commitment: send Mia the board deck. Unrelated email: Board meeting agenda attached.
+  // must not resolve it. Even if: same recipient, overlapping word, close date." — identity
+  // alone was never the missing ingredient; subject specificity is, and stays required on
+  // every non-thread tier including a genuine participant match.
+  const commitment = { status: 'open', what: 'send Mia the board deck', participant_id: 'p-mia', person_name: 'mia@example.com' };
+  assert.equal(matchesSentEvidence(commitment, {
+    participantId: 'p-mia', to: 'mia@example.com', subject: 'Board meeting agenda', body: 'Board meeting agenda attached.'
+  }), false, 'a real participant match is still not enough on its own');
+});
+
+test('same person, different thread, overlapping noun — refused', () => {
+  const commitment = { status: 'open', what: 'send the contract', thread_id: 'thr-1', participant_id: 'p-mia' };
+  assert.equal(matchesSentEvidence(commitment, {
+    participantId: 'p-mia', threadId: 'thr-99', subject: 'Contract questions', body: 'Quick question about the contract terms.'
+  }), false, 'the right person, the right noun, but never actually sent');
+});
+
+test('same thread, genuinely fulfilling action — resolves', () => {
+  const commitment = { status: 'open', what: 'send the contract', thread_id: 'thr-1', participant_id: 'p-mia' };
+  assert.equal(matchesSentEvidence(commitment, {
+    participantId: 'p-mia', threadId: 'thr-1', subject: 'Re: Contract', body: 'Sending the signed contract over now.'
+  }), true);
+});
+
+test('different person, nearly identical task — refused despite the near-identical wording', () => {
+  const commitment = { status: 'open', what: 'send the quarterly report', participant_id: 'p-mia', person_name: 'mia@example.com' };
+  assert.equal(matchesSentEvidence(commitment, {
+    participantId: 'p-ben', to: 'ben@example.com', subject: 'Report', body: 'Sending the quarterly report your way.'
+  }), false, 'the promise was to Mia, not Ben, however alike the wording');
+});
+
+test('forwarding a document is conservatively distinct from sending the promised one', () => {
+  // Deliberate: forwarding is a related but different action word. False negatives are
+  // preferable to false completion, so an unambiguous "send" promise is not closed by a
+  // message that only ever says "forwarding".
+  const commitment = { status: 'open', what: 'send the case study', thread_id: 'thr-1' };
+  assert.equal(matchesSentEvidence(commitment, {
+    threadId: 'thr-1', subject: 'Case study', body: 'Forwarding the case study over to you now.'
+  }), false, 'a real gap, not a bug — "forward" never appears as "send"');
+  assert.equal(matchesSentEvidence(commitment, {
+    threadId: 'thr-1', subject: 'Case study', body: 'Forwarding — sending the case study over to you now.'
+  }), true, 'once the actual promised word is present, it resolves');
+});
+
+test('reconcileCommitmentsForSentEmail is wired to exactly one trigger', () => {
+  // A draft, a queued message, a scheduled send — none of them call this. Only send_email's
+  // own case in api/index.js does, and only after checking result.success. This is a cheap
+  // regression tripwire: if a future action starts calling it too, this fails loudly instead
+  // of silently creating a second, uncontrolled path to "resolved from sent mail".
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
+  const callSites = source.match(/reconcileCommitmentsForSentEmail\(/g) || [];
+  // One definition + one real call site.
+  assert.equal(callSites.length, 2, `expected exactly one call site, found ${callSites.length - 1}`);
+  const guardedCall = /if \(!result\?\.success\) return result;[\s\S]{0,400}reconcileCommitmentsForSentEmail/.test(source);
+  assert.ok(guardedCall, 'the call site must be reachable only after a successful send');
 });
 
 // ── Reconciling a real, sent email ─────────────────────────────────────────────────────
