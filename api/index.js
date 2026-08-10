@@ -10819,6 +10819,21 @@ app.get('/health', async (_req, res) => {
   const versionInfo = getRuntimeVersion();
   const brainRoute = resolveModelRoute({});
   const brainStatus = providerConfiguration(brainRoute.provider, brainRoute.model);
+
+  // Configuration presence only — never a live call to Gmail, Calendar or Telegram. A health
+  // check that depends on a third party's uptime turns their outage into an unnecessary
+  // restart/autoscale signal for this service; what belongs here is "did boot-time
+  // configuration succeed", which is exactly what was missing after the 2026-08-09 pass kept
+  // finding real capability gaps that a green test suite alone never surfaced.
+  const googleConfigured = Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET);
+  const telegramConfigured = Boolean(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH);
+  const notifyChannels = availableChannels({
+    hasPushDevices: true, emailTo: 'placeholder@example.com', mailboxCanSend: googleConfigured, telegramCanSend: telegramConfigured
+  });
+  const notifyUnavailable = describeUnavailable({
+    hasPushDevices: true, emailTo: 'placeholder@example.com', mailboxCanSend: googleConfigured, telegramCanSend: telegramConfigured
+  });
+
   res.json({
     status: (missingEnv.length || dbStatus !== 'ok' || !brainStatus.ready) ? 'degraded' : 'ok',
     db: { status: dbStatus, latencyMs: dbLatencyMs },
@@ -10828,6 +10843,19 @@ app.get('/health', async (_req, res) => {
       configured: brainStatus.configured,
       ready: brainStatus.ready,
       issue: brainStatus.issue
+    },
+    connectors: {
+      google: { configured: googleConfigured },
+      telegram: { configured: telegramConfigured },
+      travel: { configured: Boolean(process.env.DUFFEL_ACCESS_TOKEN) }
+    },
+    notifications: {
+      // Configured, not "will deliver right now" — per-user destination (a verified email,
+      // an authenticated Telegram session) is still resolved per call, exactly as
+      // notification-delivery.js already does; this says whether the underlying providers
+      // that per-user resolution depends on are even present.
+      channelsConfigured: notifyChannels.filter(c => c !== 'in_app'),
+      unavailable: notifyUnavailable
     },
     memory: { heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024), heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024) },
     uptime: Math.round(process.uptime()),
