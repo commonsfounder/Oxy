@@ -7,8 +7,8 @@ const test = require('node:test');
 
 const {
   looksLikeCommitment, extractDueDate, isOverdue, isDueToday,
-  matchesSentEvidence, evidenceIdentity, describeDue, sortCommitments, formatCommitmentList,
-  reconcileSentEmail
+  matchesSentEvidence, evidenceIdentity, ambiguousThreadWords, stripQuotedContent, stripFuturePromiseOf,
+  describeDue, sortCommitments, formatCommitmentList, reconcileSentEmail
 } = require('../../api/services/commitments');
 const { normalizeCommitmentItem, buildDailyDigest } = require('../../api/services/daily-digest');
 
@@ -117,9 +117,49 @@ test('a vaguely-related reply on the same thread is NOT evidence', () => {
   assert.equal(matchesSentEvidence(SEND_DOCS, {
     threadId: 'thr-1', subject: 'Re: Documents', body: 'Thanks, got it!'
   }), false);
+});
+
+test('restating the SAME promise in future tense is not evidence it was kept', () => {
+  // This used to be asserted true here, on the theory that "the model still decides, this
+  // only gates it" — but nothing downstream reviews a match before auto-resolving; this
+  // function's result IS the decision. A bare future-tense mention ("I will send the
+  // documents tomorrow") is a re-statement or a reschedule, not completion — and, found
+  // live, the SAME substring check let a brand-new SECOND promise on a thread ("I will also
+  // send the board deck tomorrow") falsely resolve a different, already-open FIRST promise
+  // ("send the board pack") purely because both contain the bare word "send".
   assert.equal(matchesSentEvidence(SEND_DOCS, {
     threadId: 'thr-1', subject: 'Re: Documents', body: 'I will send the documents tomorrow'
-  }), true, 'the action and subject both appear — the model still decides, this only gates it');
+  }), false, 'a future promise, however specific, is not evidence anything was actually sent');
+});
+
+test('genuine completion language passes even when it echoes the promise\'s own wording', () => {
+  assert.equal(matchesSentEvidence(SEND_DOCS, {
+    threadId: 'thr-1', subject: 'Re: Documents', body: 'Sent the documents — should be with you shortly.'
+  }), true);
+  assert.equal(matchesSentEvidence(SEND_DOCS, {
+    threadId: 'thr-1', subject: 'Re: Documents', body: 'Here is the documents, sending now.'
+  }), true);
+});
+
+test('a second, later promise on the same thread cannot resolve an earlier different one', () => {
+  // The live bug this fix closes, reproduced directly: two commitments open on one thread,
+  // and the SECOND one being promised must not read as completion evidence for the FIRST.
+  const pack = { id: 'pack', status: 'open', thread_id: 'thr-1', what: 'send the board pack tomorrow' };
+  const secondPromise = { threadId: 'thr-1', subject: 'Re: docs', body: 'I will also send the board deck tomorrow.' };
+  assert.equal(matchesSentEvidence(pack, secondPromise, { siblings: [pack] }), false,
+    'a promise about the deck is not evidence the pack was sent, even though both share "send" and "board"');
+});
+
+test('stripFuturePromiseOf removes a future mention of the action, leaves real completion language alone', () => {
+  assert.equal(stripFuturePromiseOf('I will also send the deck tomorrow.', 'send').includes('send'), false);
+  assert.equal(stripFuturePromiseOf("I'll send it right now.", 'send').includes('send'), false);
+  // Lowercase, matching how matchesSentEvidence always calls this (the real body is
+  // lowercased before it ever reaches here — this function itself does no case-folding).
+  assert.equal(stripFuturePromiseOf('sending it now.', 'send').includes('send'), true, 'present continuous is not a future-tense mention');
+  // "sent" never contains the substring "send" at all (different last letter) — recognising
+  // past tense as completion evidence is PAST_TENSE's job in matchesSentEvidence, not this
+  // function's; this only confirms stripping a future mention never touches an unrelated word.
+  assert.equal(stripFuturePromiseOf('Sent it already.', 'send'), 'Sent it already.');
 });
 
 test('a different promise on the same thread does not close the first one', () => {
@@ -249,6 +289,129 @@ test('reconcileCommitmentsForSentEmail is wired to exactly one trigger', () => {
   assert.ok(guardedCall, 'the call site must be reachable only after a successful send');
 });
 
+// ── Adversarial matrix: commitments × evidence ──────────────────────────────────────────
+// The commitment system has produced two live false positives already. This is the
+// deliberate attack pass promised after fixing the second one: every combination the spec
+// named, run against the current identity+specificity rules, to find where they still
+// over-resolve or under-resolve rather than assuming the fixes so far cover everything.
+
+function commitment(id, what, opts = {}) {
+  return { id, status: 'open', what, ...opts };
+}
+
+test('two similarly-named documents open on the SAME thread: the live bug this pass found', () => {
+  // "send Mia the board pack" and "send Mia the board deck" both open, same thread. A reply
+  // that only fulfils the pack must not ALSO close the deck just because "board" is common
+  // to both — this is the concrete false positive the sibling-ambiguity check exists for.
+  const pack = commitment('c-pack', 'send Mia the board pack', { thread_id: 'thr-1' });
+  const deck = commitment('c-deck', 'send Mia the board deck', { thread_id: 'thr-1' });
+  const siblings = [pack, deck];
+
+  const fulfillsPackOnly = { threadId: 'thr-1', subject: 'Re: docs', body: 'Sending you the board pack now.' };
+  assert.equal(matchesSentEvidence(pack, fulfillsPackOnly, { siblings }), true, 'the pack really was sent');
+  assert.equal(matchesSentEvidence(deck, fulfillsPackOnly, { siblings }), false,
+    'the word "board" is shared with a sibling promise on this thread — it cannot close the deck too');
+
+  const fulfillsBoth = { threadId: 'thr-1', subject: 'Re: docs', body: 'Sending the board pack and the board deck now.' };
+  assert.equal(matchesSentEvidence(pack, fulfillsBoth, { siblings }), true);
+  assert.equal(matchesSentEvidence(deck, fulfillsBoth, { siblings }), true, 'both really were sent — each has its own distinguishing word present');
+});
+
+test('"send Ben the board deck" does not resolve "send Mia the board deck", identical wording aside', () => {
+  const toMia = commitment('c-mia', 'send Mia the board deck', { thread_id: 'thr-1', participant_id: 'p-mia' });
+  const evidenceToBen = { threadId: 'thr-2', participantId: 'p-ben', to: 'ben@example.com', subject: 'Board deck', body: 'Sending the board deck across now.' };
+  assert.equal(matchesSentEvidence(toMia, evidenceToBen), false, 'right words, wrong person, wrong thread');
+});
+
+test('"review the board deck" never becomes a trackable commitment at all', () => {
+  // Not a CONCRETE_ACTION verb — there is no undertaking-plus-action here, so this never
+  // reaches evidence matching in the first place. Confirms the earlier find (D in the matrix)
+  // was never actually reachable, rather than assuming it.
+  assert.equal(looksLikeCommitment('I will review the board deck'), false);
+});
+
+test('discussing the document without sending it does not resolve the promise', () => {
+  const promise = commitment('c1', 'send the board deck', { thread_id: 'thr-1' });
+  const discussed = { threadId: 'thr-1', subject: 'Re: deck', body: 'Reviewed the board deck, looks good to me.' };
+  assert.equal(matchesSentEvidence(promise, discussed), false, '"reviewed" is not "send"');
+});
+
+test('forwarding an OLD email that happens to quote the promise does not self-fulfil it', () => {
+  // Gmail's default reply/forward quotes the entire prior message. If that quoted text
+  // contains the promise's own words, it must not be read as new evidence of having sent
+  // anything — the user forwarded old context, not the document.
+  const promise = commitment('c1', 'send the case study', { thread_id: 'thr-1' });
+  const forwarded = {
+    threadId: 'thr-1', subject: 'Fwd: Case study',
+    body: 'FYI, forwarding this old thread for context.\n\n-----Original Message-----\nI will send the case study tomorrow.'
+  };
+  assert.equal(matchesSentEvidence(promise, forwarded), false, 'the quoted old promise is not a new send');
+});
+
+test('a reply that quotes the original promise text is judged on its OWN new content only', () => {
+  const promise = commitment('c1', 'send the case study', { thread_id: 'thr-1' });
+  const quotedReply = {
+    threadId: 'thr-1', subject: 'Re: Case study',
+    body: 'Here it is, sending the case study now as promised.\n\nOn Tue, 12 Aug, Mia wrote:\n> Can you send me the case study?'
+  };
+  // The NEW content genuinely says "sending the case study" — this should still resolve;
+  // stripping quotes must not blind the check to a real, freshly-written fulfillment.
+  assert.equal(matchesSentEvidence(promise, quotedReply), true);
+});
+
+test('a > -quoted line contributes nothing to either the action or subject match', () => {
+  const promise = commitment('c1', 'send the case study', { thread_id: 'thr-1' });
+  const onlyQuoted = {
+    threadId: 'thr-1', subject: 'Re: Case study',
+    body: 'Thanks!\n\n> I will send the case study tomorrow.\n> Sending it first thing.'
+  };
+  assert.equal(matchesSentEvidence(promise, onlyQuoted), false, 'nothing outside the quote actually says anything was sent');
+});
+
+test('stripQuotedContent removes quote markers and forward/reply headers, keeps real new text', () => {
+  assert.equal(stripQuotedContent('Sending now.\n> old text\nmore new text'), 'Sending now. more new text');
+  assert.equal(stripQuotedContent('New part.\n-----Original Message-----\nOld part.').trim(), 'New part.');
+  assert.equal(stripQuotedContent('New part.\nOn Mon, 1 Jan, Ben wrote:\nOld part.').trim(), 'New part.');
+  assert.equal(stripQuotedContent('Nothing quoted here.'), 'Nothing quoted here.');
+});
+
+test('the same participant reached from a different, aliased address still resolves the promise', () => {
+  // The people layer (participant_addresses) is what makes two addresses resolve to the same
+  // participant_id — this confirms the commitment layer trusts that id correctly once given
+  // it, rather than needing its own alias logic.
+  const promise = commitment('c1', 'send the contract', { participant_id: 'p-mia', person_name: 'mia@personal.com' });
+  const fromWorkAddress = { participantId: 'p-mia', to: 'mia.smith@company.com', subject: 'Contract', body: 'Sending the contract over now.' };
+  assert.equal(matchesSentEvidence(promise, fromWorkAddress), true, 'same participant id, different address entirely — still the same person');
+});
+
+test('a shared team inbox is not silently treated as the individual it was promised to', () => {
+  // No participant_id resolved for the team alias (a real people layer would not fold
+  // "team@company.com" into Mia's personal participant record), and the recorded address
+  // does not match either — correctly falls through to "none" rather than guessing.
+  const promise = commitment('c1', 'send the contract', { participant_id: 'p-mia', person_name: 'mia@personal.com' });
+  const toSharedInbox = { to: 'team@company.com', subject: 'Contract', body: 'Sending the contract over now.' };
+  assert.equal(matchesSentEvidence(promise, toSharedInbox), false);
+});
+
+test('a promise with a due date still matches on the same subject words, date aside', () => {
+  const promise = commitment('c1', 'send Mia the board deck next Friday', { thread_id: 'thr-1' });
+  const fulfilled = { threadId: 'thr-1', subject: 'Re: deck', body: 'Sending the board deck now, ahead of schedule.' };
+  assert.equal(matchesSentEvidence(promise, fulfilled), true);
+});
+
+test('"send Mia the final deck" is not confused with "send Mia the board deck" off-thread', () => {
+  const finalDeck = commitment('c1', 'send Mia the final deck', { participant_id: 'p-mia' });
+  const boardDeckSent = { participantId: 'p-mia', subject: 'Board deck', body: 'Sending the board deck now.' };
+  assert.equal(matchesSentEvidence(finalDeck, boardDeckSent), false, '"final" never appears — only "deck" does, and that alone is not every word');
+});
+
+test('ambiguousThreadWords is empty with no siblings, and empty across different threads', () => {
+  const c = commitment('c1', 'send the board deck', { thread_id: 'thr-1' });
+  assert.deepEqual(ambiguousThreadWords(c, []), new Set());
+  const otherThread = commitment('c2', 'send the board pack', { thread_id: 'thr-2' });
+  assert.deepEqual(ambiguousThreadWords(c, [otherThread]), new Set(), 'a sibling on a different thread cannot create ambiguity here');
+});
+
 // ── Reconciling a real, sent email ─────────────────────────────────────────────────────
 // looksLikeCommitment and matchesSentEvidence were correct and unit-tested for a while
 // without being called from anywhere: nothing captured a promise from a message the user
@@ -330,6 +493,32 @@ test('promising a DIFFERENT thing on the same thread is a second commitment', ()
   });
   assert.ok(capture, 'a different document is a different promise');
   assert.match(capture.what, /contract/);
+});
+
+test('two different objects that share ONE generic word are still two separate promises', () => {
+  // Found live: "I will send the board pack tomorrow" then, on the same thread, "I will also
+  // send the board deck tomorrow" — both share "board", and the second was silently dropped
+  // as a duplicate of the first and never captured at all. A pack and a deck are two
+  // different real promises; a single shared descriptor must not be enough to swallow one.
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', what: 'I will send the board pack tomorrow' }];
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', threadId: 'thr-9', body: 'I will also send the board deck tomorrow.' },
+    open, now: NOW
+  });
+  assert.ok(capture, 'the deck is a genuinely separate promise from the pack');
+  assert.match(capture.what, /deck/);
+});
+
+test('a genuine rewording is still recognised as a duplicate even with extra shared words', () => {
+  // The other direction of the same fix: "case study" fully contained in a longer paraphrase
+  // must still collapse to one promise, not two, just because the fix now requires
+  // containment rather than any-overlap.
+  const open = [{ id: 'c1', status: 'open', thread_id: 'thr-9', what: 'I will send the finalized case study document tomorrow' }];
+  const { capture } = reconcileSentEmail({
+    sent: { to: 'mia@example.com', threadId: 'thr-9', body: 'I will send you the case study tomorrow.' },
+    open, now: NOW
+  });
+  assert.equal(capture, null, 'a shorter paraphrase fully contained in the existing promise is the same promise');
 });
 
 test('the same words to a DIFFERENT thread are a different promise', () => {

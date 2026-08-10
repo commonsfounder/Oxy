@@ -96,7 +96,91 @@ test('an ambiguous resolution asks rather than guessing which promise to close',
   await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} receipt` });
   const result = await app.executeAction(USER_ID, 'resolve_commitment', { what: `send the ${MARK}` });
   assert.equal(result.success, false);
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.candidates.length, 2, 'the full candidate list is returned, not just a formatted string, so the caller can present real choices');
   assert.match(result.error, /More than one matches/);
+});
+
+// ── Explicit completion path: adversarial ────────────────────────────────────────────────
+// "I already did it" is strong evidence when it is clear which promise is meant, and must
+// stay conservative when it is not — the same standard as the sent-mail evidence path.
+test('the same task promised to two different people: naming the person resolves cleanly', async () => {
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} report`, person_name: `${MARK} Mia` });
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} report`, person_name: `${MARK} Ben` });
+
+  // Without a person, genuinely ambiguous — same task, two people.
+  const noPerson = await app.executeAction(USER_ID, 'resolve_commitment', { what: `${MARK} report` });
+  assert.equal(noPerson.success, false);
+  assert.equal(noPerson.ambiguous, true);
+  assert.equal(noPerson.candidates.length, 2);
+
+  // "I already sent Ben the report" — naming the person narrows it to exactly one.
+  const withPerson = await app.executeAction(USER_ID, 'resolve_commitment', { what: `${MARK} report`, person_name: `${MARK} Ben` });
+  assert.equal(withPerson.success, true);
+
+  const { data } = await supabase.from('commitments').select('status, person_name')
+    .eq('user_id', USER_ID).ilike('what', `%${MARK} report%`).order('person_name');
+  const ben = data.find(c => c.person_name === `${MARK} Ben`);
+  const mia = data.find(c => c.person_name === `${MARK} Mia`);
+  assert.equal(ben.status, 'done', 'the one actually named is closed');
+  assert.equal(mia.status, 'open', 'the other person\'s identical task is untouched');
+});
+
+test('one person, two different obligations: a specific query resolves the right one', async () => {
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} invoice`, person_name: `${MARK} Mia` });
+  await app.executeAction(USER_ID, 'track_commitment', { what: `call the ${MARK} landlord`, person_name: `${MARK} Mia` });
+
+  // A vague query naming only the person is still ambiguous — two different things are owed.
+  const vague = await app.executeAction(USER_ID, 'resolve_commitment', { what: '', person_name: `${MARK} Mia` });
+  assert.equal(vague.success, false, 'an empty what with only a person is not specific enough to resolve anything');
+
+  const specific = await app.executeAction(USER_ID, 'resolve_commitment', { what: `${MARK} landlord`, person_name: `${MARK} Mia` });
+  assert.equal(specific.success, true);
+  const { data } = await supabase.from('commitments').select('what, status').eq('user_id', USER_ID).ilike('what', `%${MARK}%`);
+  const landlord = data.find(c => c.what.includes('landlord'));
+  const invoice = data.find(c => c.what.includes('invoice'));
+  assert.equal(landlord.status, 'done');
+  assert.equal(invoice.status, 'open', 'the other obligation to the same person is untouched');
+});
+
+test('a vague "done" with several unrelated commitments open does not arbitrarily pick one', async () => {
+  await app.executeAction(USER_ID, 'track_commitment', { what: `pay the ${MARK} rent` });
+  await app.executeAction(USER_ID, 'track_commitment', { what: `book the ${MARK} dentist` });
+  await app.executeAction(USER_ID, 'track_commitment', { what: `call the ${MARK} bank` });
+  // A query too generic to match any single "what" resolves nothing — the calling agent is
+  // responsible for supplying which one the user actually meant from conversation context;
+  // the code-level backstop here is simply: never guess when the query does not single one out.
+  const result = await app.executeAction(USER_ID, 'resolve_commitment', { what: MARK });
+  assert.equal(result.success, false);
+  assert.equal(result.ambiguous, true);
+  assert.equal(result.candidates.length, 3);
+});
+
+test('a commitment resolved by id is exact, ignoring any wording collision with other rows', async () => {
+  const a = await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} draft` });
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} draft again` });
+  const result = await app.executeAction(USER_ID, 'resolve_commitment', { id: a.commitment.id });
+  assert.equal(result.success, true);
+  const { data } = await supabase.from('commitments').select('id, status').eq('id', a.commitment.id).single();
+  assert.equal(data.status, 'done');
+  const { data: other } = await supabase.from('commitments').select('status')
+    .eq('user_id', USER_ID).ilike('what', `%${MARK} draft again%`).single();
+  assert.equal(other.status, 'open', 'the similarly-worded sibling is untouched — id bypasses text matching entirely');
+});
+
+test('rescheduling then completing resolves the CURRENT commitment, not a stale duplicate', async () => {
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} agenda`, due: 'tomorrow' });
+  // Re-stating with a new date updates in place — this is the documented reschedule path.
+  await app.executeAction(USER_ID, 'track_commitment', { what: `send the ${MARK} agenda`, due: 'Friday' });
+  const { data: beforeResolve } = await supabase.from('commitments').select('id')
+    .eq('user_id', USER_ID).ilike('what', `%${MARK} agenda%`);
+  assert.equal(beforeResolve.length, 1, 'rescheduling must not have produced a second row');
+
+  const resolved = await app.executeAction(USER_ID, 'resolve_commitment', { what: `${MARK} agenda` });
+  assert.equal(resolved.success, true);
+  const { data: afterResolve } = await supabase.from('commitments').select('status')
+    .eq('user_id', USER_ID).ilike('what', `%${MARK} agenda%`).single();
+  assert.equal(afterResolve.status, 'done');
 });
 
 test('resolving something that was never promised says so', async () => {

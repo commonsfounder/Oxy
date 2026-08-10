@@ -430,10 +430,13 @@ const ACTION_CONTRACTS = {
   resolve_commitment: {
     risk: 'low',
     required: [],
-    optional: ['what', 'id', 'outcome', 'resolved_by'],
+    optional: ['what', 'id', 'person_name', 'outcome', 'resolved_by'],
     inputExample: { what: 'send the case study' },
-    paramHints: { outcome: 'done (default) | cancelled for "I\'m not doing that any more"' },
-    guidance: 'Use when the user says they have done it ("I already did that", "sent it") or no longer intends to ("forget that one"). Only resolve on real evidence — the user saying so, or an outbound message that genuinely covers it. Never close a commitment because it looks stale or because something vaguely related happened; a silently-wrong "done" is worse than a reminder they do not need. To move a deadline rather than close it, call track_commitment again with the same wording and the new date.',
+    paramHints: {
+      outcome: 'done (default) | cancelled for "I\'m not doing that any more"',
+      person_name: 'who it was promised to, when the user said — narrows "the report" to the right one if more than one is open with different people'
+    },
+    guidance: 'Use when the user says they have done it ("I already did that", "sent it") or no longer intends to ("forget that one"). Only resolve on real evidence — the user saying so, or an outbound message that genuinely covers it. Never close a commitment because it looks stale or because something vaguely related happened; a silently-wrong "done" is worse than a reminder they do not need. Pass `what` as the SPECIFIC thing the user referred to, not a generic paraphrase — if the user says "I already did that" after several commitments were just discussed, use the one they most recently referred to in the conversation, not a guess; if it is genuinely unclear which one they mean, ask rather than picking. If more than one open commitment matches, this returns `ambiguous: true` and a `candidates` list — relay those back and ask, do not silently pick the first. To move a deadline rather than close it, call track_commitment again with the same wording and the new date.',
     successSummary: 'Commitment resolved',
     failureSummary: 'Could not resolve that',
     confirmation: 'none',

@@ -4816,11 +4816,21 @@ async function executeAction(userId, action, params, context = {}) {
         updated_at: new Date().toISOString()
       };
 
-      // Re-stating the same promise updates it (a new date, a named person) rather than
-      // creating a second obligation.
-      const { data: existing } = await supabase.from('commitments')
+      // Re-stating the same promise updates it (a new date) rather than creating a second
+      // obligation. But "send the report" to Mia and "send the report" to Ben are two real,
+      // separate obligations that happen to share wording — matching on `what` alone (as this
+      // used to) found Mia's open row on the second call and silently overwrote her
+      // commitment with Ben's, losing it entirely. Matched now on exactly the same key the
+      // table's own unique index declares (what + person_name, including "neither has one" as
+      // its own bucket) — the DB constraint was already the correct invariant; the app-level
+      // pre-check just wasn't consistent with it.
+      let existingQuery = supabase.from('commitments')
         .select('id').eq('user_id', userId).eq('status', 'open')
-        .ilike('what', escapeIlikePattern(what)).maybeSingle();
+        .ilike('what', escapeIlikePattern(what));
+      existingQuery = personName
+        ? existingQuery.ilike('person_name', escapeIlikePattern(personName))
+        : existingQuery.is('person_name', null);
+      const { data: existing } = await existingQuery.maybeSingle();
 
       const { data, error } = existing?.id
         ? await supabase.from('commitments').update(row).eq('id', existing.id).select('*').single()
@@ -4862,6 +4872,7 @@ async function executeAction(userId, action, params, context = {}) {
 
     case 'resolve_commitment': {
       const query = String(params?.what || params?.id || '').trim();
+      const personFilter = String(params?.person_name || '').trim();
       if (!query) return { success: false, error: 'Say which commitment — what was it?' };
       const outcome = params?.outcome === 'cancelled' ? 'cancelled' : 'done';
 
@@ -4870,15 +4881,27 @@ async function executeAction(userId, action, params, context = {}) {
         const { data } = await supabase.from('commitments').select('*').eq('id', query).eq('user_id', userId).maybeSingle();
         row = data;
       } else {
-        const { data } = await supabase.from('commitments').select('*')
+        // Narrowing by person is what lets "I already sent Ben the report" resolve cleanly
+        // even while "send Mia the report" is also open — without it, a `what`-only search
+        // for "report" would be ambiguous between the two for no good reason.
+        let matchQuery = supabase.from('commitments').select('*')
           .eq('user_id', userId).eq('status', 'open')
-          .ilike('what', `%${escapeIlikePattern(query)}%`).limit(2);
+          .ilike('what', `%${escapeIlikePattern(query)}%`);
+        if (personFilter) matchQuery = matchQuery.ilike('person_name', `%${escapeIlikePattern(personFilter)}%`);
+        // High enough that a genuinely long candidate list is still reported honestly (not
+        // truncated to "more than one" without saying how many), while staying a bounded query.
+        const { data } = await matchQuery.limit(10);
         if (data?.length > 1) {
-          return { success: false, error: `More than one matches "${query}": ${data.map(c => c.what).join('; ')}. Which one?` };
+          return {
+            success: false,
+            ambiguous: true,
+            candidates: data.map(c => ({ id: c.id, what: c.what, personName: c.person_name, dueAt: c.due_at })),
+            error: `More than one matches "${query}"${personFilter ? ` for ${personFilter}` : ''}: ${data.map(c => c.what).join('; ')}. Which one?`
+          };
         }
         row = data?.[0] || null;
       }
-      if (!row) return { success: false, error: `I don't have an open commitment matching "${query}".` };
+      if (!row) return { success: false, error: `I don't have an open commitment matching "${query}"${personFilter ? ` for ${personFilter}` : ''}.` };
 
       const { error } = await supabase.from('commitments').update({
         status: outcome,

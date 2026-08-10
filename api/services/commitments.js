@@ -23,6 +23,21 @@ const CONCRETE_ACTION = /\b(send|email|call|ring|pay|submit|book|deliver|drop of
 // Phrases that look like commitments but are hedges. Checked first.
 const HEDGE = /\b(i'?ll (?:have a )?(?:look|think|see|check|consider)|might|maybe|possibly|if i (?:can|get|have)|no promises|try to|hopefully|at some point|when i get a chance|not sure)\b/i;
 
+// The past-tense form of each CONCRETE_ACTION verb, used only to recognise completion
+// language ("Sent the documents", "Paid the invoice"). Not a general conjugator — a fixed,
+// small map for a fixed, small verb list. Found missing live-adjacent: a base-form substring
+// check means "sent" never matches "send" (they don't share a substring at all), so the single
+// most natural way to say a thing was done — the plain past tense — silently never counted as
+// evidence, for every verb in this list, until now.
+const PAST_TENSE = {
+  send: 'sent', email: 'emailed', call: 'called', ring: 'rang', pay: 'paid', submit: 'submitted',
+  book: 'booked', deliver: 'delivered', 'drop off': 'dropped off', bring: 'brought', share: 'shared',
+  forward: 'forwarded', return: 'returned', sign: 'signed', complete: 'completed', finish: 'finished',
+  write: 'wrote', upload: 'uploaded', post: 'posted', transfer: 'transferred', refund: 'refunded',
+  confirm: 'confirmed', schedule: 'scheduled', arrange: 'arranged', order: 'ordered', buy: 'bought',
+  fix: 'fixed', 'reply to': 'replied to'
+};
+
 function clean(value, max = MAX_WHAT) {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   return text.length > max ? text.slice(0, max) : text;
@@ -148,22 +163,59 @@ function evidenceIdentity(commitment, evidence = {}) {
   return 'none';
 }
 
+// Every word a sibling open commitment ON THE SAME THREAD is about. A word that shows up in
+// more than one live promise on that thread cannot tell them apart, so it must not be trusted
+// alone — this is what stops "send Mia the board PACK" and "send Mia the board DECK", both
+// open on one thread, from being confused by an email that only says "board" (found live: a
+// reply that actually fulfilled the pack falsely resolved the deck too, because "board" alone
+// satisfied the old any-word-on-thread rule for both).
+function ambiguousThreadWords(commitment, siblings = []) {
+  const words = new Set();
+  for (const other of siblings) {
+    if (!other || other === commitment || other.id === commitment.id) continue;
+    if (other.status !== 'open') continue;
+    if (!other.thread_id || other.thread_id !== commitment.thread_id) continue;
+    const otherSubject = commitmentSubject(other.what);
+    if (!otherSubject) continue;
+    for (const word of otherSubject.words) words.add(word);
+  }
+  return words;
+}
+
 // Evidence strong enough to close a commitment without asking. Deliberately narrow: an
 // outbound message to the right person about the right thing, or the user saying so. A
 // vaguely-related email is NOT evidence — silently marking something done that was not done
 // is the one failure this feature cannot afford.
-function matchesSentEvidence(commitment, evidence = {}) {
+//
+// `siblings` is every other OPEN commitment for this user, passed through so a same-thread
+// match can tell whether the word that matched actually distinguishes this promise from
+// another live one on the same conversation. Optional and defaults to none, so existing
+// direct callers keep working exactly as before — they just lose the extra ambiguity check.
+function matchesSentEvidence(commitment, evidence = {}, { siblings = [] } = {}) {
   if (!commitment || commitment.status !== 'open') return false;
 
   const identity = evidenceIdentity(commitment, evidence);
   if (identity === 'none') return false;
 
   // The action word has to actually appear in what was sent, so replying "thanks" on the
-  // thread does not close "send the documents".
+  // thread does not close "send the documents". Checked against content with quoted/forwarded
+  // text removed — a reply that quotes the ORIGINAL promise back (Gmail includes the full
+  // prior message by default) or a forward of an old email would otherwise trivially satisfy
+  // both the action word and every subject word without the user having sent anything new.
   const subject = commitmentSubject(commitment.what);
   if (!subject) return false;
-  const body = `${evidence.subject || ''} ${evidence.body || ''}`.toLowerCase();
-  if (!body.includes(subject.action.toLowerCase())) return false;
+  const rawBody = stripQuotedContent(`${evidence.subject || ''} ${evidence.body || ''}`).toLowerCase();
+
+  // Found live, capturing a SECOND promise on the same thread as a first: "I will also send
+  // the board deck tomorrow" resolved "send the board pack" — because the action word check
+  // was a bare substring test, "will ALSO SEND" contains "send" exactly as much as "SENDING
+  // it now" does. A future-tense mention of the verb is a NEW undertaking, not evidence
+  // anything was done; only what remains after stripping "I will/I'll/... ACTION" occurrences
+  // is checked for real completion language ("sending X now", "sent X", "here it is").
+  const action = subject.action.toLowerCase();
+  const body = stripFuturePromiseOf(rawBody, action);
+  const actionForms = [action, PAST_TENSE[action]].filter(Boolean);
+  if (!actionForms.some(form => body.includes(form))) return false;
 
   // And it has to be about the same THING. This used to accept any word over three letters
   // from the commitment, which meant "today", "before" and "play" all counted — so on a live
@@ -171,16 +223,54 @@ function matchesSentEvidence(commitment, evidence = {}) {
   // end of play". Matching now runs on the promise's subject words, which exclude the timing
   // and glue vocabulary that every promise shares.
   if (!subject.words.size) return true;
+  const matchedWords = [...subject.words].filter(word => body.includes(word));
+  if (!matchedWords.length) return false;
 
-  // A shared thread is already strong evidence this message is about that particular
-  // promise, so any overlapping subject word is a fair sanity check on top of it. Identity
-  // alone — even a real participant id, even an exact address — is NOT: "send Mia the board
-  // deck" and an unrelated "Board meeting agenda attached" share both the recipient and a
-  // word, and are still two different things. Off-thread, every one of the promise's words
-  // has to show up, not just one.
-  return identity === 'thread'
-    ? [...subject.words].some(word => body.includes(word))
-    : [...subject.words].every(word => body.includes(word));
+  // Off-thread: identity alone — even a real participant id, even an exact address — is NOT
+  // enough. "send Mia the board deck" and an unrelated "Board meeting agenda attached" share
+  // both the recipient and a word, and are still two different things. Every one of the
+  // promise's words has to show up, not just one.
+  if (identity !== 'thread') return matchedWords.length === subject.words.size;
+
+  // On-thread: a shared conversation is already strong evidence this message is about SOME
+  // promise in it, so any one overlapping word is normally a fair sanity check. But if that
+  // word is also what a sibling promise on the same thread is about, it cannot disambiguate
+  // between them — at least one matched word has to be something ONLY this commitment is about.
+  const ambiguous = ambiguousThreadWords(commitment, siblings);
+  return matchedWords.some(word => !ambiguous.has(word));
+}
+
+// Lines an email client adds when quoting a prior message — "On Tue, 12 Aug, Mia wrote:",
+// "-----Original Message-----", or a line starting with the quote marker "> ". Stripped
+// before evidence matching only; the full text is still what gets stored/displayed anywhere
+// else. Deliberately simple line-based heuristics, not a MIME quote parser — good enough to
+// stop an old promise's own words from re-triggering the check that promise's fulfillment.
+function stripQuotedContent(text = '') {
+  const lines = String(text).split(/\r?\n/);
+  const kept = [];
+  for (const line of lines) {
+    if (/^\s*>/.test(line)) continue;
+    if (/^-{2,}\s*(original message|forwarded message)\s*-{2,}$/i.test(line.trim())) break;
+    if (/^\s*On .{3,80} wrote:\s*$/i.test(line)) break;
+    kept.push(line);
+  }
+  return kept.join(' ');
+}
+
+// Strips "I will/I'll/I'm going to/... ACTION" occurrences — a future-tense mention of the
+// verb is a NEW undertaking about whatever follows it, not evidence that action has happened.
+// "I will also send the board deck tomorrow" must not read as completion evidence for a
+// DIFFERENT, already-open "send the board pack" commitment merely because it contains the
+// word "send" — it is a second promise, not a first one being kept. What survives stripping
+// is checked for genuine completion language: "sending X now", "sent X", "here it is".
+function stripFuturePromiseOf(text, action) {
+  const escapedAction = String(action).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(
+    `\\b(?:i(?:'| a)?ll|i will|i'm going to|i am going to|i shall|i promise|i'?ve got to|i need to|let me|will)` +
+    `\\s+(?:also\\s+|just\\s+|then\\s+)?${escapedAction}\\b`,
+    'gi'
+  );
+  return String(text).replace(pattern, ' ');
 }
 
 // ── What a real, sent email means ──────────────────────────────────────────────────────
@@ -253,7 +343,17 @@ function duplicatesExisting(sentence, open = [], { threadId = null } = {}) {
     if (!other || other.action !== candidate.action) return false;
     // Nothing specific on either side: same verb on the same thread is as much as we know.
     if (!candidate.words.size && !other.words.size) return true;
-    return [...candidate.words].some(word => other.words.has(word));
+    // One shared word used to be enough — found live: "I will send the board pack tomorrow"
+    // then "I will also send the board deck tomorrow" on the same thread. Both share "board",
+    // so the second was silently dropped as a "duplicate" of the first and never captured at
+    // all, even though a pack and a deck are two different real promises. A genuine rewording
+    // ("the case study" vs "you the case study tomorrow morning") reduces to the SAME word
+    // set or a subset of it; two different objects that merely share one descriptor do not.
+    // So: duplicate only when the smaller word set is fully contained in the larger one —
+    // full containment survives paraphrase, and a single shared generic word no longer does.
+    const [smaller, larger] = candidate.words.size <= other.words.size
+      ? [candidate.words, other.words] : [other.words, candidate.words];
+    return smaller.size > 0 && [...smaller].every(word => larger.has(word));
   });
 }
 
@@ -275,7 +375,10 @@ function reconcileSentEmail({ sent = {}, open = [], now = new Date(), timeZone =
   };
 
   // Closing comes first: an email that discharges a promise is evidence about that promise.
-  const resolves = open.filter(commitment => matchesSentEvidence(commitment, evidence));
+  // Every commitment sees the full open list as potential siblings, so same-thread matching
+  // can tell whether the word it matched on actually distinguishes this promise from another
+  // live one on the same conversation.
+  const resolves = open.filter(commitment => matchesSentEvidence(commitment, evidence, { siblings: open }));
 
   // Capturing is independent — "here's the case study, and I'll send the deck Friday"
   // both closes one thing and opens another.
@@ -350,6 +453,9 @@ module.exports = {
   isDueToday,
   matchesSentEvidence,
   evidenceIdentity,
+  ambiguousThreadWords,
+  stripQuotedContent,
+  stripFuturePromiseOf,
   extractCommitmentSentence,
   commitmentSubject,
   reconcileSentEmail,
