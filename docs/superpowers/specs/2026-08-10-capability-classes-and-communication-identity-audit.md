@@ -284,3 +284,51 @@ Ordered so each step is independently useful and nothing is a bet on the step af
 - [Apple Messages for Business — register your account](https://register.apple.com/resources/messages/messaging-documentation/register-your-acct)
 - [Apple Messages for Business — policies](https://register.apple.com/resources/messages/messaging-documentation/policies)
 - [Ofcom consultation on mobile messaging scams (MEF analysis)](https://mobileecosystemforum.com/2025/11/05/the-uks-messaging-firewall-analysing-ofcoms-new-consultation-on-mobile-scams/)
+
+---
+
+# Addendum — Pass 1 complete: can Millie apply for a job?
+
+**Date:** 2026-08-10, after the four Files/Documents commits
+(`c10d28ed`, `a27e3415`, `09df23c3`, `b705800a`).
+
+The honest answer is **no, not yet — three concrete blockers**, and two of them are exactly
+Pass 2's scope. That is a good result: it means the ordering was right, not that the pass
+fell short.
+
+| Step in "apply for a job" | State | Evidence |
+|---|---|---|
+| Identify what the application needs | **Works, weakly** | The vision loop reads "Upload your CV (PDF)" off the page. No dedicated capability required. |
+| Find the CV | **Works** | `findDocuments` is loaded lazily into the prompt as an `AVAILABLE DOCUMENTS` block, ids only. |
+| Create a tailored version | **BLOCKED** | `createDerivedDocument` can *store* derived bytes and version them correctly. Nothing *produces* those bytes — there is no way to author a PDF or DOCX. `workspace_write` writes text into Postgres rows, not files. |
+| Upload it | **Works** | `upload` action → `setInputFiles` from a buffer, id-resolved, workflow-guarded. |
+| Download a form, fill it | **Half** | `download` works and carries provenance. Filling a *downloaded* PDF is the same missing capability as authoring one. |
+| Save application evidence | **GAP** | A confirmation page is not a download. Screenshots exist inside the loop but are never stored as documents, so "here is proof I applied on the 10th" cannot be produced. |
+| Remember status / resume later | **BLOCKED** | Two parts. (a) `session.agentTaskId` is *read* by the download/upload dispatch and **never set anywhere** — so every file fetched during a browser task lands with `agent_task_id: null`, and the cross-workflow guard has nothing to guard on in the browser path. (b) Sessions still die at 20 minutes idle with no checkpoint. |
+| Ask only when genuinely stuck | **Works** | The `ask` action. |
+| Pause before consequential submission | **GAP** | `ready_for_payment` is the only pause, and it is order-shaped. A non-order goal has no "stop before you press Submit" gate. |
+
+## What this means for Pass 2
+
+Three of the five gaps are one thing wearing different clothes: **there is no durable workflow
+object that the browser session, the documents and the review gate all point at.** That is
+precisely the Pass 2 primitive. Concretely it must:
+
+1. **Own `agentTaskId` and bind it to the browser session**, so downloads attach to the work
+   that caused them and the workflow guard becomes real rather than vacuous.
+2. **Checkpoint objective / current step / required documents / completed actions / blockers /
+   next action** durably, so a dead session reopens the site and reconstructs, per the
+   standing instruction that the durable thing is the workflow and not the tab.
+3. **Generalize the pause.** `ready_for_payment` becomes one case of a general
+   "awaiting_review before a consequential act" — submissions and declarations included.
+
+The remaining two are a separate, smaller piece worth doing inside Pass 2 rather than
+deferring:
+
+4. **Document authoring** — produce a DOCX/PDF from text so a tailored CV can exist. DOCX is
+   reachable with `fflate` alone (a DOCX is a zip of XML, and the extractor already proves
+   the shape), so this needs no new dependency.
+5. **Page-as-evidence** — store a screenshot or page snapshot as a `generated` document, which
+   is a few lines given the loop already captures JPEGs every step.
+
+Nothing here needs a new integration, and nothing needs the phone. The ordering holds.
