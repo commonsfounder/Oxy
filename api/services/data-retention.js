@@ -32,6 +32,11 @@ const RETENTION_POLICY = {
   // how conversations (chat) has one but connectors (the relationship, not its
   // content) does not.
   external_conversation_events: { maxAgeDays: 180, column: 'created_at', label: 'Messages Millie has sent or received on your behalf: deleted after 180 days.' },
+  // Keyed on last_used_at, not created_at, and deliberately so: a passport scan uploaded
+  // once and reused every few months would be deleted by an age-since-upload clock while
+  // still being in active use. `storageBucket` tells the sweep the row has a blob behind it
+  // that must go first — see the storage branch in runRetentionSweep.
+  documents: { maxAgeDays: 365, column: 'last_used_at', storageBucket: 'documents', label: 'Files you have given Millie, or that she has saved for you: deleted after 365 days without being used.' },
 };
 
 // Pure: returns the ids of conversation rows that should be deleted.
@@ -101,6 +106,30 @@ async function runRetentionSweep(supabase, opts = {}) {
     if (table === 'conversations') continue;
     const column = rule.column || 'created_at';
     const boundary = rule.expireWhenPast ? new Date(now).toISOString() : isoCutoff(rule.maxAgeDays);
+
+    // 2a. Storage-backed tables: the row is only an index over a blob, so read the expired
+    //     rows first, remove their objects, and only then delete the rows. Deleting rows
+    //     directly would leave orphaned objects — user data we are still holding and can no
+    //     longer see or account for, which is a privacy failure rather than wasted space.
+    if (rule.storageBucket) {
+      const { data: expiredRows, error: selectError } = await supabase
+        .from(table).select('id,storage_path').lt(column, boundary);
+      if (selectError) throw selectError;
+      const rows = expiredRows || [];
+      if (rows.length) {
+        const paths = rows.map(r => r.storage_path).filter(Boolean);
+        if (paths.length) {
+          const { error: storageError } = await supabase.storage.from(rule.storageBucket).remove(paths);
+          if (storageError) throw storageError;
+        }
+        const { error: deleteError } = await supabase.from(table).delete().in('id', rows.map(r => r.id));
+        if (deleteError) throw deleteError;
+      }
+      summary[table] = rows.length;
+      logger.log?.(`[retention] ${table} purged ${rows.length} rows + blobs where ${column} < ${boundary}`);
+      continue;
+    }
+
     const { error, count } = await supabase.from(table).delete({ count: 'exact' }).lt(column, boundary);
     if (error) throw error;
     summary[table] = typeof count === 'number' ? count : 0;

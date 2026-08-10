@@ -98,3 +98,75 @@ test('external_conversation_events has a retention policy entry', () => {
   assert.ok(RETENTION_POLICY.external_conversation_events);
   assert.equal(RETENTION_POLICY.external_conversation_events.maxAgeDays, 180);
 });
+
+test('documents retention is keyed on last_used_at, not created_at', () => {
+  // A passport scan uploaded once and used every few months must not be deleted for the
+  // crime of being old. Age since last USE is the only defensible clock for a file.
+  assert.ok(RETENTION_POLICY.documents);
+  assert.equal(RETENTION_POLICY.documents.column, 'last_used_at');
+  assert.equal(RETENTION_POLICY.documents.storageBucket, 'documents');
+});
+
+// Storage-backed tables need the blob removed as well as the row. A surviving object whose
+// index row is gone is user data we are still holding and can no longer account for — a
+// privacy bug, not just wasted space.
+function fakeSupabaseWithStorage(seed = {}) {
+  const ops = [];
+  const removed = [];
+  return {
+    ops,
+    removed,
+    storage: {
+      from(bucket) {
+        return {
+          async remove(paths) { removed.push({ bucket, paths }); return { error: null }; }
+        };
+      }
+    },
+    from(table) {
+      const api = {
+        select() { return api; },
+        order() { return api; },
+        range() { return Promise.resolve({ data: seed[table] || [], error: null }); },
+        delete() { return api; },
+        in(col, vals) { ops.push({ table, op: 'in', col, vals }); return Promise.resolve({ error: null, count: vals.length }); },
+        lt(col, val) {
+          ops.push({ table, op: 'lt', col, val });
+          return Promise.resolve({ data: seed[table] || [], error: null, count: (seed[table] || []).length });
+        },
+      };
+      return api;
+    },
+  };
+}
+
+test('runRetentionSweep deletes the blobs of expired documents before dropping their rows', async () => {
+  const db = fakeSupabaseWithStorage({
+    documents: [
+      { id: 'd1', storage_path: 'u1/aaa', last_used_at: new Date(NOW - 400 * DAY).toISOString() },
+      { id: 'd2', storage_path: 'u1/bbb', last_used_at: new Date(NOW - 400 * DAY).toISOString() },
+    ],
+  });
+
+  const summary = await runRetentionSweep(db, {
+    now: NOW,
+    logger: { log() {} },
+    policy: { documents: { maxAgeDays: 365, column: 'last_used_at', storageBucket: 'documents', label: 'x' } },
+  });
+
+  assert.deepStrictEqual(db.removed, [{ bucket: 'documents', paths: ['u1/aaa', 'u1/bbb'] }]);
+  const rowDelete = db.ops.find((o) => o.table === 'documents' && o.op === 'in');
+  assert.deepStrictEqual(rowDelete.vals, ['d1', 'd2']);
+  assert.strictEqual(summary.documents, 2);
+});
+
+test('a storage-backed table with nothing expired removes no blobs at all', async () => {
+  const db = fakeSupabaseWithStorage({ documents: [] });
+  const summary = await runRetentionSweep(db, {
+    now: NOW,
+    logger: { log() {} },
+    policy: { documents: { maxAgeDays: 365, column: 'last_used_at', storageBucket: 'documents', label: 'x' } },
+  });
+  assert.deepStrictEqual(db.removed, []);
+  assert.strictEqual(summary.documents, 0);
+});
