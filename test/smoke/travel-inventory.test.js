@@ -267,3 +267,142 @@ test('a search missing its dates is refused before any call is made', async () =
   assert.equal(called, false);
   assert.match(result.reason, /check-in and a check-out date/);
 });
+
+// ── Failure taxonomy: not every non-2xx is the same fact ────────────────────────────────
+test('classifyProviderError tells auth, rate-limit, malformed, provider-down and network apart', () => {
+  const { classifyProviderError } = inventory._private;
+  assert.equal(classifyProviderError({ response: { status: 429 } }), 'rate_limited');
+  assert.equal(classifyProviderError({ response: { status: 401 } }), 'auth');
+  assert.equal(classifyProviderError({ response: { status: 403 } }), 'auth');
+  assert.equal(classifyProviderError({ response: { status: 422 } }), 'malformed_request');
+  assert.equal(classifyProviderError({ response: { status: 400 } }), 'malformed_request');
+  assert.equal(classifyProviderError({ response: { status: 503 } }), 'provider_unavailable');
+  assert.equal(classifyProviderError({ message: 'timeout of 30000ms exceeded' }), 'network');
+  assert.equal(classifyProviderError({ response: { status: 418 } }), 'unknown');
+});
+
+test('a 429 is reported as rate-limited, never as "no flights found"', async () => {
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', env: LIVE, now: NOW,
+    post: async () => { throw { response: { status: 429, headers: {} } }; },
+    sleep: async () => {}
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.errorKind, 'rate_limited');
+  assert.match(result.reason, /temporarily rate-limited/);
+  assert.match(result.reason, /not the same as finding no flights/);
+});
+
+test('an auth failure and a malformed-request failure carry their own errorKind', async () => {
+  const auth = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', env: LIVE, now: NOW,
+    post: async () => { throw { response: { status: 401, data: { errors: [{ title: 'Unauthorized' }] } } }; }
+  });
+  assert.equal(auth.errorKind, 'auth');
+
+  const malformed = await inventory.searchStays({
+    latitude: 50, longitude: 14, checkIn: 'nonsense', env: LIVE
+  });
+  assert.equal(malformed.errorKind, 'malformed_request');
+
+  const staysAccess = await inventory.searchStays({
+    latitude: 50, longitude: 14, checkIn: '2026-09-18', checkOut: '2026-09-21', env: LIVE, now: NOW,
+    post: async () => { throw { response: { status: 403, data: { errors: [{ message: 'no stays access' }] } } }; }
+  });
+  assert.equal(staysAccess.errorKind, 'stays_access');
+});
+
+// ── Rate limiting: bounded retry, real backoff, Retry-After respected ───────────────────
+test('a 429 retries and succeeds on the next attempt, honoring the real Retry-After header', async () => {
+  let calls = 0;
+  const waits = [];
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', end: '2026-09-21',
+    env: LIVE, now: NOW,
+    post: async () => {
+      calls += 1;
+      if (calls === 1) throw { response: { status: 429, headers: { 'retry-after': '1' } } };
+      return FLIGHT_RESPONSE;
+    },
+    sleep: async (ms) => { waits.push(ms); }
+  });
+  assert.equal(calls, 2, 'exactly one retry, not a fresh call per failure indefinitely');
+  assert.deepEqual(waits, [1000], 'the real Retry-After value was honored, not a guessed backoff');
+  assert.equal(result.ok, true);
+  assert.equal(result.options[0].airline, 'Ryanair');
+});
+
+test('repeated 429s are bounded — it gives up and reports rate-limited rather than retrying forever', async () => {
+  let calls = 0;
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', env: LIVE, now: NOW,
+    post: async () => { calls += 1; throw { response: { status: 429, headers: {} } }; },
+    sleep: async () => {}
+  });
+  assert.equal(calls, 3, 'a bounded number of attempts, not unbounded retry');
+  assert.equal(result.errorKind, 'rate_limited');
+});
+
+test('a non-429 failure is never retried — retrying an auth failure would just repeat it slower', async () => {
+  let calls = 0;
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', env: LIVE, now: NOW,
+    post: async () => { calls += 1; throw { response: { status: 401, data: {} } }; },
+    sleep: async () => { throw new Error('should never sleep for a non-retryable error'); }
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.errorKind, 'auth');
+});
+
+test('retryAfterMsFrom reads seconds, an HTTP date, or gives up honestly on neither', () => {
+  const { retryAfterMsFrom } = inventory._private;
+  assert.equal(retryAfterMsFrom({ response: { headers: { 'retry-after': '5' } } }), 5000);
+  assert.equal(retryAfterMsFrom({ response: { headers: {} } }), null);
+  assert.equal(retryAfterMsFrom({ response: {} }), null);
+  assert.equal(retryAfterMsFrom({}), null);
+  const future = new Date(Date.now() + 10000).toUTCString();
+  const ms = retryAfterMsFrom({ response: { headers: { 'retry-after': future } } });
+  assert.ok(ms > 8000 && ms <= 10000, 'an HTTP-date form is also honored, not just seconds');
+});
+
+// ── Price integrity ──────────────────────────────────────────────────────────────────────
+test('a flight total is marked as a total, never silently treated as per-person', async () => {
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', end: '2026-09-21', passengers: 4,
+    env: LIVE, now: NOW, post: async () => FLIGHT_RESPONSE
+  });
+  const [option] = result.options;
+  assert.equal(option.priceIsTotal, true);
+  assert.equal(option.passengers, 4);
+  assert.equal(option.price, 148.3, 'the raw total from Duffel — not divided or multiplied');
+});
+
+test('a single-passenger search still records passengers, defaulting sanely', async () => {
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', env: LIVE, now: NOW,
+    post: async () => FLIGHT_RESPONSE
+  });
+  assert.equal(result.options[0].passengers, 1);
+});
+
+test('offer expiry is retained and evaluated, never treated as timeless', async () => {
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', end: '2026-09-21',
+    env: LIVE, now: NOW, post: async () => FLIGHT_RESPONSE
+  });
+  const [option] = result.options;
+  assert.equal(option.expiresAt, '2026-08-09T13:00:00Z');
+  assert.equal(option.expired, false, 'expires an hour after this offer was fetched');
+});
+
+test('an offer already past its own expiry is flagged rather than presented as current', async () => {
+  const stale = { data: { data: { offers: [{
+    ...FLIGHT_RESPONSE.data.data.offers[0],
+    expires_at: '2026-08-09T11:00:00Z' // an hour BEFORE the fixture's "now"
+  }] } } };
+  const result = await inventory.searchFlights({
+    origin: 'BHX', destination: 'PRG', start: '2026-09-18', end: '2026-09-21',
+    env: LIVE, now: NOW, post: async () => stale
+  });
+  assert.equal(result.options[0].expired, true);
+});

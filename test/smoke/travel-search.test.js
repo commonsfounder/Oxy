@@ -128,6 +128,48 @@ test('every result set carries the observed-not-bookable caveat', () => {
   assert.match(text, /have not checked whether any of them can actually be booked/);
 });
 
+test('a real inventory offer is never told apart from a web snippet by the SAME "not held quotes" caveat', () => {
+  const inventoryOnly = [{
+    kind: 'flight', airline: 'Ryanair', stops: 0, price: 148.3, priceIsTotal: true, passengers: 1,
+    currency: 'GBP', priceBasis: 'return', source: 'Duffel', inventory: true, bookable: true,
+    dateMatch: 'exact', quotedFor: 'BHX→PRG return'
+  }];
+  const text = formatTravelResults('flights', inventoryOnly, { searched: 'Birmingham to Prague' });
+  assert.match(text, /1 of these is a real, sellable price from live inventory/);
+  assert.match(text, /held only until the offer expires/);
+  assert.doesNotMatch(text, /not held quotes/, 'a real inventory offer is not the same claim as an unverified web price');
+});
+
+test('a mixed set of inventory and web options gets both caveats, attributed separately', () => {
+  const mixed = [
+    {
+      kind: 'flight', airline: 'Ryanair', stops: 0, price: 148.3, priceIsTotal: true, passengers: 1,
+      currency: 'GBP', priceBasis: 'return', source: 'Duffel', inventory: true, bookable: true,
+      dateMatch: 'exact', quotedFor: 'BHX→PRG return'
+    },
+    {
+      kind: 'flight', airline: 'easyJet', stops: 0, price: 120, currency: 'GBP', priceBasis: 'return',
+      source: 'Google Flights', dateMatch: 'exact', quotedFor: 'BHX→PRG return'
+    }
+  ];
+  const text = formatTravelResults('flights', mixed, { searched: 'Birmingham to Prague' });
+  assert.match(text, /1 of these is a real, sellable price from live inventory/);
+  assert.match(text, /The rest are prices observed in search results/);
+});
+
+test('a multi-passenger total is never mistaken for a per-person fare', () => {
+  const solo = [{
+    kind: 'flight', airline: 'Ryanair', stops: 0, price: 600, priceIsTotal: true, passengers: 1,
+    currency: 'GBP', priceBasis: 'return', source: 'Duffel', inventory: true, dateMatch: 'exact'
+  }];
+  const party = [{
+    kind: 'flight', airline: 'Ryanair', stops: 0, price: 600, priceIsTotal: true, passengers: 4,
+    currency: 'GBP', priceBasis: 'return', source: 'Duffel', inventory: true, dateMatch: 'exact'
+  }];
+  assert.doesNotMatch(formatTravelResults('flights', solo, { searched: 'BHX to PRG' }), /total for/);
+  assert.match(formatTravelResults('flights', party, { searched: 'BHX to PRG' }), /£600 return total for 4 passengers/);
+});
+
 test('options for other dates are reported separately, never as the price for these dates', () => {
   // These fixtures carry no observedStart, so the grade is "unknown" — the source never
   // pinned a date. That is reported as its own thing, and still never as an answer.

@@ -321,7 +321,10 @@ function describeFlight(option) {
   const stops = option.stops === 0 ? 'direct' : option.stops === null ? 'stops not stated' : `${option.stops} stop${option.stops === 1 ? '' : 's'}`;
   const basis = option.priceBasis === 'one_way' ? 'one-way' : 'return';
   const duration = option.durationMinutes ? `, ${Math.floor(option.durationMinutes / 60)}h ${option.durationMinutes % 60}m` : '';
-  return `${option.airline}, ${stops}${duration} — ${money(option.price, option.currency)} ${basis} (${option.source}${option.quotedFor ? `, quoted for ${option.quotedFor}` : ''})`;
+  // A Duffel total is for the whole party, never per person — said explicitly whenever there
+  // is more than one passenger, so a 4-passenger total is never misread as one person's fare.
+  const forParty = option.priceIsTotal && option.passengers > 1 ? ` total for ${option.passengers} passengers` : '';
+  return `${option.airline}, ${stops}${duration} — ${money(option.price, option.currency)} ${basis}${forParty} (${option.source}${option.quotedFor ? `, quoted for ${option.quotedFor}` : ''})`;
 }
 
 function describeHotel(option) {
@@ -396,8 +399,18 @@ function formatTravelResults(kind, options = [], { dropped = [], searched = '', 
   if (dropped.length) {
     parts.push(`${dropped.length} option${dropped.length === 1 ? '' : 's'} ruled out for not matching what you asked (${[...new Set(dropped.map(d => d.why))].join(', ')}).`);
   }
-  // The caveat that has to travel with every one of these numbers.
-  parts.push('These are prices observed in search results just now, not held quotes — availability and price are only confirmed on the airline or hotel\'s own site, and I have not checked whether any of them can actually be booked.');
+  // The caveat that has to travel with every one of these numbers — but not the SAME caveat
+  // for all of them. An inventory offer really is a live, sellable price from a booking system
+  // (and really does expire); calling it "not a held quote" right alongside the honest web-page
+  // caveat would flatten a distinction the rest of this file exists to preserve.
+  const fromInventory = options.filter(o => o.inventory === true);
+  const fromWeb = options.length - fromInventory.length;
+  if (fromInventory.length) {
+    parts.push(`${fromInventory.length} of these ${fromInventory.length === 1 ? 'is a' : 'are'} real, sellable ${fromInventory.length === 1 ? 'price' : 'prices'} from live inventory — held only until the offer expires, not indefinitely, and still requires actually booking.`);
+  }
+  if (fromWeb > 0) {
+    parts.push(`${fromInventory.length ? 'The rest are' : 'These are'} prices observed in search results just now, not held quotes — availability and price are only confirmed on the airline or hotel's own site, and I have not checked whether any of them can actually be booked.`);
+  }
   return parts.join(' ');
 }
 

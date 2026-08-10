@@ -36,6 +36,16 @@ const DUFFEL_BASE = 'https://api.duffel.com';
 const DUFFEL_VERSION = 'v2';
 const REQUEST_TIMEOUT_MS = 30000;
 
+// Duffel documents roughly 120 requests/60s. A 429 is not "no flights" — it is the provider
+// asking to wait, and it usually says exactly how long via Retry-After. Bounded: this retries
+// at most twice more (3 attempts total) inside a single user-facing search, never in an
+// unbounded loop, and the per-attempt wait is capped so one rate-limited search cannot stall
+// a chat turn for as long as the provider's own header might ask for.
+const MAX_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 400;
+const MAX_BACKOFF_MS = 2000;
+const defaultSleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Duffel issues separate live and test tokens. A test token returns a fictional carrier
 // ("Duffel Airways", IATA ZZ) with unrealistic prices — useful for proving the integration
 // works, useless as an answer to a real travel question. The distinction is carried all the
@@ -92,7 +102,10 @@ function nightsBetween(start, end) {
 //   observedStart/End    — the dates the OFFER is for, which for an inventory search are the
 //                          dates we asked for, so gradeDateMatch can verify rather than trust.
 
-function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, mode, observedAt } = {}) {
+function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, passengers, mode, observedAt } = {}) {
+  // total_amount is Duffel's price for the WHOLE booking — every passenger, taxes included —
+  // never a per-person figure. Carrying passengers alongside it is what stops a multi-traveler
+  // total from being misread as one person's fare downstream.
   const price = toNumber(offer.total_amount);
   const slices = Array.isArray(offer.slices) ? offer.slices : [];
   const outbound = slices[0];
@@ -106,6 +119,7 @@ function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, mode, 
   const observedEnd = inbound
     ? (isoDay(inbound.segments?.[0]?.departing_at) || isoDay(requestedEnd))
     : null;
+  const expiresAt = offer.expires_at || null;
 
   return {
     kind: 'flight',
@@ -113,6 +127,8 @@ function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, mode, 
     stops: segments > 0 ? segments - 1 : null,
     durationMinutes: null,
     price,
+    priceIsTotal: true,
+    passengers: Number.isFinite(passengers) && passengers > 0 ? passengers : 1,
     currency: String(offer.total_currency || 'GBP').toUpperCase(),
     priceBasis: inbound ? 'return' : 'one_way',
     origin: outbound.origin?.iata_code || null,
@@ -127,7 +143,11 @@ function normalizeFlightOffer(offer = {}, { requestedStart, requestedEnd, mode, 
     inventory: true,
     bookable: true,
     offerId: offer.id || null,
-    expiresAt: offer.expires_at || null,
+    expiresAt,
+    // Computed once, at the moment the offer was fetched — a fresh offer is never expired at
+    // fetch time, but the field exists so nothing downstream has to re-derive it from a raw
+    // timestamp (or forget to) before deciding whether the price is still good.
+    expired: expiresAt ? Date.parse(expiresAt) <= Date.parse(observedAt) : null,
     observedAt,
     source: mode === 'test' ? 'Duffel (test mode — fictional inventory)' : 'Duffel',
     sourceUrl: null,
@@ -194,26 +214,60 @@ function unconfiguredResult(env) {
   return { ok: false, configured: false, reason: describeUnconfigured(env), options: [] };
 }
 
-function failed(reason) {
-  return { ok: false, configured: true, reason, options: [] };
+function failed(reason, errorKind = 'unknown') {
+  return { ok: false, configured: true, reason, errorKind, options: [] };
+}
+
+function isRateLimited(error) {
+  return error?.response?.status === 429;
+}
+
+// Retry-After is normally a delay in seconds, but per RFC 9110 it may instead be an HTTP date.
+// axios lower-cases response header names, so 'retry-after' is the only form actually seen.
+function retryAfterMsFrom(error) {
+  const header = error?.response?.headers?.['retry-after'];
+  if (header === undefined || header === null || header === '') return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(header);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : null;
+}
+
+// Bounded: at most MAX_ATTEMPTS total calls to `send`, and only 429 is retried — every other
+// failure (auth, malformed request, provider down) is thrown straight back, since retrying
+// those would just repeat the same failure slower.
+async function sendWithRetry(send, url, body, { sleep = defaultSleep } = {}) {
+  let lastError;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await send(url, body);
+    } catch (error) {
+      lastError = error;
+      if (!isRateLimited(error) || attempt === MAX_ATTEMPTS - 1) throw error;
+      const wait = Math.min(retryAfterMsFrom(error) ?? BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+      await sleep(wait);
+    }
+  }
+  throw lastError;
 }
 
 async function searchFlights({
   origin, destination, start, end, passengers = 1, cabin = 'economy',
-  env = process.env, now = () => new Date(), post = null
+  env = process.env, now = () => new Date(), post = null, sleep = defaultSleep
 } = {}) {
   if (!isConfigured(env)) return unconfiguredResult(env);
   if (!origin || !destination || !isoDay(start)) {
-    return failed('a flight search needs an origin, a destination and a departure date');
+    return failed('a flight search needs an origin, a destination and a departure date', 'malformed_request');
   }
 
+  const partySize = Math.max(1, Number(passengers) || 1);
   const slices = [{ origin, destination, departure_date: isoDay(start) }];
   if (isoDay(end)) slices.push({ origin: destination, destination: origin, departure_date: isoDay(end) });
 
   const body = {
     data: {
       slices,
-      passengers: Array.from({ length: Math.max(1, Number(passengers) || 1) }, () => ({ type: 'adult' })),
+      passengers: Array.from({ length: partySize }, () => ({ type: 'adult' })),
       cabin_class: cabin
     }
   };
@@ -222,16 +276,16 @@ async function searchFlights({
   let response;
   try {
     // return_offers keeps this a single round trip; the alternative is create-then-poll.
-    response = await send(`${DUFFEL_BASE}/air/offer_requests?return_offers=true`, body);
+    response = await sendWithRetry(send, `${DUFFEL_BASE}/air/offer_requests?return_offers=true`, body, { sleep });
   } catch (error) {
-    return failed(describeProviderError(error));
+    return failed(describeProviderError(error), classifyProviderError(error));
   }
 
   const mode = providerMode(env);
   const observedAt = now().toISOString();
   const offers = response?.data?.data?.offers || [];
   const options = offers
-    .map(offer => normalizeFlightOffer(offer, { requestedStart: start, requestedEnd: end, mode, observedAt }))
+    .map(offer => normalizeFlightOffer(offer, { requestedStart: start, requestedEnd: end, passengers: partySize, mode, observedAt }))
     .filter(Boolean);
 
   return { ok: true, configured: true, mode, observedAt, options };
@@ -239,14 +293,14 @@ async function searchFlights({
 
 async function searchStays({
   latitude, longitude, radiusKm = 8, checkIn, checkOut, guests = 2, rooms = 1,
-  env = process.env, now = () => new Date(), post = null
+  env = process.env, now = () => new Date(), post = null, sleep = defaultSleep
 } = {}) {
   if (!isConfigured(env)) return unconfiguredResult(env);
   if (!isoDay(checkIn) || !isoDay(checkOut)) {
-    return failed('a stay search needs a check-in and a check-out date');
+    return failed('a stay search needs a check-in and a check-out date', 'malformed_request');
   }
   if (!Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude))) {
-    return failed('a stay search needs a location to search around');
+    return failed('a stay search needs a location to search around', 'malformed_request');
   }
 
   const body = {
@@ -262,7 +316,7 @@ async function searchStays({
   const send = post || ((url, payload) => axios.post(url, payload, { headers: headers(env), timeout: REQUEST_TIMEOUT_MS }));
   let response;
   try {
-    response = await send(`${DUFFEL_BASE}/stays/search`, body);
+    response = await sendWithRetry(send, `${DUFFEL_BASE}/stays/search`, body, { sleep });
   } catch (error) {
     // A token that is genuinely live for flights can still be test-only for Stays — real
     // hotel inventory needs Stays access requested and approved separately (duffel.com/
@@ -270,9 +324,9 @@ async function searchStays({
     // distinctly so this reads as "ask for Stays access", not a generic provider failure that
     // looks identical to an expired key or a network problem.
     if (providerMode(env) === 'live' && isLikelyStaysAccessError(error)) {
-      return failed('this Duffel account is not yet approved for live Stays (hotel) access — request it at duffel.com/contact-us. Flights are unaffected.');
+      return failed('this Duffel account is not yet approved for live Stays (hotel) access — request it at duffel.com/contact-us. Flights are unaffected.', 'stays_access');
     }
-    return failed(describeProviderError(error));
+    return failed(describeProviderError(error), classifyProviderError(error));
   }
 
   const mode = providerMode(env);
@@ -289,10 +343,25 @@ async function searchStays({
 // because a token expired is indistinguishable from "there are no flights", and those are
 // very different answers to give someone.
 function describeProviderError(error) {
+  if (isRateLimited(error)) {
+    return 'the travel provider is temporarily rate-limited — this is not the same as finding no flights, try again shortly';
+  }
   const detail = error?.response?.data?.errors?.[0];
   if (detail) return `${detail.title || 'provider error'}: ${detail.message || detail.code || ''}`.trim();
   if (error?.response?.status) return `the travel provider returned ${error.response.status}`;
   return error?.message || 'the travel provider could not be reached';
+}
+
+// A taxonomy, not just a message — so a caller can tell "the account is misconfigured" apart
+// from "try again in a second" apart from "the provider itself is down" without parsing prose.
+function classifyProviderError(error) {
+  if (isRateLimited(error)) return 'rate_limited';
+  const status = error?.response?.status;
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 400 || status === 422) return 'malformed_request';
+  if (Number.isFinite(status) && status >= 500) return 'provider_unavailable';
+  if (!error?.response) return 'network';
+  return 'unknown';
 }
 
 // A best-effort recognizer, not a documented Duffel error code — this account has never had
@@ -313,5 +382,8 @@ module.exports = {
   describeUnconfigured,
   searchFlights,
   searchStays,
-  _private: { normalizeFlightOffer, normalizeStay, describeProviderError, isLikelyStaysAccessError, nightsBetween }
+  _private: {
+    normalizeFlightOffer, normalizeStay, describeProviderError, classifyProviderError,
+    isLikelyStaysAccessError, nightsBetween, retryAfterMsFrom, sendWithRetry
+  }
 };
