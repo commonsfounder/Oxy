@@ -5360,7 +5360,15 @@ const notificationDelivery = createDeliveryRuntime({
   },
   sendTelegram: async (userId, { text }) => {
     const result = await telegram.execute(userId, 'send_telegram', { contact: 'me', message: text });
-    return { ok: result?.success === true, error: result?.error || null };
+    return {
+      ok: result?.success === true,
+      error: result?.error || null,
+      // FLOOD_WAIT carries a real backoff duration from Telegram itself — passed through so
+      // the delivery runtime waits that long instead of retrying on its normal cadence, which
+      // is exactly what causes the next flood wait.
+      retryAfterSeconds: result?.retryAfterSeconds || null,
+      errorKind: result?.errorKind || null
+    };
   },
   createBriefing,
   getPreferenceMap,
@@ -8887,10 +8895,12 @@ async function runProactiveSweep(logger = console) {
     try {
       const delivery = await notificationDelivery.deliverPending(user.user_id);
       if (delivery?.results?.length) {
+        // 'claimed_elsewhere' means a concurrent sweep is handling that event right now — not
+        // a failure of this one, so it counts toward neither bucket.
         summary.notificationsDelivered = (summary.notificationsDelivered || 0) +
           delivery.results.filter(r => r.status === 'delivered').length;
         summary.notificationsUndelivered = (summary.notificationsUndelivered || 0) +
-          delivery.results.filter(r => r.status !== 'delivered').length;
+          delivery.results.filter(r => r.status !== 'delivered' && r.status !== 'claimed_elsewhere').length;
         if (delivery.unavailable?.length) {
           logger.warn?.(`[notify] ${user.user_id}: ${delivery.unavailable.join('; ')}`);
         }

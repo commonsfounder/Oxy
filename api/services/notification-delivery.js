@@ -6,6 +6,14 @@
 
 const notifications = require('./notifications');
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// How long a row may sit in 'sending' before a later sweep is allowed to treat it as
+// abandoned (the worker that claimed it crashed, or the process was recycled) rather than
+// genuinely in flight. Real sends complete in seconds; this is generous on purpose — reclaiming
+// too eagerly is what would cause a real duplicate send.
+const CLAIM_STALE_MS = 5 * 60 * 1000;
+
 // Which transport actually carries an email right now.
 //
 // Resend is the dedicated provider and stays first when it is configured — it sends from
@@ -120,7 +128,81 @@ function createDeliveryRuntime({
 
     const { data, error } = await supabase.from('notification_events')
       .insert({ ...row, status: 'pending' }).select('id').single();
-    return error ? { ok: false, error: error.message } : { ok: true, id: data.id, created: true };
+    if (!error) return { ok: true, id: data.id, created: true };
+
+    // The select-then-insert above is a check-then-act race: two concurrent raises for the
+    // SAME real-world event (two overlapping sweeps both noticing the same watch fire) can
+    // both see "no existing row" before either commits, and both attempt to insert. The
+    // table's own unique index on (user_id, dedupe_key) is what actually prevents a second
+    // row — the loser here just needs to recognise that as "already raised", not surface a
+    // raw constraint-violation message for something that behaved correctly.
+    if (error.code === '23505') {
+      const { data: raced } = await supabase.from('notification_events')
+        .select('id').eq('user_id', userId).eq('dedupe_key', row.dedupe_key).maybeSingle();
+      if (raced) return { ok: true, id: raced.id, duplicate: true };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  // Atomically takes ownership of a pending/deferred/stale-sending row before anything is
+  // sent. The UPDATE's WHERE clause is the whole mechanism: Postgres serializes concurrent
+  // writers to the same row, so only one of them can flip status out of the claimable set —
+  // a second worker racing on the same event gets 0 rows back and skips it entirely. Without
+  // this, two overlapping sweeps (two Cloud Run instances, a manual call landing mid-schedule)
+  // could both call a provider for the same event and produce two real external messages.
+  async function claim(event, stamp) {
+    // 'sending' is claimable too, but ONLY if it is stale — checked here, in the same
+    // conditional UPDATE, not trusted from the caller. Two calls racing on the same row (two
+    // concurrent deliverPending sweeps, or — the case this exact check exists for — two
+    // deliverOne calls on the same event) must not BOTH see 'sending' as fair game just
+    // because the first one already flipped it a moment ago: a plain `.in('status',
+    // [...,'sending'])` allowed exactly that, since nothing distinguished a row claimed
+    // 1ms ago from one truly abandoned 10 minutes ago. Staleness is what makes reclaiming a
+    // 'sending' row safe, so it has to be part of THIS WHERE clause, not assumed upstream.
+    const staleBefore = new Date(new Date(stamp).getTime() - CLAIM_STALE_MS).toISOString();
+    const { data } = await supabase.from('notification_events')
+      .update({ status: 'sending', updated_at: stamp })
+      .eq('id', event.id)
+      .or(`status.in.(pending,deferred),and(status.eq.sending,updated_at.lt.${staleBefore})`)
+      .select('id')
+      .maybeSingle();
+    return Boolean(data);
+  }
+
+  // A send that a provider genuinely accepted must never fall back into the pending/retry
+  // pool — that would mean asking the provider to accept the same message twice. If the
+  // write that records success keeps failing, retrying the WRITE (not the send) a few times
+  // is the safe move; if it still never lands, the row is marked 'failed' — not 'pending' —
+  // with an error that says plainly what happened, so nothing auto-retries a message that
+  // already went. This is deliberately not silent: an operator reading last_error learns the
+  // provider succeeded even though the row's own history looks like a failure.
+  async function recordDelivered(event, decision, result, stamp) {
+    const patch = {
+      status: 'delivered',
+      channel: decision.channel,
+      provider_ref: result.providerRef || result.id || null,
+      attempts: (event.attempts || 0) + 1,
+      delivered_at: stamp,
+      updated_at: stamp,
+      last_error: null
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const { error } = await supabase.from('notification_events').update(patch).eq('id', event.id);
+      if (!error) return true;
+      if (attempt < 2) await sleep(200 * (attempt + 1));
+    }
+    // A real try/catch, not a `.catch()` chained onto the query builder — the actual
+    // Supabase-js client has no `.catch()` method at all (only `.then()`); that would have
+    // thrown a TypeError the first time this fallback write ever ran for real.
+    try {
+      await supabase.from('notification_events').update({
+        status: 'failed',
+        attempts: patch.attempts,
+        updated_at: stamp,
+        last_error: `${decision.channel} accepted this message but the delivery could not be recorded — left as failed rather than pending, so nothing resends a message that already went out`
+      }).eq('id', event.id);
+    } catch { /* best-effort — nothing further to do if even this write fails */ }
+    return false;
   }
 
   async function deliverOne(userId, event, { prefs, available, emailTo, emailProvider = null }) {
@@ -135,6 +217,11 @@ function createDeliveryRuntime({
         updated_at: stamp
       }).eq('id', event.id);
       return { id: event.id, status: decision.status, reason: decision.reason };
+    }
+
+    if (!(await claim(event, stamp))) {
+      // Another worker already has this one. Not a failure — just not this call's to make.
+      return { id: event.id, status: 'claimed_elsewhere' };
     }
 
     let result;
@@ -173,15 +260,7 @@ function createDeliveryRuntime({
     const attempts = (event.attempts || 0) + 1;
 
     if (accepted) {
-      await supabase.from('notification_events').update({
-        status: 'delivered',
-        channel: decision.channel,
-        provider_ref: result.providerRef || result.id || null,
-        attempts,
-        delivered_at: stamp,
-        updated_at: stamp,
-        last_error: null
-      }).eq('id', event.id);
+      await recordDelivered(event, decision, result, stamp);
       return { id: event.id, status: 'delivered', channel: decision.channel };
     }
 
@@ -192,10 +271,17 @@ function createDeliveryRuntime({
     // for good. Because delivery is keyed on the event row, a retry cannot duplicate a
     // message that already went.
     const exhausted = attempts >= notifications.MAX_ATTEMPTS;
+    // A provider-supplied backoff (Telegram's FLOOD_WAIT carries a real number of seconds)
+    // is honoured over the default "retry on the next sweep" cadence — hammering retries
+    // immediately after a flood wait is exactly what causes the next one.
+    const deliverAfter = !exhausted && Number.isFinite(result?.retryAfterSeconds)
+      ? new Date(now().getTime() + result.retryAfterSeconds * 1000).toISOString()
+      : null;
     await supabase.from('notification_events').update({
       status: exhausted ? 'failed' : 'pending',
       attempts,
       last_error: error,
+      deliver_after: deliverAfter,
       updated_at: stamp
     }).eq('id', event.id);
     return { id: event.id, status: exhausted ? 'failed' : 'pending', error };
@@ -204,11 +290,17 @@ function createDeliveryRuntime({
   // Sweeps everything owed to this user. Safe to run repeatedly.
   async function deliverPending(userId, { limit = 20 } = {}) {
     const stamp = now().toISOString();
+    const staleSendingBefore = new Date(now().getTime() - CLAIM_STALE_MS).toISOString();
+    // pending/deferred whose deliver_after has passed, OR a 'sending' row old enough that
+    // whatever worker claimed it must have died before recording an outcome — the same
+    // stale-claim recovery shape used elsewhere in this codebase for stale agent runs.
     const { data: rows, error } = await supabase.from('notification_events')
       .select('*')
       .eq('user_id', userId)
-      .in('status', ['pending', 'deferred'])
-      .or(`deliver_after.is.null,deliver_after.lte.${stamp}`)
+      .or(
+        `and(status.in.(pending,deferred),or(deliver_after.is.null,deliver_after.lte.${stamp})),` +
+        `and(status.eq.sending,updated_at.lt.${staleSendingBefore})`
+      )
       .order('created_at', { ascending: true })
       .limit(limit);
     if (error) return { ok: false, error: error.message };

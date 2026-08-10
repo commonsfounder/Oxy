@@ -209,13 +209,31 @@ async function execute(userId, action, params) {
         return { success: false, error: `Unknown action: ${action}` };
     }
   } catch (err) {
-    return { success: false, error: `Telegram error: ${err.message}` };
+    return { success: false, error: `Telegram error: ${err.message}`, ...classifyTelegramError(err) };
   } finally {
     if (client) await client.disconnect().catch(() => {});
   }
 }
 
+// Telegram tells us exactly how long to back off for a flood — gramJS's FloodWaitError (and
+// SlowModeWaitError, the per-chat variant) carries a real `.seconds`. Hammering retries
+// immediately after one of these is what CAUSES the next one; the caller (notification-
+// delivery.js) uses retryAfterSeconds to actually wait instead of re-trying on its normal
+// cadence. Session-revocation is the other case worth naming distinctly: retrying a dead
+// session cannot ever succeed, so a caller can tell "wait" from "reconnect" apart from a
+// generic failure.
+function classifyTelegramError(err) {
+  if (Number.isFinite(err?.seconds)) {
+    return { errorKind: 'flood_wait', retryAfterSeconds: err.seconds };
+  }
+  const message = String(err?.errorMessage || err?.message || '');
+  if (/AUTH_KEY_UNREGISTERED|SESSION_REVOKED|USER_DEACTIVATED/i.test(message)) {
+    return { errorKind: 'session_revoked' };
+  }
+  return {};
+}
+
 module.exports = {
   SUPPORTED_ACTIONS, execute, startAuth, verifyCode, verify2FA, getSelfDestination,
-  _private: { normalizeContactSearch, SELF_DESTINATION }
+  _private: { normalizeContactSearch, SELF_DESTINATION, classifyTelegramError }
 };

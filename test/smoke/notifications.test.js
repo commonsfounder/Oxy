@@ -393,6 +393,119 @@ test('with no digest pending, everything is judged on its own merits', () => {
   assert.deepEqual(kept.map(k => k.id), ['commit']);
 });
 
+test('two concurrent sweeps for one user: digest + the per-item it covers produce exactly one external send', async () => {
+  // The scenario this pass was asked to stress: a digest and a per-item notification about
+  // something the digest already names, both pending, delivered by two OVERLAPPING sweep
+  // calls (two Cloud Run instances, or a manual /proactive/sweep landing mid-schedule).
+  // collapseRelated suppresses the per-item on BOTH workers' local view before either claims
+  // anything; the claim step then ensures only one of them actually sends the digest itself.
+  const { runtime, calls } = runtimeWith({ env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' } });
+  await runtime.raise('u1', {
+    category: 'digest', title: 'One thing needs you today', body: 'Send Mia the case study.',
+    dedupeKey: 'digest|day:2026-08-09', sourceRef: { covers: ['commitment:c1'] }
+  });
+  await runtime.raise('u1', {
+    category: 'commitment', title: 'Send Mia the case study', body: 'Due today.',
+    dedupeKey: 'commitment|commitment:c1', sourceRef: { commitmentId: 'c1' }
+  });
+  const [a, b] = await Promise.all([runtime.deliverPending('u1'), runtime.deliverPending('u1')]);
+  const delivered = [...a.results, ...b.results].filter(r => r.status === 'delivered');
+  assert.equal(delivered.length, 1, 'one real message, not a digest from each worker and not a leaked per-item alert');
+});
+
+test('a digest for a NEW day is never deduped against a still-pending digest from the day before', () => {
+  // Crossing midnight while yesterday's digest was deferred (quiet hours) must not make
+  // today's digest look like a re-raise of the same event — the dedupe key IS the day.
+  const yesterday = dedupeKeyFor({ category: 'digest', dateKey: '2026-08-09' });
+  const today = dedupeKeyFor({ category: 'digest', dateKey: '2026-08-10' });
+  assert.notEqual(yesterday, today);
+});
+
+test('a digest deferred by quiet hours across midnight delivers once real quiet hours end, not twice', async () => {
+  // A single fake row store, shared between two runtime instances that differ only in what
+  // time they each believe it is — "the night the digest was raised" and "the next morning,
+  // once quiet hours have genuinely ended". Real production is exactly this: one process,
+  // two different sweep invocations, real wall-clock time moving on between them.
+  const rows = new Map();
+  const calls = [];
+  const supabase = {
+    from() {
+      const api = { _filters: {}, _update: null };
+      api.select = () => api;
+      api.insert = (row) => { api._insert = row; return api; };
+      api.update = (patch) => { api._update = patch; return api; };
+      api.eq = (col, val) => { api._filters[col] = val; return api; };
+      api.in = () => api;
+      api.or = (expr) => { api._claim = expr; return api; };
+      api.gte = () => { api._gte = true; return api; };
+      api.order = () => api;
+      api.limit = () => api;
+      api.maybeSingle = () => {
+        if (api._claim) {
+          const row = rows.get(api._filters.id);
+          const claimable = row && ['pending', 'deferred'].includes(row.status);
+          if (claimable) { Object.assign(row, api._update); return Promise.resolve({ data: { id: row.id } }); }
+          return Promise.resolve({ data: null });
+        }
+        if (api._insert) return Promise.resolve({ data: null });
+        return Promise.resolve({ data: [...rows.values()].find(r => r.dedupe_key === api._filters.dedupe_key) || null });
+      };
+      api.single = () => {
+        if (api._insert) {
+          const row = { id: `n${rows.size + 1}`, status: 'pending', attempts: 0, ...api._insert };
+          rows.set(row.id, row);
+          return Promise.resolve({ data: row, error: null });
+        }
+        return Promise.resolve({ data: null });
+      };
+      api.then = (resolve) => {
+        if (api._update) {
+          if (api._filters.id) { const row = rows.get(api._filters.id); if (row) Object.assign(row, api._update); }
+          return Promise.resolve({ data: [], error: null }).then(resolve);
+        }
+        if (api._gte) return Promise.resolve({ data: [], error: null }).then(resolve);
+        return Promise.resolve({
+          data: [...rows.values()].filter(r => ['pending', 'deferred'].includes(r.status)),
+          error: null
+        }).then(resolve);
+      };
+      return api;
+    }
+  };
+  const buildRuntime = (nowFn) => createDeliveryRuntime({
+    supabase, sendPush: async () => ({ ok: false }), sendEmail: async () => ({ ok: false }),
+    sendTelegram: async (_u, args) => { calls.push(`telegram:${args.text}`); return { ok: true }; },
+    createBriefing: async () => ({ id: 'b' }),
+    getPreferenceMap: async () => ({ [PREF.channel]: 'telegram', [PREF.quietHours]: '22:00-07:00' }),
+    getUserEmail: async () => '', getMailbox: async () => null, getTelegram: async () => ({ canSend: true }),
+    countPushDevices: async () => 0, env: {}, now: nowFn
+  });
+
+  // Raised late at night — quiet hours are active, so it defers rather than sends.
+  const lateNight = new Date('2026-08-09T23:50:00Z');
+  const nightRuntime = buildRuntime(() => lateNight);
+  await nightRuntime.raise('u1', { category: 'digest', title: 'T', body: 'B', dedupeKey: 'digest|day:2026-08-09' });
+  const nightSweep = await nightRuntime.deliverPending('u1');
+  assert.equal(nightSweep.results[0].status, 'deferred');
+  const deferredUntil = [...rows.values()][0].deliver_after;
+  // deliverPending resolves quiet hours in the default Europe/London timezone (BST, UTC+1,
+  // in August) — 07:00 local is 06:00 UTC. The point stands either way: it crosses midnight.
+  assert.equal(deferredUntil, '2026-08-10T06:00:00.000Z', 'the wait crosses into the next calendar day');
+  assert.equal(calls.length, 0, 'nothing was sent while quiet hours were still active');
+
+  // The SAME event, the next morning, once quiet hours have genuinely ended (07:00 BST).
+  const morning = new Date('2026-08-10T06:00:01Z');
+  const morningRuntime = buildRuntime(() => morning);
+  const morningSweep = await morningRuntime.deliverPending('u1');
+  assert.equal(morningSweep.results[0].status, 'delivered');
+  assert.equal(calls.length, 1, 'delivered exactly once, not duplicated by crossing midnight');
+
+  // And a THIRD sweep, later that same morning, must not send it again.
+  const laterSweep = await morningRuntime.deliverPending('u1');
+  assert.equal(laterSweep.results.length, 0, 'already delivered — nothing left to do');
+  assert.equal(calls.length, 1);
+});
+
 test('unrelated notifications are not collapsed together', () => {
   const kept = collapseRelated([
     { id: '1', title: 'Parcel', body: '', dedupe_key: 'a', source_ref: { scheduledTaskId: 'w1' } },
@@ -414,11 +527,28 @@ function runtimeWith(overrides = {}) {
         update(patch) { api._update = patch; return api; },
         eq(col, val) { api._filters[col] = val; return api; },
         in() { return api; },
-        or() { return api; },
+        // Only claim() calls .or() in this module, with the exact staleness-aware shape
+        // `status.in.(pending,deferred),and(status.eq.sending,updated_at.lt.X)` — the fake
+        // recognises that specific call rather than parsing PostgREST filter syntax, and
+        // replicates the same staleness semantics the real conditional UPDATE relies on.
+        or(expr) { api._claimOr = expr; return api; },
         gte() { api._gte = true; return api; },
         order() { return api; },
         limit() { return api; },
         maybeSingle() {
+          if (api._update && api._filters.id && api._claimOr) {
+            const row = rows.get(api._filters.id);
+            const staleBefore = api._claimOr.match(/updated_at\.lt\.(\S+)\)/)?.[1];
+            const claimable = row && (
+              ['pending', 'deferred'].includes(row.status) ||
+              (row.status === 'sending' && staleBefore && new Date(row.updated_at) < new Date(staleBefore))
+            );
+            if (claimable) {
+              Object.assign(row, api._update);
+              return Promise.resolve({ data: { id: row.id } });
+            }
+            return Promise.resolve({ data: null });
+          }
           if (api._insert) return Promise.resolve({ data: { id: 'n1' } });
           const found = [...rows.values()].find(r => r.dedupe_key === api._filters.dedupe_key);
           return Promise.resolve({ data: found || null });
@@ -427,7 +557,7 @@ function runtimeWith(overrides = {}) {
           if (api._insert) {
             const row = { id: `n${rows.size + 1}`, status: 'pending', attempts: 0, ...api._insert };
             rows.set(row.id, row);
-            return Promise.resolve({ data: row });
+            return Promise.resolve({ data: row, error: null });
           }
           return Promise.resolve({ data: null });
         },
@@ -446,10 +576,13 @@ function runtimeWith(overrides = {}) {
               error: null
             }).then(resolve);
           }
-          // The sweep's list query: everything still owed to this user. Without this the
-          // fake answered "nothing pending" and deliverPending could never be exercised.
-          const pending = [...rows.values()].filter(r => ['pending', 'deferred'].includes(r.status));
-          return Promise.resolve({ data: pending, error: null }).then(resolve);
+          // The sweep's list query: pending/deferred, plus a 'sending' row stale enough that
+          // whatever claimed it must have died — mirrors the real widened SELECT.
+          const staleBefore = new Date(NOW.getTime() - 5 * 60000);
+          const owed = [...rows.values()].filter(r =>
+            ['pending', 'deferred'].includes(r.status) ||
+            (r.status === 'sending' && new Date(r.updated_at) < staleBefore));
+          return Promise.resolve({ data: owed, error: null }).then(resolve);
         }
       };
       return api;
@@ -526,6 +659,163 @@ test('a notification without a title, body or dedupe key is refused', async () =
   const { runtime } = runtimeWith();
   assert.equal((await runtime.raise('u1', { category: 'watch', title: '', body: 'b', dedupeKey: 'k' })).ok, false);
   assert.equal((await runtime.raise('u1', { category: 'watch', title: 't', body: 'b', dedupeKey: '' })).ok, false);
+});
+
+// ── Reliability: concurrency, ambiguous outcomes, backoff ───────────────────────────────
+test('raise() treats a unique-constraint race as "already raised", not a raw DB error', async () => {
+  // The select-then-insert in raise() is a check-then-act race: two concurrent raises for
+  // the same real-world event can both see "no existing row" before either commits. The
+  // table's unique index on (user_id, dedupe_key) is what actually stops a second row; the
+  // loser here must recognise that as a duplicate, not surface a constraint-violation message
+  // for something that behaved correctly.
+  const winner = { id: 'winner', user_id: 'u1', dedupe_key: 'k1', status: 'pending' };
+  // Ordered exactly as raise() calls .from(): (1) the pre-insert existence check, from this
+  // process's point of view before the winner committed — sees nothing; (2) the insert
+  // itself — loses the race; (3) the re-fetch after the conflict — NOW sees the winner,
+  // because by real-world time it has committed by then.
+  let step = 0;
+  let selectCount = 0;
+  const supabase = {
+    from() {
+      step += 1;
+      const thisStep = step;
+      const api = {
+        _filters: {},
+        select() { return api; },
+        insert() { return api; },
+        eq(col, val) { api._filters[col] = val; return api; },
+        maybeSingle() {
+          if (thisStep === 1) return Promise.resolve({ data: null }); // nothing yet, from here
+          selectCount += 1;
+          return Promise.resolve({ data: api._filters.dedupe_key === winner.dedupe_key ? winner : null });
+        },
+        single() {
+          // Simulates the real unique-index violation: this call lost the race.
+          return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } });
+        }
+      };
+      return api;
+    }
+  };
+  const runtime = createDeliveryRuntime({
+    supabase, sendPush: async () => ({ ok: false }), sendEmail: async () => ({ ok: false }),
+    sendTelegram: async () => ({ ok: false }), createBriefing: async () => ({ id: 'b' }),
+    getPreferenceMap: async () => ({}), getUserEmail: async () => '', getMailbox: async () => null,
+    getTelegram: async () => null, countPushDevices: async () => 0, env: {}, now: () => NOW
+  });
+  const result = await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  assert.equal(result.ok, true, 'a race loser is not an error');
+  assert.equal(result.duplicate, true);
+  assert.equal(result.id, 'winner');
+  assert.equal(selectCount, 1, 'exactly one re-fetch to find who actually won');
+});
+
+test('two concurrent delivery attempts on the SAME event: only one actually sends', async () => {
+  const { runtime, rows, calls } = runtimeWith({ env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' } });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const event = [...rows.values()][0];
+  // Two workers racing on the same row — the claim's conditional UPDATE is the only thing
+  // standing between this and two real external Telegram messages for one event.
+  const [first, second] = await Promise.all([
+    runtime.deliverOne('u1', event, { prefs: { [PREF.channel]: 'telegram' }, available: ['telegram', 'in_app'] }),
+    runtime.deliverOne('u1', event, { prefs: { [PREF.channel]: 'telegram' }, available: ['telegram', 'in_app'] })
+  ]);
+  const outcomes = [first.status, second.status].sort();
+  assert.deepEqual(outcomes, ['claimed_elsewhere', 'delivered']);
+  assert.equal(calls.filter(c => c.startsWith('telegram:')).length, 1, 'exactly one real send, not two');
+});
+
+test('a provider that never responds (mid-send crash) leaves the row claimable again after it goes stale', async () => {
+  const { runtime, rows } = runtimeWith({ env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' } });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const event = [...rows.values()][0];
+  event.status = 'sending';
+  event.updated_at = new Date(NOW.getTime() - 10 * 60000).toISOString(); // 10 minutes ago — stale
+  const result = await runtime.deliverPending('u1');
+  // The stale 'sending' row was picked back up and actually delivered, not left stuck forever.
+  assert.equal(result.results[0]?.status, 'delivered');
+});
+
+test('a send the provider genuinely accepted is never left eligible for automatic retry, even if the write to record it keeps failing', async () => {
+  const rows = new Map();
+  rows.set('e1', { id: 'e1', user_id: 'u1', status: 'pending', dedupe_key: 'k1', category: 'watch', urgency: 'normal', title: 'T', body: 'B', attempts: 0 });
+  let updateAttempts = 0;
+  const supabase = {
+    from() {
+      const api = { _filters: {} };
+      api.select = () => api;
+      api.eq = (col, val) => { api._filters[col] = val; return api; };
+      api.in = () => api;
+      api.or = () => { api._claim = true; return api; }; // claim()'s staleness-aware call
+      api.update = (patch) => { api._update = patch; return api; };
+      api.maybeSingle = () => {
+        const row = rows.get(api._filters.id);
+        if (api._claim && row && ['pending', 'deferred'].includes(row.status)) {
+          Object.assign(row, api._update);
+          return Promise.resolve({ data: { id: row.id } });
+        }
+        return Promise.resolve({ data: null });
+      };
+      api.then = (resolve) => {
+        if (api._update && api._filters.id) {
+          const row = rows.get(api._filters.id);
+          // Only the "mark delivered" writes are ever attempted after the claim already
+          // succeeded (status is 'sending' by then) — those are the ones made to keep failing.
+          if (row?.status === 'sending' && api._update.status === 'delivered') {
+            updateAttempts += 1;
+            return Promise.resolve({ data: null, error: { message: 'connection reset' } }).then(resolve);
+          }
+          if (row) Object.assign(row, api._update);
+        }
+        return Promise.resolve({ data: [], error: null }).then(resolve);
+      };
+      return api;
+    }
+  };
+  const runtime = createDeliveryRuntime({
+    supabase, sendPush: async () => ({ ok: false }), sendEmail: async () => ({ ok: false }),
+    sendTelegram: async () => ({ ok: true, providerRef: 'tg-1' }), // the provider genuinely accepted it
+    createBriefing: async () => ({ id: 'b' }), getPreferenceMap: async () => ({ [PREF.channel]: 'telegram' }),
+    getUserEmail: async () => '', getMailbox: async () => null, getTelegram: async () => ({ canSend: true }),
+    countPushDevices: async () => 0, env: {}, now: () => NOW
+  });
+  const result = await runtime.deliverOne('u1', rows.get('e1'), { prefs: { [PREF.channel]: 'telegram' }, available: ['telegram', 'in_app'] });
+  assert.equal(result.status, 'delivered', 'the caller is told the truth: the provider DID accept it');
+  assert.equal(updateAttempts, 3, 'the write was retried, not given up on after one try');
+  // But the ROW itself must never read as 'pending' after this — that would let the next
+  // sweep call the provider a second time for a message that already went out for real.
+  assert.equal(rows.get('e1').status, 'failed');
+  assert.match(rows.get('e1').last_error, /accepted this message but the delivery could not be recorded/);
+});
+
+test('a FLOOD_WAIT backoff is honoured — the row is not eligible for retry until it elapses', async () => {
+  const { runtime, rows } = runtimeWith({
+    env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' },
+    telegramResult: { ok: false, error: 'Telegram error: A wait of 90 seconds is required', retryAfterSeconds: 90, errorKind: 'flood_wait' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const result = await runtime.deliverPending('u1');
+  assert.equal(result.results[0].status, 'pending');
+  const row = [...rows.values()][0];
+  assert.ok(row.deliver_after, 'a backoff deadline was recorded, not left immediately retryable');
+  assert.equal(new Date(row.deliver_after).getTime(), NOW.getTime() + 90000);
+});
+
+// ── Cross-channel fallback is exactly-once, in both directions ─────────────────────────
+test('Telegram recovering later does not resend something email already delivered', async () => {
+  const { runtime, rows } = runtimeWith({
+    env: { RESEND_API_KEY: 'k' }, emailTo: 'user@example.com', telegram: null, // Telegram down when this ran
+    prefs: { [PREF.channel]: 'telegram', [PREF.fallback]: 'email' }
+  });
+  await runtime.raise('u1', { category: 'watch', title: 'T', body: 'B', dedupeKey: 'k1' });
+  const first = await runtime.deliverPending('u1');
+  assert.equal(first.results[0].channel, 'email');
+  assert.equal([...rows.values()][0].status, 'delivered');
+
+  // Telegram is back now. A second sweep must find nothing left to do for this event — its
+  // status is already 'delivered', so it is not even in the claimable set.
+  const second = await runtime.deliverPending('u1');
+  assert.equal(second.results.length, 0, 'a delivered event is not re-processed just because a different channel recovered');
 });
 
 // ── Shape of what the user receives ────────────────────────────────────────────────────
