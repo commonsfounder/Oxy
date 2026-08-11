@@ -416,6 +416,49 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  // The durable responsibility. Deliberately THREE actions, not a suite: start it, move it
+  // on (including pausing for a decision), and answer a pending decision. Everything else —
+  // documents, correspondence, evidence, browser work — attaches to a workflow through the
+  // primitives that already exist, rather than earning its own verb here.
+  start_responsibility: {
+    risk: 'low',
+    required: ['goal'],
+    optional: ['type', 'deadline', 'current_step'],
+    aliases: { goal: ['outcome', 'objective'] },
+    inputExample: { goal: 'Apply for the Software Engineer role at Acme', type: 'job_application', deadline: '2026-08-20' },
+    paramHints: { type: 'a short label like job_application | insurance_renewal | claim | trip | purchase' },
+    guidance: 'Use when the user hands over an OUTCOME rather than a single action — "sort out my car insurance renewal", "deal with this claim", "apply for this for me", "get everything sorted for my trip". Not for one-off actions; a reminder or a single email is not a responsibility. Once started, everything done toward it — documents, messages, browser work, evidence — is attached to it, so it survives sessions ending and days passing. Do not tell the user about "workflows"; say what you are handling.',
+    successSummary: 'Taking that on',
+    failureSummary: 'Could not take that on',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  update_responsibility: {
+    risk: 'low',
+    required: ['workflow_id'],
+    optional: ['status', 'current_step', 'next_action', 'note', 'checkpoint_type', 'checkpoint_prompt', 'checkpoint_options'],
+    inputExample: { workflow_id: 'id from list_responsibilities', current_step: 'Comparing quotes', next_action: 'Bring you the two best' },
+    paramHints: {
+      status: 'gathering | working | waiting_external | completed | failed | cancelled — never set waiting_for_user directly, open a checkpoint instead',
+      checkpoint_type: 'approval | missing_information | authentication_required | legal_confirmation | payment_confirmation | choice_required'
+    },
+    guidance: 'Use to record progress as you go, and to STOP and ask when a decision is genuinely the user\'s: pass checkpoint_type and checkpoint_prompt to pause before submitting an application, choosing between quotes, making a declaration, or spending money. Opening a checkpoint blocks the work until the user answers — that is the point, and it is the same primitive for every kind of pause. Keep current_step and next_action in plain language; the user reads them.',
+    successSummary: 'Updated',
+    failureSummary: 'Could not update that',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  list_responsibilities: {
+    risk: 'low',
+    required: [],
+    optional: ['include_finished'],
+    inputExample: {},
+    guidance: 'Use for "what are you working on?", "what needs me?", or before starting something that may already be underway. Anything waiting on the user comes first. Report it as what you are handling — never as workflows, statuses or ids.',
+    successSummary: 'Here is what I am handling',
+    failureSummary: 'Could not check',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   find_commitments: {
     risk: 'low',
     required: [],

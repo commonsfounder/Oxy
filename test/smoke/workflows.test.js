@@ -282,3 +282,57 @@ test('a job application, a claim, a trip and a purchase all run on the same prim
     );
   }
 });
+
+// ── Reachable from a chat turn ─────────────────────────────────────────────────────────
+// The primitive being right is not the same as it being usable. These run through the real
+// executeAction path, which is how a user sentence actually reaches it.
+
+const app = require('../../api/index');
+
+test('a user handing over an outcome creates a responsibility, and it shows up as one', async () => {
+  const started = await app.executeAction(USER_ID, 'start_responsibility', {
+    goal: `${MARK} sort out my car insurance renewal`, type: 'insurance_renewal'
+  }, {});
+  assert.equal(started.success, true);
+  assert.ok(started.workflowId);
+
+  const listed = await app.executeAction(USER_ID, 'list_responsibilities', {}, {});
+  assert.equal(listed.success, true);
+  assert.ok(listed.items.some(i => i.title.includes(MARK)));
+  // What the user reads must not leak the machinery.
+  assert.ok(!/workflow|status|gathering|uuid/i.test(listed.text));
+});
+
+test('pausing for a decision takes precedence over any status in the same call', async () => {
+  const started = await app.executeAction(USER_ID, 'start_responsibility', { goal: `${MARK} apply for the role` }, {});
+
+  // A checkpoint and a status in one call: the checkpoint must win, or the status patch
+  // would immediately unblock the work that just blocked.
+  const paused = await app.executeAction(USER_ID, 'update_responsibility', {
+    workflow_id: started.workflowId,
+    status: 'working',
+    checkpoint_type: 'approval',
+    checkpoint_prompt: 'Confirm before I submit this application'
+  }, {});
+  assert.equal(paused.success, true);
+  assert.ok(paused.checkpointId);
+
+  const after = await getWorkflow(supabase, USER_ID, started.workflowId);
+  assert.equal(after.status, 'waiting_for_user', 'the status in the same call must not undo the pause');
+
+  const listed = await app.executeAction(USER_ID, 'list_responsibilities', {}, {});
+  const item = listed.items.find(i => i.title.includes(MARK) && i.needsYou);
+  assert.equal(item.detail, 'Confirm before I submit this application');
+});
+
+test('progress recorded through the action lands on the timeline', async () => {
+  const started = await app.executeAction(USER_ID, 'start_responsibility', { goal: `${MARK} track the claim` }, {});
+  await app.executeAction(USER_ID, 'update_responsibility', {
+    workflow_id: started.workflowId, status: 'working', current_step: 'Chasing their support team', note: 'Emailed support'
+  }, {});
+
+  const timeline = await getTimeline(supabase, USER_ID, started.workflowId);
+  assert.ok(timeline.some(e => e.kind === 'status_changed'));
+  const workflow = await getWorkflow(supabase, USER_ID, started.workflowId);
+  assert.equal(workflow.current_step, 'Chasing their support team');
+});
