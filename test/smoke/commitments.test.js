@@ -317,6 +317,28 @@ test('two similarly-named documents open on the SAME thread: the live bug this p
   assert.equal(matchesSentEvidence(deck, fulfillsBoth, { siblings }), true, 'both really were sent — each has its own distinguishing word present');
 });
 
+test('a static subject line carried forward by every reply cannot disambiguate — the live bug the final integrated run found', () => {
+  // Gmail (and most clients) prefixes the THREAD's original subject unedited onto every reply
+  // ("Re: board deck and board pack"). If that subject line ever named both siblings — because
+  // the original ask mentioned both — every later reply on the thread would carry BOTH
+  // disambiguating words forever, regardless of what the reply's body actually says. Found live:
+  // a reply that only fulfilled the deck, with that two-item subject still attached by Gmail's
+  // own convention, falsely resolved the pack too.
+  const pack = commitment('c-pack', 'send Mia the board pack', { thread_id: 'thr-1' });
+  const deck = commitment('c-deck', 'send Mia the board deck', { thread_id: 'thr-1' });
+  const siblings = [pack, deck];
+
+  const staticSubject = 'Re: board deck and board pack';
+  const fulfillsDeckOnly = { threadId: 'thr-1', subject: staticSubject, body: 'Sending the board deck over now — here it is, attached.' };
+  assert.equal(matchesSentEvidence(deck, fulfillsDeckOnly, { siblings }), true, 'the deck really was sent');
+  assert.equal(matchesSentEvidence(pack, fulfillsDeckOnly, { siblings }), false,
+    'the subject line names the pack too, but the sender never actually wrote "pack" in this message — the subject is boilerplate, not new evidence');
+
+  const fulfillsPackOnly = { threadId: 'thr-1', subject: staticSubject, body: 'Sending the board pack over now — here it is, attached.' };
+  assert.equal(matchesSentEvidence(pack, fulfillsPackOnly, { siblings }), true, 'the pack really was sent');
+  assert.equal(matchesSentEvidence(deck, fulfillsPackOnly, { siblings }), false, 'symmetric case — the deck must not be swept up either');
+});
+
 test('"send Ben the board deck" does not resolve "send Mia the board deck", identical wording aside', () => {
   const toMia = commitment('c-mia', 'send Mia the board deck', { thread_id: 'thr-1', participant_id: 'p-mia' });
   const evidenceToBen = { threadId: 'thr-2', participantId: 'p-ben', to: 'ben@example.com', subject: 'Board deck', body: 'Sending the board deck across now.' };

@@ -205,6 +205,11 @@ function matchesSentEvidence(commitment, evidence = {}, { siblings = [] } = {}) 
   const subject = commitmentSubject(commitment.what);
   if (!subject) return false;
   const rawBody = stripQuotedContent(`${evidence.subject || ''} ${evidence.body || ''}`).toLowerCase();
+  // The message BODY alone, no subject — Gmail (and most clients) carries a thread's original
+  // subject line forward unedited on every reply ("Re: ..."), so unlike the body, it is not
+  // evidence of anything the sender freshly wrote in THIS message. Needed only for the
+  // same-thread disambiguation tie-break below.
+  const bodyOnly = stripQuotedContent(String(evidence.body || '')).toLowerCase();
 
   // Found live, capturing a SECOND promise on the same thread as a first: "I will also send
   // the board deck tomorrow" resolved "send the board pack" — because the action word check
@@ -236,8 +241,14 @@ function matchesSentEvidence(commitment, evidence = {}, { siblings = [] } = {}) 
   // promise in it, so any one overlapping word is normally a fair sanity check. But if that
   // word is also what a sibling promise on the same thread is about, it cannot disambiguate
   // between them — at least one matched word has to be something ONLY this commitment is about.
+  // That disambiguating word must come from the BODY: a static subject line ("Re: board deck
+  // and board pack", unedited by the sender) would otherwise satisfy BOTH siblings' unique
+  // word on every single reply, forever, which is exactly the false positive this check exists
+  // to prevent — found live: a reply that only fulfilled the deck, with the original two-item
+  // subject still attached by Gmail's own reply convention, falsely resolved the pack too.
   const ambiguous = ambiguousThreadWords(commitment, siblings);
-  return matchedWords.some(word => !ambiguous.has(word));
+  const matchedBodyWords = [...subject.words].filter(word => bodyOnly.includes(word));
+  return matchedBodyWords.some(word => !ambiguous.has(word));
 }
 
 // Lines an email client adds when quoting a prior message — "On Tue, 12 Aug, Mia wrote:",
