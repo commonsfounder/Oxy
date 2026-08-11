@@ -332,3 +332,55 @@ deferring:
    is a few lines given the loop already captures JPEGs every step.
 
 Nothing here needs a new integration, and nothing needs the phone. The ordering holds.
+
+---
+
+# Addendum 2 — Pass 2 complete: what the workflow primitive unlocks
+
+**Date:** 2026-08-10, after `b39dd03e`, `407e5f29`, `a06d4142`, `2eee215e`.
+
+## The three blockers from Addendum 1 are closed
+
+| Blocker | State | How |
+|---|---|---|
+| Nothing can author a file | **Closed** | `document-authoring.js` builds real DOCX via `fflate` (no new dependency). A tailored CV is a new *version* derived from the original; the original survives untouched. Round-trip verified against the independent extractor. |
+| `session.agentTaskId` set nowhere → guard was vacuous | **Closed** | `workflow_id` threaded through `storeDocument`, `captureDownload`, `uploadDocument`, `createDerivedDocument`, `findDocuments`. A download now carries its workflow; a document from one responsibility cannot be uploaded into another. Both asserted. |
+| No checkpoint/resume, no general pre-submission pause | **Closed** | `workflows.browser_state` holds objective / currentUrl / lastObservation / completedActions / nextIntendedAction, checkpointed on pause, on completion, and every 5 steps. `workflow_checkpoints` generalises `ready_for_payment` into six types. |
+| *(minor)* No page-as-evidence | **Closed** | `capturePageAsEvidence` stores the page **with its URL**, which is what makes it evidence rather than a picture. |
+
+## Re-running the "apply for a job" chain
+
+| Step | Before Pass 2 | Now |
+|---|---|---|
+| Identify what's needed | weak | weak — unchanged, and adequate |
+| Find the CV | works | works, now scoped to the responsibility + loose personal files |
+| Create a tailored version | **blocked** | **works** — new version, original intact |
+| Download a form | works | works, now attached to the work |
+| Upload the CV | works | works, now guarded by workflow rather than nothing |
+| Save application evidence | **gap** | **works** |
+| Remember status / resume later | **blocked** | **works** — survives session death, days, and waiting |
+| Ask only when stuck | works | works |
+| Pause before submitting | **gap** | **works** — `approval` checkpoint, any goal shape |
+
+**The chain is complete end to end.** What remains is not capability but wiring: the pieces exist and are proven individually, and nothing yet *creates* a workflow from a chat turn. That is the next small step, not a new primitive.
+
+## What is now possible that was not
+
+The point of a primitive is leverage, so measured against the 14 outcomes in the original audit:
+
+- **Applications (#3), insurance renewal (#1), claims (#2)** — all three Tier-1 outcomes now have every mechanical piece: documents in and out, authoring, durable state, a general pause, evidence, and a timeline explaining what happened. They were blocked on the same three things and are unblocked by the same three commits.
+- **Returns (#5), bills (#8), household admin (#4), job search (#13)** — same shape, same unlock, no further work.
+- **Travel (#6) and purchases** — gain the checkpoint and the timeline. `ready_for_payment` no longer needs to be a special case, though it still is one in `browser-task.js` and can now be folded into `payment_confirmation` whenever that file is next touched.
+- **Subscriptions (#7), appointments (#9), warranty (#11)** — still voice-blocked. Unchanged, as expected.
+
+## Honest limits
+
+1. **Nothing creates a workflow yet.** No chat path, no action contract. The primitive is proven by tests, not by a user sentence. Deliberate — a `create_workflow` contract is trivial, and doing it blind before the primitive settled would have been the wrong order.
+2. **`ready_for_payment` still exists** in the order loop. Checkpoints supersede the *idea*; the code path is untouched because rewriting the payment flow was not worth the regression risk in this pass.
+3. **The 20-minute session TTL is unchanged**, and now doesn't matter — the durable state is on the workflow. Removing it would be churn.
+4. **`summarizeForUser` has no UI.** The data behind "Millie is handling…" exists and is jargon-free (asserted); nothing renders it.
+5. **Vision extraction for images is injected but never wired** to a real model. `extractImage` fails softly with "no vision extractor configured", which is honest but means scanned documents are not yet readable.
+
+## Next
+
+Phone identity (Pass 3) is genuinely unblocked: a workflow can now hold `awaiting_verification` as an `authentication_required` checkpoint with an expiry, which was the stated dependency for the OTP design. Before that, two hours of wiring — `create_workflow` / `update_workflow` actions and the home summary — would turn a proven primitive into a usable one.
