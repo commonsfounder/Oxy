@@ -58,7 +58,7 @@ async function findByChecksum(supabase, userId, checksum) {
 
 async function storeDocument(supabase, userId, {
   filename, mimeType, bytes, source, sourceRef = null, label = null,
-  agentTaskId = null, participantId = null, conversationId = null
+  agentTaskId = null, participantId = null, conversationId = null, workflowId = null
 } = {}) {
   const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
   if (!buffer.length) throw new Error('Refusing to store an empty file.');
@@ -88,6 +88,10 @@ async function storeDocument(supabase, userId, {
     agent_task_id: agentTaskId,
     participant_id: participantId,
     conversation_id: conversationId,
+    // The responsibility this file belongs to. Nullable ONLY for genuinely personal files
+    // that exist outside any piece of work (a passport uploaded once, reused forever) —
+    // anything created, downloaded or uploaded DURING work carries it.
+    workflow_id: workflowId,
     filename: sanitizeFilename(filename),
     mime_type: mimeType || 'application/octet-stream',
     byte_size: buffer.length,
@@ -132,10 +136,11 @@ async function getDocumentBytes(supabase, userId, documentId) {
 // Metadata-only search: label, filename, source, owning task. Deliberately does not touch
 // extracted_encrypted — finding "the CV" should not require decrypting every document the
 // user has.
-async function findDocuments(supabase, userId, { query = '', source = null, agentTaskId = null, limit = 20 } = {}) {
+async function findDocuments(supabase, userId, { query = '', source = null, agentTaskId = null, workflowId = null, limit = 20 } = {}) {
   let q = supabase.from('documents').select('*').eq('user_id', userId);
   if (source) q = q.eq('source', source);
   if (agentTaskId) q = q.eq('agent_task_id', agentTaskId);
+  if (workflowId) q = q.eq('workflow_id', workflowId);
   const { data } = await q.order('created_at', { ascending: false }).limit(200);
   const rows = data || [];
   const needle = String(query || '').trim().toLowerCase();
@@ -285,7 +290,8 @@ async function createDerivedDocument(supabase, userId, sourceDocumentId, {
     label: label || source_doc.label,
     agentTaskId: source_doc.agent_task_id,
     participantId: source_doc.participant_id,
-    conversationId: source_doc.conversation_id
+    conversationId: source_doc.conversation_id,
+    workflowId: source_doc.workflow_id
   });
 
   const { data, error } = await supabase.from('documents')

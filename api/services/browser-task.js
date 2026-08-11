@@ -352,9 +352,36 @@ function createSession(userId, session) {
   // userId is kept on the record, not just used as the map key: the document actions
   // (download/upload) must scope every store read and write by owner, and reaching back to
   // the map key from inside the loop would be an easy place to get that wrong.
+  //
+  // workflowId is the responsibility this browsing is in service of. It is what makes files
+  // fetched here belong to the work that caused them, and what lets the work survive this
+  // session dying — the durable state lives on the workflow, never on this record.
   const record = { userId, ...session, lastActivityAt: Date.now() };
   liveSessions.set(userId, record);
   return record;
+}
+
+// Persist where we got to onto the WORKFLOW, not this session. Called at the points where
+// losing progress would actually cost something: when Millie pauses for the user, when she
+// finishes, and periodically through a long run. The live session stays disposable — if it
+// dies, reopening currentUrl and reading this back is enough to carry on.
+//
+// Best-effort by design: failing to checkpoint must never abort real browser work that is
+// otherwise going fine.
+async function checkpointBrowserState(session, { nextIntendedAction = null, lastObservation = null } = {}) {
+  if (!session?.workflowId) return;
+  try {
+    const { saveBrowserState } = require('./workflows');
+    await saveBrowserState(getSupabase(), session.userId, session.workflowId, {
+      objective: session.goal,
+      currentUrl: typeof session.page?.url === 'function' ? session.page.url() : null,
+      lastObservation,
+      completedActions: session.history || [],
+      nextIntendedAction
+    });
+  } catch (err) {
+    console.warn('[browser-task] could not checkpoint workflow state:', err.message);
+  }
 }
 
 function getSession(userId) {
@@ -4553,10 +4580,26 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           // Loaded once per session, lazily: most goals never touch a file, and paying for
           // a documents query on every ordering turn would be waste. Once loaded it stays
           // on the session so the list is stable across steps of the same task.
+          // Every 5 steps: cheap insurance for a long run against a session that dies
+          // mid-way. Not every step — that would be a database write per browser action.
+          if (steps > 0 && steps % 5 === 0) {
+            await checkpointBrowserState(session, { nextIntendedAction: 'continuing' });
+          }
           if (session.availableDocuments === undefined) {
-            session.availableDocuments = await require('./documents')
-              .findDocuments(getSupabase(), session.userId, { limit: 25 })
-              .catch(() => []);
+            // Scoped to this responsibility when there is one, plus the user's unattached
+            // personal files (a passport, a CV) which are usable anywhere. Showing every
+            // document from every piece of work would invite exactly the wrong-file upload
+            // the id-only rule exists to prevent.
+            const docs = require('./documents');
+            const [ownDocs, looseDocs] = await Promise.all([
+              session.workflowId
+                ? docs.findDocuments(getSupabase(), session.userId, { workflowId: session.workflowId, limit: 25 }).catch(() => [])
+                : Promise.resolve([]),
+              docs.findDocuments(getSupabase(), session.userId, { limit: 25 }).catch(() => [])
+            ]);
+            const loose = looseDocs.filter(d => !d.workflow_id);
+            session.availableDocuments = [...ownDocs, ...loose]
+              .filter((d, i, all) => all.findIndex(x => x.id === d.id) === i);
           }
           decision = await timed('step.decide', () => decideNextAction(session.goal, session.history, elements, screenshot, pendingCorrection, session.goalContext, { availableDocuments: session.availableDocuments || [] }));
         }
@@ -4631,6 +4674,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
             supabase: getSupabase(),
             userId: session.userId,
             agentTaskId: session.agentTaskId || null,
+            workflowId: session.workflowId || null,
             label: decision.note || null
           }
         ).catch((err) => ({ ok: false, notes: err.message }));
@@ -4656,7 +4700,8 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           const fileInput = await session.page.locator('input[type="file"]').first();
           const result = await uploadDocument(fileInput, getSupabase(), session.userId, {
             documentId: decision.documentId || decision.document_id,
-            agentTaskId: session.agentTaskId || null
+            agentTaskId: session.agentTaskId || null,
+            workflowId: session.workflowId || null
           });
           session.history.push(`Step ${steps}: uploaded "${result.document.filename}"`);
           consecutiveBadDecisions = 0;
@@ -4672,6 +4717,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
 
       if (decision.action === 'done') {
+        await checkpointBrowserState(session, { nextIntendedAction: null, lastObservation: decision.summary || null });
         // For an order, "done" inside the loop is always premature — a real order only
         // completes via ready_for_payment → confirmPayment. Don't throw away the cart.
         if (session.isOrder) {
@@ -4720,6 +4766,9 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
 
       if (decision.action === 'ask') {
+        // Pausing for the user is exactly when the session is most likely to die before the
+        // answer comes back — a reply hours later must not start from nothing.
+        await checkpointBrowserState(session, { nextIntendedAction: `waiting on the user: ${decision.question || ''}`.trim() });
         // The model hit a bot/security wall (often a Cloudflare iframe detectBlockWall can't
         // read) and is asking the user what to do. Don't surface a confusing technical ask —
         // bail cleanly, same as a detected wall, so the user gets "try another site", not

@@ -78,7 +78,7 @@ test('captureDownload arms the listener before the click, then stores the file w
     // finished and the event would be missed entirely.
     armedWhenClicked = page._armedCount();
     page._fire();
-  }, { supabase, userId: 'chizi', agentTaskId: 'task-apply', label: 'Application form' });
+  }, { supabase, userId: 'chizi', agentTaskId: 'task-apply', workflowId: 'wf-apply', label: 'Application form' });
 
   assert.equal(armedWhenClicked, 1, 'the download listener must be armed before the trigger runs');
   assert.equal(result.ok, true);
@@ -87,8 +87,11 @@ test('captureDownload arms the listener before the click, then stores the file w
   assert.equal(result.document.source, 'browser_download');
   // Provenance: months later we can still say which page produced this.
   assert.equal(result.document.source_ref, 'https://jobs.example/apply');
-  // And it belongs to the application, not a general pile.
+  // And it belongs to the application, not a general pile. This is the gap the pre-Pass-2
+  // audit found: before workflows existed every browser download landed unattached, which
+  // left the cross-workflow upload guard with nothing to guard on.
   assert.equal(result.document.agent_task_id, 'task-apply');
+  assert.equal(result.document.workflow_id, 'wf-apply');
 });
 
 test('a click that starts no download is a soft outcome, not a thrown error', async () => {
@@ -181,4 +184,31 @@ test('another user\'s document cannot be uploaded', async () => {
     () => uploadDocument(fakeFileInput(), supabase, 'someone-else', { documentId: document.id }),
     /not found/i
   );
+});
+
+test('a document from one responsibility cannot be uploaded into another', async () => {
+  const supabase = fakeSupabase();
+  const { document } = await storeDocument(supabase, 'chizi', {
+    filename: 'claim-receipt.pdf', mimeType: 'application/pdf', bytes: Buffer.from('r'),
+    source: 'browser_download', workflowId: 'wf-claim'
+  });
+  await assert.rejects(
+    () => uploadDocument(fakeFileInput(), supabase, 'chizi', { documentId: document.id, workflowId: 'wf-job' }),
+    /different piece of work/i
+  );
+
+  // ...and into its own, it goes through without complaint.
+  const ok = await uploadDocument(fakeFileInput(), supabase, 'chizi', { documentId: document.id, workflowId: 'wf-claim' });
+  assert.equal(ok.ok, true);
+});
+
+test('an unattached personal file is usable by any responsibility', async () => {
+  const supabase = fakeSupabase();
+  const { document } = await storeDocument(supabase, 'chizi', {
+    filename: 'passport.pdf', mimeType: 'application/pdf', bytes: Buffer.from('p'), source: 'upload'
+  });
+  // A passport uploaded once and reused forever is exactly the case workflow_id is nullable
+  // for — it must not be trapped inside whichever workflow happened to be running.
+  const result = await uploadDocument(fakeFileInput(), supabase, 'chizi', { documentId: document.id, workflowId: 'wf-anything' });
+  assert.equal(result.ok, true);
 });

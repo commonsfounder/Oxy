@@ -44,7 +44,7 @@ function guessMimeType(filename) {
 // belongs to, so a form fetched during an application is attached to that application rather
 // than landing in a general pile.
 async function captureDownload(page, triggerAction, {
-  supabase, userId, agentTaskId = null, sourceUrl = null, label = null,
+  supabase, userId, agentTaskId = null, workflowId = null, sourceUrl = null, label = null,
   timeoutMs = DOWNLOAD_TIMEOUT_MS, readDownload = defaultReadDownload
 } = {}) {
   if (!supabase || !userId) throw new Error('captureDownload needs a supabase client and a userId.');
@@ -79,7 +79,10 @@ async function captureDownload(page, triggerAction, {
     // we can still say which page produced it.
     sourceRef: sourceUrl || (typeof page.url === 'function' ? page.url() : null),
     label,
-    agentTaskId
+    agentTaskId,
+    // Files fetched during work belong to that work. Before this, every browser download
+    // landed unattached and the cross-workflow guard had nothing to guard on.
+    workflowId
   });
 
   return { ok: true, document, deduped, filename, byteSize: bytes.length };
@@ -97,10 +100,16 @@ async function defaultReadDownload(download) {
 // Resolves which stored document to upload. Id only — the same rule as email attachments,
 // for the same reason: matching "cv" against filenames is how a passport ends up on a job
 // application.
-async function resolveDocumentForUpload(supabase, userId, { documentId, agentTaskId = null, allowCrossWorkflow = false } = {}) {
+async function resolveDocumentForUpload(supabase, userId, { documentId, agentTaskId = null, workflowId = null, allowCrossWorkflow = false } = {}) {
   if (!documentId) throw new Error('Which document should be uploaded? It has to be chosen by id, not by name.');
   const document = await getDocument(supabase, userId, documentId);
-  if (!allowCrossWorkflow && document.agent_task_id && agentTaskId && document.agent_task_id !== agentTaskId) {
+  if (allowCrossWorkflow) return document;
+
+  // Workflow is the real boundary now that browser work has one; agent_task_id remains
+  // checked so documents attached before workflows existed still behave.
+  const conflictsOnWorkflow = document.workflow_id && workflowId && document.workflow_id !== workflowId;
+  const conflictsOnTask = document.agent_task_id && agentTaskId && document.agent_task_id !== agentTaskId;
+  if (conflictsOnWorkflow || conflictsOnTask) {
     throw new Error(`"${document.filename}" belongs to a different piece of work — not uploading it here without you saying so.`);
   }
   return document;
@@ -108,9 +117,9 @@ async function resolveDocumentForUpload(supabase, userId, { documentId, agentTas
 
 // Puts a stored document into a page's file input.
 async function uploadDocument(fileInput, supabase, userId, {
-  documentId, agentTaskId = null, allowCrossWorkflow = false
+  documentId, agentTaskId = null, workflowId = null, allowCrossWorkflow = false
 } = {}) {
-  const document = await resolveDocumentForUpload(supabase, userId, { documentId, agentTaskId, allowCrossWorkflow });
+  const document = await resolveDocumentForUpload(supabase, userId, { documentId, agentTaskId, workflowId, allowCrossWorkflow });
   const { bytes } = await getDocumentBytes(supabase, userId, document.id);
 
   // setInputFiles with an in-memory buffer, rather than writing to disk first: the bytes are
