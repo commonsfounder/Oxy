@@ -19,6 +19,18 @@ struct AgenticHomeView: View {
     /// Foreground poll interval — Home has no push/BGAppRefreshTask, so this is the
     /// only thing that keeps cards from going stale while the screen sits open.
     private static let pollInterval: Duration = .seconds(90)
+    /// While something is actually running, 90 seconds is far too slow to read as live.
+    private static let activePollInterval: Duration = .seconds(10)
+
+    /// The four lanes — what needs you, what Millie is handling, what changed while you
+    /// were away, what finished. One server call (api/services/home-state.js) rather than
+    /// the client stitching briefings, tasks and watches together itself.
+    @State private var board: HomeBoard = .empty
+    /// The responsibility whose live timeline is open, if any.
+    @State private var openWorkflowID: String?
+    /// Guards the watermark: the Changed lane must only be cleared once the user has
+    /// genuinely looked at the board, and only once per foreground visit.
+    @State private var hasMarkedSeen = false
 
     @State private var briefings: [Briefing] = []
     @State private var lifeBriefing: LifeBriefing?
@@ -90,6 +102,16 @@ struct AgenticHomeView: View {
                             }
                         }
 
+                        // Proof that work is happening, above everything else. Only rendered
+                        // while something is genuinely in flight.
+                        if board.isWorking {
+                            LiveWorkHeader(
+                                count: board.handling.count,
+                                waitingCount: board.handling.filter { $0.waitingExternal == true }.count
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+
                         if let lifeBriefing = visibleLifeBriefing {
                             LifeBriefingCard(briefing: lifeBriefing) { item in
                                 handleLifeBriefingItem(item)
@@ -97,31 +119,40 @@ struct AgenticHomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
-                        if isLoading && missions.isEmpty {
+                        if isLoading && board.isEmpty && missions.isEmpty {
                             ProgressView()
                                 .tint(GlebChrome.ink.opacity(0.4))
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 40)
-                        } else if missions.isEmpty {
+                        } else if board.isEmpty && missions.isEmpty {
                             emptyMissions
                                 .padding(.top, 4)
                         } else {
-                            LazyVStack(spacing: 12) {
-                                ForEach(missions) { mission in
-                                    MissionCardView(
-                                        mission: mission,
-                                        ink: GlebChrome.ink,
-                                        onCTA: { handleMissionCTA(mission) },
-                                        onMailCTA: { email in handleMailCTA(email) },
-                                        onDismiss: mission.kind == .mailGroup || mission.watchID != nil ? nil : {
-                                            mission.id.hasPrefix("session-") ? abandonSession(mission.id) : dismissMission(mission.id)
-                                        }
-                                    )
-                                    .transition(.asymmetric(
-                                        insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
-                                        removal: .opacity
-                                    ))
+                            boardLanes
+
+                            // The inbox, deliveries and watches still come from the briefing
+                            // feed, which the board does not yet cover. Rendering them below
+                            // the lanes keeps that real content rather than dropping it, and
+                            // keeps them visually subordinate to work Millie actually owns.
+                            if !missions.isEmpty {
+                                LazyVStack(spacing: 12) {
+                                    ForEach(missions) { mission in
+                                        MissionCardView(
+                                            mission: mission,
+                                            ink: GlebChrome.ink,
+                                            onCTA: { handleMissionCTA(mission) },
+                                            onMailCTA: { email in handleMailCTA(email) },
+                                            onDismiss: mission.kind == .mailGroup || mission.watchID != nil ? nil : {
+                                                mission.id.hasPrefix("session-") ? abandonSession(mission.id) : dismissMission(mission.id)
+                                            }
+                                        )
+                                        .transition(.asymmetric(
+                                            insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)),
+                                            removal: .opacity
+                                        ))
+                                    }
                                 }
+                                .padding(.top, 4)
                             }
                         }
 
@@ -164,10 +195,17 @@ struct AgenticHomeView: View {
         .toolbar(.hidden, for: .tabBar)
         .task {
             await load(forceCheck: false)
+            await loadBoard()
             await loadRecentEntities()
+            // The board is only "seen" once it has actually been on screen — marking it on
+            // every poll would empty the Changed lane before the user ever read it.
+            await markBoardSeenOnce()
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.pollInterval)
+                // Live work refreshes quickly; an idle screen stays on the slow interval
+                // rather than polling a dormant backend every few seconds.
+                try? await Task.sleep(for: board.isWorking ? Self.activePollInterval : Self.pollInterval)
                 guard !Task.isCancelled else { break }
+                await loadBoard()
                 await load(forceCheck: false)
                 await loadRecentEntities()
             }
@@ -323,6 +361,16 @@ struct AgenticHomeView: View {
             AgentWorkView()
                 .swipeToDismiss()
         }
+        // Watching one responsibility progress. Reloads the board on the way out so a
+        // decision made in there is reflected on Home immediately.
+        .fullScreenCover(item: Binding(
+            get: { openWorkflowID.map(OpenWorkflow.init) },
+            set: { openWorkflowID = $0?.id }
+        )) { open in
+            WorkflowTimelineView(workflowId: open.id, onChanged: { Task { await loadBoard() } })
+                .swipeToDismiss()
+                .onDisappear { Task { await loadBoard() } }
+        }
     }
 
     // MARK: - Greeting (video: date + large serif over pastel)
@@ -362,6 +410,85 @@ struct AgenticHomeView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 4)
+    }
+
+    // MARK: - The board
+
+    /// Fixed order, and empty lanes are omitted entirely rather than shown as placeholders:
+    /// four permanently-visible headings with nothing under them would make a quiet day look
+    /// like a broken screen.
+    private var boardLanes: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            ForEach(BoardLane.allCases) { lane in
+                let items = board.items(in: lane)
+                if !items.isEmpty {
+                    BoardLaneSection(
+                        lane: lane,
+                        items: items,
+                        onOpen: { item in openBoardItem(item) },
+                        onDecide: { item, approved, choice in
+                            decide(on: item, approved: approved, choice: choice)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private func openBoardItem(_ item: BoardItem) {
+        HapticManager.shared.impact(.light)
+        if let workflowId = item.workflowId {
+            openWorkflowID = workflowId
+            return
+        }
+        if item.taskId != nil {
+            isAgentWorkPresented = true
+            return
+        }
+        // A promise the user owes has no machinery behind it — there is nothing to watch,
+        // so the useful move is to start the conversation about it.
+        openChat(autoSend: nil, startFresh: false)
+    }
+
+    /// Answers a decision straight from the card, then reloads so the row visibly moves out
+    /// of Needs you and back into Handling.
+    private func decide(on item: BoardItem, approved: Bool, choice: String?) {
+        guard let workflowId = item.workflowId, let checkpointId = item.checkpointId else {
+            openBoardItem(item)
+            return
+        }
+        Task {
+            do {
+                try await HomeBoardService.resolveCheckpoint(
+                    workflowId: workflowId,
+                    checkpointId: checkpointId,
+                    approved: approved,
+                    choice: choice
+                )
+                HapticManager.shared.impact(.medium)
+                await loadBoard()
+            } catch {
+                errorMessage = "Couldn't send that answer."
+            }
+        }
+    }
+
+    /// Advances the "changed since" watermark exactly once per visit. Deliberately fired
+    /// after the first render rather than before it, so what changed is still on screen when
+    /// the watermark moves — the next open is what starts clean.
+    private func markBoardSeenOnce() async {
+        guard !hasMarkedSeen else { return }
+        hasMarkedSeen = true
+        try? await HomeBoardService.markSeen()
+    }
+
+    private func loadBoard() async {
+        do {
+            let fetched = try await HomeBoardService.fetchBoard()
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { board = fetched }
+        } catch {
+            // A board failure must not blank Home — the briefing feed below still renders.
+        }
     }
 
     // MARK: - Chrome
@@ -1080,6 +1207,11 @@ struct AgenticHomeView: View {
 }
 
 // MARK: - Chat launch
+
+/// `fullScreenCover(item:)` needs an Identifiable, and a bare workflow id string is not one.
+private struct OpenWorkflow: Identifiable, Equatable {
+    let id: String
+}
 
 private struct ChatLaunch: Identifiable, Equatable {
     let id = UUID()

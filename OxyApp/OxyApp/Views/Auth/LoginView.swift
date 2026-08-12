@@ -88,42 +88,46 @@ struct LoginView: View {
         isLoading = true
         errorMessage = nil
 
-        #if DEBUG
-        // Local-only bypass so the UI can be driven in the Simulator without a
-        // backend that has demo auth enabled. Sets state directly (Simulator
-        // keychain saves are unreliable). Never compiled into Release.
-        HapticManager.shared.success()
-        appState.userId = "demo@oxy.app"
-        appState.token = "debug-local"
-        appState.isDemoSession = true
-        appState.isAuthenticated = true
-        isLoading = false
-        return
-        #endif
-
         Task {
             do {
                 let response = try await authService.demoLogin()
                 if let token = response.token, let returnedUserId = response.userId {
                     await MainActor.run {
                         HapticManager.shared.success()
-                        appState.login(userId: returnedUserId, token: token, isDemo: true)
+                        // A server-issued session is a real one. Flagging it demo made Home
+                        // substitute mock briefings and jump straight to chat, hiding the
+                        // account's actual data behind placeholder content.
+                        appState.login(userId: returnedUserId, token: token, isDemo: false)
                     }
-                } else {
-                    await MainActor.run {
-                        HapticManager.shared.warning()
-                        withAnimation { errorMessage = response.error ?? "Demo login is not available on this backend." }
-                        isLoading = false
-                    }
+                    return
                 }
+                await MainActor.run { failDemoLogin(response.error ?? "Demo login is not available on this backend.") }
             } catch {
-                await MainActor.run {
-                    HapticManager.shared.warning()
-                    withAnimation { errorMessage = error.localizedDescription }
-                    isLoading = false
-                }
+                await MainActor.run { failDemoLogin(error.localizedDescription) }
             }
         }
+    }
+
+    /// The backend is asked first, and the offline bypass is only a fallback.
+    ///
+    /// This used to be the other way around: DEBUG builds returned a fake `debug-local`
+    /// token before ever calling the server, which meant that pointing the Simulator at a
+    /// backend with demo auth genuinely enabled still produced a session that 401'd on
+    /// every request and silently fell back to mock content. The bypass keeps its original
+    /// purpose — driving the UI with no backend at all — without lying when one exists.
+    private func failDemoLogin(_ message: String) {
+        #if DEBUG
+        HapticManager.shared.success()
+        appState.userId = "demo@oxy.app"
+        appState.token = "debug-local"
+        appState.isDemoSession = true
+        appState.isAuthenticated = true
+        isLoading = false
+        #else
+        HapticManager.shared.warning()
+        withAnimation { errorMessage = message }
+        isLoading = false
+        #endif
     }
 }
 

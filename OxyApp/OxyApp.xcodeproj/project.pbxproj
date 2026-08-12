@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F08 /* WorkflowTimelineView.swift */; };
+		A10000010000000000000F07 /* HomeBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F07 /* HomeBoardView.swift */; };
+		A10000010000000000000F06 /* HomeBoardService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F06 /* HomeBoardService.swift */; };
+		A10000010000000000000F05 /* HomeBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000F05 /* HomeBoard.swift */; };
 		A1000001000000000000F010 /* MessageUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A2000001000000000000F010 /* MessageUI.framework */; };
 		A10000010000000000000001 /* OxyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000001 /* OxyApp.swift */; };
 		A10000010000000000000002 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000010000000000000002 /* AppState.swift */; };
@@ -84,6 +88,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		A20000010000000000000F08 /* WorkflowTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowTimelineView.swift; sourceTree = "<group>"; };
+		A20000010000000000000F07 /* HomeBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardView.swift; sourceTree = "<group>"; };
+		A20000010000000000000F06 /* HomeBoardService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoardService.swift; sourceTree = "<group>"; };
+		A20000010000000000000F05 /* HomeBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeBoard.swift; sourceTree = "<group>"; };
 		A2000001000000000000F010 /* MessageUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MessageUI.framework; path = System/Library/Frameworks/MessageUI.framework; sourceTree = SDKROOT; };
 		A20000010000000000000001 /* OxyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OxyApp.swift; sourceTree = "<group>"; };
 		A20000010000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -201,6 +209,7 @@
 		A50000010000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				A20000010000000000000F05 /* HomeBoard.swift */,
 				A20000010000000000000002 /* AppState.swift */,
 				A20000010000000000000003 /* Message.swift */,
 				A20000010000000000000101 /* AgentTaskSession.swift */,
@@ -221,6 +230,7 @@
 		A50000010000000000000004 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				A20000010000000000000F06 /* HomeBoardService.swift */,
 				A20000010000000000000004 /* KeychainHelper.swift */,
 				A20000010000000000000005 /* APIClient.swift */,
 				A20000010000000000000006 /* AuthService.swift */,
@@ -399,6 +409,8 @@
 		A50000010000000000000100 /* Home */ = {
 			isa = PBXGroup;
 			children = (
+				A20000010000000000000F08 /* WorkflowTimelineView.swift */,
+				A20000010000000000000F07 /* HomeBoardView.swift */,
 				A20000010000000000000100 /* AgenticHomeView.swift */,
 				A20000010000000000000104 /* GlebAgenticFlow.swift */,
 				A20000010000000000000102 /* AgentTaskSessionView.swift */,
@@ -496,6 +508,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000010000000000000F08 /* WorkflowTimelineView.swift in Sources */,
+				A10000010000000000000F07 /* HomeBoardView.swift in Sources */,
+				A10000010000000000000F06 /* HomeBoardService.swift in Sources */,
+				A10000010000000000000F05 /* HomeBoard.swift in Sources */,
 				A10000010000000000000001 /* OxyApp.swift in Sources */,
 				A10000010000000000000002 /* AppState.swift in Sources */,
 				A10000010000000000000003 /* Message.swift in Sources */,

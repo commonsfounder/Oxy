@@ -25,6 +25,11 @@
 		<string>calshow</string>
 		<string>x-apple-health</string>
 	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>Milgrain uses Apple Music to play songs and add music to your library or playlists when you ask.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
@@ -51,16 +56,16 @@
 	<string>Milgrain lets you attach photos and images for multimodal chat when you choose them.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Milgrain uses reminders to help create native Apple Reminders when you ask.</string>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>bluetooth-central</string>
-	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fraunces.ttf</string>
 		<string>Inter.ttf</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
 	</array>
 </dict>
 </plist>

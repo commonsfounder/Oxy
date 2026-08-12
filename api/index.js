@@ -11990,6 +11990,100 @@ app.get('/tasks/:id/steps', requireSessionAuth, async (req, res) => {
   }
 });
 
+// --- The home board -------------------------------------------------------------------
+//
+// Four lanes in one call: what needs you, what Millie is handling, what changed while you
+// were away, what finished. api/services/home-state.js owns the assembly; these routes only
+// authenticate and hand back what it built.
+
+app.get('/agent/state', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const homeState = require('./services/home-state');
+    res.json(await homeState.getHomeState(supabase, userId));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Marking the board seen is its own call, never a side effect of reading it: a background
+// poll that advanced the watermark would empty the Changed lane before the user ever looked.
+app.post('/agent/state/seen', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const homeState = require('./services/home-state');
+    res.json({ lastSeenAt: await homeState.markSeen(supabase, userId) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// One responsibility in full: its timeline, whatever it is waiting on, and what it has
+// gathered. This is the screen where long-running work is actually watched.
+app.get('/workflows/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const wf = require('./services/workflows');
+    res.json(await wf.getWorkflowContext(supabase, userId, req.params.id));
+  } catch (e) {
+    // getWorkflow throws for both "no such row" and "not yours" — deliberately the same
+    // answer, so this never confirms the existence of another user's work.
+    const missing = /not found/i.test(e.message);
+    res.status(missing ? 404 : 500).json({ error: e.message });
+  }
+});
+
+app.get('/workflows', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const wf = require('./services/workflows');
+    res.json({ workflows: await wf.listActiveWorkflows(supabase, userId) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Answering the question that stopped the work, from the phone, without opening chat.
+app.post('/workflows/:id/checkpoints/:checkpointId/resolve', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { approved, choice = null, note = null } = req.body || {};
+    if (typeof approved !== 'boolean') {
+      return res.status(400).json({ error: 'approved must be true or false' });
+    }
+    const wf = require('./services/workflows');
+    const checkpoint = await wf.resolveCheckpoint(supabase, userId, req.params.checkpointId, {
+      approved, choice, note
+    });
+    res.json({ checkpoint, workflow: await wf.getWorkflow(supabase, userId, req.params.id) });
+  } catch (e) {
+    const missing = /not found/i.test(e.message);
+    res.status(missing ? 404 : 500).json({ error: e.message });
+  }
+});
+
+// Files Millie has read or made. Until now nothing in the app could show that a document
+// existed at all, let alone open one.
+app.get('/documents', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const docs = require('./services/documents');
+    const found = await docs.findDocuments(supabase, userId, {
+      workflowId: req.query.workflowId || null,
+      limit: Math.min(Number(req.query.limit) || 25, 100)
+    });
+    res.json({ documents: found });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Routines — a user-saved name + prompt they can re-run later (api/services/routines.js).
 // A recurring routine re-runs the full agentic loop (real model + tool calls) on every
 // firing with no per-user spend cap yet (tracked separately), so the one guard that belongs
