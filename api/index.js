@@ -129,7 +129,8 @@ const {
   formatActionFailure,
   formatProviderFailure
 } = require('./services/user-facing-copy');
-const { resolveEntityReference, REFERENTIAL_SUBSTITUTION_PATTERN } = require('./services/entity-recall');
+const { resolveEntityReference, extractReferentialPhrase, hasBareEntityReference, REFERENTIAL_SUBSTITUTION_PATTERN } = require('./services/entity-recall');
+const { logEntityReference } = require('./services/session-events');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
 const {
@@ -9960,6 +9961,20 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       settings,
       appointmentProviderConnected: Boolean(getAppointmentBookingService())
     });
+    // Instrumentation for the entity-recall bare-pronoun path: how often it's attempted, how
+    // often it resolves, and whether a resolved reference was clear enough to route directly
+    // vs falling through to the model (a proxy for "still needed clarification", not a
+    // guarantee — the model path can also succeed without asking anything). Only fires when a
+    // referential phrase was actually detected this turn, so this doesn't log every message.
+    const entityReferenceKind = extractReferentialPhrase(message) ? 'named' : (hasBareEntityReference(message) ? 'bare' : null);
+    if (entityReferenceKind) {
+      logEntityReference({
+        userId,
+        kind: entityReferenceKind,
+        resolved: Boolean(resolvedEntity),
+        routedDirectly: Boolean(resolvedEntity) && Boolean(deterministicAction)
+      }).catch(() => {});
+    }
     devTiming('chat', 'intent_classification.end', {
       route: deterministicAction ? 'deterministic_action' : 'model',
       reason: deterministicAction?.reason || null,

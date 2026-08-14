@@ -53,6 +53,49 @@ function logSessionOutcome({ userId, site, outcome, steps = null, durationMs = n
   return logEvent({ userId, site, eventType, detail: { steps, durationMs } });
 }
 
+// Entity-recall isn't a browser session, but this table's (event_type, detail jsonb) shape
+// already fits it and this is best-effort telemetry same as everything else here — no reason
+// for a second table. 'chat' marks these as coming from the chat-routing layer, not a
+// specific retailer site. routedDirectly is a proxy, not a guarantee: it says the reference
+// was resolved AND the turn matched a deterministic action (no model reasoning/clarification
+// needed) — not that the action itself later succeeded.
+function logEntityReference({ userId, kind, resolved, routedDirectly }) {
+  return logEvent({ userId, site: 'chat', eventType: 'entity_reference', detail: { kind, resolved, routedDirectly } });
+}
+
+// Pure so it's unit-testable without a live Supabase client (this module's DB-backed
+// reporting functions use their own lazy singleton, same as getRecipeHitRate below, so a
+// fake client can't be injected — this is the part worth pinning with a real test).
+function aggregateEntityReferenceStats(rows = []) {
+  const total = rows.length;
+  const bare = rows.filter((r) => r.detail?.kind === 'bare').length;
+  const resolved = rows.filter((r) => r.detail?.resolved).length;
+  const routedDirectly = rows.filter((r) => r.detail?.resolved && r.detail?.routedDirectly).length;
+  return {
+    total,
+    bare,
+    named: total - bare,
+    resolved,
+    resolvedRate: total ? resolved / total : 0,
+    routedDirectly,
+    routedDirectlyRateOfResolved: resolved ? routedDirectly / resolved : 0
+  };
+}
+
+// how often bare references occur (kind: 'bare' vs 'named'), how often they resolve, and how
+// often a resolved reference was clear enough to route directly vs falling through to the
+// model — the three questions this instrumentation exists to answer.
+async function getEntityReferenceStats({ sinceHours = 24 * 7 } = {}) {
+  const since = new Date(Date.now() - sinceHours * 3600 * 1000).toISOString();
+  const { data, error } = await getSupabase()
+    .from('browser_session_events')
+    .select('detail')
+    .eq('event_type', 'entity_reference')
+    .gte('created_at', since);
+  if (error || !data) return null;
+  return aggregateEntityReferenceStats(data);
+}
+
 // Reporting: hit rate per (site, step) over a lookback window, worst-first so the
 // steps most in need of attention float to the top.
 async function getRecipeHitRate({ site = null, sinceHours = 24 } = {}) {
@@ -97,6 +140,9 @@ module.exports = {
   logRecipeHit,
   logVisionStep,
   logSessionOutcome,
+  logEntityReference,
   getRecipeHitRate,
   getSessionOutcomes,
+  getEntityReferenceStats,
+  aggregateEntityReferenceStats,
 };
