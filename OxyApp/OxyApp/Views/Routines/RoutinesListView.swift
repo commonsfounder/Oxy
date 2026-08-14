@@ -12,6 +12,7 @@ struct RoutinesListView: View {
     @State private var composerExpanded = false
     @State private var draftName = ""
     @State private var draftPrompt = ""
+    @State private var draftRepeat: RepeatOption = .off
     @State private var saveMessage: String?
     @State private var pendingDeleteRoutine: Routine?
 
@@ -124,6 +125,13 @@ struct RoutinesListView: View {
             AppLineField(placeholder: "Name", text: $draftName)
             AppLineField(placeholder: "Prompt", text: $draftPrompt, axis: .vertical, lineLimit: 2...5)
 
+            Picker("Repeat", selection: $draftRepeat) {
+                ForEach(RepeatOption.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+
             HStack {
                 if let saveMessage {
                     Text(saveMessage)
@@ -136,6 +144,7 @@ struct RoutinesListView: View {
                     withAnimation(.appStandard) { composerExpanded = false }
                     draftName = ""
                     draftPrompt = ""
+                    draftRepeat = .off
                 } label: {
                     Text("Cancel")
                         .font(.appBody(12, weight: .semibold))
@@ -186,11 +195,12 @@ struct RoutinesListView: View {
         guard !name.isEmpty, !prompt.isEmpty, !isSaving else { return }
         await MainActor.run { isSaving = true; saveMessage = nil }
         do {
-            _ = try await RoutinesService.createRoutine(name: name, prompt: prompt)
+            _ = try await RoutinesService.createRoutine(name: name, prompt: prompt, intervalMinutes: draftRepeat.minutes)
             await MainActor.run {
                 HapticManager.shared.success()
                 draftName = ""
                 draftPrompt = ""
+                draftRepeat = .off
                 isSaving = false
                 withAnimation(.appStandard) { composerExpanded = false }
             }
@@ -214,8 +224,39 @@ struct RoutinesListView: View {
     }
 }
 
+/// Server floor is 60 (see ROUTINE_MIN_INTERVAL_MINUTES in api/index.js) — options here stay
+/// at or above it so every choice the picker offers is always accepted.
+private enum RepeatOption: CaseIterable, Identifiable {
+    case off, daily, weekly
+
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .off: return "Once"
+        case .daily: return "Daily"
+        case .weekly: return "Weekly"
+        }
+    }
+
+    var minutes: Int? {
+        switch self {
+        case .off: return nil
+        case .daily: return 24 * 60
+        case .weekly: return 7 * 24 * 60
+        }
+    }
+}
+
 private struct RoutineRow: View {
     let routine: Routine
+
+    private var cadenceLabel: String? {
+        guard let minutes = routine.intervalMinutes else { return nil }
+        if minutes % (7 * 24 * 60) == 0 { return "Weekly" }
+        if minutes % (24 * 60) == 0 { return "Daily" }
+        return "Every \(minutes)m"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -228,6 +269,14 @@ private struct RoutineRow: View {
                 // original is still live wherever it came from.
                 if !routine.isEnabled {
                     Text(routine.isImported ? "Off · imported" : "Off")
+                        .font(.appBody(10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.mgSecondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.mgSecondary.opacity(0.12), in: Capsule())
+                } else if let cadenceLabel {
+                    Text(cadenceLabel)
                         .font(.appBody(10, weight: .semibold))
                         .tracking(0.5)
                         .foregroundStyle(Color.mgSecondary)

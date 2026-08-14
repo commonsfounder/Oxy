@@ -23,6 +23,10 @@ async function listDueRoutines(supabase, now) {
       .from('routines')
       .select('*')
       .not('interval_minutes', 'is', null)
+      // An imported automation arrives with enabled=false so it can't double-fire against
+      // its still-live source (see supabase-migration-agent-continuity.sql) — the DB index
+      // already assumes this filter; enforce it here too.
+      .eq('enabled', true)
       .lte('next_run_at', now.toISOString());
     if (error || !data) return [];
     return data;

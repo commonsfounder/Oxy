@@ -2,11 +2,13 @@ import Foundation
 
 /// CRUD for user-saved routines (`/routines`, see api/services/routines.js).
 enum RoutinesService {
-    static func createRoutine(name: String, prompt: String) async throws -> Routine {
+    static func createRoutine(name: String, prompt: String, intervalMinutes: Int? = nil) async throws -> Routine {
+        var body: [String: Any] = ["name": name, "prompt": prompt]
+        if let intervalMinutes { body["interval_minutes"] = intervalMinutes }
         let data = try await APIClient.shared.request(
             path: "/routines",
             method: "POST",
-            body: ["name": name, "prompt": prompt]
+            body: body
         )
         return try JSONDecoder().decode(Routine.self, from: data)
     }

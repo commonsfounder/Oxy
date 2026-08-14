@@ -192,10 +192,15 @@ function fakeDueRoutinesSupabase(rows = []) {
           return {
             not() {
               return {
-                lte: async (col, val) => ({
-                  data: rows.filter((r) => r[col] <= val),
-                  error: null
-                })
+                eq(col, val) {
+                  const filtered = rows.filter((r) => r[col] === val);
+                  return {
+                    lte: async (lteCol, lteVal) => ({
+                      data: filtered.filter((r) => r[lteCol] <= lteVal),
+                      error: null
+                    })
+                  };
+                }
               };
             }
           };
@@ -207,12 +212,21 @@ function fakeDueRoutinesSupabase(rows = []) {
 
 test('listDueRoutines returns only routines whose next_run_at has passed', async () => {
   const rows = [
-    { id: 'r1', user_id: 'u1', interval_minutes: 60, next_run_at: new Date(Date.now() - 1000).toISOString() },
-    { id: 'r2', user_id: 'u1', interval_minutes: 60, next_run_at: new Date(Date.now() + 100000).toISOString() }
+    { id: 'r1', user_id: 'u1', interval_minutes: 60, enabled: true, next_run_at: new Date(Date.now() - 1000).toISOString() },
+    { id: 'r2', user_id: 'u1', interval_minutes: 60, enabled: true, next_run_at: new Date(Date.now() + 100000).toISOString() }
   ];
   const supabase = fakeDueRoutinesSupabase(rows);
   const due = await listDueRoutines(supabase, new Date());
   assert.deepEqual(due.map((r) => r.id), ['r1']);
+});
+
+test('listDueRoutines excludes a disabled (imported, not yet turned on) routine even if due', async () => {
+  const rows = [
+    { id: 'r1', user_id: 'u1', interval_minutes: 60, enabled: false, next_run_at: new Date(Date.now() - 1000).toISOString() }
+  ];
+  const supabase = fakeDueRoutinesSupabase(rows);
+  const due = await listDueRoutines(supabase, new Date());
+  assert.deepEqual(due, []);
 });
 
 test('listDueRoutines never throws even when the supabase client blows up', async () => {

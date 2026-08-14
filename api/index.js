@@ -11966,13 +11966,27 @@ app.get('/tasks/:id/steps', requireSessionAuth, async (req, res) => {
 });
 
 // Routines — a user-saved name + prompt they can re-run later (api/services/routines.js).
+// A recurring routine re-runs the full agentic loop (real model + tool calls) on every
+// firing with no per-user spend cap yet (tracked separately), so the one guard that belongs
+// here is a floor on how often that can happen. Hourly matches the cadence the rest of the
+// product already treats as "recurring" (watches, digests) rather than "real-time".
+const ROUTINE_MIN_INTERVAL_MINUTES = 60;
+
 app.post('/routines', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const { name, prompt } = req.body || {};
+    const { name, prompt, interval_minutes: rawInterval } = req.body || {};
     if (!name || !prompt) return res.status(400).json({ error: 'name and prompt required' });
-    const routine = await createRoutine(supabase, { userId, name, prompt });
+    let intervalMinutes = null;
+    if (rawInterval !== undefined && rawInterval !== null && rawInterval !== '') {
+      const parsed = Number(rawInterval);
+      if (!Number.isInteger(parsed) || parsed < ROUTINE_MIN_INTERVAL_MINUTES) {
+        return res.status(400).json({ error: `interval_minutes must be a whole number of at least ${ROUTINE_MIN_INTERVAL_MINUTES}` });
+      }
+      intervalMinutes = parsed;
+    }
+    const routine = await createRoutine(supabase, { userId, name, prompt, intervalMinutes });
     if (routine.error) return res.status(500).json({ error: routine.error });
     res.status(201).json(routine);
   } catch (e) {
