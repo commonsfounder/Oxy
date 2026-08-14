@@ -25,6 +25,7 @@ const {
 } = require('./checkout-profile');
 const { getAgentCard } = require('./agent-card');
 const { getVaultCredential, saveVaultCredential, normalizeSite } = require('./vault-credentials');
+const { encryptTokens, decryptTokens } = require('./token-crypto');
 const { recordTaskStep } = require('./task-steps');
 const { recordTaskEntity } = require('./task-entities');
 const receipts = require('./receipts');
@@ -184,7 +185,12 @@ async function loadStorageState(userId, site) {
     .eq('user_id', userId)
     .eq('site', site)
     .maybeSingle();
-  return data?.storage_state || undefined;
+  if (!data?.storage_state) return undefined;
+  // Cookies/localStorage are bearer credentials — often stronger than a password, since a
+  // live session cookie skips login and 2FA entirely. decryptTokens transparently passes
+  // through any pre-existing plaintext row (isEncryptedTokenEnvelope check), so this reads
+  // both old and newly-encrypted rows with no migration needed.
+  return decryptTokens(data.storage_state);
 }
 
 function siteKeyFromUrl(url) {
@@ -2347,7 +2353,11 @@ async function persistStorage(userId, session) {
     await getSupabase().from('browser_sessions').upsert({
       user_id: userId,
       site: session.site,
-      storage_state: await session.context.storageState(),
+      // Same AES-256-GCM envelope already used for connector tokens and vault_credentials
+      // (token-crypto.js) — these are just as sensitive and were the one place still storing
+      // plaintext. Fails closed in production if OXY_TOKEN_ENCRYPTION_KEY is unset, same as
+      // the rest of the app's credential storage.
+      storage_state: encryptTokens(await session.context.storageState()),
       last_url: session.page.url(),
       goal: session.goal,
       history: session.history,
