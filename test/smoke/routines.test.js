@@ -274,6 +274,36 @@ test('markRoutineRun advances next_run_at by interval_minutes', async () => {
   assert.equal(new Date(updated.next_run_at).getTime(), now.getTime() + 60 * 60000);
 });
 
+test('markRoutineRun defaults to a successful run and clears failure state', async () => {
+  const rows = [{ id: 'r1', interval_minutes: 60, next_run_at: new Date().toISOString(), consecutive_failures: 3 }];
+  const supabase = fakeMarkRunSupabase(rows);
+  await markRoutineRun(supabase, 'r1', new Date());
+  const updated = rows.find((r) => r.id === 'r1');
+  assert.equal(updated.last_run_status, 'success');
+  assert.equal(updated.last_run_error, null);
+  assert.equal(updated.consecutive_failures, 0);
+});
+
+test('markRoutineRun still advances next_run_at on a failed run (no retry storm) and records why', async () => {
+  const rows = [{ id: 'r1', interval_minutes: 60, next_run_at: new Date().toISOString(), consecutive_failures: 0 }];
+  const supabase = fakeMarkRunSupabase(rows);
+  const now = new Date();
+  await markRoutineRun(supabase, 'r1', now, { success: false, error: 'Gmail token expired' });
+  const updated = rows.find((r) => r.id === 'r1');
+  assert.equal(new Date(updated.next_run_at).getTime(), now.getTime() + 60 * 60000);
+  assert.equal(updated.last_run_status, 'failed');
+  assert.equal(updated.last_run_error, 'Gmail token expired');
+  assert.equal(updated.consecutive_failures, 1);
+});
+
+test('markRoutineRun accumulates consecutive_failures across repeated failures', async () => {
+  const rows = [{ id: 'r1', interval_minutes: 60, next_run_at: new Date().toISOString(), consecutive_failures: 2 }];
+  const supabase = fakeMarkRunSupabase(rows);
+  await markRoutineRun(supabase, 'r1', new Date(), { success: false, error: 'still broken' });
+  const updated = rows.find((r) => r.id === 'r1');
+  assert.equal(updated.consecutive_failures, 3);
+});
+
 test('markRoutineRun never throws even when the supabase client blows up', async () => {
   const brokenSupabase = { from() { throw new Error('boom'); } };
   const result = await markRoutineRun(brokenSupabase, 'r1', new Date());

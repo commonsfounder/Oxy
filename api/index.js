@@ -8983,8 +8983,12 @@ async function runProactiveSweep(logger = console) {
   // uses for background agent runs), not a second dispatch mechanism.
   const dueRoutines = await listDueRoutines(supabase, new Date());
   for (const routine of dueRoutines) {
+    // runAgenticLoop resolves normally even when it stopped without finishing (its own
+    // agentTrace.status is 'error'/'awaiting_approval') — only a genuine throw is an
+    // exception here. Both cases must record a failed run; only 'completed' counts as one.
+    let outcome = { success: true };
     try {
-      await runAgenticLoop({
+      const result = await runAgenticLoop({
         userId: routine.user_id,
         initialMessage: routine.prompt,
         dynamicSystemPrompt: await buildBackgroundSystemPrompt(routine.user_id),
@@ -8993,10 +8997,16 @@ async function runProactiveSweep(logger = console) {
         executeActionsFn: executeActions,
         persistTask: false
       });
-      await markRoutineRun(supabase, routine.id, new Date());
+      const status = result?.agentTrace?.status;
+      outcome = status === 'completed'
+        ? { success: true }
+        : { success: false, error: result?.agentTrace?.lastError || result?.spoken || `Routine stopped (${status || 'unknown'}) before finishing.` };
     } catch (err) {
-      logger?.error?.('routine_run_failed', { routineId: routine.id, error: err.message });
+      outcome = { success: false, error: err.message };
     }
+    if (!outcome.success) logger?.error?.('routine_run_failed', { routineId: routine.id, error: outcome.error });
+    const marked = await markRoutineRun(supabase, routine.id, new Date(), outcome);
+    if (marked?.error) logger?.error?.('routine_run_record_failed', { routineId: routine.id, error: marked.error });
   }
 
   summary.durationMs = Date.now() - startedAt;

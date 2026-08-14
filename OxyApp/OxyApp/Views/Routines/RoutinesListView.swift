@@ -275,6 +275,14 @@ private struct RoutineRow: View {
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
                         .background(Color.mgSecondary.opacity(0.12), in: Capsule())
+                } else if routine.isFailing {
+                    Text("Failing")
+                        .font(.appBody(10, weight: .semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(Color.mgDestructive)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.mgDestructive.opacity(0.12), in: Capsule())
                 } else if let cadenceLabel {
                     Text(cadenceLabel)
                         .font(.appBody(10, weight: .semibold))
@@ -290,6 +298,13 @@ private struct RoutineRow: View {
                 .foregroundStyle(Color.mgSecondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            if routine.isFailing, let lastRunError = routine.lastRunError, !lastRunError.isEmpty {
+                Text(lastRunError)
+                    .font(.appBody(11))
+                    .foregroundStyle(Color.mgDestructive)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
         }
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
