@@ -44,6 +44,22 @@ async function findRecentEntity(supabase, userId, { keyword, sinceHours = 72 }) 
   return match || null;
 }
 
+// Same recency window as findRecentEntity, but with no keyword to match — used for a bare
+// pronoun back-reference ("add it to my basket") where the message has no noun to search for
+// at all, only "the thing we were just talking about".
+async function findMostRecentEntity(supabase, userId, { sinceHours = 72 } = {}) {
+  const { data, error } = await supabase
+    .from('task_entities')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error || !data || !data.length) return null;
+  const [mostRecent] = data;
+  const cutoff = Date.now() - sinceHours * 60 * 60 * 1000;
+  if (new Date(mostRecent.created_at).getTime() < cutoff) return null;
+  return mostRecent;
+}
+
 async function listRecentEntities(supabase, userId, limit = 10) {
   const { data, error } = await supabase
     .from('task_entities')
@@ -54,4 +70,4 @@ async function listRecentEntities(supabase, userId, limit = 10) {
   return { entities: data.slice(0, limit) };
 }
 
-module.exports = { recordTaskEntity, findRecentEntity, listRecentEntities };
+module.exports = { recordTaskEntity, findRecentEntity, findMostRecentEntity, listRecentEntities };

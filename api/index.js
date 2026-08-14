@@ -129,7 +129,7 @@ const {
   formatActionFailure,
   formatProviderFailure
 } = require('./services/user-facing-copy');
-const { resolveEntityReference } = require('./services/entity-recall');
+const { resolveEntityReference, REFERENTIAL_SUBSTITUTION_PATTERN } = require('./services/entity-recall');
 const { listRecentEntities } = require('./services/task-entities');
 const { getChatSettings, saveChatSettings } = require('./services/chat-settings');
 const {
@@ -9934,7 +9934,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
 
     const resolvedEntity = await resolveEntityReference(supabase, userId, message).catch(() => null);
     const routingMessage = resolvedEntity
-      ? message.replace(/\bthat \w+\b|\bthe \w+ i (?:opened|saw|looked at|checked)\b/i, `"${resolvedEntity.entityName}" (from ${resolvedEntity.site})`)
+      ? message.replace(REFERENTIAL_SUBSTITUTION_PATTERN, `"${resolvedEntity.entityName}" (from ${resolvedEntity.site})`)
       : message;
 
     const contextualTurn = await timedDev('chat', 'intent_classification.contextual', {}, () => inferContextualDeterministicTurn(userId, routingMessage, settings, trace, {
