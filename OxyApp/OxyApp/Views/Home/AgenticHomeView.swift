@@ -29,7 +29,6 @@ struct AgenticHomeView: View {
     @State private var backgroundSessions: [AgentTaskSession] = []
     @State private var isChatHomePresented = false
     @State private var isMorePresented = false
-    @State private var isConnectionsPresented = false
     @State private var chatDragOffset: CGFloat = 0
     @State private var chatDragActive = false
     @State private var localMissions: [HomeMission] = []
@@ -72,13 +71,6 @@ struct AgenticHomeView: View {
                             ErrorBanner(message: errorMessage, onRetry: {
                                 Task { await load(forceCheck: false) }
                             })
-                        }
-
-                        if !hasEmailConnection && !isLoading {
-                            EmailConnectionCard {
-                                HapticManager.shared.impact(.light)
-                                isConnectionsPresented = true
-                            }
                         }
 
                         if board.isWorking {
@@ -186,11 +178,6 @@ struct AgenticHomeView: View {
                 Task { await load(forceCheck: false) }
             }
         }
-        .onChange(of: isConnectionsPresented) { old, new in
-            if old && !new {
-                Task { await load(forceCheck: false) }
-            }
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await load(forceCheck: false) }
@@ -253,10 +240,6 @@ struct AgenticHomeView: View {
                     .padding(.top, 8)
                     .padding(.trailing, 12)
                 }
-        }
-        .fullScreenCover(isPresented: $isConnectionsPresented) {
-            ConnectorsView()
-                .swipeToDismiss()
         }
         .fullScreenCover(item: $chatLaunch) { launch in
             NavigationStack {
@@ -322,46 +305,6 @@ struct AgenticHomeView: View {
                 .swipeToDismiss()
                 .onDisappear { Task { await loadBoard() } }
         }
-}
-
-private struct EmailConnectionCard: View {
-    let onConnect: () -> Void
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image("google")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 32, height: 32)
-                .padding(10)
-                .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Gmail & Calendar")
-                    .font(.appBody(16, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink)
-                Text("Connect your account")
-                    .font(.appBody(13))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.55))
-            }
-
-            Spacer(minLength: 8)
-
-            Button("Connect", action: onConnect)
-                .font(.appBody(14, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(GlebChrome.ink, in: Capsule())
-                .buttonStyle(.appScale(0.96))
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.62), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 0.5)
-        )
-    }
 }
 
 // MARK: - Greeting
