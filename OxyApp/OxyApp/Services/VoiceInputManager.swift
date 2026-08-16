@@ -13,6 +13,8 @@ final class VoiceInputManager {
     private var tempURL: URL?
     private var currentUserId = ""
     private var transcribeTask: Task<Void, Never>?
+    private var recordingStartTask: Task<Void, Never>?
+    private var recordingStartToken: UUID?
 
     var micAuthStatus: AVAudioSession.RecordPermission {
         AVAudioSession.sharedInstance().recordPermission
@@ -27,14 +29,24 @@ final class VoiceInputManager {
     }
 
     func startRecording(userId: String) {
-        guard !isRecording, !isTranscribing else { return }
+        guard !isRecording, !isTranscribing, recordingStartToken == nil else { return }
         currentUserId = userId
         transcript = ""
         errorMessage = nil
-        Task { await beginRecording() }
+        let token = UUID()
+        recordingStartToken = token
+        recordingStartTask = Task { [weak self] in
+            await self?.beginRecording(startToken: token)
+        }
     }
 
-    private func beginRecording() async {
+    private func beginRecording(startToken: UUID) async {
+        defer {
+            if recordingStartToken == startToken {
+                recordingStartToken = nil
+                recordingStartTask = nil
+            }
+        }
         errorMessage = nil
         transcript = ""
 
@@ -42,6 +54,9 @@ final class VoiceInputManager {
             errorMessage = "Enable microphone access to use voice."
             return
         }
+        // A pendant release can arrive while iOS is prompting for or acquiring
+        // the microphone. Do not begin listening after that release.
+        guard !Task.isCancelled, recordingStartToken == startToken else { return }
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("oxy_voice_\(UUID().uuidString).wav")
@@ -80,6 +95,9 @@ final class VoiceInputManager {
     }
 
     func stopRecording() {
+        recordingStartToken = nil
+        recordingStartTask?.cancel()
+        recordingStartTask = nil
         guard isRecording, let rec = recorder, let url = tempURL else {
             cancel()
             return
@@ -133,6 +151,9 @@ final class VoiceInputManager {
     }
 
     func cancel() {
+        recordingStartToken = nil
+        recordingStartTask?.cancel()
+        recordingStartTask = nil
         transcribeTask?.cancel()
         transcribeTask = nil
         recorder?.stop()
