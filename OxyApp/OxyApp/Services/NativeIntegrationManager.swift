@@ -9,6 +9,7 @@ import MediaPlayer
 import MessageUI
 import AVFoundation
 import MusicKit
+import Observation
 import UIKit
 import UserNotifications
 
@@ -2927,6 +2928,7 @@ private extension HKWorkoutActivityType {
 
 // MARK: - PendantBLEManager
 
+@Observable
 final class PendantBLEManager: NSObject {
     static let didReceiveData = Notification.Name("PendantBLEManagerDidReceiveData")
     static let didConnect = Notification.Name("PendantBLEManagerDidConnect")
