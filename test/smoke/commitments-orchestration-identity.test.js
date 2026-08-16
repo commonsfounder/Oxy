@@ -22,7 +22,12 @@ test.afterEach(() => { registry.send_email = original; });
 
 test('a failed send never reaches commitment bookkeeping', async () => {
   registry.send_email = { async execute() { return { success: false, error: 'no address on file' }; } };
-  const result = await app.executeAction(USER_ID, 'send_email', { to: 'Mia', body: 'I will send the report tomorrow.' });
+  const result = await app.executeAction(
+    USER_ID,
+    'send_email',
+    { to: 'Mia', body: 'I will send the report tomorrow.' },
+    { enabledConnectors: ['google'] }
+  );
   assert.equal(result.success, false);
   assert.equal(result.commitmentCaptured, undefined, 'a promise that was never sent must not be recorded as made');
   assert.equal(result.commitmentsResolved, undefined);
@@ -34,7 +39,12 @@ test('a successful send with no promise in it captures nothing, and reports noth
       return { success: true, messageId: 'm1', threadId: 't1', to: params.to, subject: params.subject };
     }
   };
-  const result = await app.executeAction(USER_ID, 'send_email', { to: 'ben@example.com', subject: 'Lunch', body: 'See you at noon.' });
+  const result = await app.executeAction(
+    USER_ID,
+    'send_email',
+    { to: 'ben@example.com', subject: 'Lunch', body: 'See you at noon.' },
+    { enabledConnectors: ['google'] }
+  );
   assert.equal(result.success, true);
   assert.equal(result.commitmentCaptured, undefined);
 });

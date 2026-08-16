@@ -1,9 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Cross-cutting app preferences only. Identity and account actions live in
-/// Profile, memory in the Memory screen, and pendant pairing on the Pendant
-/// screen — Settings used to duplicate all three.
+/// App preferences.
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -20,11 +18,6 @@ struct SettingsView: View {
         case payments, savedLogins, continuity, trust
         var id: String { "\(self)" }
     }
-    // Light/dark/system — the single source of truth read by the app root's
-    // preferredColorScheme. Writing it re-themes the whole app live.
-
-    // The Gleb pastel wash sits behind the glass section plates below so they
-    // refract the living mesh instead of reading as flat cards on a flat canvas.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
 
@@ -38,18 +31,18 @@ struct SettingsView: View {
                     ScrollView {
                     appGlassContainer(spacing: 24) {
                     VStack(spacing: 28) {
-                        settingsSection(title: "Assistant") {
+                        settingsSection(title: "Millie") {
                             FreedomSlider(selection: $settings.autonomy, onChange: saveSettings)
 
                             MilgrainDivider()
 
-                            settingRow(label: "Briefings", description: "Check-ins through the day.") {
+                            settingRow(label: "Briefings", description: "Daily check-ins") {
                                 MilgrainToggle(isOn: $settings.proactiveBriefings)
                                     .onChange(of: settings.proactiveBriefings) { _, _ in saveSettings() }
                             }
                         }
 
-                        settingsSection(title: "Action Defaults") {
+                        settingsSection(title: "Preferences") {
                             dropdownRow(
                                 label: "Maps",
                                 options: [
@@ -73,7 +66,7 @@ struct SettingsView: View {
 
                             MilgrainDivider()
 
-                            settingRow(label: "Ask before private apps", description: "Banking, health, and similar.") {
+                            settingRow(label: "Ask before opening private apps", description: "Banking, health, and similar") {
                                 MilgrainToggle(isOn: $settings.confirmSensitiveAppOpens)
                                     .onChange(of: settings.confirmSensitiveAppOpens) { _, _ in saveSettings() }
                             }
@@ -111,9 +104,9 @@ struct SettingsView: View {
                             .padding(.vertical, 14)
                         }
 
-                        settingsSection(title: "Chat") {
+                        settingsSection(title: "Conversation") {
                             dropdownRow(
-                                label: "Effort",
+                                label: "Response detail",
                                 options: [
                                     ("low", "Low"),
                                     ("medium", "Medium"),
@@ -124,7 +117,7 @@ struct SettingsView: View {
 
                             MilgrainDivider()
 
-                            settingRow(label: "Guard mode", description: "Confirm every action before it runs.") {
+                            settingRow(label: "Ask before actions", description: nil) {
                                 MilgrainToggle(isOn: $settings.guardMode)
                                     .onChange(of: settings.guardMode) { _, _ in saveSettings() }
                             }
@@ -133,9 +126,9 @@ struct SettingsView: View {
                         settingsSection(title: "More") {
                             navRow(label: "Payments") { moreDestination = .payments }
                             MilgrainDivider()
-                            navRow(label: "Saved Logins") { moreDestination = .savedLogins }
+                            navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
                             MilgrainDivider()
-                            navRow(label: "Continuity") { moreDestination = .continuity }
+                            navRow(label: "Import history") { moreDestination = .continuity }
                             MilgrainDivider()
                             navRow(label: "Trust") { moreDestination = .trust }
                         }
@@ -194,16 +187,12 @@ struct SettingsView: View {
             .onAppear {
                 loadSettings()
             }
-            // Edge-swipe-to-dismiss is provided once by `.swipeToDismiss()` on the
-            // presenting fullScreenCover (MoreView) — no per-screen copy needed.
         }
     }
 
     // MARK: - Helpers
 
     private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        // Section title on the wash, rows on a glass plate that refracts it — the
-        // same floating-glass language as Home's mission plates and More's menu.
         VStack(alignment: .leading, spacing: 10) {
             AppSectionTitle(title, size: 20)
             VStack(spacing: 0) { content() }
@@ -331,10 +320,6 @@ struct SettingsView: View {
         normalizeSettings()
         UserDefaults.standard.set(settings.accentColor, forKey: "oxy_accentColor")
         homeAddressDraft = settings.homeAddress
-        // Chat effort/guard mode are also persisted server-side (chat_settings table) so
-        // they survive a reinstall/new device, not just a relaunch — UserDefaults above
-        // already covers relaunch. Refresh from the server on appear; local stays
-        // authoritative until this resolves.
         Task { await refreshChatSettingsFromServer() }
     }
 
@@ -367,7 +352,6 @@ struct SettingsView: View {
                 UserDefaults.standard.set(encoded, forKey: "oxy_settings")
             }
         } catch {
-            // Ambient sync — local UserDefaults values already loaded above stay in effect.
         }
     }
 
@@ -426,7 +410,7 @@ private struct BackendURLEditorSheet: View {
                     .textInputAutocapitalization(.never)
                     .keyboardType(.URL)
 
-                    Text("Leave blank to use the default Cloud Run backend.")
+                    Text("Leave blank for the default backend.")
                         .font(.appBody(12))
                         .foregroundStyle(Color.mgSecondary)
 
@@ -485,7 +469,7 @@ private extension View {
 
 // MARK: - Proactivity (autonomy slider)
 
-/// Discrete 5-step slider. Stored values stay Reactive…Autonomous for the API.
+/// Five saved initiative levels.
 private struct FreedomSlider: View {
     @Binding var selection: String
     let onChange: () -> Void
@@ -513,7 +497,7 @@ private struct FreedomSlider: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Proactivity")
+                Text("Initiative")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(Color.mgHeading)
                 Text(simpleLabel)
@@ -525,7 +509,7 @@ private struct FreedomSlider: View {
             // Plain system slider — no glass shell around the track.
             Slider(value: index, in: 0...Double(levels.count - 1), step: 1)
                 .tint(Color.appAccent)
-                .accessibilityLabel("Proactivity")
+                .accessibilityLabel("Initiative")
                 .accessibilityValue(simpleLabel)
         }
         .padding(.vertical, 16)
@@ -533,11 +517,11 @@ private struct FreedomSlider: View {
 
     private var simpleLabel: String {
         switch OxySettings.normalizedAutonomy(selection) {
-        case "Reactive": return "Only acts when you ask."
-        case "Reserved": return "Light nudges, mostly quiet."
-        case "Proactive": return "Looks for useful openings."
-        case "Autonomous": return "Acts for you, then tells you."
-        default: return "Helpful without being noisy."
+        case "Reactive": return "Waits for you to ask"
+        case "Reserved": return "Occasional suggestions"
+        case "Proactive": return "Looks for useful things"
+        case "Autonomous": return "Takes care of routine tasks"
+        default: return "Helpful, not noisy"
         }
     }
 }

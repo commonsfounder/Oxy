@@ -9,9 +9,7 @@ struct ChatView: View {
     var initialSession: ChatSessionSummary? = nil
     var autoSendTranscript: String? = nil
     var initialReviewAction: ActionResult? = nil
-    /// Start a brand-new empty chat instead of resuming the current one.
     var startFresh: Bool = false
-    /// When set, the top-left toolbar shows a sidebar/menu button instead of a back chevron.
     var onMenu: (() -> Void)? = nil
 
     @Environment(AppState.self) private var appState
@@ -38,13 +36,10 @@ struct ChatView: View {
     @State private var didSendAutoDemoMessage = false
     @State private var scrollViewportHeight: CGFloat = 0
     @State private var isScrollPinnedToBottom = true
-    // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
     private let networkMonitor = NWPathMonitor()
 
-    /// True the instant the last message is a finished assistant reply — the trigger for the
-    /// soft "reply landed" tick. Reads only `.last`, so it stays O(1) per render.
     private var assistantReplySettled: Bool {
         guard let last = viewModel.messages.last else { return false }
         return last.role == .assistant && !last.isStreaming && !last.content.isEmpty
@@ -53,8 +48,6 @@ struct ChatView: View {
     var body: some View {
         NavigationStack {
         ZStack {
-            // The Gleb pastel wash, same living mesh as Home, so message bubbles and the
-            // material composer read as glass floating over it rather than on flat white.
             GlebChrome.pastelBlob
                 .ignoresSafeArea()
 
@@ -210,13 +203,11 @@ struct ChatView: View {
                             }
                         }
                         .scrollDismissesKeyboard(.interactively)
-                        // The header uses glass controls, but the region itself must be
-                        // opaque. Otherwise history text ghosts under the menu button while
-                        // scrolling, which makes the first visible message unreadable.
                         .safeAreaInset(edge: .top, spacing: 0) {
                             AppHeaderView(
                                 isIncognito: $isIncognito,
                                 isEmptyChat: viewModel.messages.isEmpty,
+                                showsBackButton: onMenu == nil,
                                 onLeading: {
                                     HapticManager.shared.impact(.light)
                                     if let onMenu { onMenu() } else { dismiss() }
@@ -229,7 +220,6 @@ struct ChatView: View {
                             .onChange(of: isIncognito) { _, on in
                                 viewModel.incognito = on
                             }
-                            // No frosted band — the header's glass buttons float on the canvas.
                         }
                         .hidesTabBarOnScroll()
                         .onChange(of: viewModel.messages.count) {
@@ -257,9 +247,6 @@ struct ChatView: View {
                                 viewModel.scrollTargetMessageID = nil
                             }
                         }
-                        // Both helpers only inspect `.actions` on the last few messages.
-                        // Keying on the action count (instead of the whole messages array)
-                        // avoids an O(conversation) Equatable compare on every streamed token.
                         .onChange(of: viewModel.messages.suffix(3).reduce(0) { $0 + $1.actions.count }) {
                             presentPendingReviewIfNeeded()
                             presentMessageComposerIfNeeded()
@@ -310,8 +297,6 @@ struct ChatView: View {
                 attachmentSheetOverlay
             }
             .toolbar(.hidden, for: .navigationBar)
-            // A soft tick when Millie's reply settles; a warning buzz when a request fails.
-            // Lives in its own modifier so this (large) body still type-checks in time.
             .modifier(ChatHaptics(replySettled: assistantReplySettled, failed: viewModel.networkError != nil))
             .onChange(of: assistantReplySettled) { _, settled in
                 guard settled else { return }
@@ -403,14 +388,11 @@ struct ChatView: View {
             .onChange(of: voiceInput.errorMessage) {
                 voiceErrorMessage = voiceInput.errorMessage
             }
-            // Spoken input from the pendant or the "Ask Oxy" Siri intent — routed
-            // into this existing chat instead of opening a second screen.
             .onReceive(NotificationCenter.default.publisher(for: .oxyVoiceMessage)) { note in
                 guard let text = note.userInfo?["text"] as? String else { return }
                 SiriRequestBus.shared.pendingQuery = nil
                 injectVoiceMessage(text)
             }
-            // Draft handoff (e.g. from a Today card) — fill the composer, don't send.
             .onReceive(NotificationCenter.default.publisher(for: .oxyDraftMessage)) { note in
                 guard let text = note.userInfo?["text"] as? String else { return }
                 viewModel.inputText = text
@@ -435,8 +417,6 @@ struct ChatView: View {
             if let transcript = autoSendTranscript, !transcript.isEmpty {
                 injectVoiceMessage(transcript)
             }
-            // Cold-launch from the Siri intent: the notification may have fired
-            // before this view subscribed, so drain any pending query here.
             if let pending = SiriRequestBus.shared.take() {
                 injectVoiceMessage(pending)
             }
@@ -519,9 +499,7 @@ struct ChatView: View {
         withAnimation(.appFast) { showAttachMenu = false }
     }
 
-    /// Send a spoken transcript as a message into this conversation. De-dupes
-    /// against an in-flight send so an overlapping pendant + Siri trigger can't
-    /// fire the same text twice.
+    /// Send a spoken transcript once.
     private func injectVoiceMessage(_ rawText: String) {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -658,16 +636,13 @@ struct ChatView: View {
     }
 }
 
-/// The chat's two reward haptics, isolated from the main body so its type-checking
-/// cost doesn't compound the (already large) `ChatView` body expression.
+/// Chat haptics.
 private struct ChatHaptics: ViewModifier {
     let replySettled: Bool
     let failed: Bool
 
     func body(content: Content) -> some View {
         content
-            // Was .impact(flexibility: .soft, intensity: 0.7) — read as imperceptible on
-            // a real device. Medium weight at full intensity is a distinctly crisper tap.
             .sensoryFeedback(trigger: replySettled) { _, settled in
                 settled ? .impact(weight: .medium, intensity: 1.0) : nil
             }
@@ -972,14 +947,14 @@ struct ChatSessionsResponse: Codable {
 
 // MARK: - Welcome Card
 
-/// Full-screen welcome. Calm, personal, and ready for future dynamic suggestions.
+/// Empty chat.
 private struct WelcomeCard: View {
     var onAction: (String) -> Void
     @State private var appeared = false
-    @AppStorage("oxy_starter_actions") private var storedActions = "What needs attention today?\nSummarise my inbox\nCheck my calendar"
+    @AppStorage("oxy_starter_actions") private var storedActions = "What's on today?\nSummarise my inbox\nCheck my calendar"
 
     private static let pool: [(icon: String, label: String)] = [
-        ("sparkle.magnifyingglass", "What needs attention today?"),
+        ("sparkle.magnifyingglass", "What's on today?"),
         ("envelope", "Summarise my inbox"),
         ("calendar", "Check my calendar"),
         ("magnifyingglass", "Find something for me"),
@@ -992,7 +967,11 @@ private struct WelcomeCard: View {
 
     private var actions: [String] {
         let allowed = Set(Self.pool.map(\.label))
-        let parts = storedActions.split(separator: "\n").map(String.init).filter { allowed.contains($0) }
+        let parts = storedActions
+            .split(separator: "\n")
+            .map(String.init)
+            .map { $0 == "What needs attention today?" ? "What's on today?" : $0 }
+            .filter { allowed.contains($0) }
         return parts.isEmpty ? Array(Self.pool.prefix(3).map(\.label)) : parts
     }
 
@@ -1027,14 +1006,12 @@ private struct WelcomeCard: View {
             .padding(.horizontal, 24)
             .padding(.top, 58)
 
-            Spacer()
+            Color.clear.frame(height: 72)
 
             VStack(alignment: .leading, spacing: 12) {
                 Text("Suggestions")
-                    .font(.appBody(11, weight: .medium))
-                    .tracking(1.6)
-                    .textCase(.uppercase)
-                    .foregroundStyle(Color.appMuted)
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(Color.appInk.opacity(0.72))
                     .padding(.horizontal, 24)
 
                 ForEach(Array(actions.enumerated()), id: \.offset) { index, label in
@@ -1070,7 +1047,7 @@ private struct WelcomeCard: View {
             }
             .padding(.bottom, 18)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { withAnimation { appeared = true } }
     }
 
@@ -1123,7 +1100,6 @@ private struct ChatInputBar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Attachment strip
             if let attachmentLabel {
                 HStack(spacing: 10) {
                     if attachmentIsImage, let attachmentData, let uiImage = UIImage(data: attachmentData) {
@@ -1132,9 +1108,6 @@ private struct ChatInputBar: View {
                             .scaledToFill()
                             .frame(width: 38, height: 38)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                            // A hairline edge so the photo reads as a crisp object, not a
-                            // torn-out scrap. Color.primary is pure-ish black in light /
-                            // white in dark — never a tinted neutral that reads as dirt.
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
                                     .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
@@ -1158,7 +1131,6 @@ private struct ChatInputBar: View {
                     Button(action: onRemoveAttachment) {
                         AppIcon(sf: "xmark.circle.fill", size: 17)
                             .foregroundStyle(Color.appMuted)
-                            // Glyph stays 16pt; the tap target grows to the 40×40 minimum.
                             .frame(width: 40, height: 40)
                             .contentShape(Rectangle())
                     }
@@ -1174,7 +1146,6 @@ private struct ChatInputBar: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
-                // Attach
                 Button(action: onAttach) {
                     AppIcon(sf: "plus", size: 19)
                         .foregroundStyle(isVoiceActive ? Color.appMuted.opacity(0.45) : Color.appMuted)
@@ -1193,7 +1164,6 @@ private struct ChatInputBar: View {
                 }
                 .frame(minHeight: 38)
 
-                // Send / voice
                 Button(action: canSend ? onSend : onVoice) {
                     ZStack {
                         if isPreparingVoice && !canSend {
@@ -1204,9 +1174,6 @@ private struct ChatInputBar: View {
                             AppIcon(sf: canSend ? "arrow.up" : (isRecording ? "stop.fill" : "mic.fill"), size: 15)
                         }
                     }
-                    // A filled circle when there's something to act on (send or stop
-                    // recording); a quiet bordered outline for the idle mic — no
-                    // reliance on the (now no-op) glass effect for legibility.
                     .foregroundStyle(buttonForeground)
                     .frame(width: 34, height: 34)
                     .contentShape(Circle())
@@ -1226,13 +1193,12 @@ private struct ChatInputBar: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 8)
-            // No frosted band — the field pill floats on the canvas like ChatGPT's composer.
         }
         .onAppear { pulse = true }
     }
 
     private var textField: some View {
-        TextField(incognito ? "Private — not saved" : "Ask Milgrain", text: $text, axis: .vertical)
+        TextField(incognito ? "Private — not saved" : "Message", text: $text, axis: .vertical)
             .font(.system(size: 14.5, weight: .regular))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)

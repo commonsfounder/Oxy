@@ -47,7 +47,7 @@ struct PendantStatusView: View {
                             if pendant.isConnected {
                                 hardwareConfig
                             } else {
-                                Text("Connect your home device to configure it and see live status.")
+                                Text("Connect a device to see its status.")
                                     .font(.rowSecondary)
                                     .foregroundStyle(Color.appMuted)
                             }

@@ -1,10 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The account home — clean dark surfaces, accent highlights.
-/// 0.5px rules. Identity at the top (editable assistant name + read-only account
-/// id), then the account lifecycle actions (export, sign out, delete) that used
-/// to be scattered across Settings and the Pendant screen.
+/// Account details and data actions.
 struct ProfileView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
@@ -37,17 +34,18 @@ struct ProfileView: View {
                     ScreenHeaderView(title: "Account", onBack: { dismiss() })
                     ScrollView {
                         VStack(alignment: .leading, spacing: 36) {
-                            // Identity. The hardcoded "Status: Active" row was a fixture and is
-                            // gone; the account id stays (it's real account data) but is shown
-                            // monospace and middle-truncated so it reads as an identifier, not a stray label.
                             section(title: "Identity") {
                                 HStack {
                                     Text("Your Name")
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
-                                    TextField("Not set — tap to add", text: $settings.userName)
-                                        .font(.system(size: 15, weight: .light))
+                                    TextField(
+                                        "",
+                                        text: $settings.userName,
+                                        prompt: Text("Not set — tap to add").foregroundStyle(Color.appMuted)
+                                    )
+                                        .font(.appBody(15))
                                         .foregroundStyle(Color.mgHeading)
                                         .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
@@ -63,8 +61,12 @@ struct ProfileView: View {
                                         .font(.system(size: 15, weight: .regular))
                                         .foregroundStyle(Color.mgHeading)
                                     Spacer(minLength: 16)
-                                    TextField("Not set — tap to name", text: $settings.name)
-                                        .font(.system(size: 15, weight: .light))
+                                    TextField(
+                                        "",
+                                        text: $settings.name,
+                                        prompt: Text("Not set — tap to name").foregroundStyle(Color.appMuted)
+                                    )
+                                        .font(.appBody(15))
                                         .foregroundStyle(Color.mgHeading)
                                         .tint(Color.mgSecondary)
                                         .multilineTextAlignment(.trailing)
@@ -83,7 +85,6 @@ struct ProfileView: View {
                                 actionRow(label: "Memory", action: { profileDestination = .memory })
                             }
 
-                            // Benign data action, kept clear of the destructive group below.
                             section(title: "Your Data") {
                                 actionRow(
                                     label: isExportingData ? "Preparing Export…" : "Export My Data",
@@ -92,8 +93,6 @@ struct ProfileView: View {
                                 .disabled(isExportingData || isDeletingAccount)
                             }
 
-                            // Destructive account lifecycle — grouped on its own so a sign-out
-                            // or deletion is never one slip away from a routine tap.
                             section(title: "Sign Out & Deletion") {
                                 actionRow(
                                     label: "Sign Out",
@@ -169,8 +168,6 @@ struct ProfileView: View {
                 .swipeToDismiss()
                 .environment(\.colorScheme, colorScheme)
             }
-            // Edge-swipe-to-dismiss comes from `.swipeToDismiss()` on the presenting
-            // fullScreenCover (MoreView); no per-screen recognizer needed.
         }
     }
 

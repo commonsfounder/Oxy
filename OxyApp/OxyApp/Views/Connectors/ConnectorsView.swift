@@ -141,11 +141,11 @@ struct ConnectorsView: View {
             } label: {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(Color.appAccent)
+                        .fill(Color.appSuccess)
                         .frame(width: 6, height: 6)
                     Text("Connected")
                         .font(.rowSecondary)
-                        .foregroundStyle(Color.appMuted)
+                        .foregroundStyle(Color.appSuccess)
                 }
             }
             .disabled(!connector.implemented)

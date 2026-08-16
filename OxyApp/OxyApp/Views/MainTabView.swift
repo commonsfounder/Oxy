@@ -4,10 +4,7 @@ import UIKit
 struct MainTabView: View {
     @AppStorage("oxy_accentColor") private var accentColor = "stone"
 
-    /// Home is the sole root screen — no bottom tab bar. Chat and More are reached
-    /// from Home itself (composer / avatar tap / edge swipe), each as a full-screen
-    /// cover that swipes back out, mirroring iOS's own Camera↔Photos convention.
-    /// See AgenticHomeView for the presentation + gesture wiring.
+    /// Home is the root screen. Chat and account open from here.
     var body: some View {
         AgenticHomeView()
             .tint(Color.appAccent)
@@ -36,14 +33,7 @@ struct MoreView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                // The Gleb pastel wash, same living mesh as Home — glass menu plates
-                // float over it so More reads as one piece with the agentic surfaces
-                // instead of a flat settings list.
                 GlebChrome.pastelBlob.ignoresSafeArea()
-                // Identity + the six-row menu is short, fixed-height content — pinned to
-                // the top it left the bottom third of the screen as bare gradient. Center
-                // it in the available height instead (falls back to top-anchored, scrolling
-                // normally, if the content ever grows past one screen).
                 GeometryReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
@@ -59,9 +49,6 @@ struct MoreView: View {
                     }
                 }
                 .onAppear {
-                    // fullScreenCover creates a fresh instance each time it's presented,
-                    // so this fires — and the entrance stagger replays — every open, which
-                    // is the desired feel for a modal cover (unlike the old tab-switch case).
                     guard !appeared else { return }
                     withAnimation { appeared = true }
                 }
@@ -78,18 +65,14 @@ struct MoreView: View {
                     }
                 }
                 .swipeToDismiss()
-                // fullScreenCover starts a fresh environment, so carry the finish into it.
                 .environment(\.colorScheme, lightMode ? .light : .dark)
             }
         }
     }
 
-    // MARK: - Identity header (Milgrain clean)
+    // MARK: - Identity
 
     private var identityHeader: some View {
-        // Static display, not a nav trigger — "Account" is its own row in the menu
-        // below, so this doubling as an invisible button to the same screen was a
-        // redundant, undiscoverable tap target.
         VStack(alignment: .leading, spacing: 0) {
             BrandWordmark(height: 20, color: Color.appInk.opacity(0.85))
                 .padding(.bottom, 28)
@@ -118,7 +101,6 @@ struct MoreView: View {
                     .padding(.top, 10)
             }
 
-            // Hairline rule separating identity from navigation
             Rectangle()
                 .fill(Color.appHairline)
                 .frame(height: 0.5)
@@ -131,18 +113,21 @@ struct MoreView: View {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data),
            !saved.userName.trimmingCharacters(in: .whitespaces).isEmpty {
-            return saved.userName.trimmingCharacters(in: .whitespaces)
+            let name = saved.userName.trimmingCharacters(in: .whitespaces)
+            if !["user", "demo", "demo user", "test"].contains(name.lowercased()) {
+                return name
+            }
         }
-        // Derive a readable first name from the account id (email local-part)
         let local = appState.userId.split(separator: "@").first.map(String.init) ?? appState.userId
         let first = local.split(whereSeparator: { ".-_0123456789".contains($0) }).first.map(String.init) ?? ""
-        if first.count >= 2, first.count <= 20 {
+        if first.count >= 2, first.count <= 20,
+           !["user", "demo", "test"].contains(first.lowercased()) {
             return first.prefix(1).uppercased() + first.dropFirst().lowercased()
         }
         return "Your Account"
     }
 
-    /// Shows the email portion of the account id, or nothing if it doesn't look like one.
+    /// The email account id, when available.
     private var accountEmail: String {
         let id = appState.userId.trimmingCharacters(in: .whitespaces)
         return id.contains("@") ? id : ""
@@ -161,7 +146,6 @@ struct MoreView: View {
             AppRow(title: "Settings") { destination = .settings }
         }
         .padding(.horizontal, 16)
-        // Rows sit on a glass plate that refracts the wash behind it.
         .background { MissionGlassPlate() }
         .padding(.top, 24)
     }

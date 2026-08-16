@@ -5897,7 +5897,7 @@ async function confirmPayment(userId, onProgress = () => {}) {
     if (sawChallenge) {
       return { type: 'error', error: 'The bank is asking for verification (3-D Secure). Approve the payment in your banking app, then ask me to confirm again — the checkout is still open.' };
     }
-    return { type: 'error', error: `I pressed "${clickedLabel}" but couldn't see an order confirmation within ${Math.round(CONFIRM_WATCH_BUDGET_MS / 1000)}s. The checkout is still open — say "confirm" to try again, or check the site directly.` };
+    return { type: 'error', error: `Couldn't confirm the order after selecting "${clickedLabel}". Check the site or try again.` };
   } catch (error) {
     return { type: 'error', error: error.message };
   }

@@ -249,9 +249,7 @@ async function listActiveWorkflows(supabase, userId) {
   return (data || []).filter(w => ACTIVE_STATUSES.includes(w.status));
 }
 
-// What the home screen renders. Deliberately produces no jargon: the user is never shown the
-// word "workflow", a status enum, or an id — they see what Millie is handling and what, if
-// anything, she needs. AGENTS.md editing rule 6: terse and factual, or absent.
+// Home summary.
 async function summarizeForUser(supabase, userId) {
   const active = await listActiveWorkflows(supabase, userId);
   const items = [];

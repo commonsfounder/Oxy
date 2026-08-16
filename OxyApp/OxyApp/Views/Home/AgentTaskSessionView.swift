@@ -1,13 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Agent Task Session shell (real-data native job flows)
-//
-// Persistent chrome: close · task title · step k/n. Body swaps per-step generated
-// UI, driven by real results from the same backend pipeline chat uses. Bottom dock
-// always offers a way back into free chat. Black pill CTA advances the flow, or on
-// the payment/ride step, calls the real confirm_browser_payment action / opens the
-// real Uber deep link.
+// MARK: - Task session
 
 struct AgentTaskSessionView: View {
     @Bindable var session: AgentTaskSession
@@ -18,9 +12,7 @@ struct AgentTaskSessionView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var ink: Color {
-        colorScheme == .dark
-            ? Color(red: 0.95, green: 0.95, blue: 0.94)
-            : Color(red: 0.12, green: 0.12, blue: 0.14)
+        Color.appInk
     }
 
     var body: some View {
@@ -57,11 +49,6 @@ struct AgentTaskSessionView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
-        // session.start() is kicked off by AgenticHomeView at creation time, not here —
-        // this view's own lifecycle no longer gates the network work, so dismissing the
-        // sheet (swipe away) lets the job keep running in the background instead of
-        // auto-cancelling. Re-presenting an already-started session just resumes
-        // watching its (already-live) state.
     }
 
     // MARK: - Chrome
@@ -75,9 +62,10 @@ struct AgentTaskSessionView: View {
                 AppIcon("xmark", size: 14)
                     .foregroundStyle(ink.opacity(0.8))
                     .frame(width: 34, height: 34)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .background(Color.appSurface, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appScale)
 
             Text(session.title)
                 .font(.appBody(15, weight: .semibold))
@@ -92,7 +80,8 @@ struct AgentTaskSessionView: View {
                     .foregroundStyle(ink.opacity(0.5))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background(Color.appSurface, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
             }
         }
     }
@@ -132,9 +121,6 @@ struct AgentTaskSessionView: View {
         }
     }
 
-    /// The trace reads as "how I got to this card" — show it under the
-    /// product/payment/ride/link result steps it explains, not under the working
-    /// hero (nothing to explain yet) or the assistant-ask reply field.
     private func isStepThatShowsTrace(_ ui: StepUI) -> Bool {
         switch ui {
         case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
@@ -152,17 +138,17 @@ struct AgentTaskSessionView: View {
             } label: {
                 HStack(spacing: 8) {
                     AppIcon("chat", size: 15)
-                    Text("Tap to chat")
+                    Text("Chat")
                         .font(.appBody(14, weight: .medium))
                 }
                 .foregroundStyle(ink.opacity(0.75))
                 .padding(.horizontal, 16)
                 .padding(.vertical, 13)
                 .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.1 : 0.65), lineWidth: 0.6))
+                .background(Color.appSurface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appScale)
 
             if session.isComplete {
                 Button {
@@ -192,18 +178,14 @@ struct AgentTaskSessionView: View {
                 .opacity(step.canAdvance && !session.isWorking ? 1 : 0.4)
             }
         }
-        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.35 : 0.08), radius: 18, y: 8)
+        .shadow(color: Color.black.opacity(colorScheme == .dark ? 0.2 : 0.05), radius: 6, y: 2)
     }
 
-    /// The reply lives inside `AssistantAskStepView` itself — no dock CTA to advance.
     private func isAssistantAsk(_ ui: StepUI) -> Bool {
         if case .assistantAsk = ui { return true }
         return false
     }
 
-    // Same deep-link-then-web-link fallback ChatViewModel.openActionLink already
-    // uses for book_uber results — one open behavior for the same action result
-    // shape, whether it arrived via chat or this hidden pipeline.
     private func openRideLink(_ details: RideDetails) {
         if let link = details.deepLink, let url = URL(string: link) {
             UIApplication.shared.open(url)

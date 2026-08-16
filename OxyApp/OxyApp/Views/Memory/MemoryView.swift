@@ -107,7 +107,7 @@ struct MemoryView: View {
                                 MilgrainDivider()
                             }
                         } else if items.isEmpty {
-                            Text("Nothing remembered yet. Add something above, or just talk — it picks things up as you go.")
+                            Text("Nothing saved yet.")
                                 .font(.appBody(14))
                                 .foregroundStyle(Color.mgSecondary)
                                 .padding(.vertical, 20)

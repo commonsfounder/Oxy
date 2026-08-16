@@ -43,7 +43,7 @@ function buildCleanupQuery({ sender, since, before, query } = {}) {
 function classifyForCleanup(email, triageSignal) {
   if (!triageSignal) return { archive: false, unsubscribeCandidate: false, reason: 'could not be classified' };
   if (triageSignal.isPrimary) {
-    return { archive: false, unsubscribeCandidate: false, reason: 'looks like it needs your attention' };
+    return { archive: false, unsubscribeCandidate: false, reason: 'primary message' };
   }
   if (triageSignal.category === 'bulk updates') {
     return { archive: true, unsubscribeCandidate: Boolean(email?.listUnsubscribe), reason: 'promotional or bulk mail' };

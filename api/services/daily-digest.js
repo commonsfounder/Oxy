@@ -374,7 +374,7 @@ function formatDigest(items = [], { focus = 'all', coverage = {}, hidden = 0 } =
   if (!items.length) {
     const base = focus === 'urgent' ? 'Nothing urgent right now.'
       : focus === 'can_wait' ? 'Nothing sitting in the "can wait" pile.'
-        : "Nothing needs you today — nobody's waiting on a reply, nothing's due, and nothing's changed on what I'm watching.";
+        : "Nothing waiting today.";
     return `${base}${gaps}`;
   }
 

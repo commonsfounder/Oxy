@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Shown when pairing fails: a restrained warning header, a short checklist with
-/// hairline separators, and two actions — a stark white retry and a quiet
-/// border-only skip.
+/// Pairing recovery.
 struct ConnectionTroubleView: View {
     var onRetry: () -> Void = {}
     var onSkip: () -> Void = {}
@@ -20,9 +18,8 @@ struct ConnectionTroubleView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
 
-                Text("NO DEVICE FOUND")
-                    .font(.appBody(11, weight: .semibold))
-                    .tracking(2.4)
+                Text("Device not found")
+                    .font(.appBody(13, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
                 Text("We couldn't reach your home device.")
@@ -42,8 +39,8 @@ struct ConnectionTroubleView: View {
                 Spacer(minLength: 0)
 
                 VStack(spacing: 12) {
-                    AppPrimaryButton(title: "TRY AGAIN", action: onRetry)
-                    AppOutlineButton(title: "SKIP FOR NOW", action: onSkip)
+                    AppPrimaryButton(title: "Try again", action: onRetry)
+                    AppOutlineButton(title: "Skip for now", action: onSkip)
                 }
             }
             .padding(.horizontal, 28)

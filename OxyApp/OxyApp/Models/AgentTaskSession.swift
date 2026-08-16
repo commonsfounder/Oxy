@@ -261,7 +261,7 @@ final class AgentTaskSession: Identifiable {
     private func finishWithAssistantText(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            errorMessage = "Didn't get a clear answer back — try again or rephrase."
+            errorMessage = "Couldn't understand that. Try again."
         } else {
             appendStep(AgentStep(title: title, ui: .assistantAsk(trimmed), ctaLabel: ""))
         }
@@ -291,7 +291,7 @@ final class AgentTaskSession: Identifiable {
                 ctaLabel: "Done"
             ))
         } catch {
-            errorMessage = "Couldn't put together next steps for that email."
+            errorMessage = "Couldn't prepare next steps."
         }
     }
 
@@ -500,4 +500,3 @@ struct ProductDetails: Equatable {
         self.colorOptions = colorOptions
     }
 }
-

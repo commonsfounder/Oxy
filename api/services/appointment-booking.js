@@ -152,13 +152,13 @@ function createAppointmentBookingService({ provider, calendar } = {}) {
     async addBookingToCalendar({ booking } = {}) {
       const choice = booking?.choice;
       if (!choice?.id || !choice?.start || !choice?.end || !choice?.service) return { ok: false, kind: 'invalid_choice', text: "I couldn't find that appointment choice. Please pick one again." };
-      if (!calendar || typeof calendar.add !== 'function') return { ok: false, kind: 'calendar_unavailable', booking, text: "The appointment is booked, but I couldn't add it to your calendar. I've kept this open so I can try again." };
+      if (!calendar || typeof calendar.add !== 'function') return { ok: false, kind: 'calendar_unavailable', booking, text: "Booked, but not added to your calendar." };
       try {
         const event = await calendar.add(choice, booking);
         if (!event?.id) throw new Error('Calendar did not return an event.');
         return { ok: true, booking, calendarEvent: { id: event.id, title: cleanText(event.title || '', 160) || null } };
       } catch {
-        return { ok: false, kind: 'calendar_failed', booking, text: "The appointment is booked, but I couldn't add it to your calendar. I've kept this open so I can try again." };
+        return { ok: false, kind: 'calendar_failed', booking, text: "Booked, but not added to your calendar." };
       }
     }
   };

@@ -31,7 +31,7 @@ struct WorkflowTimelineView: View {
                     header
 
                     if let errorMessage {
-                        ErrorBanner(message: errorMessage) { Task { await load() } }
+                        ErrorBanner(message: errorMessage, onRetry: { Task { await load() } })
                     }
 
                     if isLoading && detail == nil {

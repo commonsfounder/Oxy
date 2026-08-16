@@ -1,24 +1,12 @@
 import SwiftUI
 
-// The four lanes.
-//
-// Home used to render one flat list of at most eight "missions" stitched together on the
-// client from briefings, tasks and watches. It could not express the difference between
-// work that is running and work that is stuck on you, and it had no way at all to say
-// what happened while you were away. This does, because the server now answers those
-// four questions directly (api/services/home-state.js).
-//
-// Order is deliberate and fixed: what you have to do, what is being done, what changed,
-// what is finished. Anything you cannot act on sits below everything you can.
+// MARK: - Home board
 
 // MARK: - Live header
 
-/// The one piece of chrome that proves work is happening. It animates only while
-/// something is actually in flight — a permanently spinning indicator would say nothing.
 struct LiveWorkHeader: View {
     let count: Int
     let waitingCount: Int
-    @State private var phase = 0.0
 
     var body: some View {
         HStack(spacing: 10) {
@@ -33,47 +21,42 @@ struct LiveWorkHeader: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .background {
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.5)
-                )
-        }
+        .background(Capsule().fill(Color.appSurface))
+        .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
 
     private var label: String {
-        // "Waiting to hear back" is not the same as working, and claiming to be busy while
-        // idling on someone else's reply is the kind of small dishonesty that erodes trust.
         if count == 0 { return "Nothing running" }
         if waitingCount == count {
             return count == 1 ? "Waiting to hear back on 1 thing" : "Waiting to hear back on \(count) things"
         }
-        return count == 1 ? "Millie is handling 1 thing" : "Millie is handling \(count) things"
+        return count == 1 ? "1 in progress" : "\(count) in progress"
     }
 }
 
-/// A soft breathing dot. Deliberately slow — a fast pulse reads as an alert.
 struct PulsingWorkDot: View {
     let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var big = false
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(Color.appAccent.opacity(0.28))
-                .frame(width: 18, height: 18)
-                .scaleEffect(big ? 1.0 : 0.55)
-                .opacity(big ? 0.0 : 0.9)
+            if !reduceMotion {
+                Circle()
+                    .fill(Color.appAccent.opacity(0.28))
+                    .frame(width: 18, height: 18)
+                    .scaleEffect(big ? 1.0 : 0.55)
+                    .opacity(big ? 0.0 : 0.9)
+            }
             Circle()
                 .fill(Color.appAccent)
                 .frame(width: 7, height: 7)
         }
         .frame(width: 18, height: 18)
         .onAppear {
-            guard active else { return }
+            guard active, !reduceMotion else { return }
             withAnimation(.easeOut(duration: 1.7).repeatForever(autoreverses: false)) {
                 big = true
             }
@@ -92,9 +75,8 @@ struct BoardLaneSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Text(lane.title.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(1.3)
+                Text(lane.title)
+                    .font(.appBody(14, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(lane == .needsYou ? 0.75 : 0.42))
 
                 Text("\(items.count)")
@@ -136,8 +118,6 @@ struct BoardCard: View {
         }
     }
 
-    // A question that stopped the work, answerable here. Everything about this card is
-    // louder than the others because it is the only one the user must act on.
     private var needsYouCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
@@ -206,10 +186,8 @@ struct BoardCard: View {
                     .padding(.horizontal, 13)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(Color.white.opacity(0.45)))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.6), lineWidth: 0.5))
+                    .background(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                        .fill(Color.appSurface2.opacity(0.72)))
                 }
                 .buttonStyle(.appScale(0.98))
             }
@@ -267,8 +245,6 @@ struct BoardCard: View {
         .padding(.top, 12)
     }
 
-    // Work in flight. The progress rail is real step counts when the job reports them,
-    // and absent otherwise — a fake rail creeping forward would be a lie about progress.
     private var handlingCard: some View {
         Button(action: { HapticManager.shared.impact(.light); onOpen() }) {
             VStack(alignment: .leading, spacing: 0) {
@@ -322,7 +298,6 @@ struct BoardCard: View {
         return item.detail
     }
 
-    // Changed and Completed are a ledger, not a to-do list: compact, timestamped, quiet.
     private var ledgerCard: some View {
         Button(action: { HapticManager.shared.impact(.light); onOpen() }) {
             HStack(alignment: .top, spacing: 10) {
@@ -358,10 +333,7 @@ struct BoardCard: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.34)))
-            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.5), lineWidth: 0.5))
+            .background { MissionGlassPlate() }
         }
         .buttonStyle(.appScale(0.99))
     }

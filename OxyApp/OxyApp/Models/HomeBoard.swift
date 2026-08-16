@@ -1,10 +1,6 @@
 import Foundation
 
-/// The four questions Home answers, in the order a person asks them.
-///
-/// The server (api/services/home-state.js) does the assembly across workflows,
-/// commitments and tasks, so this is a straight decode — no client-side merging of
-/// sources, which is what made the previous mission feed so hard to reason about.
+/// Lanes on Home.
 enum BoardLane: String, CaseIterable, Identifiable {
     case needsYou
     case handling
@@ -23,8 +19,7 @@ enum BoardLane: String, CaseIterable, Identifiable {
     }
 }
 
-/// One row on the board. Every source collapses into this shape, so the UI renders a
-/// lane without knowing whether a row came from a workflow, a task or a promise.
+/// A Home item.
 struct BoardItem: Codable, Identifiable, Equatable, Hashable {
     let id: String
     let kind: String
@@ -37,22 +32,19 @@ struct BoardItem: Codable, Identifiable, Equatable, Hashable {
     var commitmentId: String?
     var checkpointId: String?
 
-    /// Only on `needsYou` — the question that stopped the work, in the user's language.
     var prompt: String?
     var options: [BoardChoice]?
 
     var deadline: String?
     var overdue: Bool?
     var failed: Bool?
-    /// Waiting on someone else rather than actively running. Nothing is required of the
-    /// user either way, but a person reads the difference immediately.
+    /// Work is waiting on someone else.
     var waitingExternal: Bool?
     var progress: BoardProgress?
 
     var date: Date? { at.flatMap(Date.oxyParse) }
 
-    /// A row is only actionable when there is something specific to answer. A promise the
-    /// user owes has no machinery waiting on it, so it opens chat rather than a decision.
+    /// True when the item has a direct decision.
     var hasDecision: Bool { checkpointId != nil }
 }
 
@@ -103,8 +95,7 @@ struct HomeBoard: Codable, Equatable {
         }
     }
 
-    /// Drives the live header and the poll interval. Anything in flight means the screen
-    /// should be refreshing quickly and showing motion.
+    /// Refresh Home more often while work is active.
     var isWorking: Bool { !handling.isEmpty }
 
     var isEmpty: Bool {
@@ -112,7 +103,7 @@ struct HomeBoard: Codable, Equatable {
     }
 }
 
-// MARK: - One responsibility, in full
+// MARK: - Workflow detail
 
 struct WorkflowDetail: Codable, Equatable {
     let workflow: WorkflowSummary
@@ -144,13 +135,12 @@ struct WorkflowSummary: Codable, Equatable {
         ["completed", "failed", "cancelled"].contains(status.lowercased())
     }
 
-    /// What the user is told. Never a status enum — see AGENTS.md editing rule 6.
     var plainStatus: String {
         switch status.lowercased() {
-        case "gathering": return "Getting what I need"
-        case "working": return "Working on it"
-        case "waiting_for_user": return "Waiting on you"
-        case "waiting_external": return "Waiting to hear back"
+        case "gathering": return "Gathering"
+        case "working": return "Working"
+        case "waiting_for_user": return "Needs you"
+        case "waiting_external": return "Waiting"
         case "completed": return "Done"
         case "failed": return "Couldn't finish"
         case "cancelled": return "Stopped"
@@ -182,8 +172,7 @@ struct WorkflowCheckpoint: Codable, Equatable, Identifiable, Hashable {
     let prompt: String
     let options: [BoardChoice]?
 
-    /// An approval is a yes/no. A choice is a pick. The card renders differently for each,
-    /// so the difference has to survive the decode.
+    /// Choice checkpoints include options.
     var isChoice: Bool { type == "choice_required" && !(options ?? []).isEmpty }
 }
 

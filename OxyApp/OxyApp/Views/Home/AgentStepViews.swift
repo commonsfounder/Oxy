@@ -1,10 +1,6 @@
 import SwiftUI
 
-// MARK: - Generated-for-the-job step content (real-data native job flows)
-//
-// Each case swaps the whole body of AgentTaskSessionView. Shared shell (title,
-// glass plates) lives here; every field on a step comes from the real backend
-// pipeline chat already uses — see Models/AgentTaskSession.swift.
+// MARK: - Task steps
 
 struct StepTitleBlock: View {
     let title: String
@@ -27,7 +23,7 @@ struct StepTitleBlock: View {
     }
 }
 
-// MARK: - Payment confirm (trust surface)
+// MARK: - Payment
 
 struct PaymentConfirmStepView: View {
     let details: PaymentDetails
@@ -55,7 +51,7 @@ struct PaymentConfirmStepView: View {
             .padding(18)
             .background { MissionGlassPlate() }
 
-            Text("You can cancel any time before this is charged.")
+            Text("Cancel before payment.")
                 .font(.system(size: 12))
                 .foregroundStyle(ink.opacity(0.4))
                 .padding(.top, 12)
@@ -63,7 +59,7 @@ struct PaymentConfirmStepView: View {
     }
 }
 
-// MARK: - Ride confirm (book_uber — real deep link + fare estimate)
+// MARK: - Ride
 
 struct RideConfirmStepView: View {
     let details: RideDetails
@@ -75,9 +71,8 @@ struct RideConfirmStepView: View {
 
             if let estimate = details.estimate {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("ESTIMATE")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.2)
+                    Text("Estimate")
+                        .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     Text(estimate)
                         .font(.system(size: 22, weight: .bold))
@@ -88,7 +83,7 @@ struct RideConfirmStepView: View {
 
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
-                Text("Fare and time are Oxy's estimate — Uber shows the real price before you confirm the trip in the app.")
+                Text("Uber shows the final fare before you confirm.")
                     .font(.system(size: 12))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -97,8 +92,7 @@ struct RideConfirmStepView: View {
     }
 }
 
-// MARK: - Link result ("go handle it" on an inbox card — real steps + real links
-// mined from the email itself, never a login attempt on the user's behalf)
+// MARK: - Email links
 
 struct LinkResultStepView: View {
     let details: LinkResultDetails
@@ -142,7 +136,9 @@ struct LinkResultStepView: View {
                                 .foregroundStyle(ink)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 12)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .background(Color.appSurface, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
+                                    .strokeBorder(Color.appHairline, lineWidth: 0.5))
                             }
                         }
                     }
@@ -151,7 +147,7 @@ struct LinkResultStepView: View {
 
             HStack(spacing: 6) {
                 AppIcon("shield-check", size: 13)
-                Text("Real links from that email — nothing was logged into on your behalf.")
+                Text("Links from this email.")
                     .font(.system(size: 12))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -160,7 +156,7 @@ struct LinkResultStepView: View {
     }
 }
 
-// MARK: - Product detail (buy job — real backend data)
+// MARK: - Product
 
 struct ProductDetailStepView: View {
     let details: ProductDetails
@@ -174,9 +170,8 @@ struct ProductDetailStepView: View {
 
             if let priceText = details.priceText {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("PRICE")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.2)
+                    Text("Price")
+                        .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     Text(priceText)
                         .font(.system(size: 30, weight: .bold))
@@ -188,9 +183,8 @@ struct ProductDetailStepView: View {
 
             if !details.colorOptions.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("OPTIONS")
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(1.2)
+                    Text("Options")
+                        .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -205,7 +199,7 @@ struct ProductDetailStepView: View {
                                         if isSelected {
                                             Capsule().fill(ink)
                                         } else {
-                                            Capsule().fill(.ultraThinMaterial)
+                                            Capsule().fill(Color.appSurface)
                                         }
                                     }
                                     .onTapGesture {
@@ -231,10 +225,6 @@ struct ProductDetailStepView: View {
         }
     }
 
-    // Real photo (og:image, or the largest visible <img> the browser-task agent
-    // found) when present — same fade-in AsyncImage pattern as chat's product image
-    // row. Falls back to an honest placeholder plate only when there's genuinely no
-    // photo, never a stand-in picture for a specific item.
     @ViewBuilder
     private var heroImage: some View {
         if let urlString = details.imageUrls.first, let url = URL(string: urlString) {
@@ -248,28 +238,24 @@ struct ProductDetailStepView: View {
             }
             .frame(height: 190)
             .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 0.7)
+                RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    .strokeBorder(Color.appHairline, lineWidth: 0.6)
             )
-            .shadow(color: .black.opacity(0.06), radius: 16, y: 8)
         } else {
             placeholderPlate
                 .frame(height: 190)
                 .frame(maxWidth: .infinity)
-                .shadow(color: .black.opacity(0.06), radius: 16, y: 8)
         }
     }
 
     private var placeholderPlate: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color.white.opacity(0.45))
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.7), lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .fill(Color.appSurface2)
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .strokeBorder(Color.appHairline, lineWidth: 0.6)
             AppIcon("cube", size: 60)
                 .foregroundStyle(ink.opacity(0.4))
                 .shadow(color: .black.opacity(0.08), radius: 12, y: 6)
@@ -329,8 +315,8 @@ struct AssistantAskStepView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.6))
+            .background(Color.appSurface, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
         }
     }
 
@@ -344,87 +330,40 @@ struct AssistantAskStepView: View {
     }
 }
 
-// MARK: - Working hero (holographic search)
+// MARK: - In progress
 
 struct WorkingHeroStepView: View {
     let title: String
     let status: String
     var ink: Color
-    @State private var pulse = false
-    @State private var rotation: Double = 0
-
     var body: some View {
-        VStack(spacing: 22) {
-            Spacer(minLength: 40)
-
-            ZStack {
-                // Radar rings
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .strokeBorder(
-                            AngularGradient(
-                                colors: [
-                                    Color(red: 0.7, green: 0.85, blue: 1.0).opacity(0.0),
-                                    Color(red: 0.6, green: 0.8, blue: 1.0).opacity(0.45),
-                                    Color(red: 1.0, green: 0.85, blue: 0.7).opacity(0.25),
-                                    Color(red: 0.7, green: 0.85, blue: 1.0).opacity(0.0)
-                                ],
-                                center: .center
-                            ),
-                            lineWidth: 1.2
-                        )
-                        .frame(width: CGFloat(150 + i * 44), height: CGFloat(150 + i * 44))
-                        .scaleEffect(pulse ? 1.04 : 0.96)
-                        .opacity(pulse ? 0.9 : 0.55)
-                        .rotationEffect(.degrees(rotation + Double(i * 20)))
-                }
-
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                Color(red: 0.75, green: 0.88, blue: 1.0).opacity(0.55),
-                                Color(red: 1.0, green: 0.9, blue: 0.8).opacity(0.25),
-                                .clear
-                            ],
-                            center: .center,
-                            startRadius: 6,
-                            endRadius: 90
-                        )
-                    )
-                    .frame(width: 150, height: 150)
-                    .scaleEffect(pulse ? 1.02 : 0.98)
-            }
-            .frame(height: 240)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
-                    pulse = true
-                }
-                withAnimation(.linear(duration: 12).repeatForever(autoreverses: false)) {
-                    rotation = 360
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(Color.appAccent)
+                Text("In progress")
+                    .font(.appBody(14, weight: .semibold))
+                    .foregroundStyle(ink.opacity(0.68))
             }
 
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.appDisplay(24, weight: .semibold))
                     .foregroundStyle(ink)
                 Text(status)
-                    .font(.system(size: 14))
+                    .font(.appBody(15))
                     .foregroundStyle(ink.opacity(0.5))
                     .animation(.appFast, value: status)
             }
-
-            Spacer(minLength: 60)
         }
         .frame(maxWidth: .infinity)
+        .padding(20)
+        .background { MissionGlassPlate() }
     }
 }
 
-// MARK: - Live step trace ("how I got there" — a post-hoc transcript of a
-// finished run_browser_task run, fetched once its taskId is known; never a
-// real-time progress meter for a task still in flight, see
-// AgentTaskSession.fetchLiveSteps)
+// MARK: - Activity
 
 struct LiveStepsTraceView: View {
     let steps: [TaskStep]
@@ -432,9 +371,8 @@ struct LiveStepsTraceView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("HOW I GOT THERE")
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(1.2)
+            Text("Activity")
+                .font(.appBody(13, weight: .semibold))
                 .foregroundStyle(ink.opacity(0.45))
 
             VStack(alignment: .leading, spacing: 8) {
@@ -469,7 +407,7 @@ struct SessionDoneStepView: View {
             Text(title)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(ink)
-            Text("All set — this will land on Home as a status card.")
+            Text("Added to Home.")
                 .font(.system(size: 14))
                 .foregroundStyle(ink.opacity(0.55))
         }

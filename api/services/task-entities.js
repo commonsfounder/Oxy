@@ -60,14 +60,18 @@ async function findMostRecentEntity(supabase, userId, { sinceHours = 72 } = {}) 
   return mostRecent;
 }
 
-async function listRecentEntities(supabase, userId, limit = 10) {
+// Same 72-hour window as the two lookups above. Without it "recently touched" meant "the
+// last 10 things ever touched", so a single product from weeks earlier sat on Home forever.
+async function listRecentEntities(supabase, userId, limit = 10, { sinceHours = 72 } = {}) {
   const { data, error } = await supabase
     .from('task_entities')
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
   if (error || !data) return { entities: [] };
-  return { entities: data.slice(0, limit) };
+  const cutoff = Date.now() - sinceHours * 60 * 60 * 1000;
+  const fresh = data.filter((row) => new Date(row.created_at).getTime() >= cutoff);
+  return { entities: fresh.slice(0, limit) };
 }
 
 module.exports = { recordTaskEntity, findRecentEntity, findMostRecentEntity, listRecentEntities };

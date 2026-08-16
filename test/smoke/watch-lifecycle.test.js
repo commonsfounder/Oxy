@@ -197,7 +197,7 @@ test('asking for the same watch twice adjusts the first instead of running two',
   });
   assert.equal(second.deduped, true);
   assert.equal(second.scheduledTask.id, first.scheduledTask.id);
-  assert.match(second.text, /already watching/);
+  assert.match(second.text, /already watching/i);
 
   const { data } = await supabase.from('scheduled_tasks').select('id').eq('user_id', USER_ID).like('title', `${PREFIX}%`).eq('active', true);
   assert.equal(data.length, 1);

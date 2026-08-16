@@ -10,8 +10,6 @@ struct AgentContinuityView: View {
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
-    /// Held between preview and confirm so the file is read once and the bytes the user
-    /// approved are the bytes that get imported.
     @State private var pendingData: Data?
     @State private var preview: AgentContinuityPreview?
 
@@ -19,7 +17,7 @@ struct AgentContinuityView: View {
         ZStack {
             GlebChrome.pastelBlob.ignoresSafeArea()
             VStack(spacing: 0) {
-                ScreenHeaderView(title: "Continuity", onBack: { dismiss() })
+                ScreenHeaderView(title: "Import history", onBack: { dismiss() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         if let preview {
@@ -69,7 +67,7 @@ struct AgentContinuityView: View {
                 AppIcon("dotted", size: 15).foregroundStyle(Color.appAccent)
                 AppSectionTitle("Bring your history", size: 20)
             }
-            Text("Upload the export from ChatGPT, Claude, or Zapier. The .zip carries your instructions and memory — a single .json holds only conversations.")
+            Text("Import a .zip export. A .json includes conversations only.")
                 .font(.system(size: 13))
                 .foregroundStyle(Color.mgSecondary)
             Button {

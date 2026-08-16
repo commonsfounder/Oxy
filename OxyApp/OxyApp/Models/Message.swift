@@ -130,19 +130,14 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let distanceText: String?
     let recoverable: Bool?
     let recoveryAction: BrowserRecoveryAction?
-    /// Product photo(s) the browser-task agent found on the page it finished on (og:image,
-    /// falling back to the largest visible <img>) — up to 3, shown as an image row in chat.
+    /// Product images observed during a browser task.
     let imageUrls: [String]?
-    /// Real product name/price/checkout-total/color-options the browser-task agent read off
-    /// the page it's on — used by the native buy-flow step UI. Never fabricated: absent
-    /// whenever the model didn't genuinely observe the field on the page.
+    /// Product details observed during a browser task.
     let productName: String?
     let price: String?
     let total: String?
     let colorOptions: [String]?
-    /// Backend-generated id for a completed `run_browser_task` run — a plain camelCase
-    /// key on the JS result object (not a DB row field), letting iOS fetch that task's
-    /// recorded step trace via `GET /tasks/:id/steps` after the turn has finished.
+    /// Completed browser-task identifier.
     let taskId: String?
 
     enum CodingKeys: String, CodingKey {
@@ -558,6 +553,27 @@ struct LifeBriefingItem: Codable, Identifiable, Equatable {
             pending: true
         )
     }
+
+    var displayTitle: String {
+        var words = title.split(separator: " ").map(String.init)
+        while words.count > 1,
+              words[words.count - 1].caseInsensitiveCompare(words[words.count - 2]) == .orderedSame {
+            words.removeLast()
+        }
+        return words.joined(separator: " ")
+            .replacingOccurrences(of: "a appointment", with: "an appointment", options: .caseInsensitive)
+    }
+
+    var displayDetail: String? {
+        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        guard !trimmed.isEmpty,
+              !lower.contains("needs your attention"),
+              !lower.contains("millie can continue") else {
+            return nil
+        }
+        return trimmed
+    }
 }
 
 struct LifeBriefingReview: Codable, Equatable {
@@ -637,30 +653,21 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
     let subject: String
     let snippet: String?
     let date: String?
-    /// Stakes-first, casual one-liner from a server-side model pass — states the real
-    /// consequence/deadline when there is one, not a neutral restatement of the email.
-    /// Nil for older briefings created before this existed, or if that pass failed.
+    /// Brief stakes or next step.
     let summary: String?
-    /// Short server-judged action verb for the ONE useful next step ("Pay it", "Sort it",
-    /// "Reply", "Ignore"...) — nil falls back to a generic "Draft reply" on the card.
+    /// Suggested next step.
     let cta: String?
-    /// Which connected inbox this came from ("gmail" / "outlook") — nil for briefings
-    /// created before multi-provider tagging existed. Drives the provider badge on the
-    /// Home inbox card so a user with more than one connected account can tell them apart.
+    /// Connected inbox source.
     let provider: String?
-    /// Real provider message id (Gmail message id / Graph message id) — lets the "go
-    /// handle it" path re-fetch this exact email server-side via /emails/action-plan.
-    /// Nil for briefings created before this existed; that CTA falls back to chat then.
+    /// Provider message ID.
     let messageId: String?
 
     var id: String { from + "|" + subject }
 
-    // Inbox snippets arrive as raw HTML-ish text (&#39; &amp; &lt; …). Decode for display.
     var cleanFrom: String { from.decodingHTMLEntities() }
     var cleanSubject: String { subject.decodingHTMLEntities() }
     var cleanSnippet: String? { snippet?.decodingHTMLEntities() }
 
-    /// Prefer a human name over `Name <addr@…>` so Today Inbox stays glanceable.
     var displayFrom: String {
         let raw = cleanFrom.trimmingCharacters(in: .whitespacesAndNewlines)
         if let open = raw.firstIndex(of: "<"), open > raw.startIndex {
@@ -669,19 +676,12 @@ struct BriefingEmail: Codable, Equatable, Identifiable {
         }
         if let at = raw.firstIndex(of: "@"), raw.startIndex < at {
             let local = raw[..<at]
-            // Bare addresses → local-part only when it looks like an email.
             if raw.contains("."), local.count >= 2 { return String(local) }
         }
         return raw
     }
 
-    /// Marketing / bulk mail the dashboard shouldn't surface as something that needs you.
-    /// ponytail: keyword heuristic; move to a server-side classifier if it misfires.
     var isLikelyPromotional: Bool {
-        // Include `summary` (the server's AI paraphrase) — a raw subject/snippet can
-        // read as neutral ("ClearScore Cup is live") while the summary spells out the
-        // actual marketing hook ("enter a prize draw"), which the original from/subject/
-        // snippet-only haystack never saw.
         let haystack = "\(from) \(subject) \(snippet ?? "") \(summary ?? "")".lowercased()
         let signals = [
             "% off", " off ", "sale", "deal", "discount", "coupon", "promo", "offer",

@@ -1,66 +1,48 @@
 import SwiftUI
 import UIKit
 
-/// MILGRAIN DESIGN SYSTEM
-/// Warm black canvas, restrained surfaces, readable text, and a sparse metal
-/// accent. The interface should feel like the software side of an intimate object:
-/// useful first, tactile second, decorative last.
+// MARK: - Color tokens
 
-/// A color that resolves per the real trait collection (not a manually-threaded
-/// `colorScheme` bool) so native chrome (TabView, sheets, keyboard) and every custom
-/// token always agree on which finish is active — the prior "empty pill" tab bar bug
-/// was exactly this class of mismatch (content pinned dark, chrome following the OS).
 private func appDynamicColor(dark: Color, light: Color) -> Color {
     Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
 }
 
 extension Color {
-    /// Main canvas. Gleb cool pastel base in light (the app's identity); warm black
-    /// retained for dark, though the app is pinned light.
     static let appBackground = appDynamicColor(
         dark: Color(red: 0.047, green: 0.043, blue: 0.043),   // #0C0B0B
         light: Color(red: 0.969, green: 0.969, blue: 0.980)   // #F7F7FA — Gleb wash base
     )
 
-    /// Quiet raised surface — cool glassy near-white.
     static let appSurface = appDynamicColor(
         dark: Color(red: 0.082, green: 0.078, blue: 0.075),   // #151413
         light: Color(red: 0.965, green: 0.967, blue: 0.980)   // #F6F7FA
     )
 
-    /// Raised surface (sheets, prominent rows).
     static let appSurface2 = appDynamicColor(
         dark: Color(red: 0.118, green: 0.110, blue: 0.102),   // #1E1C1A
         light: Color(red: 0.929, green: 0.933, blue: 0.957)   // #EDEEF4
     )
 
-    /// Hairline / divider — soft cool edge that reads on glass.
     static let appHairline = appDynamicColor(
         dark: Color(red: 0.949, green: 0.933, blue: 0.906).opacity(0.10),
         light: Color(red: 0.18, green: 0.19, blue: 0.22).opacity(0.10)
     )
 
-    /// Primary text — Gleb ink.
     static let appInk = appDynamicColor(
         dark: Color(red: 0.949, green: 0.933, blue: 0.906),   // #F2EEE7
         light: Color(red: 0.180, green: 0.192, blue: 0.220)   // #2E313A — Gleb ink
     )
 
-    /// Secondary / captions — Gleb muted.
     static let appMuted = appDynamicColor(
         dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
         light: Color(red: 0.451, green: 0.471, blue: 0.520)   // #737885 — Gleb muted
     )
 
-    /// Metal accent. Use sparingly: selected detail, status, progress, important moments.
-    /// Deepened in light mode — the pale dark-mode gold loses contrast on a white canvas.
     static let appAccent = appDynamicColor(
         dark: Color(red: 0.784, green: 0.663, blue: 0.420),   // #C8A96B
         light: Color(red: 0.612, green: 0.471, blue: 0.188)   // #9C7830
     )
 
-    /// On accent (text/icons on the accent fill). Accent is a mid-tone gold in both
-    /// finishes, so this stays a fixed dark ink rather than following appBackground.
     static let appOnAccent = Color(red: 0.106, green: 0.098, blue: 0.086)
 
     // MARK: - Semantic (for trust and safety)
@@ -78,33 +60,23 @@ extension Color {
         light: Color(red: 0.08, green: 0.58, blue: 0.36)
     )
 
-    // Legacy scrim etc for quick ports
     static let appScrim = Color.black.opacity(0.5)
     static let appFillSubtle = appDynamicColor(dark: Color.white.opacity(0.08), light: Color.black.opacity(0.06))
     static let appFillScrim = appScrim
     static let appObsidian = appBackground
     static let appTitanium = appMuted
 
-    /// User chat bubble fill — a flat neutral, not a translucent accent wash.
-    /// Alpha-blending `appAccent` at low opacity directly over the canvas desaturates
-    /// warm gold into a muddy tone in either finish (basic alpha-compositing over a
-    /// non-neutral backdrop). `appSurface2` is already a tested, legible flat tone, so
-    /// the bubble reads as a clean neutral chip instead — the accent stays reserved
-    /// for the assistant's voice.
     static let appUserBubble = appSurface2
 }
 
-// MARK: - Spacing (consistent rhythm; use these instead of new magic numbers)
+// MARK: - Spacing
 enum AppSpacing {
     static let xs: CGFloat = 4
     static let sm: CGFloat = 8
     static let md: CGFloat = 12
     static let lg: CGFloat = 16
     static let xl: CGFloat = 24
-    /// Chat's outer content margin — slightly wider than the old 16pt so text
-    /// doesn't crowd the screen edges now that assistant replies sit flush.
     static let chatMargin: CGFloat = 20
-    /// Canonical outer content margin for non-chat screens (Settings/Memory/etc).
     static let margin: CGFloat = 20
 }
 
@@ -115,7 +87,7 @@ extension Font {
     static func heroDisplay(_ size: CGFloat = 30) -> Font { .appEditorial(size) }
 }
 
-// MARK: - Radius (concentric friendly)
+// MARK: - Radius
 enum AppRadius {
     static let sm: CGFloat = 6
     static let md: CGFloat = 10
@@ -125,27 +97,18 @@ enum AppRadius {
     static let card: CGFloat = lg
 }
 
-// MARK: - Animation tokens
-// Critically-damped springs (dampingFraction 1.0 = zero overshoot) rather than fixed-duration
-// eases: interruptible and velocity-aware on retrigger, but visually still "no bounce" —
-// the house style is unchanged, only the underlying curve is more physically honest.
-// appMomentum is the one deliberate exception, reserved for gesture-driven motion that
-// carries momentum (drag-to-dismiss, flicks) — nothing wires to it yet.
+// MARK: - Motion
 extension Animation {
     static let appFast     = Animation.spring(response: 0.15, dampingFraction: 1.0)
     static let appStandard = Animation.spring(response: 0.22, dampingFraction: 1.0)
     static let appRelax    = Animation.spring(response: 0.4,  dampingFraction: 1.0)
     static let appSpring   = Animation.spring(response: 0.28, dampingFraction: 1.0)
     static let appMomentum = Animation.spring(response: 0.3,  dampingFraction: 0.8)
-    /// Expand/collapse (mission cards, weather detail) wants a touch more life than the
-    /// critically-damped tokens above — named so the value isn't hand-typed at each call site.
     static let appExpand   = Animation.spring(response: 0.42, dampingFraction: 0.82)
-    /// A precise, mechanical on/off feel for AppToggle/MilgrainToggle — deliberately a fixed
-    /// duration ease rather than a spring, so the switch reads as a hard flip, not a settle.
     static let appToggle   = Animation.easeInOut(duration: 0.18)
 }
 
-// MARK: - Helpers (scale on press, glass where it still fits)
+// MARK: - Interaction
 extension View {
     func appScale(_ amount: CGFloat = 0.96) -> some View {
         buttonStyle(AppScaleButtonStyle(amount: amount))
@@ -166,9 +129,6 @@ extension ButtonStyle where Self == AppScaleButtonStyle {
     static func appScale(_ amount: CGFloat) -> AppScaleButtonStyle { .init(amount: amount) }
 }
 
-/// Staggered fade+rise entrance for first-appearance content (cards, headers, list rows).
-/// Under Reduce Motion the rise drops out and only a plain cross-fade remains — reduced
-/// motion means gentler feedback, not none.
 private struct AppEntranceModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let appeared: Bool
@@ -191,22 +151,12 @@ extension View {
         modifier(AppEntranceModifier(appeared: appeared, riseOffset: riseOffset, delay: delay))
     }
 
-    /// Large display/editorial headings (Fraunces, ~26–31pt) read too airy with system
-    /// tracking at that size — tighten proportionally. Body and eyebrow text are unaffected.
     func appHeroTracking(_ size: CGFloat) -> some View {
         tracking(-size * 0.02)
     }
 }
 
-// Legacy shims removed during full app migration.
-// All code must use the primary app* tokens (appBackground, appSurface, appAccent, appInk, appMuted, AppRadius, appBody, appDisplay, etc.).
-// Remove any remaining nml*, NML*, ed* or Nameless references.
-
 extension View {
-    /// Light material chrome for small interactive chips (nav icons, composer buttons).
-    /// Thin blur + a warm tint keeps it a "small surface" per the materials weight rule —
-    /// TodayCard uses the heavier `.regularMaterial` for the same reason, being structural.
-    /// `interactive` elements get a brighter edge, as if catching light, since they invite touch.
     func appGlass<S: InsettableShape>(_ shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
         background {
             shape.fill((tint ?? Color.appSurface2).opacity(0.35))
@@ -220,30 +170,11 @@ extension View {
 }
 
 extension Color {
-    /// One-off adaptive value for call sites that need a color the shared tokens
-    /// don't cover. Most styling should use the `app*` tokens directly — they're
-    /// already dynamic — reach for this only for something genuinely local.
     static func appAdaptive(dark: Color, light: Color) -> Color { appDynamicColor(dark: dark, light: light) }
 }
 
-// MARK: - Typography rule (serif vs sans)
-//
-// Decide which face a new label takes by its SEMANTIC ROLE, not by taste:
-//
-//   • appDisplay (Fraunces, serif) — warm / identity / emotional moments ONLY:
-//     greetings ("Good afternoon", "Welcome back."), empty-state prompts, and
-//     Memory content category headers ("People", "Places"). The voice of the app.
-//
-//   • appBody (Inter, sans) — ALL functional/navigational/control UI: screen and
-//     nav titles, settings rows, buttons, field labels, status text, captions.
-//
-//   • appMono — technical readouts only (battery, latency, ids, timestamps).
-//
-// If a label is something the user operates (a control, a title, a status), it's
-// sans. If it's the product speaking to the user, it's serif. No other use of serif.
-/// Maps a SwiftUI `Font.Weight` to its `UIFont.Weight` twin. `Font.Weight` isn't a
-/// switchable enum, so a small lookup is the cleanest bridge for the metrics-scaled
-/// monospace font below.
+// MARK: - Typography
+
 private func appUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
     let map: [Font.Weight: UIFont.Weight] = [
         .ultraLight: .ultraLight, .thin: .thin, .light: .light, .regular: .regular,
@@ -253,34 +184,22 @@ private func appUIFontWeight(_ w: Font.Weight) -> UIFont.Weight {
 }
 
 extension Font {
-    // Every face below opts into Dynamic Type: custom fonts via `relativeTo:` and the
-    // monospace readout via `UIFontMetrics`. A fixed-size font ignores the user's text-size
-    // setting entirely, so the passed `size` is the point size at the Large default and
-    // scales from there.
-
     static func appTitle(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .default)
     }
 
-    /// Display face — composed sans, not rounded. Functional headings use this.
     static func appDisplay(_ size: CGFloat, weight: Font.Weight = .semibold) -> Font {
         .system(size: size, weight: weight, design: .default)
     }
 
-    /// Editorial face — Fraunces only for short identity and greeting moments.
     static func appEditorial(_ size: CGFloat) -> Font {
         .custom("Fraunces", size: size, relativeTo: .title)
     }
 
-    /// Body / UI face — system SF at regular weight. The old Inter-light body was
-    /// a major legibility failure on device; never default below .regular.
     static func appBody(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
     }
 
-    /// Clean monospace for technical readouts — battery, latency, connection state.
-    /// Scaled with Dynamic Type via UIFontMetrics (a fixed-size `.system` mono otherwise
-    /// stays pinned no matter the user's text-size setting).
     static func appMono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         let base = UIFont.monospacedSystemFont(ofSize: size, weight: appUIFontWeight(weight))
         return Font(UIFontMetrics(forTextStyle: .body).scaledFont(for: base))
@@ -288,25 +207,16 @@ extension Font {
 }
 
 extension View {
-    /// Label: 11pt uppercase Inter, +1.5 tracking, muted. Use above a title to let the
-    /// layout breathe instead of stacking bold headers.
     func appEyebrow() -> some View {
-        font(.appBody(11, weight: .regular))
-            .tracking(1.5)
-            .textCase(.uppercase)
+        font(.appBody(12, weight: .medium))
             .foregroundStyle(Color.appMuted)
     }
 
-    /// Borders eliminated per the pure-black minimalist directive. No-op,
-    /// kept only so existing call sites don't need touching.
     func appHairline(radius: CGFloat) -> some View {
         self
     }
 }
 
-/// A small status dot whose colour carries meaning (see the token table in the
-/// semantic-status section above). A soft halo only appears for the `.live` state,
-/// so "live" reads differently from a merely "enabled" row at a glance.
 struct AppStatusDot: View {
     enum Kind {
         case live      // green — active / streaming
@@ -357,34 +267,22 @@ struct AppStatusDot: View {
     }
 }
 
-// MARK: - Unified "App" list primitives
-//
-// Stock `List`/`Form` rows, grouped insets and the green system `Toggle` are
-// banned across Settings, Connectors and Memory. These primitives replace them:
-// flat rows on pure black, separated by ultra-thin titanium dividers, with raw
-// typography instead of colourful SF-symbol tiles.
+// MARK: - List primitives
 
 extension Color {
-    /// Luminous coral for destructive actions and overdue states — warm rather than
-    /// neon, but bright enough to clear contrast against the pure-black canvas.
     static let appDanger = Color(red: 235 / 255, green: 118 / 255, blue: 102 / 255)
 }
 
-/// An ultra-thin, low-opacity horizontal divider — the only separator the
-/// language allows between rows.
 struct AppDivider: View {
     var inset: CGFloat = 0
     var body: some View {
         Rectangle()
-            // The spec separator: 0.5px ≈ #222222, tinted subtly by the active finish.
             .fill(Color.appHairline)
             .frame(height: 0.5)
             .padding(.leading, inset)
     }
 }
 
-/// Title Case, wide-tracked sans-serif section header in muted detail colour.
-/// Elegant spacing instead of a loud uppercase monospace grid.
 struct AppSectionHeader: View {
     let title: String
     var body: some View {
@@ -395,8 +293,6 @@ struct AppSectionHeader: View {
     }
 }
 
-/// Minimalist custom toggle: a 30×16 capsule that slides between muted gray
-/// (off) and soft silver (on). Replaces the stock green `Toggle`.
 struct AppToggle: View {
     @Binding var isOn: Bool
 
@@ -414,13 +310,11 @@ struct AppToggle: View {
                         .padding(2)
                         .frame(maxWidth: .infinity, alignment: isOn ? .trailing : .leading)
                 )
-                // Extend hit area to 44×44 without growing the visual
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? [.isSelected, .isButton] : .isButton)
-        // A precise, mechanical-switch pulse on every state change.
         .sensoryFeedback(.impact(weight: .light, intensity: 1.0), trigger: isOn)
     }
 }
@@ -438,13 +332,18 @@ struct AppLineField: View {
         VStack(spacing: 9) {
             Group {
                 if axis == .vertical {
-                    TextField(placeholder, text: $text, axis: .vertical)
+                    TextField(
+                        "",
+                        text: $text,
+                        prompt: Text(placeholder).foregroundStyle(Color.appMuted),
+                        axis: .vertical
+                    )
                         .lineLimit(lineLimit)
                 } else {
-                    TextField(placeholder, text: $text)
+                    TextField("", text: $text, prompt: Text(placeholder).foregroundStyle(Color.appMuted))
                 }
             }
-            .font(.system(size: 15, weight: .light))
+            .font(.appBody(15))
             .foregroundStyle(Color.appInk)
             .tint(Color.appMuted)
             .focused($isFocused)
@@ -468,13 +367,11 @@ struct AppPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.appBody(13, weight: .semibold))
-                .tracking(1.8)
-                .textCase(.uppercase)
+                .font(.appBody(15, weight: .semibold))
                 .foregroundStyle(Color.appBackground)
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(Color.appInk)
+                .frame(height: 50)
+                .background(Color.appInk, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
         }
         .buttonStyle(.appScale(0.97))
     }
@@ -700,36 +597,6 @@ typealias MilgrainSegmentedControl = AppSegmented
 // living aurora gradient with glass cards floating over it, in two finishes.
 // `TodayPalette` swaps the text/line colours between the dark aurora and the
 // light pastel finish; cards read `p.ink` / `p.muted` etc. so a single bool
-// flips the whole screen.
-
-/// The user's chosen appearance, persisted in UserDefaults. Drives `.preferredColorScheme`
-/// at the app root; every screen then reads the resolved `\.colorScheme` from the
-/// environment rather than computing its own finish. `.system` follows the iOS setting.
-enum AppAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .system: return "System"
-        case .light:  return "Light"
-        case .dark:   return "Dark"
-        }
-    }
-
-    /// nil = follow the system (the `.preferredColorScheme` "no preference" value).
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: return nil
-        case .light:  return .light
-        case .dark:   return .dark
-        }
-    }
-
-    static let storageKey = "oxy_appearance"
-}
-
 struct TodayPalette {
     let ink: Color       // primary editorial text
     let muted: Color     // captions, eyebrows, secondary
@@ -750,10 +617,7 @@ struct TodayPalette {
     )
 }
 
-/// A glass card for the Today tab — same silhouette as `AppCard` but with a
-/// refractive Liquid Glass surface instead of an opaque fill, so it picks up the
-/// aurora gradient behind it. Group these in `appGlassContainer` to get the fluid
-/// morph between cards on iOS 26.
+/// Shared raised surface for grouped content.
 struct TodayCard<Content: View>: View {
     var padding: CGFloat = 16
     @ViewBuilder let content: Content
@@ -763,12 +627,9 @@ struct TodayCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(padding)
-            // Structural surface — heavier material than the small appGlass() chips,
-            // per the materials weight rule (bigger surfaces read as thicker).
-            .background(shape.fill(Color.appSurface.opacity(0.55)))
-            .background(.regularMaterial, in: shape)
-            .overlay(shape.strokeBorder(Color.appAdaptive(dark: .white, light: .black).opacity(0.08), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
+            .background(shape.fill(Color.appAdaptive(dark: Color.appSurface2, light: .white.opacity(0.88))))
+            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
+            .shadow(color: .black.opacity(0.035), radius: 6, y: 2)
     }
 }
 
@@ -861,16 +722,13 @@ struct AppOutlineButton: View {
     let title: String
     var action: () -> Void
 
-    // No border — affordance comes from tracked-out uppercase type, not a stroked pill.
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .tracking(1.5)
-                .textCase(.uppercase)
+                .font(.appBody(15, weight: .medium))
                 .foregroundStyle(Color.appMuted)
                 .frame(maxWidth: .infinity)
-                .frame(height: 58)
+                .frame(height: 50)
         }
         .buttonStyle(.appScale)
     }

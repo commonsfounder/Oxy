@@ -57,7 +57,7 @@ struct PaymentsView: View {
 
     private var balanceSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Concierge balance").padding(.bottom, 12)
+            AppSectionHeader(title: "Balance").padding(.bottom, 12)
             Text(formattedBalance)
                 .font(.rowTitle)
                 .foregroundStyle(Color.appInk)
@@ -83,11 +83,9 @@ struct PaymentsView: View {
         }
     }
 
-    // Card the agent fills into merchant checkouts after an explicit "yes" to a
-    // ready-to-pay summary. Stored encrypted server-side; only brand/last4 come back.
     private var agentCardSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AppSectionHeader(title: "Checkout card").padding(.bottom, 12)
+            AppSectionHeader(title: "Card for checkout").padding(.bottom, 12)
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agentCardTitle)
@@ -120,9 +118,9 @@ struct PaymentsView: View {
 
     private var agentCardSubtitle: String {
         guard let agentCard else {
-            return "Add a card so the agent can complete purchases you approve"
+            return "For checkouts you approve"
         }
-        return "Expires \(String(format: "%02d", agentCard.expMonth))/\(String(agentCard.expYear % 100)) — used only after you confirm an order"
+        return "Expires \(String(format: "%02d", agentCard.expMonth))/\(String(agentCard.expYear % 100))"
     }
 
     private var formattedBalance: String {
@@ -135,7 +133,7 @@ struct PaymentsView: View {
     }
 
     private var cardSubtitle: String {
-        card == nil ? "Link a card so the agent can charge you directly" : "Linked"
+        card == nil ? "No card linked" : "Linked"
     }
 
     // MARK: - Networking
@@ -235,13 +233,13 @@ private struct AgentCardEntrySheet: View {
                             cvc = String(new.filter(\.isNumber).prefix(4))
                         }
                 } footer: {
-                    Text("Stored encrypted. Only used to complete a purchase after you've approved its total in chat.")
+                    Text("Encrypted. Used only after you approve the total.")
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Checkout card")
+            .navigationTitle("Card for checkout")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

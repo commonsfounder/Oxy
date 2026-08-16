@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Pairing screen: a mono sub-header, a quiet tabletop-device glyph standing in
-/// for real artwork, a single line of instruction, and a thin rotating silver
-/// arc at the foot — quiet, expensive, patient.
+/// Device pairing.
 struct SetupPendantView: View {
     var body: some View {
         ZStack {
@@ -11,17 +9,16 @@ struct SetupPendantView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                Text("CONNECTING DEVICE")
-                    .font(.appBody(11, weight: .semibold))
-                    .tracking(2.4)
+                Text("Connecting device")
+                    .font(.appBody(13, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
                 HomeDeviceGlyph()
                     .frame(width: 168, height: 126)
                     .padding(.top, 56)
 
-                Text("Place your home device on its charger to begin pairing.")
-                    .font(.system(size: 15, weight: .light))
+                Text("Place the device on its charger.")
+                    .font(.appBody(15))
                     .foregroundStyle(Color.appMuted)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
@@ -38,8 +35,6 @@ struct SetupPendantView: View {
     }
 }
 
-/// A minimal tabletop-device stand-in, drawn in thin titanium strokes.
-/// Placeholder until the physical industrial design artwork lands.
 private struct HomeDeviceGlyph: View {
     var body: some View {
         VStack(spacing: 0) {
@@ -64,19 +59,18 @@ private struct HomeDeviceGlyph: View {
     }
 }
 
-/// A single thin silver arc, rotating forever — a 1px loading indicator with no
-/// track, no fill, no fuss.
 private struct SilverArcSpinner: View {
     @State private var spinning = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Circle()
             .trim(from: 0, to: 0.18)
             .stroke(Color.appTitanium, style: StrokeStyle(lineWidth: 1, lineCap: .round))
             .frame(width: 28, height: 28)
-            .rotationEffect(.degrees(spinning ? 360 : 0))
+            .rotationEffect(.degrees(spinning && !reduceMotion ? 360 : 0))
             .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: spinning)
-            .onAppear { spinning = true }
+            .onAppear { if !reduceMotion { spinning = true } }
             .accessibilityLabel("Pairing")
     }
 }

@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Consent gate. Clean, direct.
-/// header, custom fill-box checkboxes (no green switches), and a single stark
-/// white pill to proceed. Continuing is blocked until both boxes are filled.
+/// Consent gate.
 struct LegalConsentView: View {
     var onContinue: () -> Void = {}
 
@@ -18,9 +16,8 @@ struct LegalConsentView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
 
-                Text("AGREEMENT")
-                    .font(.appBody(11, weight: .semibold))
-                    .tracking(2.4)
+                Text("Agreement")
+                    .font(.appBody(13, weight: .medium))
                     .foregroundStyle(Color.appMuted)
 
                 Text("Before we begin.")
@@ -28,8 +25,8 @@ struct LegalConsentView: View {
                     .foregroundStyle(Color.appInk)
                     .padding(.top, 18)
 
-                Text("Yours alone. Confirm you've read how your data is handled before continuing.")
-                    .font(.system(size: 15, weight: .light))
+                Text("Review how your data is handled before continuing.")
+                    .font(.appBody(15))
                     .foregroundStyle(Color.appMuted)
                     .lineSpacing(4)
                     .fixedSize(horizontal: false, vertical: true)
@@ -52,7 +49,7 @@ struct LegalConsentView: View {
 
                 Spacer(minLength: 0)
 
-                AppPrimaryButton(title: "AGREE AND CONTINUE", action: onContinue)
+                AppPrimaryButton(title: "Agree and continue", action: onContinue)
                     .disabled(!canContinue)
                     .opacity(canContinue ? 1 : 0.4)
                     .animation(.appFast, value: canContinue)
@@ -86,8 +83,6 @@ struct LegalConsentView: View {
     }
 }
 
-/// A 16×16 box that simply fills with soft silver when selected — no checkmark,
-/// no animation theatrics, just presence or absence.
 private struct AppCheckbox: View {
     let isOn: Bool
 
@@ -99,9 +94,7 @@ private struct AppCheckbox: View {
                 Rectangle()
                     .strokeBorder(isOn ? Color.clear : Color.appAdaptive(dark: .white, light: .black).opacity(0.3), lineWidth: 1)
             )
-            // A small overshoot as it fills — presence with a little life, not a hard flip.
-            .scaleEffect(isOn ? 1.08 : 1.0)
-            .animation(.appSpring, value: isOn)
+            .animation(.appFast, value: isOn)
     }
 }
 

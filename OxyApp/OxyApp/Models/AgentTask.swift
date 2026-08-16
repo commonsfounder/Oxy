@@ -1,7 +1,6 @@
 import Foundation
 
-/// A durable goal owned by the agent. The backend may attach arbitrary JSON plans
-/// and results, so the iOS list deliberately decodes the stable task envelope only.
+/// A durable goal with a stable client-facing envelope.
 struct AgentTask: Codable, Identifiable, Equatable {
     let id: String
     let goal: String
@@ -13,12 +12,11 @@ struct AgentTask: Codable, Identifiable, Equatable {
     let createdAt: String?
     let updatedAt: String?
     let completedAt: String?
-    /// Why a run stopped. A paused task with no explanation is exactly the state the
-    /// durability work exists to eliminate, so this is shown wherever status is.
+    /// The reason a run stopped, when one is available.
     let lastError: String?
-    /// A checkpoint survived, so this run can continue rather than start over.
+    /// Whether the task can continue from its last checkpoint.
     let resumable: Bool
-    /// Parked on the user, not stalled — an action needs approving before it continues.
+    /// Whether an action needs approval before the task continues.
     let awaitingApproval: Bool
     /// The durable execution identity behind this goal, when one has been started.
     var runtime: AgentRuntimeSnapshot?
@@ -70,6 +68,24 @@ struct AgentTask: Codable, Identifiable, Equatable {
         }
     }
 
+    var displayGoal: String {
+        var words = goal.split(separator: " ").map(String.init)
+        while words.count > 1,
+              words[words.count - 1].caseInsensitiveCompare(words[words.count - 2]) == .orderedSame {
+            words.removeLast()
+        }
+        return words.joined(separator: " ")
+            .replacingOccurrences(of: "a appointment", with: "an appointment", options: .caseInsensitive)
+    }
+
+    var interruptionMessage: String? {
+        guard let lastError = lastError?.trimmingCharacters(in: .whitespacesAndNewlines), !lastError.isEmpty else {
+            return nil
+        }
+        let sentence = lastError.split(separator: ".", maxSplits: 1).first.map(String.init) ?? lastError
+        return sentence.hasSuffix(".") ? sentence : sentence + "."
+    }
+
     var updatedDate: Date? { Date.oxyParse(updatedAt ?? createdAt) }
 }
 
@@ -99,7 +115,7 @@ struct AgentRuntimeSnapshot: Codable, Equatable {
         case "running": return "Handling"
         case "waiting_approval": return "Needs your OK"
         case "completed": return "Complete"
-        case "failed": return "Needs attention"
+        case "failed": return "Needs you"
         case "paused": return "Paused"
         case "cancelled": return "Cancelled"
         default: return "Ready"

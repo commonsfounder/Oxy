@@ -91,7 +91,7 @@ test('a day with nothing on it says so concisely, not with an empty structure', 
   const digest = buildDailyDigest({ now: NOW });
   assert.equal(digest.empty, true);
   assert.equal(digest.items.length, 0);
-  assert.match(digest.text, /Nothing needs you today/);
+  assert.match(digest.text, /Nothing waiting today/);
 });
 
 // ── One urgent reply-needed thread ─────────────────────────────────────────────────────

@@ -100,7 +100,7 @@ function normalizeTask(task = {}) {
       id: `approval-task:${task.id || goal}`,
       kind: 'approval',
       title: goal,
-      detail: 'This needs your OK before Millie can continue.',
+      detail: 'Approval needed.',
       prompt: `Approve this: ${goal}`,
       urgency: 'now',
       priority: 94,
@@ -113,7 +113,7 @@ function normalizeTask(task = {}) {
       id: `goal:${task.id || goal}`,
       kind: 'goal',
       title: goal,
-      detail: 'This needs your attention before Millie can continue.',
+      detail: 'Review.',
       prompt: `Help Millie continue: ${goal}`,
       urgency: 'soon',
       priority: 88,
@@ -126,7 +126,7 @@ function normalizeTask(task = {}) {
       id: `goal:${task.id || goal}`,
       kind: 'goal',
       title: goal,
-      detail: 'Paused. Millie saved the progress and can continue.',
+      detail: 'Paused.',
       prompt: `Continue this: ${goal}`,
       urgency: 'soon',
       priority: 82,
@@ -139,7 +139,7 @@ function normalizeTask(task = {}) {
       id: `goal:${task.id || goal}`,
       kind: 'goal',
       title: goal,
-      detail: 'Millie is still handling this.',
+      detail: 'In progress.',
       prompt: `Show me the update: ${goal}`,
       urgency: 'background',
       priority: 48,
@@ -151,7 +151,7 @@ function normalizeTask(task = {}) {
     id: `goal:${task.id || goal}`,
     kind: 'goal',
     title: goal,
-    detail: 'Ready to keep moving when you are.',
+    detail: 'Ready.',
     prompt: `Start this task: ${goal}`,
     urgency: 'background',
     priority: 42,
@@ -187,7 +187,7 @@ function normalizeApproval(approval = {}) {
     id: `approval:${approval.approvalId || approval.taskId || goal}`,
     kind: 'approval',
     title: goal,
-    detail: 'This needs your OK before Millie can continue.',
+    detail: 'Review required.',
     prompt: `Approve this: ${goal}`,
     urgency: 'now',
     priority: 100,
@@ -333,7 +333,7 @@ function publicItem(item) {
   const output = {
     id: item.id,
     kind: item.kind,
-    title: cleanText(item.title, 'Something needs your attention', 180),
+    title: cleanText(item.title, 'Update', 180),
     detail: cleanText(item.detail, '', 220),
     urgency: item.urgency,
     prompt: cleanText(item.prompt, '', 220)
@@ -362,10 +362,10 @@ function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [
   ]).sort(itemSort).slice(0, MAX_ITEMS).map(publicItem);
 
   const headline = items.length === 0
-    ? 'Nothing pressing right now.'
+    ? 'No updates.'
     : items.length === 1
-      ? 'One thing needs your attention.'
-      : `${items.length} things need your attention.`;
+      ? '1 update'
+      : `${items.length} updates`;
 
   return {
     headline,
@@ -385,7 +385,7 @@ function buildLifeBriefing({ tasks = [], approvals = [], emails = [], events = [
 
 function formatLifeBriefing(briefing) {
   if (!briefing || briefing.empty || !briefing.items?.length) {
-    return 'Nothing pressing right now. I’ll keep an eye on what’s moving.';
+    return 'No updates.';
   }
   const parts = briefing.items.map((item, index) =>
     `${index + 1}. ${item.title} — ${item.detail}`

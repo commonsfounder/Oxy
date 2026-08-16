@@ -16,7 +16,7 @@ struct VaultView: View {
                 Color.appBackground.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScreenHeaderView(title: "Vault", onBack: { dismiss() })
+                    ScreenHeaderView(title: "Saved sign-ins", onBack: { dismiss() })
 
                     if !isUnlocked {
                         lockedState
@@ -57,7 +57,7 @@ struct VaultView: View {
 
     private var lockedState: some View {
         VStack(spacing: 12) {
-            Text(errorMessage ?? "Unlock with Face ID to view your saved credentials.")
+            Text(errorMessage ?? "Use Face ID to view saved sign-ins.")
                 .font(.rowSecondary)
                 .foregroundStyle(Color.appMuted)
                 .multilineTextAlignment(.center)
@@ -71,7 +71,7 @@ struct VaultView: View {
     private var credentialsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                AppSectionHeader(title: "Saved credentials")
+                AppSectionHeader(title: "Saved sign-ins")
                 Spacer()
                 Button("Add") { showEntrySheet = true }
                     .font(.rowSecondary)
@@ -79,7 +79,7 @@ struct VaultView: View {
             .padding(.bottom, 12)
 
             if credentials.isEmpty {
-                Text("No saved credentials. The agent will only use one when a task explicitly asks to sign in to that site.")
+                Text("No saved sign-ins.")
                     .font(.rowSecondary)
                     .foregroundStyle(Color.appMuted)
                     .padding(.vertical, 14)
@@ -90,7 +90,7 @@ struct VaultView: View {
                             Text(credential.label)
                                 .font(.rowTitle)
                                 .foregroundStyle(Color.appInk)
-                            Text("\(credential.site) · \(credential.username.isEmpty ? "no username saved" : credential.username)")
+                            Text("\(credential.site) · \(credential.username.isEmpty ? "No username" : credential.username)")
                                 .font(.rowSecondary)
                                 .foregroundStyle(Color.appMuted)
                         }
@@ -124,7 +124,7 @@ struct VaultView: View {
         do {
             let success = try await context.evaluatePolicy(
                 .deviceOwnerAuthenticationWithBiometrics,
-                localizedReason: "Unlock your Vault"
+                localizedReason: "Unlock saved sign-ins"
             )
             await MainActor.run { isUnlocked = success }
             if success { await loadCredentials() }
@@ -194,13 +194,13 @@ private struct VaultCredentialEntrySheet: View {
                     SecureField("Password", text: $password)
                         .textContentType(.password)
                 } footer: {
-                    Text("Stored encrypted. Only used when a task explicitly asks to sign in to this site, after you confirm.")
+                    Text("Encrypted. Used only after you approve sign-in.")
                 }
                 if let errorMessage {
                     Section { Text(errorMessage).foregroundStyle(.red) }
                 }
             }
-            .navigationTitle("Add credential")
+            .navigationTitle("Add sign-in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

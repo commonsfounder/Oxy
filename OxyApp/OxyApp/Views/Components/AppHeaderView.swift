@@ -1,17 +1,11 @@
 import SwiftUI
 
-/// Silent-luxury top header: pure black, no nav-bar chrome. A three-line menu
-/// icon on the left (opens history); on an empty chat, a small ghost icon on the
-/// right toggles incognito ("shadow") mode — filled white when active.
+/// Chat header.
 struct AppHeaderView: View {
     @Binding var isIncognito: Bool
-    /// Only show the incognito ghost when the conversation is empty.
     var isEmptyChat: Bool = false
-    /// Invoked when the left menu icon is tapped (open history/sidebar).
+    var showsBackButton: Bool = false
     var onLeading: () -> Void = {}
-    /// Invoked by the right-side compose icon to start a fresh conversation. Only offered
-    /// once a chat is under way — so a new chat (and abandoning any running order) is one
-    /// tap from anywhere, without opening the drawer.
     var onNewChat: (() -> Void)? = nil
 
     private let circle: CGFloat = 38
@@ -19,23 +13,18 @@ struct AppHeaderView: View {
     var body: some View {
         appGlassContainer(spacing: 16) {
             HStack {
-                // Left: history / menu, in a soft circular button (matches the
-                // app's other circular nav controls), finished with Liquid Glass.
                 Button(action: onLeading) {
-                    AppIcon("menu", size: 18)
+                    AppIcon(showsBackButton ? "chevron-left" : "menu", size: 18)
                         .foregroundColor(Color.appInk.opacity(0.85))
                         .frame(width: circle, height: circle)
                         .appGlass(Circle(), interactive: true)
                 }
                 .buttonStyle(.appScale)
-                .accessibilityLabel("History")
+                .accessibilityLabel(showsBackButton ? "Home" : "History")
 
                 Spacer()
 
                 HStack(spacing: 10) {
-                    // Right: incognito ghost. Offered on an empty chat, and kept visible whenever
-                    // shadow mode is ON so the user can see they're in it and switch it back off
-                    // mid-conversation — not just silently active behind an absent button.
                     if isEmptyChat || isIncognito {
                         Button {
                             withAnimation(.linear(duration: 0.15)) { isIncognito.toggle() }
@@ -52,8 +41,6 @@ struct AppHeaderView: View {
                             : "Turn on private chat. Turns will not be saved.")
                     }
 
-                    // New conversation — only once a chat is under way (an empty chat is already
-                    // new, so it'd be a no-op). One tap starts fresh from anywhere.
                     if !isEmptyChat, let onNewChat {
                         Button(action: onNewChat) {
                             AppIcon("edit", size: 17)
@@ -79,14 +66,10 @@ struct AppHeaderView: View {
     }
 }
 
-/// A minimal filled ghost glyph with cut-out eyes. Muted when off, ink when on
-/// (ink adapts to the finish so it stays visible on a light or dark glass chip).
 private struct GhostIcon: View {
     var active: Bool
 
     var body: some View {
-        // Active chip is ink-tinted, so the glyph takes the inverse of ink to stay
-        // legible in both finishes; inactive is a neutral muted grey.
         GhostShape()
             .fill(active ? Color.appAdaptive(dark: Color(red: 0.08, green: 0.08, blue: 0.10), light: .white) : Color.appMuted,
                   style: FillStyle(eoFill: true))

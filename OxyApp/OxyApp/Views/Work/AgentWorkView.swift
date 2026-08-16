@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// The agent's durable workspace: goals that continue beyond one chat turn,
-/// with their autonomy level and current state visible at a glance.
+/// Ongoing and completed requests.
 struct AgentWorkView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var tasks: [AgentTask] = []
@@ -28,7 +27,7 @@ struct AgentWorkView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 24) {
-                        ScreenHeaderView(title: "What Millie is handling", onBack: { dismiss() })
+                        ScreenHeaderView(title: "Work", onBack: { dismiss() })
 
                         Button(action: { isShowingComposer = true }) {
                             HStack(spacing: 8) {
@@ -104,12 +103,9 @@ struct AgentWorkView: View {
         VStack(alignment: .leading, spacing: 10) {
             AppIcon("dotted", size: 18)
                 .foregroundStyle(Color.appAccent)
-            Text("Nothing needs handling right now")
+            Text("Nothing in progress")
                 .font(.appBody(18, weight: .semibold))
                 .foregroundStyle(Color.appInk)
-            Text("Ask Millie to keep something moving while you get on with your day.")
-                .font(.appBody(14))
-                .foregroundStyle(Color.appMuted)
         }
         .padding(.top, 24)
     }
@@ -136,7 +132,7 @@ struct AgentWorkView: View {
     private var backgroundWatchesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Millie is watching")
+                Text("Watching")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 Spacer(minLength: 0)
@@ -166,7 +162,7 @@ struct AgentWorkView: View {
         } catch {
             await MainActor.run {
                 isLoading = false
-                if tasks.isEmpty { errorMessage = "Could not load what Millie is handling." }
+                if tasks.isEmpty { errorMessage = "Couldn't load work." }
             }
         }
 
@@ -289,10 +285,10 @@ private struct AgentGoalComposerView: View {
                         ScreenHeaderView(title: "New request", onBack: { dismiss() })
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("What should Millie handle?")
+                            Text("What needs doing?")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
-                            TextField("Tell Millie what to handle", text: $goal, axis: .vertical)
+                            TextField("e.g. Book a dentist appointment", text: $goal, axis: .vertical)
                                 .font(.appBody(16))
                                 .foregroundStyle(Color.appInk)
                                 .lineLimit(3...7)
@@ -301,19 +297,12 @@ private struct AgentGoalComposerView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 15) {
-                            Toggle(isOn: $guardMode) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Ask before each action")
-                                        .font(.appBody(15, weight: .medium))
-                                        .foregroundStyle(Color.appInk)
-                                    Text("Millie will ask before each action.")
-                                        .font(.appBody(12))
-                                        .foregroundStyle(Color.appMuted)
-                                }
-                            }
+                            Toggle("Ask before each action", isOn: $guardMode)
+                                .font(.appBody(15, weight: .medium))
+                                .foregroundStyle(Color.appInk)
                             .tint(Color.appAccent)
 
-                            Picker("Proactivity", selection: $autonomy) {
+                            Picker("Initiative", selection: $autonomy) {
                                 ForEach(autonomyLevels, id: \.self) { level in
                                     Text(level).tag(level)
                                 }
@@ -405,24 +394,19 @@ private struct AgentTaskRow: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 7) {
                         Circle().fill(statusColor).frame(width: 6, height: 6)
-                        Text(task.statusLabel.uppercased())
-                            .font(.appBody(10, weight: .semibold))
-                            .tracking(0.8)
+                        Text(task.statusLabel)
+                            .font(.appBody(13, weight: .semibold))
                             .foregroundStyle(statusColor)
                     }
-                    Text(task.goal)
+                    Text(task.displayGoal)
                         .font(.appBody(16, weight: .semibold))
                         .foregroundStyle(Color.appInk)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(task.autonomy + " autonomy · " + (task.currentStep == 0 ? "Not started" : "Step " + String(task.currentStep)))
-                        .font(.appBody(12))
-                        .foregroundStyle(Color.appMuted)
-                    // A run that stopped says why, and whether continuing picks up where it
-                    // left off or starts the goal again.
-                    if let lastError = task.lastError, !lastError.isEmpty, task.status.lowercased() != "completed" {
-                        Text(task.resumable ? lastError + " Continues from where it stopped." : lastError)
+                    if let interruptionMessage = task.interruptionMessage, task.status.lowercased() != "completed" {
+                        Text(interruptionMessage)
                             .font(.appBody(12))
                             .foregroundStyle(Color.mgDestructive)
+                            .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -436,24 +420,48 @@ private struct AgentTaskRow: View {
                         .foregroundStyle(Color.appMuted)
                         .buttonStyle(.appScale)
                     Spacer(minLength: 0)
-                    Button(action: onRun) {
-                        HStack(spacing: 7) {
-                            if isRunning { ProgressView().scaleEffect(0.65).tint(Color.appInk) }
-                            Text(isRunning ? "Starting" : task.awaitingApproval ? "Needs your OK" : task.status.lowercased() == "running" ? "Handling" : "Continue")
-                                .font(.appBody(12, weight: .semibold))
-                        }
-                        .foregroundStyle(Color.appInk)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(Color.appAccent.opacity(0.16), in: Capsule())
-                    }
-                    .buttonStyle(.appScale)
-                    .disabled(isRunning || task.status.lowercased() == "running" || task.awaitingApproval)
+                    taskAction
                 }
             }
         }
         .padding(16)
         .background { MissionGlassPlate() }
+    }
+
+    @ViewBuilder
+    private var taskAction: some View {
+        if task.awaitingApproval {
+            Button("Review", action: onOpen)
+                .buttonStyle(TaskActionButtonStyle())
+        } else if task.status.lowercased() == "running" {
+            Text("In progress")
+                .font(.appBody(12, weight: .semibold))
+                .foregroundStyle(Color.appMuted)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Color.appSurface2, in: Capsule())
+        } else {
+            Button(action: onRun) {
+                HStack(spacing: 7) {
+                    if isRunning { ProgressView().scaleEffect(0.65).tint(Color.appInk) }
+                    Text(isRunning ? "Starting" : task.resumable ? "Continue" : "Try again")
+                        .font(.appBody(12, weight: .semibold))
+                }
+            }
+            .buttonStyle(TaskActionButtonStyle())
+            .disabled(isRunning)
+        }
+    }
+}
+
+private struct TaskActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(Color.appInk)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(Color.appAccent.opacity(configuration.isPressed ? 0.24 : 0.16), in: Capsule())
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }
 }
 
@@ -488,7 +496,7 @@ private struct AgentTaskDetailView: View {
                         ScreenHeaderView(title: "Details", onBack: { dismiss() })
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(task.goal)
+                            Text(task.displayGoal)
                                 .font(.appBody(20, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -503,26 +511,19 @@ private struct AgentTaskDetailView: View {
                             Text("Your OK")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
-                            Toggle(isOn: $guardMode) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Ask before each action")
-                                        .font(.appBody(15, weight: .medium))
-                                        .foregroundStyle(Color.appInk)
-                                    Text("Millie will ask before each action.")
-                                        .font(.appBody(12))
-                                        .foregroundStyle(Color.appMuted)
-                                }
-                            }
+                            Toggle("Ask before each action", isOn: $guardMode)
+                                .font(.appBody(15, weight: .medium))
+                                .foregroundStyle(Color.appInk)
                             .tint(Color.appAccent)
                         }
                         .padding(16)
                         .background { MissionGlassPlate() }
 
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("How much Millie should take on")
+                            Text("Initiative")
                                 .font(.appBody(16, weight: .semibold))
                                 .foregroundStyle(Color.appInk)
-                            Picker("Proactivity", selection: $autonomy) {
+                            Picker("Initiative", selection: $autonomy) {
                                 ForEach(autonomyLevels, id: \.self) { level in
                                     Text(level).tag(level)
                                 }

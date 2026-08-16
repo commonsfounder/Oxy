@@ -69,7 +69,7 @@ final class AppState {
             self.userId = ""
             isDemoSession = false
             isAuthenticated = false
-            errorMessage = "Could not save your session securely. Please unlock your device and try again."
+            errorMessage = "Couldn't save your session. Unlock your device and try again."
             print("[Auth] baseURL=\(APIClient.shared.baseURL) bucket=callback_or_session_storage_failed environment=\(isDemo ? "DEMO" : "STANDARD") event=auth.login.failure provider=custom_session reason=keychain_save_failed")
             return
         }

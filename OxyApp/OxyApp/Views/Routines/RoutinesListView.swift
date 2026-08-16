@@ -62,7 +62,7 @@ struct RoutinesListView: View {
                                     MilgrainDivider()
                                 }
                             } else if routines.isEmpty {
-                                Text("No routines saved yet. Add a name and a prompt above and it'll be ready to run again later.")
+                                Text("No routines yet.")
                                     .font(.appBody(14))
                                     .foregroundStyle(Color.mgSecondary)
                                     .padding(.vertical, 20)

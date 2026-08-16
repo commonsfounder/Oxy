@@ -2840,7 +2840,9 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
 async function executeAction(userId, action, params, context = {}) {
   const connectorId = connectorForAction(action);
   if (connectorId && connectorId !== 'maps') {
-    const enabledConnectors = await getEnabledConnectors(userId, context.trace || null);
+    const enabledConnectors = Array.isArray(context.enabledConnectors)
+      ? context.enabledConnectors
+      : await getEnabledConnectors(userId, context.trace || null);
     if (!enabledConnectors.includes(connectorId)) {
       return {
         success: false,
@@ -2971,8 +2973,7 @@ async function executeAction(userId, action, params, context = {}) {
     case 'list_responsibilities': {
       const wf = require('./services/workflows');
       const items = await wf.summarizeForUser(supabase, userId);
-      if (!items.length) return { success: true, text: 'Nothing on my plate right now.', items: [] };
-      // Rendered as what Millie is handling — no statuses, no ids, no jargon.
+      if (!items.length) return { success: true, text: 'No active work.', items: [] };
       const lines = items.map(i => `${i.title}${i.detail ? ` — ${i.detail}` : ''}`);
       return {
         success: true,
@@ -3657,8 +3658,8 @@ async function executeAction(userId, action, params, context = {}) {
         success: true,
         deduped: Boolean(created.deduped),
         text: created.deduped
-          ? `I'm already watching “${task.title || title}” — updated it rather than starting a second one. ${scheduledTasks.describeSchedule(task)}.`
-          : `I’ll keep an eye on “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`,
+          ? `Already watching “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`
+          : `Watching “${task.title || title}” ${scheduledTasks.describeSchedule(task)}.`,
         actionSummary: 'Watch saved',
         scheduledTask: {
           id: task.id,
@@ -5321,7 +5322,7 @@ async function executeAction(userId, action, params, context = {}) {
         const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: 'Appointment booking is not connected yet.' });
         return {
           success: false,
-          error: "I need an appointment booking connection before I can look for times. I've kept this open so we can continue when it is ready.",
+          error: "Connect appointment booking to continue.",
           taskId: task.id,
           actionSummary: 'Appointment saved'
         };
@@ -5355,7 +5356,7 @@ async function executeAction(userId, action, params, context = {}) {
       } catch {
         const booking = { request, service: 'appointment', preference: { label: '' }, choices: [], phase: 'paused' };
         const task = await saveAppointmentTask(userId, params?.task_id, booking, { lastError: 'Appointment search paused.' });
-        return { success: false, error: "I couldn't look for appointment times right now. I've kept this open so we can try again.", taskId: task.id };
+        return { success: false, error: "Couldn't find appointment times. Try again.", taskId: task.id };
       }
     }
 
@@ -5367,7 +5368,7 @@ async function executeAction(userId, action, params, context = {}) {
       const service = getAppointmentBookingService();
       if (!service || booking.provider !== 'sandbox') {
         await saveAppointmentTask(userId, task.id, { ...booking, phase: 'needs_connection' }, { lastError: 'Appointment booking is not connected yet.' });
-        return { success: false, error: "I couldn't book that yet because the appointment connection is not ready. I've kept the choice open." };
+        return { success: false, error: 'Appointment booking is not connected yet.' };
       }
       try {
         const committed = booking.phase === 'calendar_retry' && booking.booking
@@ -5377,7 +5378,7 @@ async function executeAction(userId, action, params, context = {}) {
           await saveAppointmentTask(userId, task.id, { ...booking, phase: committed.kind === 'calendar_failed' ? 'calendar_retry' : 'choosing', booking: committed.booking || null }, {
             lastError: committed.text || 'Appointment was not confirmed.'
           });
-          return { success: false, error: committed.text || "I couldn't confirm that appointment. I've kept it open." };
+          return { success: false, error: committed.text || "Couldn't confirm that appointment." };
         }
         const completedBooking = { ...booking, phase: 'confirmed', booking: committed.booking };
         await saveAppointmentTask(userId, task.id, completedBooking, {
@@ -5395,7 +5396,7 @@ async function executeAction(userId, action, params, context = {}) {
         };
       } catch {
         await saveAppointmentTask(userId, task.id, { ...booking, phase: 'choosing' }, { lastError: 'Appointment booking paused.' });
-        return { success: false, error: "I couldn't confirm that appointment. I've kept it open so we can try again." };
+        return { success: false, error: "Couldn't confirm that appointment. Try again." };
       }
     }
 
@@ -8861,7 +8862,7 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       if (isScheduledRunNoteworthy(claimed, { conditionTriggered, failed, waiting })) {
         const spoken = sanitizeAgentTaskText(
           scheduledTasks.cleanScheduledResultText(result.spoken),
-          waiting ? `“${claimed.title}” needs your OK before Millie can continue.`
+          waiting ? `Review “${claimed.title}”.`
             : conditionTriggered ? `I found a match for “${claimed.title}”.`
               : `I checked “${claimed.title}”.`,
           500
@@ -9470,7 +9471,7 @@ function buildConciseDataAnswer(dataResults = []) {
     const grouped = emailGroups.length
       ? ` Most of what I found was ${emailGroups.map(group => `${group.count} ${group.category}`).join(', ')}.`
       : '';
-    lines.push(`Nothing urgent needs your attention from email.${grouped}`);
+    lines.push(`No urgent email.${grouped}`);
   } else if (emailItems.length) {
     lines.push(`I found ${emailItems.length} email${emailItems.length === 1 ? '' : 's'} that may need attention.`);
     for (const email of emailItems.slice(0, 3)) {
@@ -9498,7 +9499,7 @@ function buildConciseDataAnswer(dataResults = []) {
     lines.push('I did not find calendar events in the requested window.');
   }
   if (!emailItems.length && !calendarItems.length && emailSets.length && calendarSets.length) {
-    lines[0] = 'Nothing urgent needs your attention. I did not find actionable email or calendar commitments to prepare for.';
+    lines[0] = 'No urgent email or calendar items.';
   } else if (emailItems.length && calendarItems.length) {
     lines.push('Start with the email items that need a response, then use the calendar items as your preparation list.');
   } else if (emailItems.length) {
@@ -11992,9 +11993,7 @@ app.get('/tasks/:id/steps', requireSessionAuth, async (req, res) => {
 
 // --- The home board -------------------------------------------------------------------
 //
-// Four lanes in one call: what needs you, what Millie is handling, what changed while you
-// were away, what finished. api/services/home-state.js owns the assembly; these routes only
-// authenticate and hand back what it built.
+// Home board.
 
 app.get('/agent/state', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);

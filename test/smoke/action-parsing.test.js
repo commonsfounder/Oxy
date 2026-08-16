@@ -190,7 +190,7 @@ test('compound read-only summary threads the original message so broad email tri
     ] } },
     { action: 'get_calendar_events', result: { success: true, events: [] } }
   ], 'Check my emails for anything important today, then check my calendar for tomorrow and tell me what I need to prepare for.');
-  assert.match(spoken, /Nothing urgent needs your attention/i);
+  assert.match(spoken, /No urgent email/i);
   assert.doesNotMatch(spoken, /Indeed|WorkCircle|FindEveryJob/);
 });
 
@@ -303,7 +303,7 @@ test('compound email and calendar fallback leads with the conclusion', () => {
     { action: 'get_calendar_events', input: { when: 'tomorrow' }, result: { success: true, events: [] } }
   ], 'Check my emails for anything important today, then check my calendar for tomorrow and tell me what I need to prepare for.');
   const spoken = guardVisibleDataResponse('Email results:\nBody: raw leak', contexts);
-  assert.match(spoken.split('\n')[0], /Nothing urgent needs your attention/i);
+  assert.match(spoken.split('\n')[0], /No urgent email/i);
   assert.doesNotMatch(spoken, /Indeed.*New jobs.*Recommended jobs/i);
 });
 

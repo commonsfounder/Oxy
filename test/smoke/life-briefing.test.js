@@ -82,8 +82,8 @@ test('deduplicates a task approval and keeps a quiet empty state', () => {
 
   const empty = buildLifeBriefing({ now });
   assert.equal(empty.empty, true);
-  assert.equal(empty.headline, 'Nothing pressing right now.');
-  assert.match(formatLifeBriefing(empty), /Nothing pressing right now/);
+  assert.equal(empty.headline, 'No updates.');
+  assert.equal(formatLifeBriefing(empty), 'No updates.');
 });
 
 test('ignores stale and informational items', () => {

@@ -141,7 +141,7 @@ struct AgentOSView: View {
         let active = goals.filter { ["pending", "running", "paused", "failed"].contains($0.status.lowercased()) }
         if !active.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Millie is handling")
+                Text("In progress")
                     .font(.appBody(18, weight: .semibold))
                     .foregroundStyle(Color.appInk)
                 VStack(alignment: .leading, spacing: 0) {
@@ -199,10 +199,10 @@ struct AgentOSView: View {
 
     private func goalStatus(_ status: String) -> String {
         switch status.lowercased() {
-        case "running": return "Millie is handling this"
+        case "running": return "In progress"
         case "paused": return "Paused"
-        case "failed": return "Needs your attention"
-        default: return "Ready to continue"
+        case "failed": return "Needs you"
+        default: return "Ready"
         }
     }
 
@@ -228,7 +228,7 @@ struct AgentOSView: View {
             await MainActor.run {
                 isLoading = false
                 if context == nil {
-                    errorMessage = "Could not load Millie's context."
+                    errorMessage = "Couldn't load context."
                 }
             }
         }

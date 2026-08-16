@@ -108,13 +108,7 @@ struct LoginView: View {
         }
     }
 
-    /// The backend is asked first, and the offline bypass is only a fallback.
-    ///
-    /// This used to be the other way around: DEBUG builds returned a fake `debug-local`
-    /// token before ever calling the server, which meant that pointing the Simulator at a
-    /// backend with demo auth genuinely enabled still produced a session that 401'd on
-    /// every request and silently fell back to mock content. The bypass keeps its original
-    /// purpose — driving the UI with no backend at all — without lying when one exists.
+    /// Use a local demo session only when the backend demo is unavailable.
     private func failDemoLogin(_ message: String) {
         #if DEBUG
         HapticManager.shared.success()
@@ -158,7 +152,7 @@ private struct LoginFormPage: View {
                     .padding(.bottom, 44)
 
                 VStack(alignment: .leading, spacing: 28) {
-                    lineField(placeholder: "User ID", text: $userId, secure: false, field: .userId)
+                    lineField(placeholder: "Email or username", text: $userId, secure: false, field: .userId)
                     lineField(placeholder: "Password", text: $password, secure: true, field: .password)
                 }
 
@@ -179,18 +173,12 @@ private struct LoginFormPage: View {
                                 .scaleEffect(0.8)
                         }
                         Text(isRegistering ? "Create Account" : "Sign In")
-                            .font(.system(size: 14, weight: .semibold))
-                            .tracking(1.5)
+                            .font(.appBody(15, weight: .semibold))
                     }
-                    // On-ink, not pure black: contrasts with appInk in BOTH finishes (the same
-                    // primary button accent. appBackground.
-                    // enabled button in light mode rendered black text on a near-black fill —
-                    // invisible. appBackground flips with the finish and stays legible.
                     .foregroundStyle(Color.appBackground)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 58)
-                    .background(Color.appInk)
-                    .clipShape(Capsule())
+                    .frame(height: 50)
+                    .background(Color.appInk, in: RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                 }
                 .buttonStyle(.appScale)
                 .disabled(isLoading || userId.isEmpty || password.isEmpty)
@@ -203,16 +191,15 @@ private struct LoginFormPage: View {
                         HStack(spacing: 8) {
                             AppIcon("person-check", size: 16)
                             Text("Continue as Test User")
-                                .font(.system(size: 13, weight: .semibold))
-                                .tracking(1.1)
+                                .font(.appBody(14, weight: .semibold))
                         }
                         .foregroundStyle(Color.appInk)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
+                        .frame(height: 48)
                         .background(Color.appFillSubtle)
-                        .clipShape(Capsule())
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous))
                         .overlay(
-                            Capsule()
+                            RoundedRectangle(cornerRadius: AppRadius.md, style: .continuous)
                                 .stroke(Color.appHairline, lineWidth: 0.5)
                         )
                     }
@@ -232,7 +219,7 @@ private struct LoginFormPage: View {
                     withAnimation(.appFast) { isRegistering.toggle() }
                 } label: {
                     Text(isRegistering ? "Already have an account? Sign in" : "New here? Create account")
-                        .font(.system(size: 13, weight: .light))
+                        .font(.appBody(14))
                         .foregroundStyle(Color.appMuted)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
@@ -250,14 +237,14 @@ private struct LoginFormPage: View {
         VStack(spacing: 9) {
             Group {
                 if secure {
-                    SecureField(placeholder, text: text)
+                    SecureField("", text: text, prompt: Text(placeholder).foregroundStyle(Color.appMuted))
                 } else {
-                    TextField(placeholder, text: text)
+                    TextField("", text: text, prompt: Text(placeholder).foregroundStyle(Color.appMuted))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
             }
-            .font(.system(size: 16, weight: .light))
+            .font(.appBody(16))
             .foregroundStyle(Color.appInk)
             .tint(Color.appTitanium)
             .focused($focusedField, equals: field)

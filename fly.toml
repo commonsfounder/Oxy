@@ -1,0 +1,36 @@
+# fly.toml app configuration file generated for milgrain-live-2026 on 2026-08-16T09:14:13+01:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'milgrain-live-2026'
+primary_region = 'lhr'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  APP_URL = 'https://milgrain-live-2026.fly.dev'
+  NODE_ENV = 'production'
+  TZ = 'Europe/London'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+  [[http_service.checks]]
+    grace_period = '60s'
+    interval = '30s'
+    method = 'GET'
+    timeout = '5s'
+    path = '/health'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

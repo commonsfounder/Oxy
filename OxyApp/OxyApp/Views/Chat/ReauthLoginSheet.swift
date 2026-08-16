@@ -29,7 +29,7 @@ struct ReauthLoginSheet: View {
                 } header: {
                     Text("Sign in to \(site)")
                 } footer: {
-                    Text("Typed straight into the site's own sign-in form — never sent through chat or seen by the model.")
+                    Text("Entered on the site's sign-in form. Never sent through chat.")
                 }
                 Section {
                     Toggle("Save to Vault for next time", isOn: $saveToVault)

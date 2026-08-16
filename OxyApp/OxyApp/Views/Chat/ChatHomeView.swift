@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// The Chat tab. Shows a live `ChatView` with a slide-in conversation sidebar
-/// (Claude/ChatGPT style): New Chat, search, and date-grouped recent chats.
-/// Opens via the top-left menu button or a swipe from the left edge.
+/// Chat and conversation history.
 struct ChatHomeView: View {
     var showHistoryOnAppear = false
     @Environment(AppState.self) private var appState
@@ -27,7 +25,6 @@ struct ChatHomeView: View {
     // Pendant
     @State private var pendantBridge = PendantAudioBridge()
 
-    // Resolved from the app-wide appearance setting via the root's preferredColorScheme.
     @Environment(\.colorScheme) private var colorScheme
     private var lightMode: Bool { colorScheme == .light }
 
@@ -98,13 +95,11 @@ struct ChatHomeView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            // Header — Milgrain wordmark above the label for weight
             VStack(alignment: .leading, spacing: 10) {
                 BrandWordmark(height: 12)
-                Text("CONVERSATIONS")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(3.5)
-                    .foregroundStyle(Color.appMuted.opacity(0.8))
+                Text("Conversations")
+                    .font(.appBody(15, weight: .semibold))
+                    .foregroundStyle(Color.appInk)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)

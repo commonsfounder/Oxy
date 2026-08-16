@@ -92,3 +92,15 @@ test('listRecentEntities returns up to limit rows for that user, most recent fir
   assert.equal(entities.length, 2);
   assert.equal(entities[0].entity_name, 'New');
 });
+
+test('listRecentEntities drops rows older than the sinceHours window', async () => {
+  const now = Date.now();
+  const rows = [
+    { id: '1', user_id: 'u1', site: 'amazon.co.uk', entity_name: 'A laptop from weeks ago', entity_type: 'product', created_at: new Date(now - 1000 * 60 * 60 * 24 * 24).toISOString() },
+    { id: '2', user_id: 'u1', site: 'x.com', entity_name: 'Touched this morning', entity_type: 'product', created_at: new Date(now - 1000 * 60 * 60).toISOString() }
+  ];
+  const supabase = fakeSupabase(rows);
+  const { entities } = await listRecentEntities(supabase, 'u1', 10);
+  assert.equal(entities.length, 1);
+  assert.equal(entities[0].entity_name, 'Touched this morning');
+});

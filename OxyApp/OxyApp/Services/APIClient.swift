@@ -27,9 +27,9 @@ final class APIClient: @unchecked Sendable {
             return envURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
         #if DEBUG
-        return "https://oxy-151340634966.europe-west2.run.app"
+        return "https://milgrain-live-2026.fly.dev"
         #else
-        return "https://oxy-151340634966.europe-west2.run.app"
+        return "https://milgrain-live-2026.fly.dev"
         #endif
     }
 

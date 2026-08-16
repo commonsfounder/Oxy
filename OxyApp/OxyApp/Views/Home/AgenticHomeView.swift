@@ -1,35 +1,20 @@
 import SwiftUI
 
-// MARK: - Agentic home
-//
-// Visual language after the Gleb Kuznetsov concept (soft pastel wash, glass,
-// serif greeting): https://x.com/glebich/status/2066714881911586836
-//
-// A buy/food-order/ride intent opens AgentTaskSession's native step-flow shell
-// (search animation → result → confirm), but every field on it comes from the
-// real backend — the same run_browser_task/confirm_browser_payment/book_uber
-// pipeline chat already uses, just without rendering a chat transcript. Restaurant
-// bookings have no real backend yet, so that intent isn't matched — see
-// Models/AgentTaskSession.swift and docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
+// MARK: - Home
 
 struct AgenticHomeView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
 
-    /// Foreground poll interval — Home has no push/BGAppRefreshTask, so this is the
-    /// only thing that keeps cards from going stale while the screen sits open.
+    /// Idle refresh interval.
     private static let pollInterval: Duration = .seconds(90)
-    /// While something is actually running, 90 seconds is far too slow to read as live.
+    /// Refresh interval while work is active.
     private static let activePollInterval: Duration = .seconds(10)
 
-    /// The four lanes — what needs you, what Millie is handling, what changed while you
-    /// were away, what finished. One server call (api/services/home-state.js) rather than
-    /// the client stitching briefings, tasks and watches together itself.
+    /// Home board state.
     @State private var board: HomeBoard = .empty
-    /// The responsibility whose live timeline is open, if any.
     @State private var openWorkflowID: String?
-    /// Guards the watermark: the Changed lane must only be cleared once the user has
-    /// genuinely looked at the board, and only once per foreground visit.
+    /// Prevents duplicate changed-state acknowledgement.
     @State private var hasMarkedSeen = false
 
     @State private var briefings: [Briefing] = []
@@ -39,30 +24,17 @@ struct AgenticHomeView: View {
     @State private var errorMessage: String?
     @State private var weather: OxyWeatherService.OxyWeatherSnapshot?
     @State private var chatLaunch: ChatLaunch?
-    /// Whichever session's sheet is currently on screen, if any.
     @State private var activeSession: AgentTaskSession?
-    /// Sessions that were dismissed (swiped away) while still running — the sheet
-    /// closing no longer cancels the job; it keeps executing via the `Task` started
-    /// in `startSession`, and shows as a Working/Needs-you card on Home (see
-    /// `sessionMissions`) until it completes or the user abandons it.
+    /// Sessions that continue after their sheet is dismissed.
     @State private var backgroundSessions: [AgentTaskSession] = []
-    /// Home is the sole root screen — no bottom tab bar. Chat and More are reached
-    /// via the composer / avatar (unchanged) or an edge swipe, and both dismiss the
-    /// same way every other cover in this app does: `.swipeToDismiss()`.
     @State private var isChatHomePresented = false
     @State private var isMorePresented = false
     @State private var chatDragOffset: CGFloat = 0
     @State private var chatDragActive = false
     @State private var localMissions: [HomeMission] = []
-    /// "Ignore" on an inbox card is a purely local dismiss — there's no real
-    /// archive/mark-read backend action to call, so this never claims the email was
-    /// actually archived server-side, only that it's hidden from this feed. Persisted
-    /// to UserDefaults (keyed per user) so an ignored email stays ignored across
-    /// launches instead of reappearing every time this in-memory Set resets.
+    /// Locally dismissed inbox items.
     @State private var dismissedMailIDs: Set<String> = []
-    /// Swiping a mission card away (any kind except `.mailGroup`, which already has its
-    /// own per-email "Ignore" CTA) is a purely local hide, same contract as
-    /// `dismissedMailIDs` — persisted so it stays hidden across launches.
+    /// Locally dismissed missions.
     @State private var dismissedMissionIDs: Set<String> = []
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
@@ -71,9 +43,8 @@ struct AgenticHomeView: View {
     @State private var agentWatches: [AgentWatch] = []
     @State private var stoppingWatchIDs = Set<String>()
     @State private var isAgentWorkPresented = false
-    /// "Recently touched" strip (Phase 3 of the aside-parity roadmap) — entities the
-    /// agent itself touched while running a task, not a search UI. Empty array hides
-    /// the strip entirely rather than showing an empty-state placeholder.
+    @State private var hasEmailConnection = false
+    /// Recent task entities.
     @State private var recentEntities: [RecentEntity] = []
 
     var body: some View {
@@ -97,13 +68,11 @@ struct AgenticHomeView: View {
                             .padding(.top, 2)
 
                         if let errorMessage {
-                            ErrorBanner(message: errorMessage) {
+                            ErrorBanner(message: errorMessage, onRetry: {
                                 Task { await load(forceCheck: false) }
-                            }
+                            })
                         }
 
-                        // Proof that work is happening, above everything else. Only rendered
-                        // while something is genuinely in flight.
                         if board.isWorking {
                             LiveWorkHeader(
                                 count: board.handling.count,
@@ -119,21 +88,16 @@ struct AgenticHomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .top)))
                         }
 
-                        if isLoading && board.isEmpty && missions.isEmpty {
+                        if isLoading && board.isEmpty && missions.isEmpty && visibleLifeBriefing == nil {
                             ProgressView()
                                 .tint(GlebChrome.ink.opacity(0.4))
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 40)
-                        } else if board.isEmpty && missions.isEmpty {
-                            emptyMissions
-                                .padding(.top, 4)
                         } else {
-                            boardLanes
+                            if !board.isEmpty {
+                                boardLanes
+                            }
 
-                            // The inbox, deliveries and watches still come from the briefing
-                            // feed, which the board does not yet cover. Rendering them below
-                            // the lanes keeps that real content rather than dropping it, and
-                            // keeps them visually subordinate to work Millie actually owns.
                             if !missions.isEmpty {
                                 LazyVStack(spacing: 12) {
                                     ForEach(missions) { mission in
@@ -156,9 +120,6 @@ struct AgenticHomeView: View {
                             }
                         }
 
-                        suggestionRail
-                            .padding(.top, 2)
-
                         if !recentEntities.isEmpty {
                             recentEntitiesRail
                                 .padding(.top, 2)
@@ -177,10 +138,7 @@ struct AgenticHomeView: View {
                     .padding(.bottom, 10)
             }
 
-            // Right-edge swipe → Chat, mirroring ChatHomeView's own left-edge sidebar
-            // gesture (same technique: a thin edge strip + DragGesture, not a
-            // screen-wide recognizer — Home's ScrollView already owns pull-to-refresh
-            // and the inbox card owns its own horizontal swipes).
+            // Chat edge gesture.
             Color.clear
                 .frame(width: 20)
                 .frame(maxHeight: .infinity)
@@ -190,19 +148,14 @@ struct AgenticHomeView: View {
 
             chatPeekIndicator
         }
-        .preferredColorScheme(.light)
         .toolbar(.hidden, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .task {
             await load(forceCheck: false)
             await loadBoard()
             await loadRecentEntities()
-            // The board is only "seen" once it has actually been on screen — marking it on
-            // every poll would empty the Changed lane before the user ever read it.
             await markBoardSeenOnce()
             while !Task.isCancelled {
-                // Live work refreshes quickly; an idle screen stays on the slow interval
-                // rather than polling a dormant backend every few seconds.
                 try? await Task.sleep(for: board.isWorking ? Self.activePollInterval : Self.pollInterval)
                 guard !Task.isCancelled else { break }
                 await loadBoard()
@@ -252,10 +205,6 @@ struct AgenticHomeView: View {
             isMorePresented = true
         }
         .fullScreenCover(isPresented: $isChatHomePresented) {
-            // No `.swipeToDismiss()` here — ChatHomeView already owns a left-edge
-            // swipe for its own conversation-history drawer, and stacking a second
-            // left-edge gesture on top of it left no reliable way back to Home. An
-            // explicit close button is the honest fix, not a gesture-priority hack.
             ChatHomeView()
                 .overlay(alignment: .topTrailing) {
                     Button {
@@ -337,22 +286,9 @@ struct AgenticHomeView: View {
                     activeSession = nil
                 },
                 onOpenChat: { prompt in
-                    // Manually escaping to chat mid-job (e.g. tapping while a purchase
-                    // is still running) shouldn't let that in-flight work vanish with
-                    // no way to ever see its outcome — same background tracking as a
-                    // plain dismiss.
                     backgroundIfNeeded(session)
                     activeSession = nil
-                    // `startFresh: true` here was wiping the exact turn the hidden
-                    // pipeline just ran — for .shopping/.ride jobs, `session.start()`
-                    // already called chatService.sendMessage (the same /chat endpoint
-                    // real chat uses, which persists the turn server-side regardless of
-                    // what this session's SSE consumer did with it) before ever handing
-                    // off here. Landing on a blank new chat threw away the model's own
-                    // reply — often a clarifying question ("what gift, for who?") — so a
-                    // "buy a gift" job would flash the native UI, find no run_browser_task
-                    // call yet, and dump the user into an empty chat with no visible
-                    // reason why. Loading real history instead surfaces that reply.
+                    // Keep the existing conversation when a session opens chat.
                     openChat(autoSend: prompt, startFresh: false)
                 }
             )
@@ -361,8 +297,6 @@ struct AgenticHomeView: View {
             AgentWorkView()
                 .swipeToDismiss()
         }
-        // Watching one responsibility progress. Reloads the board on the way out so a
-        // decision made in there is reflected on Home immediately.
         .fullScreenCover(item: Binding(
             get: { openWorkflowID.map(OpenWorkflow.init) },
             set: { openWorkflowID = $0?.id }
@@ -373,11 +307,10 @@ struct AgenticHomeView: View {
         }
     }
 
-    // MARK: - Greeting (video: date + large serif over pastel)
+    // MARK: - Greeting
 
     private var greetingBlock: some View {
         ZStack(alignment: .bottomLeading) {
-            // Soft rainbow under the name, like the concept
             Ellipse()
                 .fill(
                     RadialGradient(
@@ -412,11 +345,8 @@ struct AgenticHomeView: View {
         .padding(.bottom, 4)
     }
 
-    // MARK: - The board
+    // MARK: - Board
 
-    /// Fixed order, and empty lanes are omitted entirely rather than shown as placeholders:
-    /// four permanently-visible headings with nothing under them would make a quiet day look
-    /// like a broken screen.
     private var boardLanes: some View {
         VStack(alignment: .leading, spacing: 22) {
             ForEach(BoardLane.allCases) { lane in
@@ -445,13 +375,9 @@ struct AgenticHomeView: View {
             isAgentWorkPresented = true
             return
         }
-        // A promise the user owes has no machinery behind it — there is nothing to watch,
-        // so the useful move is to start the conversation about it.
         openChat(autoSend: nil, startFresh: false)
     }
 
-    /// Answers a decision straight from the card, then reloads so the row visibly moves out
-    /// of Needs you and back into Handling.
     private func decide(on item: BoardItem, approved: Bool, choice: String?) {
         guard let workflowId = item.workflowId, let checkpointId = item.checkpointId else {
             openBoardItem(item)
@@ -473,13 +399,14 @@ struct AgenticHomeView: View {
         }
     }
 
-    /// Advances the "changed since" watermark exactly once per visit. Deliberately fired
-    /// after the first render rather than before it, so what changed is still on screen when
-    /// the watermark moves — the next open is what starts clean.
+    /// Acknowledge board changes once per visit.
     private func markBoardSeenOnce() async {
         guard !hasMarkedSeen else { return }
         hasMarkedSeen = true
-        try? await HomeBoardService.markSeen()
+        do {
+            try await HomeBoardService.markSeen()
+        } catch {
+        }
     }
 
     private func loadBoard() async {
@@ -487,52 +414,10 @@ struct AgenticHomeView: View {
             let fetched = try await HomeBoardService.fetchBoard()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.86)) { board = fetched }
         } catch {
-            // A board failure must not blank Home — the briefing feed below still renders.
         }
     }
 
     // MARK: - Chrome
-
-    private var emptyMissions: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Nothing needs handling right now")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(GlebChrome.ink)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background { MissionGlassPlate() }
-    }
-
-    private var suggestionRail: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(Self.suggestions, id: \.self) { prompt in
-                    Button {
-                        handleIntent(prompt)
-                    } label: {
-                        Text(prompt)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(GlebChrome.ink.opacity(0.75))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.appScale(0.97))
-                }
-            }
-            .padding(.vertical, 2)
-        }
-    }
-
-    private static let suggestions = [
-        "What matters?",
-        "Book a table for dinner",
-        "Book a ride home",
-        "Order food nearby",
-        "Buy a gift"
-    ]
 
     private var recentEntitiesRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -548,10 +433,9 @@ struct AgenticHomeView: View {
                             .foregroundStyle(GlebChrome.ink.opacity(0.5))
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 0.5))
+                    .frame(width: 180, alignment: .leading)
+                    .padding(12)
+                    .background { MissionGlassPlate() }
                 }
             }
             .padding(.vertical, 2)
@@ -564,8 +448,6 @@ struct AgenticHomeView: View {
             let response = try JSONDecoder().decode(RecentEntitiesResponse.self, from: data)
             await MainActor.run { recentEntities = response.entities }
         } catch {
-            // Ambient surface, not a primary screen — a failed fetch just means the
-            // strip stays hidden, no error state to show.
         }
     }
 
@@ -578,12 +460,13 @@ struct AgenticHomeView: View {
                 AppIcon("plus", size: 16)
                     .foregroundStyle(GlebChrome.ink.opacity(0.6))
                     .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
+                    .background(Color.appSurface, in: Circle())
+                    .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.5))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.appScale)
 
             HStack(spacing: 8) {
-                TextField("Type a message", text: $composerDraft)
+                TextField("Message", text: $composerDraft)
                     .font(.system(size: 16))
                     .foregroundStyle(GlebChrome.ink)
                     .focused($composerFocused)
@@ -611,9 +494,9 @@ struct AgenticHomeView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.75), lineWidth: 0.6))
-            .shadow(color: .black.opacity(0.08), radius: 16, y: 6)
+            .background(Color.appSurface, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
+            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
         }
     }
 
@@ -621,12 +504,7 @@ struct AgenticHomeView: View {
 
     private static let chatDragCommitDistance: CGFloat = -60
 
-    /// Right-edge swipe → Chat. `minimumDistance: 12` + a translation threshold
-    /// (not just `.gesture` on the whole screen) so this never fights Home's own
-    /// `.refreshable` pull or the inbox card's horizontal swipe paging. Tracks the
-    /// drag live (rather than firing only on release) so `chatPeekIndicator` can
-    /// follow the finger — the same live-drag feel `SwipeToDismissModifier` and
-    /// ChatHomeView's own sidebar gesture already use elsewhere in this app.
+    /// Right-edge swipe to Chat.
     private var chatEdgeGesture: some Gesture {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
@@ -648,17 +526,15 @@ struct AgenticHomeView: View {
             }
     }
 
-    /// Floating chat-glyph badge that follows the right-edge drag, fading in as the
-    /// gesture approaches its commit distance — the visual half of `chatEdgeGesture`,
-    /// same idea as iOS's own edge-swipe-back hint.
+    /// Chat edge-swipe indicator.
     private var chatPeekIndicator: some View {
         HStack {
             Spacer()
             AppIcon("chat", size: 17)
                 .foregroundStyle(GlebChrome.ink.opacity(0.75))
                 .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.75), lineWidth: 0.6))
+                .background(Color.appSurface, in: Circle())
+                .overlay(Circle().strokeBorder(Color.appHairline, lineWidth: 0.6))
                 .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
         }
         .padding(.trailing, 10)
@@ -669,12 +545,11 @@ struct AgenticHomeView: View {
 
     // MARK: - Data
 
-    /// Keep one clear card for each item. A message or goal can arrive through both
-    /// the live briefing and the older outcome feed. Showing both makes Millie look
-    /// forgetful, so the outcome card wins and only genuinely new context stays here.
+    /// Deduplicated mission cards.
     private var visibleLifeBriefing: LifeBriefing? {
         guard let lifeBriefing, !lifeBriefing.items.isEmpty else { return nil }
         let missionTitles = missions.map { $0.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+        let missionTaskIDs = Set(missions.compactMap(\.taskID))
         let items = lifeBriefing.items.filter { item in
             let title = item.title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             let duplicatesOutcome = missionTitles.contains { missionTitle in
@@ -683,15 +558,12 @@ struct AgenticHomeView: View {
             }
             let duplicatesInbox = item.kind.lowercased() == "message" &&
                 missions.contains { $0.kind == .mailGroup }
-            return !duplicatesOutcome && !duplicatesInbox
+            let duplicatesTask = item.taskId.map(missionTaskIDs.contains) ?? false
+            return !duplicatesOutcome && !duplicatesInbox && !duplicatesTask
         }
         guard !items.isEmpty else { return nil }
         guard items.count != lifeBriefing.items.count else { return lifeBriefing }
-        let headline: String
-        switch items.count {
-        case 1: headline = "One thing needs your attention."
-        default: headline = "\(items.count) things need your attention."
-        }
+        let headline = items.count == 1 ? "1 update" : "\(items.count) updates"
         return LifeBriefing(
             headline: headline,
             items: items,
@@ -702,7 +574,10 @@ struct AgenticHomeView: View {
     }
 
     private var missions: [HomeMission] {
-        let briefingMissions = HomeMissionBuilder.build(from: briefings).filter { $0.kind != .agent }
+        let briefingMissions = HomeMissionBuilder.build(from: briefings).filter { mission in
+            guard mission.kind != .agent else { return false }
+            return hasEmailConnection || (mission.kind != .mailGroup && mission.kind != .incoming)
+        }
         return (watchMissions + persistentTaskMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
             guard mission.kind == .mailGroup else {
                 return dismissedMissionIDs.contains(mission.id) ? nil : mission
@@ -724,7 +599,7 @@ struct AgenticHomeView: View {
             return HomeMission(
                 id: "watch-\(watch.id)",
                 kind: .agent,
-                eyebrow: "Millie is watching",
+                eyebrow: "Watching",
                 title: watch.title,
                 detail: detail,
                 cta: "Stop watching",
@@ -736,10 +611,7 @@ struct AgenticHomeView: View {
         }
     }
 
-    /// One card per backgrounded job, reflecting its live `@Observable` state — no
-    /// snapshotting, so this updates itself as the session progresses even while its
-    /// sheet is closed. The currently-presented session is excluded so its card
-    /// doesn't sit duplicated behind the open sheet.
+    /// Cards for background sessions.
     private var sessionMissions: [HomeMission] {
         backgroundSessions
             .filter { $0.id != activeSession?.id }
@@ -774,16 +646,16 @@ struct AgenticHomeView: View {
                 let cta: String?
                 switch lower {
                 case "running": eyebrow = "Handling"; cta = "Open"
-                case "failed": eyebrow = "Needs your attention"; cta = "Review"
-                case "paused": eyebrow = "Paused"; cta = "Resume"
-                default: eyebrow = "Ready"; cta = "Start"
+                case "failed": eyebrow = "Needs you"; cta = "Review"
+                case "paused": eyebrow = task.awaitingApproval ? "Needs your OK" : "Paused"; cta = "View"
+                default: eyebrow = "Ready"; cta = "View"
                 }
                 return HomeMission(
                     id: "persistent-task-\(task.id)",
                     kind: .agent,
                     eyebrow: eyebrow,
-                    title: task.goal,
-                    detail: lower == "running" ? "Millie is handling this." : lower == "paused" ? "Saved and ready to continue." : "Ready when you are.",
+                    title: task.displayGoal,
+                    detail: nil,
                     cta: cta,
                     prompt: nil,
                     symbol: "circle.dotted",
@@ -802,7 +674,7 @@ struct AgenticHomeView: View {
                     id: "completed-booking-\(task.id)",
                     kind: .status,
                     eyebrow: "Booked",
-                    title: task.goal,
+                    title: task.displayGoal,
                     detail: nil,
                     cta: nil,
                     prompt: nil,
@@ -820,10 +692,7 @@ struct AgenticHomeView: View {
     private func handleLifeBriefingItem(_ item: LifeBriefingItem) {
         HapticManager.shared.impact(.light)
         if item.kind.caseInsensitiveCompare("approval") == .orderedSame {
-            // The pending action already exists in the current conversation. Loading that
-            // conversation lets ChatView present the saved review card with its real email
-            // details. Sending a new "Approve this" turn here could confirm the action
-            // before the user sees what Millie prepared.
+            // Open the saved review before approving.
             openChat(autoSend: nil, startFresh: false, review: item.reviewAction)
             return
         }
@@ -877,59 +746,34 @@ struct AgenticHomeView: View {
         }
     }
 
-    /// Explicitly abandons a backgrounded job — swiping its Home card away. The job
-    /// itself has no server-side cancel (run_browser_task/book_uber calls that are
-    /// already in flight finish regardless), this only stops tracking and showing it.
+    /// Stop showing a background session.
     private func abandonSession(_ id: String) {
         backgroundSessions.removeAll { sessionMissionID($0) == id }
     }
 
-    /// Every place a native job starts: create it, present its sheet, and kick off
-    /// the real pipeline call immediately — not from the sheet's own `.task`, so the
-    /// work isn't tied to the sheet's lifecycle and survives a dismiss.
+    /// Start work independently of the sheet lifecycle.
     private func startSession(_ session: AgentTaskSession) {
         activeSession = session
         Task { await session.start() }
     }
 
-    /// Shared by both ways a session's sheet can go away (swipe-dismiss and the
-    /// dock's manual "Tap to chat") — if there's genuinely nothing left to do,
-    /// don't bother tracking a card for it; otherwise keep it visible on Home until
-    /// it resolves.
+    /// Keep unfinished sessions visible on Home.
     private func backgroundIfNeeded(_ session: AgentTaskSession) {
         guard !session.isComplete, !backgroundSessions.contains(where: { $0.id == session.id }) else { return }
         backgroundSessions.append(session)
     }
 
-    /// Inbox card action routing. The concierge already has everything it needs
-    /// (sender, subject, the stakes-first summary) — re-opening chat and re-explaining
-    /// that context for every tap defeats the point of surfacing it on the card at
-    /// all. Route by what the server judged the real next step to be:
-    ///  - "Ignore"/"Archive": nothing to hand off — dismiss locally. There's no real
-    ///    archive/mark-read action wired up server-side yet, so this only hides the
-    ///    card, it doesn't claim to have touched the actual inbox.
-    ///  - "Reply": a reply is content sent on the user's behalf under their name —
-    ///    that still deserves a look before it goes, so this opens chat (which
-    ///    already gates send_email behind a confirm step) rather than firing blind.
-    ///  - everything else ("Pay it", "Sort it", "Review", "Confirm"...): never
-    ///    routed through run_browser_task or chat's agent loop — a bank/card-issuer
-    ///    site can't be safely logged into by a bot (2FA, aggressive anti-automation),
-    ///    so that's never even attempted. Instead this mines the ORIGINAL email for
-    ///    real links the provider already sent (e.g. Revolut's own "Add money" link)
-    ///    and writes manual steps — see buildEmailActionPlan in api/index.js.
+    /// Reply opens review; other email actions use original links.
     private func handleMailCTA(_ email: BriefingEmail) {
         switch mailCTAKind(email.cta) {
         case .ignore:
             HapticManager.shared.impact(.light)
-            withAnimation(.appSpring) { dismissedMailIDs.insert(email.id) }
+            _ = withAnimation(.appSpring) { dismissedMailIDs.insert(email.id) }
             persistDismissedMailIDs()
         case .reply:
             handleIntent(mailGoal(for: email))
         case .handle:
             guard let messageId = email.messageId, !messageId.isEmpty else {
-                // Older briefing, created before messageId tagging existed — nothing
-                // to look up server-side, so fall back to the honest chat handoff
-                // rather than opening a session that's guaranteed to fail.
                 handleIntent(mailGoal(for: email))
                 return
             }
@@ -978,9 +822,6 @@ struct AgenticHomeView: View {
         return .handle
     }
 
-    /// Leads with the server's judged action and the stakes-first summary (not just
-    /// the bare subject line) so whichever pipeline picks this up — chat or the
-    /// hidden native runner — starts already knowing what actually matters.
     private func mailGoal(for email: BriefingEmail) -> String {
         let action = email.cta?.isEmpty == false ? email.cta! : "Help me with"
         let stakes = email.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -988,10 +829,6 @@ struct AgenticHomeView: View {
         return "\(action) — email from \(email.cleanFrom): \(context)"
     }
 
-    /// Every composer submission goes to the same conversation — whether it turns
-    /// into a durable task is decided per-turn by the backend, not by a client-side
-    /// guess at the user's first message. (The one other AgentTaskSession entry
-    /// point, the inbox "handle it" CTA, is a separate explicit tap and unaffected.)
     private func handleIntent(_ text: String) {
         HapticManager.shared.impact(.medium)
         openChat(autoSend: text, startFresh: true)
@@ -1006,6 +843,7 @@ struct AgenticHomeView: View {
         errorMessage = nil
 
         async let weatherTask = OxyWeatherService.shared.currentWeather()
+        async let emailConnectionTask = loadEmailConnection()
 
         if forceCheck {
             await NativeIntegrationManager.shared.syncNativeContext(userId: appState.userId)
@@ -1022,15 +860,10 @@ struct AgenticHomeView: View {
             errorMessage = error.localizedDescription
         }
 
-        // Answer-first context sits above the older feed of individual cards. Preserve
-        // the previous snapshot on a transient connector or server failure so Home does
-        // not flicker back to a blank page while the ambient device is listening.
         if let fetchedLifeBriefing = try? await service.loadLifeBriefing() {
             lifeBriefing = fetchedLifeBriefing
         }
 
-        // Durable goals are the continuity layer between chat turns. Preserve the
-        // previous snapshot if this ambient fetch fails; Work has its own retry path.
         if let fetchedTasks = try? await AgentTasksService.fetchTasks() {
             agentTasks = fetchedTasks
         }
@@ -1038,136 +871,23 @@ struct AgenticHomeView: View {
             agentWatches = fetchedWatches
         }
 
-        #if DEBUG
-        // Seed a representative card mix when running against a backend with no
-        // data (Simulator/demo) so the Home surface can be seen and iterated on.
-        if briefings.isEmpty && appState.isDemoSession {
-            errorMessage = nil
-            briefings = AgenticHomeView.sampleBriefings
-        }
-        if lifeBriefing == nil && appState.isDemoSession {
-            lifeBriefing = AgenticHomeView.sampleLifeBriefing
-        }
-        #endif
-
         weather = await weatherTask
+        hasEmailConnection = await emailConnectionTask
         isLoading = false
         isRefreshing = false
     }
 
-    #if DEBUG
-    static let sampleBriefings: [Briefing] = [
-        Briefing(
-            id: "sample-1",
-            kind: "agent_task",
-            title: "Today",
-            body: "",
-            source: "demo",
-            read: false,
-            createdAt: nil,
-            metadata: BriefingMetadata(
-                emails: [
-                    BriefingEmail(
-                        from: "School office <school@example.com>",
-                        subject: "Friday trip details",
-                        snippet: "Please confirm the lunch plan before Friday.",
-                        date: "9:02 AM",
-                        summary: "The school needs a quick reply before Friday",
-                        cta: nil,
-                        provider: nil,
-                        messageId: nil
-                    )
-                ],
-                incoming: [
-                    BriefingIncoming(
-                        kind: "delivery",
-                        title: "Sony WH-1000XM6",
-                        vendor: "Amazon",
-                        status: "Out for delivery",
-                        eta: "2:40 PM",
-                        stage: 2
-                    ),
-                    BriefingIncoming(
-                        kind: "reservation",
-                        title: "Dinner · Kōji",
-                        vendor: "Resy",
-                        status: "Confirmed",
-                        eta: "Fri 7:30 PM",
-                        stage: nil
-                    )
-                ],
-                lead: nil,
-                signals: [
-                    BriefingSignal(
-                        title: "Reply to the school about Friday's trip",
-                        detail: "They need the lunch plan confirmed",
-                        status: "pending",
-                        receipt: nil,
-                        label: "Draft reply",
-                        prompt: "Draft a reply to the school about Friday's trip",
-                        undo: nil
-                    ),
-                    BriefingSignal(
-                        title: "Rebooked your 6pm ride to 7:30",
-                        detail: nil,
-                        status: "done",
-                        receipt: "Uber · confirmation #4821",
-                        label: nil,
-                        prompt: nil,
-                        undo: BriefingSignalUndo(type: "ride")
-                    )
-                ],
-                narrative: nil,
-                wellbeing: nil
-            )
-        )
-    ]
-
-    static let sampleLifeBriefing = LifeBriefing(
-        headline: "Three things need your attention.",
-        items: [
-            LifeBriefingItem(
-                id: "sample-approval",
-                kind: "approval",
-                title: "Ask the supplier for a lower price",
-                detail: "This needs your OK before Millie can continue.",
-                urgency: "now",
-                prompt: "Review the supplier message",
-                taskId: nil,
-                approvalId: nil,
-                review: LifeBriefingReview(
-                    action: "send_email",
-                    recipient: "sales@supplier.example",
-                    subject: "Could you review the price?",
-                    body: "Hi,\n\nCould you review the price and see if there is room to reduce it?\n\nThanks"
-                )
-            ),
-            LifeBriefingItem(
-                id: "sample-calendar",
-                kind: "calendar",
-                title: "Dentist appointment",
-                detail: "Today at 3:00 PM",
-                urgency: "soon",
-                prompt: "Help me prepare for my dentist appointment",
-                taskId: nil,
-                approvalId: nil
-            ),
-            LifeBriefingItem(
-                id: "sample-goal",
-                kind: "watch",
-                title: "Flight prices to Turkey",
-                detail: "Millie is watching this.",
-                urgency: "background",
-                prompt: "Update me on flight prices to Turkey",
-                taskId: nil,
-                approvalId: nil
-            )
-        ],
-        empty: false,
-        generatedAt: nil,
-        coverage: nil
-    )
-    #endif
+    private func loadEmailConnection() async -> Bool {
+        do {
+            let data = try await APIClient.shared.request(path: "/connectors/\(appState.userId)")
+            let connectors = try JSONDecoder().decode(ConnectorsResponse.self, from: data).connectors
+            return connectors.contains { connector in
+                connector.enabled && ["google", "microsoft"].contains(connector.id)
+            }
+        } catch {
+            return false
+        }
+    }
 
     // MARK: - Copy
 
@@ -1175,16 +895,17 @@ struct AgenticHomeView: View {
         if let data = UserDefaults.standard.data(forKey: "oxy_settings"),
            let saved = try? JSONDecoder().decode(OxySettings.self, from: data) {
             let name = saved.userName.trimmingCharacters(in: .whitespaces)
-            if !name.isEmpty {
+            if !name.isEmpty && !["user", "demo", "demo user", "test"].contains(name.lowercased()) {
                 return name.split(separator: " ").first.map(String.init) ?? name
             }
         }
         let local = appState.userId.split(separator: "@").first.map(String.init) ?? ""
         let first = local.split(whereSeparator: { ".-_0123456789".contains($0) }).first.map(String.init) ?? ""
-        if first.count >= 2, first.count <= 20 {
+        if first.count >= 2, first.count <= 20,
+           !["user", "demo", "test"].contains(first.lowercased()) {
             return first.prefix(1).uppercased() + first.dropFirst().lowercased()
         }
-        return "there"
+        return ""
     }
 
     private var greetingLine: String {
@@ -1196,7 +917,7 @@ struct AgenticHomeView: View {
         case 17..<22: hello = "Good evening"
         default: hello = "Hey"
         }
-        return "\(hello),\n\(firstName)"
+        return firstName.isEmpty ? hello : "\(hello),\n\(firstName)"
     }
 
     private var dateLine: String {
@@ -1248,14 +969,17 @@ private struct LifeBriefingCard: View {
                                 .background(GlebChrome.ink.opacity(0.06), in: Circle())
 
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(item.title)
+                                Text(item.displayTitle)
                                     .font(.system(size: 15, weight: .semibold))
                                     .foregroundStyle(GlebChrome.ink)
                                     .multilineTextAlignment(.leading)
-                                Text(item.detail)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(GlebChrome.ink.opacity(0.55))
-                                    .multilineTextAlignment(.leading)
+                                if item.kind.caseInsensitiveCompare("approval") != .orderedSame,
+                                   let detail = item.displayDetail {
+                                    Text(detail)
+                                        .font(.system(size: 13))
+                                        .foregroundStyle(GlebChrome.ink.opacity(0.55))
+                                        .multilineTextAlignment(.leading)
+                                }
                             }
 
                             Spacer(minLength: 6)
@@ -1281,7 +1005,7 @@ private struct LifeBriefingCard: View {
     }
 }
 
-// MARK: - Mission model (briefing → cards)
+// MARK: - Mission cards
 
 struct HomeMission: Identifiable, Equatable {
     enum Kind: Equatable {
@@ -1303,46 +1027,33 @@ struct HomeMission: Identifiable, Equatable {
     let isPrimary: Bool
     var taskID: String? = nil
     var watchID: String? = nil
-    /// Structured payload for bespoke (Gleb-style) card rendering. All optional so
-    /// existing call sites are unaffected and cards degrade gracefully.
+    /// Optional card payload.
     var deliveryStage: Int? = nil
     var vendor: String? = nil
     var sender: String? = nil
-    /// Every real (non-promotional) inbox email across all recent briefings, swiped
-    /// through as one card instead of one card per email — only set on `.mailGroup`.
+    /// Inbox emails grouped on one card.
     var mailItems: [BriefingEmail] = []
+
+    var displayTitle: String {
+        var words = title.split(separator: " ").map(String.init)
+        while words.count > 1,
+              words[words.count - 1].caseInsensitiveCompare(words[words.count - 2]) == .orderedSame {
+            words.removeLast()
+        }
+        let collapsed = words.joined(separator: " ")
+        return collapsed.replacingOccurrences(of: "a appointment", with: "an appointment", options: .caseInsensitive)
+    }
 }
 
 enum HomeMissionBuilder {
     static func build(from briefings: [Briefing]) -> [HomeMission] {
         var out: [HomeMission] = []
         var seen = Set<String>()
-        // Collected across every briefing and appended as one swipeable card at the
-        // end, instead of one full card per email — an inbox list doesn't belong in
-        // a feed of "what matters today". Deduped by the email's own identity
-        // (from+subject), not per-briefing, since the same email can appear in more
-        // than one briefing window.
         var mailItems: [BriefingEmail] = []
         var seenMailIDs = Set<String>()
-        // `briefing.emails` is a fresh live re-fetch of the inbox each time it's written
-        // (refreshBriefingEmailData on the server overwrites TODAY's row in place), not an
-        // incremental diff — so briefings older than the newest one are just stale
-        // duplicates of what was unread on some earlier day. Accumulating mail across all
-        // of them (as this used to do) is exactly why weeks-old newsletters kept sitting
-        // in "needs you" forever: only the single most recent briefing that actually
-        // carries an emails list reflects the current inbox.
         let latestEmailBriefingID = briefings.first(where: { !$0.emails.isEmpty })?.id
 
         for briefing in briefings {
-            // Server-side "what matters" signal generation (and the auto-execution behind
-            // it — this is what silently created real reminders like "Red Warning for
-            // extreme heat" and "Cadbury End-of-Year Show" with no confirmation) was killed
-            // on 2026-06-25 (commit 3c9f3a8, "stop generating AI what-matters signals") —
-            // every briefing since then always has `signals: []`. Old rows from before that
-            // date still carry their signals forever, and nothing ever aged them out
-            // client-side, so they kept resurfacing indefinitely. Signals can now only ever
-            // be a fossil, so gate on recency — this hides all pre-existing ghosts
-            // immediately without touching `incoming`/`agent_task`, which are still live.
             let briefingAge = Date.oxyParse(briefing.createdAt).map { Date().timeIntervalSince($0) }
             let signalsAreFresh = briefingAge.map { $0 < 2 * 24 * 3600 } ?? false
             for signal in (signalsAreFresh ? briefing.signals : []) {
@@ -1424,7 +1135,7 @@ enum HomeMissionBuilder {
                     id: id,
                     kind: .agent,
                     eyebrow: "Handling",
-                    title: briefing.title ?? "Something Millie is handling",
+                    title: briefing.title ?? "Update",
                     detail: briefing.body,
                     cta: "Continue",
                     prompt: briefing.body,
@@ -1512,26 +1223,14 @@ struct MissionCardView: View {
         }
     }
 
-    /// Whether tapping the card does anything at all — gates both the button's
-    /// enabled state and its press-scale, so a card with nothing to do doesn't
-    /// visually invite a tap it can't honour.
     private var isTappable: Bool { canExpand || mission.cta != nil }
 
     var body: some View {
-        // The inbox card owns its own swipe/tap gestures (a per-page "Draft reply"
-        // button plus the TabView's own drag recognizer) — wrapping it in the shared
-        // outer Button below would have `.disabled(!isTappable)` (true here, since
-        // there's no single card-level cta) propagate through the environment and
-        // disable those nested controls too. Render it as its own root instead.
         if mission.kind == .mailGroup {
             mailGroupCard
                 .padding(16)
                 .background { MissionGlassPlate() }
         } else {
-            // A plain onTapGesture here gave the single most-tapped surface in the whole
-            // Home feed zero press feedback, unlike every other tappable element in the
-            // app (pillCTA, AppRow, etc. all use appScale) — a real feedback gap on a
-            // tens-of-times-a-day surface, not just a cosmetic nit.
             Button {
                 if canExpand {
                     HapticManager.shared.impact(.light)
@@ -1552,7 +1251,7 @@ struct MissionCardView: View {
                 }
                 .padding(16)
                 .background { MissionGlassPlate() }
-                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             }
             .buttonStyle(.appScale(0.98))
             .disabled(!isTappable)
@@ -1562,7 +1261,7 @@ struct MissionCardView: View {
         }
     }
 
-    // MARK: - Delivery (Gleb route-card anatomy: title · id-pill · progress rail)
+    // MARK: - Delivery
 
     private var deliveryCard: some View {
         let stage = min(max(mission.deliveryStage ?? 0, 0), 3)
@@ -1570,7 +1269,7 @@ struct MissionCardView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(mission.title)
+                    Text(mission.displayTitle)
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1611,7 +1310,6 @@ struct MissionCardView: View {
         }
     }
 
-    /// Faint route-map strip revealed on expand — mirrors the reference map snippet.
     private var routeMap: some View {
         ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -1668,21 +1366,19 @@ struct MissionCardView: View {
     }
 
     private var deliveryETA: String? {
-        // detail is "vendor · status · eta" — surface the trailing ETA if present.
         guard let parts = mission.detail?.components(separatedBy: " · "), parts.count >= 3 else { return nil }
         return parts.last
     }
 
-    // MARK: - Mail group (one swipeable card for every real inbox email, not one card each)
+    // MARK: - Mail group
 
     @State private var mailPage = 0
 
     private var mailGroupCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(mission.eyebrow.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.8)
+                Text(mission.eyebrow)
+                    .font(.appBody(13, weight: .semibold))
                     .foregroundStyle(ink.opacity(0.42))
                 Spacer(minLength: 8)
                 if mission.mailItems.count > 1 {
@@ -1691,7 +1387,7 @@ struct MissionCardView: View {
                         .foregroundStyle(ink.opacity(0.45))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(.ultraThinMaterial, in: Capsule())
+                        .background(Color.appSurface2, in: Capsule())
                 }
             }
 
@@ -1703,10 +1399,6 @@ struct MissionCardView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: 176)
-            // Dismissing (Ignore) or the underlying briefing refreshing can shrink
-            // mailItems out from under a page index that was pointing past the new
-            // end — clamp so the TabView never holds a selection tag that no longer
-            // exists.
             .onChange(of: mission.mailItems.count) { _, newCount in
                 if mailPage >= newCount { mailPage = max(0, newCount - 1) }
             }
@@ -1739,9 +1431,6 @@ struct MissionCardView: View {
                         .font(.system(size: 13))
                         .foregroundStyle(ink.opacity(0.55))
                         .lineLimit(1)
-                    // The one-line summary — this is the actual answer to "why does this
-                    // need my attention" — prefers the server's judgment over the raw
-                    // (often truncated HTML) Gmail/Outlook snippet.
                     if let text = (summary?.isEmpty == false ? summary : email.cleanSnippet), !text.isEmpty {
                         Text(text)
                             .font(.system(size: 12.5))
@@ -1774,10 +1463,6 @@ struct MissionCardView: View {
         }
     }
 
-    /// Small full-colour brand mark (Assets: "google" / "outlook") pinned to the
-    /// top-left corner so a user with more than one connected inbox can tell which
-    /// account an item came from at a glance. AppIcon can't be reused here — it
-    /// always renders in monochrome template mode, which would strip the brand colour.
     @ViewBuilder
     private func providerBadge(_ provider: String?) -> some View {
         switch provider {
@@ -1801,7 +1486,7 @@ struct MissionCardView: View {
             .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
     }
 
-    // MARK: - Reservation (calendar-forward)
+    // MARK: - Reservation
 
     private var reservationCard: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1811,11 +1496,10 @@ struct MissionCardView: View {
                     .frame(width: 40, height: 40)
                     .background(Color(red: 0.55, green: 0.4, blue: 0.85).opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(mission.eyebrow.uppercased())
-                        .font(.system(size: 11, weight: .semibold))
-                        .tracking(0.8)
+                    Text(mission.eyebrow)
+                        .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.42))
-                    Text(mission.title)
+                    Text(mission.displayTitle)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(ink)
                     if let detail = mission.detail, !detail.isEmpty {
@@ -1845,15 +1529,15 @@ struct MissionCardView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        if mission.kind == .agent {
-                            Circle().fill(Color(red: 0.18, green: 0.7, blue: 0.34)).frame(width: 7, height: 7)
+                        if mission.kind == .agent && mission.eyebrow == "Handling" {
+                            PulsingWorkDot(active: true)
+                                .frame(width: 10, height: 10)
                         }
-                        Text(mission.eyebrow.uppercased())
-                            .font(.system(size: 11, weight: .semibold))
-                            .tracking(0.8)
+                        Text(mission.eyebrow)
+                            .font(.appBody(13, weight: .semibold))
                             .foregroundStyle(mission.kind == .status ? Color(red: 0.16, green: 0.6, blue: 0.3) : ink.opacity(0.42))
                     }
-                    Text(mission.title)
+                    Text(mission.displayTitle)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1926,13 +1610,11 @@ struct MissionCardView: View {
 
 struct MissionGlassPlate: View {
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        ZStack {
-            shape.fill(.ultraThinMaterial)
-            shape.fill(Color.white.opacity(0.55))
-            shape.strokeBorder(Color.white.opacity(0.7), lineWidth: 0.6)
-        }
-        .shadow(color: Color.black.opacity(0.06), radius: 16, y: 8)
+        let shape = RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+        shape
+            .fill(Color.appAdaptive(dark: Color.appSurface2, light: .white.opacity(0.88)))
+            .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
+            .shadow(color: Color.black.opacity(0.035), radius: 6, y: 2)
     }
 }
 
