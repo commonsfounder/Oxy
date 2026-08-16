@@ -41,7 +41,9 @@ const unsigned long longPressMs = 900;
 const unsigned long doubleClickWindowMs = 450;
 const unsigned long maxPressForClickMs = 700;
 
-const bool enableSoundWakeTrigger = true;
+// The pilot interaction is deliberately button-first. A raw sound threshold is
+// not a wake word and makes a wearable fire unpredictably in normal life.
+const bool enableSoundWakeTrigger = false;
 const int soundWakeDeltaThreshold = 10;
 const int soundWakePeakFloor = 70;
 const int soundWakeConsecutiveWindows = 1;
@@ -206,17 +208,22 @@ void handleButton() {
 
   if (debouncedButtonState == LOW) {
     pressStartedAt = now;
-    pressHandledAsLong = true;
-    clickWaiting = false;
-    triggerVoiceCommand("Button");
+    // Do not claim the press yet: doing so made every release look like an
+    // already-handled long press, which disabled the tap and double-tap paths.
+    pressHandledAsLong = false;
   } else {
     unsigned long pressDuration = now - pressStartedAt;
 
     if (pressHandledAsLong) {
+      // A held button is push-to-talk: release ends exactly the recording it
+      // began, rather than leaving the phone microphone open.
+      stopOxyRecording();
       return;
     }
 
     if (pressDuration > maxPressForClickMs) {
+      // A medium press is still an intentional single interaction. It uses the
+      // same predictable start/stop behaviour as a single tap.
       toggleOxyRecording();
       return;
     }
@@ -235,7 +242,9 @@ void handlePendingClickTimeout() {
   unsigned long now = millis();
   if (clickWaiting && (now - firstClickAt) > doubleClickWindowMs) {
     clickWaiting = false;
-    sendCommand("OPEN_CHAT");
+    // A single tap is hands-free start/stop. Delay it just long enough to let
+    // a second tap turn into SEND_MESSAGE without starting a recording first.
+    toggleOxyRecording();
   }
 }
 

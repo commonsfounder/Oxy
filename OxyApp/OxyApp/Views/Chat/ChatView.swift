@@ -400,8 +400,12 @@ struct ChatView: View {
             .onReceive(NotificationCenter.default.publisher(for: .oxyPendantCommand)) { note in
                 guard let rawCommand = note.userInfo?["command"] as? String,
                       let command = PendantCommand.parse(Data(rawCommand.utf8)) else { return }
-                _ = PendantCommandBus.shared.take()
-                handlePendantCommand(command)
+                let queued = PendantCommandBus.shared.takeAll()
+                if queued.isEmpty {
+                    handlePendantCommand(command)
+                } else {
+                    queued.forEach(handlePendantCommand)
+                }
             }
         .task {
             #if DEBUG
@@ -426,9 +430,7 @@ struct ChatView: View {
             if let pending = SiriRequestBus.shared.take() {
                 injectVoiceMessage(pending)
             }
-            if let pendingCommand = PendantCommandBus.shared.take() {
-                handlePendantCommand(pendingCommand)
-            }
+            PendantCommandBus.shared.takeAll().forEach(handlePendantCommand)
             if appState.isDemoSession,
                !didSendAutoDemoMessage,
                let autoDemoMessage = UserDefaults.standard.string(forKey: "oxy_auto_demo_message"),

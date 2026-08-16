@@ -56,18 +56,22 @@ enum PendantCommand: Equatable, Sendable {
     }
 }
 
-/// Retains the most recent pendant command while ChatHome opens. BLE callbacks
-/// can arrive before SwiftUI has installed the chat receiver, especially after
-/// a button press from the Home screen.
+/// Retains pendant commands while ChatHome opens. BLE callbacks can arrive
+/// before SwiftUI has installed the chat receiver, especially when a physical
+/// hold emits OPEN_CHAT, START_RECORDING, then STOP_RECORDING in quick order.
 final class PendantCommandBus: @unchecked Sendable {
     static let shared = PendantCommandBus()
     private let lock = NSLock()
-    private var pendingCommand: PendantCommand?
+    private var pendingCommands: [PendantCommand] = []
+    private let maximumPendingCommands = 8
 
     func deliver(_ command: PendantCommand) {
         guard command.needsChat else { return }
         lock.lock()
-        pendingCommand = command
+        pendingCommands.append(command)
+        if pendingCommands.count > maximumPendingCommands {
+            pendingCommands.removeFirst(pendingCommands.count - maximumPendingCommands)
+        }
         lock.unlock()
         NotificationCenter.default.post(
             name: .oxyPendantCommand,
@@ -77,12 +81,12 @@ final class PendantCommandBus: @unchecked Sendable {
         NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
     }
 
-    func take() -> PendantCommand? {
+    func takeAll() -> [PendantCommand] {
         lock.lock()
         defer { lock.unlock() }
-        let command = pendingCommand
-        pendingCommand = nil
-        return command
+        let commands = pendingCommands
+        pendingCommands.removeAll()
+        return commands
     }
 }
 
