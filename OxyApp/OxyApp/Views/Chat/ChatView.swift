@@ -397,6 +397,12 @@ struct ChatView: View {
                 guard let text = note.userInfo?["text"] as? String else { return }
                 viewModel.inputText = text
             }
+            .onReceive(NotificationCenter.default.publisher(for: .oxyPendantCommand)) { note in
+                guard let rawCommand = note.userInfo?["command"] as? String,
+                      let command = PendantCommand.parse(Data(rawCommand.utf8)) else { return }
+                _ = PendantCommandBus.shared.take()
+                handlePendantCommand(command)
+            }
         .task {
             #if DEBUG
             ChatInputBar.runComposerRuleCheck()
@@ -419,6 +425,9 @@ struct ChatView: View {
             }
             if let pending = SiriRequestBus.shared.take() {
                 injectVoiceMessage(pending)
+            }
+            if let pendingCommand = PendantCommandBus.shared.take() {
+                handlePendantCommand(pendingCommand)
             }
             if appState.isDemoSession,
                !didSendAutoDemoMessage,
@@ -533,6 +542,45 @@ struct ChatView: View {
             selectedPhotoItem = nil
         } else {
             viewModel.sendMessage(userId: appState.userId)
+        }
+    }
+
+    /// The pendant only controls the same local interaction paths a person can
+    /// tap. In particular, CONFIRM/CANCEL do nothing without a visible pending
+    /// review; they can never turn an arbitrary BLE packet into an external
+    /// action.
+    private func handlePendantCommand(_ command: PendantCommand) {
+        switch command {
+        case .openChat, .connected, .pong:
+            break
+        case .startRecording:
+            guard !voiceInput.isRecording, !voiceInput.isTranscribing else { return }
+            HapticManager.shared.impact(.medium)
+            voiceInput.startRecording(userId: appState.userId)
+        case .stopRecording:
+            guard voiceInput.isRecording else { return }
+            HapticManager.shared.impact(.medium)
+            voiceInput.stopRecording()
+        case .toggleRecording:
+            HapticManager.shared.impact(.medium)
+            if voiceInput.isRecording {
+                voiceInput.stopRecording()
+            } else if !voiceInput.isTranscribing {
+                voiceInput.startRecording(userId: appState.userId)
+            }
+        case .sendMessage:
+            guard !viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            sendCurrentDraft()
+        case .confirm:
+            guard let action = pendingReviewAction else { return }
+            handledReviewActionIDs.insert(action.id)
+            pendingReviewAction = nil
+            viewModel.sendCommand("confirm", userId: appState.userId)
+        case .cancel:
+            guard let action = pendingReviewAction else { return }
+            handledReviewActionIDs.insert(action.id)
+            pendingReviewAction = nil
+            viewModel.sendCommand("cancel", userId: appState.userId)
         }
     }
 

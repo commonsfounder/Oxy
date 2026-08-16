@@ -3120,6 +3120,15 @@ extension PendantBLEManager: CBPeripheralDelegate {
         guard error == nil, characteristic.uuid == UART.tx,
               let data = characteristic.value else { return }
 
+        // The control firmware and the audio-streaming experiment share the
+        // Nordic UART characteristic. Recognize a bounded text control frame
+        // before handing anything to the PCM bridge; otherwise bytes such as
+        // START_RECORDING would be treated as microphone samples.
+        if let command = PendantCommand.parse(data) {
+            PendantCommandBus.shared.deliver(command)
+            return
+        }
+
         if isRecording {
             if data == PendantBLEManager.doneSignal {
                 isRecording = false

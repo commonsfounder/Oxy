@@ -1,6 +1,91 @@
 import AppIntents
 import Foundation
 
+/// The small, version-one command vocabulary the pendant can emit. These are
+/// control frames, never user text or audio, and they all remain local until a
+/// normal chat/approval path decides whether an external action may run.
+enum PendantCommand: Equatable, Sendable {
+    case openChat
+    case startRecording
+    case stopRecording
+    case toggleRecording
+    case sendMessage
+    case confirm
+    case cancel
+    case connected
+    case pong
+
+    static func parse(_ data: Data) -> PendantCommand? {
+        // Raw PCM is arbitrary binary. Only small, clean UTF-8 frames are
+        // eligible as commands, so microphone audio cannot become a control.
+        guard data.count <= 32,
+              let text = String(data: data, encoding: .utf8) else { return nil }
+        switch text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() {
+        case "OPEN_CHAT", "CHAT": return .openChat
+        case "SOUND_WAKE", "START_RECORDING", "START": return .startRecording
+        case "STOP_RECORDING", "STOP": return .stopRecording
+        case "TOGGLE_RECORDING", "TOGGLE": return .toggleRecording
+        case "SEND_MESSAGE", "SEND": return .sendMessage
+        case "CONFIRM", "YES", "OK": return .confirm
+        case "CANCEL", "NO", "REJECT": return .cancel
+        case "CONNECTED": return .connected
+        case "PONG": return .pong
+        default: return nil
+        }
+    }
+
+    var wireValue: String {
+        switch self {
+        case .openChat: return "OPEN_CHAT"
+        case .startRecording: return "START_RECORDING"
+        case .stopRecording: return "STOP_RECORDING"
+        case .toggleRecording: return "TOGGLE_RECORDING"
+        case .sendMessage: return "SEND_MESSAGE"
+        case .confirm: return "CONFIRM"
+        case .cancel: return "CANCEL"
+        case .connected: return "CONNECTED"
+        case .pong: return "PONG"
+        }
+    }
+
+    var needsChat: Bool {
+        switch self {
+        case .connected, .pong: return false
+        default: return true
+        }
+    }
+}
+
+/// Retains the most recent pendant command while ChatHome opens. BLE callbacks
+/// can arrive before SwiftUI has installed the chat receiver, especially after
+/// a button press from the Home screen.
+final class PendantCommandBus: @unchecked Sendable {
+    static let shared = PendantCommandBus()
+    private let lock = NSLock()
+    private var pendingCommand: PendantCommand?
+
+    func deliver(_ command: PendantCommand) {
+        guard command.needsChat else { return }
+        lock.lock()
+        pendingCommand = command
+        lock.unlock()
+        NotificationCenter.default.post(
+            name: .oxyPendantCommand,
+            object: nil,
+            userInfo: ["command": command.wireValue]
+        )
+        NotificationCenter.default.post(name: .oxyJumpToChat, object: nil)
+    }
+
+    func take() -> PendantCommand? {
+        lock.lock()
+        defer { lock.unlock() }
+        let command = pendingCommand
+        pendingCommand = nil
+        return command
+    }
+}
+
 /// A tiny hand-off bus between an App Intent (which may run before any view is
 /// alive) and `ChatHomeView`. The intent drops a query here and posts a
 /// notification; the chat surface drains it on appear and on notification, so a

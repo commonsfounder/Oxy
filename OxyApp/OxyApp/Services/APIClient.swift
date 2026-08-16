@@ -11,6 +11,10 @@ extension Notification.Name {
     /// Pre-fills the chat composer with a draft (userInfo["text"]) WITHOUT sending —
     /// e.g. tapping a Today item to start a message about it. The user edits and sends.
     static let oxyDraftMessage = Notification.Name("oxy.draftMessage")
+    /// Carries a recognized control frame from the physical pendant into the
+    /// active chat surface. The command itself is retained by PendantCommandBus
+    /// until that surface has loaded, so a button press during navigation is not lost.
+    static let oxyPendantCommand = Notification.Name("oxy.pendantCommand")
 }
 
 final class APIClient: @unchecked Sendable {
