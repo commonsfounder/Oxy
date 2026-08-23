@@ -2105,6 +2105,23 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   const capabilitySweep = inferCapabilitySweepAction(text);
   if (capabilitySweep) return capabilitySweep;
 
+  // A browser checkout can pause on a real user choice (delivery vs collection, email,
+  // address, or a generic "keep going" handoff). Route that next turn back to the live
+  // Playwright session before the general model sees it; otherwise the model can merely
+  // acknowledge the choice while the retailer page remains untouched.
+  const browserSession = browserTask.getSession(userId);
+  const browserContinuation = browserSession?.page && (
+    browserTask.parseDeliveryPreferenceFromText(text) ||
+    /\b(?:continue|keep\s+going|deliver|collect|pickup|pick\s*up|email|address|postcode|post\s*code|phone|name)\b/i.test(normalized)
+  );
+  if (browserContinuation) {
+    return {
+      reason: 'browser_task_continuation',
+      spoken: "I'll continue the browser task.",
+      actions: [{ type: 'run_browser_task', input: { goal: text } }]
+    };
+  }
+
   const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
   if (appointmentTurn) return appointmentTurn;
 
