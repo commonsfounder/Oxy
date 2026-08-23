@@ -323,6 +323,17 @@ test('nextRecipeMove returns a click for add-to-basket once size is satisfied', 
   assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
 });
 
+test('nextRecipeMove never repeats a selected size during preflight', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const page = fakePage('https://www.johnlewis.com/x/p6543210?size=m', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 0 },
+    sizeChips: [{ label: 'M', idx: 12 }],
+    'resolve:jl-add': { locatorIndex: 17, text: 'Add to basket' },
+  });
+  const move = await nextRecipeMove(page, { goal: 'add the joggers size medium to my basket', history: [] }, jl, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
+});
+
 // Regression: a live JL run showed the retailer's own "Sorry, we've had a technical
 // problem" banner swallow every "Add to basket" click while the selector kept resolving —
 // recordHit only proves the button was found, not that the click did anything, so the

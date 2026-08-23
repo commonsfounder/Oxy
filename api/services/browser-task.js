@@ -128,6 +128,13 @@ const BROWSER_THINKING_BUDGET = envInt('OXY_BROWSER_THINKING_BUDGET', 64);
 // "wait" action is the safety net if a page genuinely isn't ready. Tunable per-env if a slow
 // site needs more.
 const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 150);
+// For an order from a known retailer root, open its search-results URL directly. The old
+// default first fetched the search page and up to eight PDPs over plain HTTP; on datacenter
+// IPs that probe often timed out or returned a bot-walled result, sending the browser back to
+// the homepage and spending a model step typing the query again. The browser's deterministic
+// search-result picker is both faster and more reliable. Keep the PDP probe available as an
+// explicit A/B for sites where it is proven useful.
+const ORDER_PDP_PREFETCH = process.env.OXY_BROWSER_ORDER_PDP_PREFETCH === 'true';
 const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 100);
 const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 80);
 // Recipe-driven steps chain quickly — a shorter beat between them saves ~0.5–1s per step vs the
@@ -2394,8 +2401,9 @@ function pickFallbackCandidate(checked, searchUrl) {
   return scored.length ? scored[0].productUrl : searchUrl;
 }
 
-// Order open URL: search → best-matching orderable product PDP in one HTTP hop when
-// possible, skipping the search-results vision step (~3–5s). Falls back to search URL.
+// Optional order URL prefetch: search → best-matching orderable product PDP in one HTTP hop
+// when possible, skipping the search-results vision step. The normal path opens the search
+// URL directly because browser-side deterministic picking is faster on bot-walled retailers.
 async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
   const searchUrl = directSearchUrl(url, goal, retailOptions);
   if (!searchUrl) return url;
@@ -2460,10 +2468,14 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   // commercial page to find a search box / first result.
   const context = await browser.newContext({ viewport: VIEWPORT, ...(storageState ? { storageState } : {}) });
   const page = await context.newPage();
-  // Orders: open the first product PDP directly when a plain fetch can resolve it; else the
-  // search-results URL; else the caller's url. Info goals keep the search-page fastpath only.
+  // Orders: open the deterministic search-results URL directly by default. A PDP prefetch is
+  // available only as an explicit opt-in because its plain HTTP requests are slower than the
+  // browser recipe on bot-walled retailers and can otherwise fall back to the homepage.
+  const orderSearchUrl = isOrderGoal(goal) ? directSearchUrl(url, goal, retailOptions) : null;
   let openUrl = isOrderGoal(goal)
-    ? await resolveOrderOpenUrl(url, goal, retailOptions)
+    ? (ORDER_PDP_PREFETCH
+      ? await resolveOrderOpenUrl(url, goal, retailOptions)
+      : (orderSearchUrl || url))
     : isSignupGoal(goal)
       ? url
       : (directSearchUrl(url, goal, retailOptions) || url);
@@ -2487,7 +2499,7 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
   const goalContext = parseGoalContext(goal);
   const usedFastpath = (openUrl !== url) ? siteKeyFromUrl(url) : null;
-  const searchUrl = directSearchUrl(url, goal, retailOptions)
+  const searchUrl = orderSearchUrl
     || (isSearchResultsUrl(url) ? url : null);
   return createSession(userId, {
     browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null,
@@ -2528,21 +2540,25 @@ function resumeFromBrowserStorage(storedState, fallbackSite) {
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
 // history) so an idle-evicted or accidentally-closed session can be re-opened where it
 // left off instead of dead-ending. Failing to persist must never abort an in-progress order.
+const BROWSER_PERSIST_TIMEOUT_MS = envInt('OXY_BROWSER_PERSIST_TIMEOUT_MS', 2500);
+
 async function persistStorage(userId, session) {
   try {
-    const browserState = await session.context.storageState();
-    const { error } = await getSupabase().from('browser_sessions').upsert({
-      user_id: userId,
-      site: session.site,
-      // Same AES-256-GCM envelope already used for connector tokens and vault_credentials
-      // (token-crypto.js) — these are just as sensitive and were the one place still storing
-      // plaintext. Fails closed in production if OXY_TOKEN_ENCRYPTION_KEY is unset, same as
-      // the rest of the app's credential storage.
-      storage_state: encryptTokens(packBrowserStorageState(browserState, session)),
-      updated_at: new Date().toISOString()
-    }, { onConflict: 'user_id,site' });
-    if (error) throw error;
-    return true;
+    return await withTimeout((async () => {
+      const browserState = await session.context.storageState();
+      const { error } = await getSupabase().from('browser_sessions').upsert({
+        user_id: userId,
+        site: session.site,
+        // Same AES-256-GCM envelope already used for connector tokens and vault_credentials
+        // (token-crypto.js) — these are just as sensitive and were the one place still storing
+        // plaintext. Fails closed in production if OXY_TOKEN_ENCRYPTION_KEY is unset, same as
+        // the rest of the app's credential storage.
+        storage_state: encryptTokens(packBrowserStorageState(browserState, session)),
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id,site' });
+      if (error) throw error;
+      return true;
+    })(), BROWSER_PERSIST_TIMEOUT_MS, 'browser session checkpoint');
   } catch (error) {
     // swallow — persistence is non-critical to the current turn, but leave a bounded
     // diagnostic so a missing live migration/schema cannot masquerade as a routing bug.

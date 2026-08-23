@@ -1584,7 +1584,10 @@ async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   const host = hostOfRecipe(recipe, (session && session.site) || 'unknown');
   const ctx = await readCtx(page, recipe, session);
   const wantSize = parseSizeFromGoal(`${session?.goal || ''} ${(session?.history || []).join(' ')}`, session?.goalContext);
-  if (wantSize && !ctx.basketCount) {
+  // Once the page reports the requested size as selected, do not run the preflight resolver
+  // again. John Lewis keeps the size chips in the DOM after a ?size= navigation, so the old
+  // condition clicked the same size twice and burned a second recipe step/model fallback.
+  if (wantSize && !ctx.basketCount && ctx.hasUnsatisfiedSize) {
     const phaseNow = phaseFromUrl(recipe, page.url());
     const sizeStep = recipe.steps.find((s) => s.name === 'size' && s.phase === phaseNow && s.resolve);
     if (sizeStep && (!sizeStep.when || sizeStep.when(ctx))) {
