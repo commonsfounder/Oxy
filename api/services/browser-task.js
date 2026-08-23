@@ -2435,6 +2435,22 @@ async function loadUserLocation(userId) {
   return null;
 }
 
+// A retailer can leave the document usable while never completing DOMContentLoaded (John
+// Lewis does this intermittently on a persisted PDP). Playwright reports that as a timeout,
+// but throwing it away loses the exact cart/page we just checkpointed. Continue only when a
+// real document arrived; a genuine blank navigation still fails normally.
+async function gotoBrowserPage(page, openUrl) {
+  try {
+    await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
+  } catch (error) {
+    if (!/timeout/i.test(String(error?.message || ''))) throw error;
+    const currentUrl = page.url();
+    const bodyLength = await page.evaluate(() => (document.body?.innerText || '').trim().length).catch(() => 0);
+    if (!currentUrl || currentUrl === 'about:blank' || bodyLength === 0) throw error;
+    console.warn(`[browser-task] page navigation timed out with a usable document; continuing (${bodyLength} chars)`);
+  }
+}
+
 async function openNewSession(userId, url, goal, retailOptions = {}) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
@@ -2460,7 +2476,7 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
       }
     } catch { /* keep openUrl */ }
   }
-  await timed('open.goto', () => page.goto(openUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }));
+  await gotoBrowserPage(page, openUrl);
   // Let the SPA hydrate before the first perception, or we screenshot a bare skeleton
   // and the model thinks there's no search bar. A longer beat here (first paint is the
   // slowest) but still bounded — not the old open-ended networkidle wait.
