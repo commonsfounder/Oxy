@@ -83,6 +83,12 @@ const envInt = (name, fallback) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+// A slow/half-open Supabase connection must not consume the browser turn before Chromium
+// starts. These reads are optional context; the browser can proceed without them and ask for
+// missing checkout details later. Keep the budget small so a stale DB connection is not a
+// hidden 30–60s cold-start tax.
+const BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS = envInt('OXY_BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS', 2500);
+
 // Whole-turn budget. Used to be capped at 30s specifically to stay under the mobile
 // client's OLD fixed 45s request watchdog — every extra turn beyond the first forced a
 // full round trip back through the outer agent loop (a Gemini "what next" call + a fresh
@@ -194,18 +200,22 @@ async function primeLearnedRecipes() { await learnedRecipeStore.load(); }
 // ponytail: site key keeps cookies/login isolated per domain per user. One row
 // per (user, site) — fine at personal-assistant scale, revisit if sites multiply.
 async function loadStorageState(userId, site) {
-  const { data } = await getSupabase()
-    .from('browser_sessions')
-    .select('storage_state')
-    .eq('user_id', userId)
-    .eq('site', site)
-    .maybeSingle();
-  if (!data?.storage_state) return undefined;
-  // Cookies/localStorage are bearer credentials — often stronger than a password, since a
-  // live session cookie skips login and 2FA entirely. decryptTokens transparently passes
-  // through any pre-existing plaintext row (isEncryptedTokenEnvelope check), so this reads
-  // both old and newly-encrypted rows with no migration needed.
-  return unpackBrowserStorageState(decryptTokens(data.storage_state));
+  try {
+    const { data } = await withTimeout(getSupabase()
+      .from('browser_sessions')
+      .select('storage_state')
+      .eq('user_id', userId)
+      .eq('site', site)
+      .maybeSingle(), BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS, 'browser session load');
+    if (!data?.storage_state) return undefined;
+    // Cookies/localStorage are bearer credentials — often stronger than a password, since a
+    // live session cookie skips login and 2FA entirely. decryptTokens transparently passes
+    // through any pre-existing plaintext row (isEncryptedTokenEnvelope check), so this reads
+    // both old and newly-encrypted rows with no migration needed.
+    return unpackBrowserStorageState(decryptTokens(data.storage_state));
+  } catch {
+    return undefined;
+  }
 }
 
 function siteKeyFromUrl(url) {
@@ -1774,6 +1784,7 @@ async function dismissConsent(page) {
 // internal retry/backoff for 60–130s, blowing the whole-turn watchdog on one blip. Bound it
 // and let decideNextAction's own retry handle recovery.
 const MODEL_CALL_TIMEOUT_MS = envInt('OXY_BROWSER_MODEL_TIMEOUT_MS', 20000);
+const FALLBACK_MODEL_TIMEOUT_MS = envInt('OXY_BROWSER_FALLBACK_MODEL_TIMEOUT_MS', 8000);
 function withTimeout(promise, ms, label) {
   let t;
   const timeout = new Promise((_, reject) => { t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms); });
@@ -1799,12 +1810,19 @@ async function decideNextAction(goal, history, elements, screenshotB64, correcti
   } catch (err) {
     if (BROWSER_PROVIDER === 'gemini' || process.env.OXY_BROWSER_PROVIDER_FALLBACK === 'false') throw err;
     console.warn(`[browser-task] ${BROWSER_PROVIDER} decide failed (${String(err && err.message || err).split('\n')[0].slice(0, 160)}) — falling back to gemini for this step`);
-    return decideNextActionVia('gemini', goal, history, elements, screenshotB64, correction, goalContext, opts);
+    // A two-attempt Gemini fallback after a timed-out primary call used to add up to
+    // 60 seconds to one browser step (20s primary + 2×20s Gemini). A fallback is useful,
+    // but it must be a single short rescue attempt or it defeats the turn deadline.
+    return decideNextActionVia('gemini', goal, history, elements, screenshotB64, correction, goalContext, {
+      ...opts,
+      modelTimeoutMs: FALLBACK_MODEL_TIMEOUT_MS,
+      modelAttempts: 1,
+    });
   }
 }
 
 async function decideNextActionVia(provider, goal, history, elements, screenshotB64, correction = '', goalContext = null, opts = {}) {
-  const { textOnly = false } = opts;
+  const { textOnly = false, modelTimeoutMs = MODEL_CALL_TIMEOUT_MS, modelAttempts = 2 } = opts;
   const promptText = textOnly
     ? buildTextOnlyDecisionPrompt(goal, history, elements, correction, goalContext)
     : buildDecisionPrompt(goal, history, elements, correction, goalContext, opts.availableDocuments || []);
@@ -1962,9 +1980,9 @@ async function decideNextActionVia(provider, goal, history, elements, screenshot
     generationConfig: { temperature: 0.2, maxOutputTokens: 2048, responseMimeType: 'application/json', ...browserThinkingConfig() }
   };
   let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < modelAttempts; attempt++) {
     try {
-      const response = await withTimeout(model.generateContent(request), MODEL_CALL_TIMEOUT_MS, 'model call');
+      const response = await withTimeout(model.generateContent(request), modelTimeoutMs, 'model call');
       return parseModelDecision(response.response.text());
     } catch (err) {
       lastErr = err;
@@ -2430,11 +2448,11 @@ async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
 
 async function loadUserLocation(userId) {
   try {
-    const { data } = await getSupabase()
+    const { data } = await withTimeout(getSupabase()
       .from('native_context')
       .select('location')
       .eq('user_id', userId)
-      .maybeSingle();
+      .maybeSingle(), BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS, 'browser location load');
     const loc = data?.location;
     const lat = Number(loc?.latitude ?? loc?.lat);
     const lng = Number(loc?.longitude ?? loc?.lng);
@@ -2570,15 +2588,19 @@ async function persistStorage(userId, session) {
 // Most-recent persisted session for the user, so a resume with no live session and no
 // url can re-open the browser at the last page (cookies + cart survive via storageState).
 async function loadResumeContext(userId) {
-  const { data } = await getSupabase()
-    .from('browser_sessions')
-    .select('storage_state, site')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!data?.storage_state) return null;
-  return resumeFromBrowserStorage(decryptTokens(data.storage_state), data.site);
+  try {
+    const { data } = await withTimeout(getSupabase()
+      .from('browser_sessions')
+      .select('storage_state, site')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(), BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS, 'browser resume load');
+    if (!data?.storage_state) return null;
+    return resumeFromBrowserStorage(decryptTokens(data.storage_state), data.site);
+  } catch {
+    return null;
+  }
 }
 
 async function hasResumableSession(userId) {
@@ -2599,7 +2621,11 @@ function blockedPageResult(session) {
 // Checkout identity: load once per session turn, reuse the preferences KV store.
 async function getCheckoutProfileCached(session, userId) {
   if (session.checkoutProfile) return session.checkoutProfile;
-  session.checkoutProfile = await loadCheckoutProfile(getSupabase(), userId);
+  session.checkoutProfile = await withTimeout(
+    loadCheckoutProfile(getSupabase(), userId),
+    BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS,
+    'checkout profile load'
+  ).catch(() => ({ email: null, title: null, name: null, phone: null, address: null, consent: false }));
   return session.checkoutProfile;
 }
 
@@ -4326,7 +4352,11 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
     { code: 'browser_stuck', reason: 'progress_guard' });
 
   if (session.isOrder && !session.checkoutProfile) {
-    session.checkoutProfile = await loadCheckoutProfile(getSupabase(), userId);
+    session.checkoutProfile = await withTimeout(
+      loadCheckoutProfile(getSupabase(), userId),
+      BROWSER_CONTEXT_LOOKUP_TIMEOUT_MS,
+      'checkout profile load'
+    ).catch(() => ({ email: null, title: null, name: null, phone: null, address: null, consent: false }));
   }
 
   try {
@@ -5031,6 +5061,13 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
 
       if (decision.action === 'invalid') {
+        // A provider timeout is transient infrastructure, not a page decision. Return the
+        // resumable retry outcome after this bounded attempt instead of spending the same turn
+        // on three more identical model calls.
+        if (isTransientBrowserFailure(decision.error)) {
+          const retry = transientRetryResult(decision.error);
+          if (retry) return retry;
+        }
         consecutiveBadDecisions += 1;
         session.history.push(`Step ${steps}: could not decide an action (${decision.error})`);
         if (consecutiveBadDecisions >= 3) return STUCK();

@@ -11,3 +11,21 @@ dist
 build
 coverage
 .DS_Store
+
+# The Fly image is the Node API/browser worker. Keep the build context focused on
+# runtime source; these directories are iOS/CAD/docs/test/tooling assets and were
+# adding ~2 GB to every deploy upload.
+OxyApp
+OxyPendantFirmware
+cad
+docs
+test
+.agents
+.claude
+.codex
+.computer-use-cache
+.impeccable
+.superpowers
+firmware
+launch
+scratchpad

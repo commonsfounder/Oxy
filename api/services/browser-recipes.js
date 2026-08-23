@@ -423,12 +423,7 @@ const RECIPES = {
         'text=View basket',
         'text=Basket',
       ] },
-      { phase: 'basket', name: 'checkout', action: 'click', selectorAny: [
-        '[data-testid*="checkout" i]',
-        'text=Checkout',
-        'text=Secure checkout',
-        'text=Continue to checkout',
-      ] },
+      { phase: 'basket', name: 'checkout', resolve: (a) => resolveJohnLewisCheckout(a) },
       { phase: 'checkout', name: 'guest', when: (ctx) => !ctx.isGuestEmailSubmit && !ctx.checkoutPastEmail, action: 'click', selectorAny: STANDARD_GUEST_SELECTORS },
       { phase: 'checkout', name: 'advance', when: (ctx) => ctx.checkoutPastEmail && !ctx.isGuestEmailSubmit, action: 'click', selectorAny: CHECKOUT_ADVANCE_SELECTORS },
     ],
@@ -1121,6 +1116,33 @@ async function resolveJohnLewisAdd({ page, clickable }) {
   ], clickable, 'resolve:jl-add');
   if (!hit) return null;
   return { action: 'click', locatorIndex: hit.locatorIndex, text: hit.text, stepName: 'add' };
+}
+
+// John Lewis's basket CTA is sometimes wrapped with delivery copy, so exact selector
+// matching misses it and the loop pays for a vision decision on a page whose next move is
+// unambiguous. Match the checkout wording in the live clickable set and let the common
+// executor scroll the control into view before clicking it.
+async function resolveJohnLewisCheckout({ page, clickable }) {
+  const hit = await page.evaluate(({ clickableSelector, probe }) => {
+    void probe;
+    const all = [...document.querySelectorAll(clickableSelector)];
+    const visible = (el) => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const pattern = /(?:continue|proceed|go)\s+(?:securely\s+)?to\s+checkout|checkout\s+securely|secure\s+checkout/i;
+    for (const el of all) {
+      const text = (el.innerText || el.getAttribute('aria-label') || el.value || '').replace(/\s+/g, ' ').trim();
+      if (visible(el) && pattern.test(text)) {
+        return { locatorIndex: all.indexOf(el), text: text.slice(0, 80) };
+      }
+    }
+    return null;
+  }, { clickableSelector: clickable, probe: 'resolve:jl-checkout' }).catch(() => null);
+  return hit ? { action: 'click', locatorIndex: hit.locatorIndex, text: hit.text, stepName: 'checkout' } : null;
 }
 
 // The size step's resolve — the per-step escape hatch from the design. Size is a genuine

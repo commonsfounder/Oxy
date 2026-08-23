@@ -334,6 +334,16 @@ test('nextRecipeMove never repeats a selected size during preflight', async () =
   assert.deepEqual(move, { action: 'click', locatorIndex: 17, text: 'Add to basket', stepName: 'add' });
 });
 
+test('nextRecipeMove handles the John Lewis basket checkout CTA without vision', async () => {
+  const jl = RECIPES['johnlewis.com'];
+  const page = fakePage('https://www.johnlewis.com/basket', {
+    ctx: { hasUnsatisfiedSize: false, basketCount: 1 },
+    'resolve:jl-checkout': { locatorIndex: 23, text: 'Continue to checkout' },
+  });
+  const move = await nextRecipeMove(page, { goal: 'order the sweatshirt', history: [] }, jl, createRecipeHealth());
+  assert.deepEqual(move, { action: 'click', locatorIndex: 23, text: 'Continue to checkout', stepName: 'checkout' });
+});
+
 // Regression: a live JL run showed the retailer's own "Sorry, we've had a technical
 // problem" banner swallow every "Add to basket" click while the selector kept resolving —
 // recordHit only proves the button was found, not that the click did anything, so the
