@@ -18,6 +18,7 @@ const {
   pickBestSearchResult,
   scoreProductNameVsGoal,
   pickFallbackCandidate,
+  isJohnLewisExpressOnlyHtml,
   findElementByText,
   shouldStartFreshSession,
   buildChilternRailSearchUrl,
@@ -427,6 +428,12 @@ test('pickFallbackCandidate falls back to the search URL when nothing scores pos
 test('pickFallbackCandidate handles nulls from failed PDP fetches', () => {
   const checked = [null, { productUrl: 'https://x/iphone17', name: 'Apple iPhone 17, 256GB', score: 2 }, null];
   assert.equal(pickFallbackCandidate(checked, 'https://x/search'), 'https://x/iphone17');
+});
+
+test('John Lewis HTTP prefetch rejects Express-only PDP markup', () => {
+  assert.equal(isJohnLewisExpressOnlyHtml('<button data-testid="basket:add:express">Express</button>'), true);
+  assert.equal(isJohnLewisExpressOnlyHtml('<button data-testid="basket:add:express">Express</button><button data-testid="basket:add">Add</button>'), false);
+  assert.equal(isJohnLewisExpressOnlyHtml('<button data-testid="basket:add">Add</button>'), false);
 });
 
 test('John Lewis basket confirmation distinguishes an empty basket from a populated one', () => {

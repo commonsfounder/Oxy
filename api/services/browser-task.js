@@ -2431,6 +2431,15 @@ function scoreProductNameVsGoal(name, goal) {
   return score;
 }
 
+// John Lewis exposes a separate Express-only add control on ship-from-store PDPs. The live
+// browser can detect that after opening the page, but the HTML prefetch can reject it earlier
+// and avoid a needless product open → back → search-pick cycle.
+function isJohnLewisExpressOnlyHtml(html) {
+  const source = String(html || '');
+  return /data-testid\s*=\s*["']basket:add:express["']/i.test(source)
+    && !/data-testid\s*=\s*["']basket:add["']/i.test(source);
+}
+
 // Pick the PDP to open when none of the fetched candidates looked "orderable" (a plain
 // HTTP fetch often gets a stripped/bot-walled response, so `orderable` can be false for
 // every candidate even on a normal search). Pure + unit-testable.
@@ -2440,7 +2449,7 @@ function scoreProductNameVsGoal(name, goal) {
 // console. Require a positive name-vs-goal score before ever trusting a fallback pick;
 // otherwise let the live browser + vision loop choose from the real search-results page.
 function pickFallbackCandidate(checked, searchUrl) {
-  const scored = (checked || []).filter((c) => c && c.score > 0).sort((a, b) => b.score - a.score);
+  const scored = (checked || []).filter((c) => c && !c.expressOnly && c.score > 0).sort((a, b) => b.score - a.score);
   return scored.length ? scored[0].productUrl : searchUrl;
 }
 
@@ -2458,12 +2467,13 @@ async function resolveOrderOpenUrl(url, goal, retailOptions = {}) {
   const checked = await Promise.all(candidates.map(async (productUrl) => {
     const pdpHtml = await fetchHtml(productUrl);
     if (!pdpHtml) return null;
-    const orderable = looksOrderablePdp(pdpHtml);
+    const expressOnly = siteKeyFromUrl(productUrl) === 'johnlewis.com' && isJohnLewisExpressOnlyHtml(pdpHtml);
+    const orderable = !expressOnly && looksOrderablePdp(pdpHtml);
     const name = extractProductName(pdpHtml) || '';
     const score = scoreProductNameVsGoal(name, goal);
-    return { productUrl, orderable, name, score };
+    return { productUrl, orderable, expressOnly, name, score };
   }));
-  const orderable = checked.filter((c) => c?.orderable && c.score > 0);
+  const orderable = checked.filter((c) => c?.orderable && !c.expressOnly && c.score > 0);
   if (orderable.length) {
     orderable.sort((a, b) => b.score - a.score);
     return orderable[0].productUrl;
@@ -6698,6 +6708,7 @@ module.exports = {
   scoreSearchResultText,
   pickBestSearchResult,
   scoreProductNameVsGoal,
+  isJohnLewisExpressOnlyHtml,
   pickFallbackCandidate,
   findElementByText,
   shouldStartFreshSession,
