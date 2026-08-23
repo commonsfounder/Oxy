@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   matchesPaymentKeyword,
+  isPaymentHandoffBlockedByLoading,
   isTechnicalAsk,
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,
@@ -15,7 +16,8 @@ const {
   scoreProductNameVsGoal,
   pickFallbackCandidate,
   findElementByText,
-  shouldStartFreshSession
+  shouldStartFreshSession,
+  buildChilternRailSearchUrl
 } = require('../../api/services/browser-task');
 const { validateActionWithContract } = require('../../api/action-contracts');
 
@@ -30,6 +32,21 @@ test('validateActionWithContract does not require goal (the handler enforces it 
   const action = { type: 'run_browser_task', input: {} };
   const error = validateActionWithContract(action, '');
   assert.equal(error, null, 'an empty goal must reach the handler, not be rejected upstream');
+});
+
+test('buildChilternRailSearchUrl keeps both legs and their time constraints', () => {
+  const url = new URL(buildChilternRailSearchUrl(
+    'Buy a return ticket from Birmingham Moor Street to Wembley Stadium on Wednesday 19 August 2026, arrive by 17:00 and return after 23:00.'
+  ));
+  assert.equal(url.hostname, 'buy.chilternrailways.co.uk');
+  assert.equal(url.searchParams.get('origin'), 'GBBMO');
+  assert.equal(url.searchParams.get('destination'), 'GBWCX');
+  assert.equal(url.searchParams.get('outboundTime'), '2026-08-19T17:00:00');
+  assert.equal(url.searchParams.get('outboundTimeType'), 'ARRIVAL');
+  assert.equal(url.searchParams.get('inbound'), 'true');
+  assert.equal(url.searchParams.get('inboundTime'), '2026-08-19T23:00:00');
+  assert.equal(url.searchParams.get('inboundTimeType'), 'DEPARTURE');
+  assert.equal(buildChilternRailSearchUrl('buy a train ticket to Wembley'), null);
 });
 
 test('matchesPaymentKeyword catches common finalize/payment button text', () => {
@@ -52,9 +69,16 @@ test('matchesPaymentKeyword catches real-world finalize buttons and rejects mid-
   }
   // must NOT match (browse / mid-flow — pausing here would strand the user)
   for (const t of ['Add to basket', 'Add to cart', 'View menu', 'Search',
-    'Proceed to checkout', 'Continue', 'Edit order', 'More options']) {
+    'Proceed to checkout', 'Continue', 'Edit order', 'More options', 'Quick buy']) {
     assert.equal(matchesPaymentKeyword(t), false, `expected no match: ${t}`);
   }
+});
+
+test('isPaymentHandoffBlockedByLoading defers a ticket retailer loading shell', async () => {
+  const loadingPage = { evaluate: async () => 'Loading, please wait\nPlease wait while we search for tickets\nTotal to pay: £0.00' };
+  const settledPage = { evaluate: async () => 'Select tickets\nAdvance Single\n£42.50\nContinue to payment' };
+  assert.equal(await isPaymentHandoffBlockedByLoading(loadingPage), true);
+  assert.equal(await isPaymentHandoffBlockedByLoading(settledPage), false);
 });
 
 test('buildDecisionPrompt includes the goal, history, and numbered elements', () => {
@@ -104,7 +128,22 @@ test('isOrderGoal recognizes ordering intent so a premature "done" never closes 
   assert.equal(isOrderGoal('Order a McDonald\'s Big Mac to 1805 Coventry Road'), true);
   assert.equal(isOrderGoal('get me some jerk chicken for delivery'), true);
   assert.equal(isOrderGoal('mcdonald\'s'), false); // bare reply — handled by live session, not a fresh order goal
+  assert.equal(isOrderGoal('find dry cat food and report the cheapest displayed price'), false);
+  assert.equal(isOrderGoal('find the price of a pizza'), false);
   assert.equal(isOrderGoal('what is the capital of France'), false);
+});
+
+test('ordering recipes are never applied to a read-only lookup', () => {
+  const { shouldUseOrderingAutomation } = require('../../api/services/browser-task');
+  assert.equal(shouldUseOrderingAutomation({ isOrder: false }), false);
+  assert.equal(shouldUseOrderingAutomation({ isOrder: true }), true);
+});
+
+test('the ordering capability gate is the sole authority for search-result picking', () => {
+  const { shouldUseOrderingAutomation } = require('../../api/services/browser-task');
+  // This protects every ordering-only helper, including result picking, recipes and
+  // checkout navigation, from running for a question-only task.
+  assert.equal(shouldUseOrderingAutomation({ isOrder: false, goal: 'find dry cat food and report the cheapest price' }), false);
 });
 
 test('parseModelDecision parses a valid wait decision', () => {
@@ -543,4 +582,3 @@ test('shouldStartFreshSession: a url pointing at a different site starts fresh',
     true
   );
 });
-

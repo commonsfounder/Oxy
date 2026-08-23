@@ -15,6 +15,8 @@ struct MessageBubble: View {
     var onRetryFailedTurn: (() -> Void)? = nil
 
     @State private var showReauthSheet = false
+    @State private var showCheckoutInformationSheet = false
+    @State private var showDisplaySheet = false
 
     private var isUser: Bool { message.role == .user }
     private var isCompact: Bool { OxySettingsCache.current.bubbleStyle == "compact" }
@@ -24,7 +26,7 @@ struct MessageBubble: View {
     /// composer. Neither belongs in the stream.
     private var completedActions: [ActionResult] {
         message.actions.filter {
-            !$0.pending && !($0.action == "send_message" && $0.success)
+            !$0.needsUser && !($0.action == "send_message" && $0.isCompleted)
         }
     }
 
@@ -39,7 +41,7 @@ struct MessageBubble: View {
              "save_trip":
             return true
         case "get_directions", "plan_trip":
-            return action.success && (action.deepLink != nil || action.webLink != nil)
+            return !action.isFailure && (action.deepLink != nil || action.webLink != nil)
         default:
             return false
         }
@@ -49,7 +51,7 @@ struct MessageBubble: View {
     private var receiptActions: [ActionResult] { completedActions.filter { !Self.isRichAction($0) } }
     private var browserRecoveryAction: ActionResult? {
         completedActions.first {
-            !$0.success &&
+            $0.isFailure &&
             $0.recoveryAction?.type == "continue_browser_task" &&
             $0.recoveryAction?.autoContinue != true
         }
@@ -59,13 +61,20 @@ struct MessageBubble: View {
     /// posts straight to POST /browser-task/reauth-login instead of resending chat text
     /// (which would just re-hit the same wall; see api/index.js's `reauth` case).
     private var reauthAction: ActionResult? {
-        completedActions.first { !$0.success && $0.recoveryAction?.type == "reauth_login" }
+        completedActions.first { $0.isFailure && $0.recoveryAction?.type == "reauth_login" }
+    }
+
+    /// A merchant marked ordinary contact/billing fields as required. The browser returns
+    /// only portable field categories, so this native sheet works for any checkout rather
+    /// than encoding a merchant or task type here.
+    private var checkoutInformationAction: ActionResult? {
+        completedActions.first { $0.isFailure && $0.recoveryAction?.type == "checkout_information" }
     }
 
     /// A ride booking gets a dedicated native handoff card; suppress the
     /// assistant's "Opening Uber…" chat text so the card stands alone.
     private var uberAction: ActionResult? {
-        message.actions.first { $0.action == "book_uber" && !$0.pending }
+        message.actions.first { $0.action == "book_uber" && !$0.needsUser && !$0.isFailure }
     }
 
     /// Deduped product photos across every completed action in this turn (currently
@@ -84,7 +93,7 @@ struct MessageBubble: View {
 
     private var appointmentChoices: [(label: String, command: String)] {
         guard !isUser, !message.isStreaming,
-              message.actions.contains(where: { $0.action == "find_appointment_options" && $0.success }) else { return [] }
+              message.actions.contains(where: { $0.action == "find_appointment_options" && $0.isCompleted }) else { return [] }
         return message.content
             .split(separator: "\n")
             .compactMap { line -> (label: String, command: String)? in
@@ -131,6 +140,20 @@ struct MessageBubble: View {
                 } else {
                     AssistantAnswerView(text: message.content, compact: isCompact, isStreaming: message.isStreaming)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !message.isStreaming,
+                       message.turnError == nil,
+                       !message.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Show on display") {
+                            showDisplaySheet = true
+                        }
+                        .font(.appBody(12, weight: .semibold))
+                        .foregroundStyle(Color.appAccent)
+                        .padding(.top, 3)
+                        .sheet(isPresented: $showDisplaySheet) {
+                            DisplayRenderSheet(content: message.content)
+                        }
+                    }
                 }
             }
 
@@ -224,6 +247,32 @@ struct MessageBubble: View {
                             }
                         }
                     }
+
+                    if let information = checkoutInformationAction,
+                       let fields = information.recoveryAction?.fields,
+                       !fields.isEmpty {
+                        Button {
+                            showCheckoutInformationSheet = true
+                        } label: {
+                            Text(information.recoveryAction?.label ?? "Add details")
+                                .font(.appBody(13, weight: .semibold))
+                                .foregroundStyle(Color.appAccent)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(Color.appSurface.opacity(0.84))
+                                .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: AppRadius.sm, style: .continuous)
+                                        .strokeBorder(Color.appHairline, lineWidth: 0.5)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .sheet(isPresented: $showCheckoutInformationSheet) {
+                            CheckoutInformationSheet(fields: fields) {
+                                onActionCommand?("keep going")
+                            }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 6)
@@ -275,6 +324,136 @@ struct MessageBubble: View {
         // Animate the streaming→settled flip, not every token. Animating on
         // `content` re-ran a spring layout pass per streamed word — a stutter source.
         .animation(.appSpring, value: message.isStreaming)
+    }
+}
+
+private struct DisplayRenderSheet: View {
+    let content: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var displays: [PairedDisplay] = []
+    @State private var isLoading = true
+    @State private var sendingDisplayID: String?
+    @State private var errorMessage: String?
+
+    private var title: String {
+        let firstLine = content
+            .components(separatedBy: .newlines)
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String((firstLine?.isEmpty == false ? firstLine! : "From chat").prefix(160))
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Choose a paired display")
+                    .font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(Color.mgHeading)
+
+                Text("This sends the reply as a short readable update.")
+                    .font(.appBody(13))
+                    .foregroundStyle(Color.mgSecondary)
+
+                if isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if displays.isEmpty, let errorMessage {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(errorMessage)
+                            .font(.appBody(14))
+                            .foregroundStyle(Color.mgDestructive)
+                        Button("Try again") {
+                            Task { await loadDisplays() }
+                        }
+                        .font(.appBody(13, weight: .semibold))
+                        .foregroundStyle(Color.appAccent)
+                    }
+                } else if displays.isEmpty {
+                    Text("No displays paired. Pair one in Settings.")
+                        .font(.appBody(14))
+                        .foregroundStyle(Color.mgSecondary)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(displays) { display in
+                            Button {
+                                guard sendingDisplayID == nil else { return }
+                                sendingDisplayID = display.id
+                                Task { await send(to: display) }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(display.name)
+                                            .font(.system(size: 15, weight: .semibold))
+                                            .foregroundStyle(Color.mgHeading)
+                                        Text("Paired")
+                                            .font(.appBody(12))
+                                            .foregroundStyle(Color.mgSecondary)
+                                    }
+                                    Spacer()
+                                    if sendingDisplayID == display.id {
+                                        ProgressView()
+                                    } else {
+                                        Text("Show")
+                                            .font(.appBody(13, weight: .semibold))
+                                            .foregroundStyle(Color.appAccent)
+                                    }
+                                }
+                                .padding(.vertical, 14)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(sendingDisplayID != nil)
+
+                            if display.id != displays.last?.id {
+                                MilgrainDivider()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .background { MissionGlassPlate() }
+                }
+
+                if !displays.isEmpty, let errorMessage {
+                    Text(errorMessage)
+                        .font(.appBody(12))
+                        .foregroundStyle(Color.mgDestructive)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, AppSpacing.margin)
+            .padding(.top, 24)
+            .background { GlebChrome.pastelBlob.ignoresSafeArea() }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+            .task { await loadDisplays() }
+        }
+    }
+
+    private func loadDisplays() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            displays = try await PairedDisplaysService.fetchDisplays()
+        } catch {
+            errorMessage = "Couldn’t load paired displays."
+        }
+        isLoading = false
+    }
+
+    private func send(to display: PairedDisplay) async {
+        guard sendingDisplayID == display.id else { return }
+        errorMessage = nil
+        do {
+            try await PairedDisplaysService.render(displayId: display.id, title: title, body: content)
+            dismiss()
+        } catch {
+            errorMessage = "Couldn’t send this to the display."
+            sendingDisplayID = nil
+        }
     }
 }
 
@@ -744,7 +923,7 @@ private struct DirectionsResultCard: View {
             ToolHeader(
                 icon: isDriving ? "car" : "train.side.front.car",
                 eyebrow: isDriving ? "DIRECTIONS" : "JOURNEY",
-                state: action.success ? .success : .failure
+                state: action.isCompleted ? .success : (action.isFailure ? .failure : .neutral)
             )
 
             VStack(alignment: .leading, spacing: 5) {
@@ -1032,7 +1211,7 @@ struct UberHandoffCard: View {
                             .foregroundStyle(Color.appInk)
                             .lineLimit(2)
                         Spacer(minLength: 8)
-                        ToolStatusGlyph(state: action.success ? .success : .failure)
+                        ToolStatusGlyph(state: action.isCompleted ? .success : (action.isFailure ? .failure : .neutral))
                     }
 
                     VStack(alignment: .leading, spacing: 4) {
@@ -1094,12 +1273,12 @@ struct TravelResultCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ToolHeader(icon: icon, eyebrow: eyebrow, state: action.success ? .success : .failure)
+            ToolHeader(icon: icon, eyebrow: eyebrow, state: action.isCompleted ? .success : (action.isFailure ? .failure : .neutral))
 
             if let text = action.text, !text.isEmpty {
                 Text(text.strippingMarkdown)
                     .font(.appBody(13))
-                    .foregroundStyle(action.success ? Color.appInk : Color.appMuted)
+                    .foregroundStyle(action.isFailure ? Color.appMuted : Color.appInk)
                     .lineLimit(6)
             }
         }

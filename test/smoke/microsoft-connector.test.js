@@ -45,12 +45,9 @@ function withMockedDeps({ tokensRow = null, axiosMock } = {}, fn) {
   }
 }
 
-test('microsoft connector exports the 6 Outlook actions', () => {
+test('microsoft connector has no parallel action ownership manifest', () => {
   const microsoft = withMockedDeps({}, () => require('../../connectors/microsoft'));
-  assert.deepEqual(microsoft.SUPPORTED_ACTIONS, [
-    'send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events',
-    'get_outlook_email_action_links'
-  ]);
+  assert.equal(Object.hasOwn(microsoft, 'SUPPORTED_ACTIONS'), false);
 });
 
 test('microsoft connector is honest (not silently successful) when Outlook was never connected', async () => {

@@ -20,6 +20,7 @@ enum ActivityStepState: String, Equatable {
     case active
     case complete
     case failed
+    case neutral
 }
 
 struct ActivityStep: Identifiable, Equatable {
@@ -350,9 +351,9 @@ final class ChatViewModel {
                         guard updateAssistantMessage(id: assistantID, { $0.actions.merging(results) }) else { return }
                         markActionsComplete(results)
                         openDeepLinks(results)
-                        if results.contains(where: { $0.success }) {
+                        if results.contains(where: { $0.isCompleted }) {
                             HapticManager.shared.success()
-                        } else if results.contains(where: { !$0.success }) {
+                        } else if results.contains(where: { $0.isFailure }) {
                             HapticManager.shared.warning()
                         }
                         // "Browser task paused" just means the ordering loop is still
@@ -517,14 +518,14 @@ final class ChatViewModel {
                     case .actions(let results):
                         // In silent pendant mode, open any successful action with a link —
                         // the user spoke the command so no whitelist gating needed.
-                        for result in results where result.success {
+                        for result in results where self.canPerformClientHandoff(result) {
                             let hasLink = result.deepLink != nil || result.webLink != nil
                             if hasLink && !self.shouldHoldForLocalConfirmation(result, settings: settings) {
                                 self.openActionLink(result)
                             }
                         }
                         // Resolve music play actions natively for gapless playback
-                        for result in results where result.action == "play_music" && result.success {
+                        for result in results where result.action == "play_music" && self.canPerformClientHandoff(result) {
                             let query = (result.cardText ?? result.text ?? "")
                                 .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
                                 .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
@@ -976,6 +977,10 @@ final class ChatViewModel {
             setActivity("Working on it", state: .active)
             return
         }
+        if status == "browser_progress" {
+            setActivity(label, state: .active)
+            return
+        }
 
         let combined = "\(status) \(label)".lowercased()
         if combined.contains("location") {
@@ -994,7 +999,7 @@ final class ChatViewModel {
 
     private func markActionsComplete(_ results: [ActionResult]) {
         for result in results {
-            let state: ActivityStepState = result.success ? .complete : .failed
+            let state: ActivityStepState = result.isCompleted ? .complete : (result.isFailure ? .failed : .neutral)
             switch result.action {
             case "get_directions", "plan_trip":
                 setActivity("Finding routes", state: state)
@@ -1009,6 +1014,10 @@ final class ChatViewModel {
             }
         }
         setActivity("Preparing result", state: .active)
+    }
+
+    private func canPerformClientHandoff(_ result: ActionResult) -> Bool {
+        (result.isCompleted || result.isHandoff) && !result.needsUser
     }
 
     private func finishActivity() {
@@ -1303,13 +1312,13 @@ final class ChatViewModel {
     /// resolution for play_music results.
     func openPendantActions(_ results: [ActionResult]) {
         let settings = currentSettings
-        for result in results where result.success {
+        for result in results where canPerformClientHandoff(result) {
             let hasLink = result.deepLink != nil || result.webLink != nil
             if hasLink && !shouldHoldForLocalConfirmation(result, settings: settings) {
                 openActionLink(result)
             }
         }
-        for result in results where result.action == "play_music" && result.success {
+        for result in results where result.action == "play_music" && canPerformClientHandoff(result) {
             let query = (result.cardText ?? result.text ?? "")
                 .replacingOccurrences(of: #"(?i)^playing\s+"#, with: "", options: .regularExpression)
                 .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))

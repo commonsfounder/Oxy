@@ -1,4 +1,3 @@
-const SUPPORTED_ACTIONS = ['search_trains', 'station_board'];
 const { getGoogleDirectionsKey } = require('../api/services/maps-config');
 
 function getAxios() {
@@ -221,7 +220,9 @@ async function execute(userId, action, params) {
 
     if (!getGoogleDirectionsKey()) {
       return {
-        success: true,
+        success: false,
+        outcome: 'unavailable',
+        unavailable: true,
         text: `I couldn't get a train route summary from ${origin} to ${destination} because route data is not configured on the server.`,
         cardText: 'No train route summary available',
         actionSummary: 'Route unavailable',
@@ -255,4 +256,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

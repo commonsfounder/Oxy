@@ -60,3 +60,68 @@ private struct MarkSeenResponse: Codable {
 private struct DocumentsResponse: Codable {
     let documents: [WorkflowDocument]
 }
+
+struct PairedDisplay: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let type: String
+    let capabilities: [String: Bool]
+    let pairedAt: String?
+    let lastSeenAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, type, capabilities
+        case pairedAt, lastSeenAt
+    }
+}
+
+enum DisplayTimestampParser {
+    static func date(from raw: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: raw) { return date }
+
+        let standard = ISO8601DateFormatter()
+        standard.formatOptions = [.withInternetDateTime]
+        return standard.date(from: raw)
+    }
+}
+
+struct DisplayPairingChallenge: Codable, Equatable {
+    let id: String
+    let code: String
+    let expiresAt: String
+    let displayUrl: String
+}
+
+private struct PairedDisplaysResponse: Codable {
+    let displays: [PairedDisplay]
+}
+
+enum PairedDisplaysService {
+    static func createPairing(displayName: String? = nil) async throws -> DisplayPairingChallenge {
+        var body: [String: Any] = [:]
+        if let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["displayName"] = displayName
+        }
+        let data = try await APIClient.shared.request(path: "/agent/displays/pairing", method: "POST", body: body)
+        return try JSONDecoder().decode(DisplayPairingChallenge.self, from: data)
+    }
+
+    static func fetchDisplays() async throws -> [PairedDisplay] {
+        let data = try await APIClient.shared.request(path: "/agent/displays")
+        return try JSONDecoder().decode(PairedDisplaysResponse.self, from: data).displays
+    }
+
+    static func revokeDisplay(id: String) async throws {
+        _ = try await APIClient.shared.request(path: "/agent/displays/\(id)", method: "DELETE")
+    }
+
+    static func render(displayId: String, title: String, body: String, kind: String = "agent_update") async throws {
+        _ = try await APIClient.shared.request(
+            path: "/agent/displays/\(displayId)/render",
+            method: "POST",
+            body: ["title": title, "body": body, "kind": kind]
+        )
+    }
+}

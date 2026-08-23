@@ -68,7 +68,8 @@ const { runOrderingTurn, getSession, closeSession } = require('../../api/service
 
 const USER = 'e2e-test-user';
 const GOAL = process.argv[2] || 'find a pair of men\'s joggers and tell me the exact price shown';
-const URL = process.argv[3] || 'https://www.johnlewis.com';
+// Pass --auto to exercise the production no-URL provider routing path.
+const URL = process.argv[3] === '--auto' ? null : (process.argv[3] || 'https://www.johnlewis.com');
 const MAX_TURNS = Number(process.argv[4] || 10);
 
 const stamp = () => new Date().toISOString().slice(11, 19);

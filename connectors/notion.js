@@ -4,8 +4,6 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 
 const supabase = createSupabaseServiceClient();
 
-const SUPPORTED_ACTIONS = ['create_note', 'search_notes', 'add_to_notion_list'];
-
 async function getNotionToken(userId) {
   try {
     const { data } = await supabase
@@ -27,13 +25,13 @@ async function getNotionToken(userId) {
 async function execute(userId, action, params) {
   const token = await getNotionToken(userId);
   if (!token) {
-    return { success: true, text: `Open Notion for ${params?.content || 'note'}.`, webLink: 'https://notion.so' };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: 'Notion is not connected. No note was saved.' };
   }
 
   const headers = { Authorization: `Bearer ${token}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' };
 
   try {
-    if (action === 'create_note' || action === 'add_to_notion_list') {
+    if (action === 'save_to_notion' || action === 'create_note' || action === 'add_to_notion_list') {
       const title = params?.title || params?.content || 'Note from Assistant';
       const content = params?.content || params?.body || '';
       const dbId = params?.database_id || process.env.NOTION_DEFAULT_DB;
@@ -47,8 +45,9 @@ async function execute(userId, action, params) {
         }, { headers });
         return { success: true, text: `Created Notion page: ${title}`, webLink: res.data.url };
       } else {
-        // Simple page
-        return { success: true, text: `Note prepared: ${title}. Open Notion to save.`, webLink: 'https://notion.so' };
+        // A token alone is not evidence that a page was created. A database target is
+        // required for this connector's current implementation.
+        return { success: false, outcome: 'handoff_required', handoffRequired: true, text: `Notion is connected, but no destination database is configured for "${title}".`, webLink: 'https://notion.so' };
       }
     }
 
@@ -71,4 +70,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

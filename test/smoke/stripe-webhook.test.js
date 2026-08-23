@@ -82,7 +82,7 @@ test('succeeded event for a PaymentIntent with no matching pending SCA record is
   assert.equal(result.deducted, false);
 });
 
-test('succeeded event resolves a pending SCA charge exactly once: deducts balance and clears the flag', async () => {
+test('succeeded event resolves a pending SCA charge without creating a virtual balance', async () => {
   const supabase = fakeSupabase([
     { _table: 'preferences', user_id: 'user-1', key: 'concierge_account.balance', value: '100' }
   ]);
@@ -94,14 +94,15 @@ test('succeeded event resolves a pending SCA charge exactly once: deducts balanc
   });
 
   assert.equal(result.handled, true);
-  assert.equal(result.deducted, true);
+  assert.equal(result.settled, true);
+  assert.equal(result.deducted, false);
   const balanceRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.balance');
-  assert.equal(balanceRow.value, '75');
+  assert.equal(balanceRow.value, '100');
   const pendingRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.payment_action_required');
   assert.equal(pendingRow, undefined, 'the SCA-pending flag must be cleared once resolved');
 });
 
-test('redelivered succeeded events for the same PaymentIntent only deduct once (at-least-once webhook delivery)', async () => {
+test('redelivered succeeded events settle at most one pending checkpoint and never mutate a virtual balance', async () => {
   const supabase = fakeSupabase([
     { _table: 'preferences', user_id: 'user-1', key: 'concierge_account.balance', value: '100' }
   ]);
@@ -127,11 +128,11 @@ test('redelivered succeeded events for the same PaymentIntent only deduct once (
     handleStripeWebhookEvent(supabase, event)
   ]);
 
-  const deductedCount = [first, second].filter(r => r.deducted === true).length;
-  assert.equal(deductedCount, 1, 'exactly one delivery should win the claim and deduct');
+  const settledCount = [first, second].filter(r => r.settled === true).length;
+  assert.equal(settledCount, 1, 'exactly one delivery should win the claim');
 
   const balanceRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.balance');
-  assert.equal(balanceRow.value, '70', 'balance must only be deducted once (100 - 30 = 70), not twice');
+  assert.equal(balanceRow.value, '100', 'Stripe settlement must not mutate a virtual balance');
 
   const pendingRow = supabase._rows.find(r => r._table === 'preferences' && r.key === 'concierge_account.payment_action_required');
   assert.equal(pendingRow, undefined);

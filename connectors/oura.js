@@ -1,11 +1,9 @@
 const axios = require('axios');
 
-const SUPPORTED_ACTIONS = ['get_oura_sleep', 'get_oura_readiness'];
-
 async function execute(userId, action, params) {
   const token = process.env.OURA_ACCESS_TOKEN;
   if (!token) {
-    return { success: true, text: `Oura ${action} - set OURA_ACCESS_TOKEN for real wearable data.`, webLink: 'https://ouraring.com' };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: `Oura ${action} is unavailable because Oura is not connected.` };
   }
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -27,4 +25,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

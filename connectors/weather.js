@@ -1,12 +1,10 @@
 const axios = require('axios');
 
-const SUPPORTED_ACTIONS = ['get_weather', 'get_forecast'];
-
 async function execute(userId, action, params) {
   const key = process.env.OPENWEATHER_API_KEY;
   const city = params.city || params.location || 'London';
   if (!key) {
-    return { success: true, text: `Weather for ${city} - set OPENWEATHER_API_KEY for live data (free tier).`, webLink: `https://openweathermap.org` };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: `Weather is unavailable because no provider is configured for ${city}.` };
   }
 
   try {
@@ -26,4 +24,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

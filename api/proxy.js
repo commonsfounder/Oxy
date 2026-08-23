@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const { dispatch } = require('../connectors');
+const { getActionContract } = require('./action-contracts');
 const { getAuthenticatedUserId, requireSessionAuth } = require('../auth');
 const { createSupabaseServiceClient, logMissingRuntimeEnvOnce } = require('../runtime');
 
@@ -32,7 +33,10 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const result = await dispatch(userId, action, params);
+    const adapter = getActionContract(action)?.adapter;
+    const result = adapter?.kind === 'connector'
+      ? await dispatch(adapter.id, userId, action, params)
+      : { success: false, outcome: 'unavailable', unavailable: true, error: 'That capability is not available yet. No action was taken.' };
 
     await supabase.from('action_log').insert({
       user_id: userId,

@@ -4,8 +4,6 @@ const { decryptTokens } = require('../api/services/token-crypto');
 
 const supabase = createSupabaseServiceClient();
 
-const SUPPORTED_ACTIONS = ['send_slack_message', 'search_slack', 'get_slack_channels'];
-
 async function getSlackToken(userId) {
   try {
     const { data } = await supabase.from('connectors').select('tokens').eq('user_id', userId).eq('connector_id', 'slack').eq('enabled', true).limit(1);
@@ -17,7 +15,7 @@ async function getSlackToken(userId) {
 async function execute(userId, action, params) {
   const token = await getSlackToken(userId);
   if (!token) {
-    return { success: true, text: `Slack ${action} - connect for real messaging.`, webLink: 'https://slack.com' };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: `Slack ${action} is unavailable because Slack is not connected. No message was sent.` };
   }
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -52,4 +50,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

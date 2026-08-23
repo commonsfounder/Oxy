@@ -2,6 +2,19 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createActionRunner } = require('../../api/services/action-runner');
+const { getActionContract } = require('../../api/action-contracts');
+const { adapterForAction } = require('../../api/services/action-catalog');
+
+function syntheticResolver(type) {
+  if (type === 'action_a' || type === 'action_b') {
+    return { risk: 'low', confirmation: 'none', executionMode: 'direct', modelVisible: true, availability: 'registered', adapter: { kind: 'inline' } };
+  }
+  return getActionContract(type);
+}
+
+function syntheticAdapterResolver(type) {
+  return syntheticResolver(type)?.adapter || adapterForAction(type);
+}
 
 test('action runner parks high-risk actions for review', async () => {
   const pending = [];
@@ -109,6 +122,28 @@ test('action runner executes reviewed action when bypassReview is set', async ()
   assert.equal(result[0].result.actionSummary, 'Email sent');
 });
 
+test('action runner simulates parallel actions without invoking the executor', async () => {
+  let executed = 0;
+  const executeActions = createActionRunner({
+    executeAction: async () => { executed += 1; return { success: true }; },
+    setPendingAction: async () => {},
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  const result = await executeActions('user-1', [
+    { type: 'find_place', input: { query: 'coffee' } },
+    { type: 'get_weather', input: { city: 'London' } }
+  ], { simulate: true });
+
+  assert.equal(executed, 0);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map(entry => [entry.result.success, entry.result.outcome]), [
+    [false, 'simulated'],
+    [false, 'simulated']
+  ]);
+});
+
 test('action runner validates required fields before execution', async () => {
   let executed = false;
   const executeActions = createActionRunner({
@@ -177,6 +212,8 @@ test('a later action throwing in a sequential batch does not discard earlier suc
   // which would misreport an already-completed side effect (e.g. a sent email)
   // as failed and risk a duplicate retry.
   const executeActions = createActionRunner({
+    resolveContract: syntheticResolver,
+    resolveAdapter: syntheticAdapterResolver,
     executeAction: async (userId, type) => {
       if (type === 'action_a') return { success: true, text: 'Sent.' };
       throw new Error('connector timed out');
@@ -247,6 +284,8 @@ function fakeSupabaseBuilder() {
 
 test('a logAction that returns a thenable-without-.catch (Supabase-shaped) does not fail the action, sequential mode, no trace', async () => {
   const executeActions = createActionRunner({
+    resolveContract: syntheticResolver,
+    resolveAdapter: syntheticAdapterResolver,
     executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
     setPendingAction: async () => {},
     logAction: () => fakeSupabaseBuilder(),
@@ -299,6 +338,8 @@ test('one action\'s logging failure in a multi-action sequential batch does not 
   // which never even ran yet, and any action before it that had already succeeded.
   let logCalls = 0;
   const executeActions = createActionRunner({
+    resolveContract: syntheticResolver,
+    resolveAdapter: syntheticAdapterResolver,
     executeAction: async (userId, type) => ({ success: true, text: `ok:${type}` }),
     setPendingAction: async () => {},
     logAction: () => {

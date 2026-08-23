@@ -4,7 +4,7 @@ struct PaymentsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    @State private var balance: Double = 0
+    @State private var balance: Double?
     @State private var card: LinkedCard?
     @State private var agentCard: AgentCardSummary?
     @State private var showAgentCardSheet = false
@@ -124,7 +124,7 @@ struct PaymentsView: View {
     }
 
     private var formattedBalance: String {
-        String(format: "%.2f", balance)
+        balance.map { String(format: "%.2f", $0) } ?? "Unavailable"
     }
 
     private var cardTitle: String {
@@ -342,7 +342,7 @@ private struct AgentCardSaveResponse: Codable {
 }
 
 private struct BalanceResponse: Codable {
-    let balance: Double
+    let balance: Double?
 }
 
 #Preview {

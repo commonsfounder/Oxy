@@ -6,28 +6,31 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const flights = require('../../connectors/flights');
-const { registry } = require('../../connectors');
+const { getExecutableActionCatalog } = require('../../api/services/action-catalog');
 
 // This connector used to answer search_flights with a Google Flights URL and success:true,
 // having never seen a price. That is now a real grounded search in api/index.js. These tests
 // exist to keep the fake from coming back by the side door.
-test('flights connector exports SUPPORTED_ACTIONS, and search is no longer one of them', () => {
-  assert.ok(Array.isArray(flights.SUPPORTED_ACTIONS));
-  assert.ok(flights.SUPPORTED_ACTIONS.includes('track_flight'));
-  assert.equal(flights.SUPPORTED_ACTIONS.includes('search_flights'), false);
+test('flight ownership comes from the executable catalog, not connector-local action arrays', () => {
+  const track = getExecutableActionCatalog().find(action => action.type === 'track_flight');
+  const search = getExecutableActionCatalog().find(action => action.type === 'search_flights');
+  assert.equal(track.adapter.id, 'flights');
+  assert.equal(search.adapter.kind, 'inline');
+  assert.equal(Object.hasOwn(flights, 'SUPPORTED_ACTIONS'), false);
 });
 
 test('the link-generator is genuinely unreachable, not merely unregistered', async () => {
-  assert.equal(registry.search_flights, undefined, 'nothing may dispatch search_flights to a connector');
-  assert.equal(registry.search_hotels, undefined, 'the hotels link-generator was deleted outright');
   const result = await flights.execute('user1', 'search_flights', { from: 'LON', destination: 'TYO' });
   assert.equal(result.success, false);
 });
 
-test('track_flight still works — it was never the decorative one', async () => {
+test('track_flight opens a search handoff and does not claim tracking', async () => {
   const result = await flights.execute('user1', 'track_flight', { flight: 'BA123' });
-  assert.equal(result.success, true);
-  assert.match(result.text, /Tracking flight BA123/);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'handoff_required');
+  assert.equal(result.handoffRequired, true);
+  assert.doesNotMatch(result.text, /Tracking flight BA123/);
+  assert.match(result.text, /open.*search|search.*flight/i);
 });
 
 test('flights connector returns error for unknown action', async () => {

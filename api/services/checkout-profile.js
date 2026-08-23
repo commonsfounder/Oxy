@@ -5,13 +5,14 @@
 
 const PREF_EMAIL = 'checkout_profile.email';
 const PREF_EMAIL_CONSENT = 'checkout_profile.email_consent'; // legacy key, still read
+const PREF_TITLE = 'checkout_profile.title';
 const PREF_NAME = 'checkout_profile.name';
 const PREF_PHONE = 'checkout_profile.phone';
 const PREF_ADDRESS = 'checkout_profile.address'; // JSON: {line1,line2?,city,postcode}
 const PREF_CONSENT = 'checkout_profile.consent'; // consolidated consent flag
 
 // Never auto-fill payment-adjacent fields — hard stop at every classification layer.
-const PAYMENT_ASK_PATTERN = /\b(card\s*(?:number|details)?|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number)\b/i;
+const PAYMENT_ASK_PATTERN = /\b(card\s*(?:number|details)?|credit\s*card|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number|cc-(?:number|csc|exp|exp-month|exp-year))\b/i;
 
 const EMAIL_ASK_PATTERN = /\b(e-?mail(?:\s*address)?|your\s+email|guest\s+email)\b/i;
 const TITLE_ASK_PATTERN = /\b(title|salutation|preferred\s+title|mr\/mrs|how\s+should\s+we\s+address)\b/i;
@@ -27,6 +28,18 @@ const SAVE_DETAILS_CONSENT_PATTERN = /\bsave\s+(my\s+)?(?:details|address|info(?
 
 // Hints that indicate address line 1 (street/house words)
 const STREET_WORDS = /\b(street|st|road|rd|avenue|ave|lane|ln|close|cl|court|ct|drive|dr|way|place|pl|crescent|grove|gardens?|terrace|house|flat|apt|apartment|floor)\b/i;
+
+// The small, portable identity profile that an ordinary checkout can reasonably reuse.
+// This deliberately stops before payment, account passwords, government identifiers and
+// medical information. Those must remain merchant- and task-specific, never become a
+// silent global autofill store.
+const CHECKOUT_INFORMATION_LABELS = Object.freeze({
+  email: 'email address',
+  title: 'title',
+  name: 'full name',
+  phone: 'mobile number',
+  address: 'billing address',
+});
 
 /** Conservative classifier: returns field type or null. Payment always wins → null. */
 function classifyCheckoutAsk(question) {
@@ -85,6 +98,63 @@ function matchProfileFieldForInput(hintText) {
   if (/post.?code|postal|zip/.test(h)) return 'postcode';
   if (/\b(city|town)\b/.test(h)) return 'city';
   return null;
+}
+
+/**
+ * Convert a DOM-observed input classification into the smallest user-facing profile
+ * requirement. Callers provide only field metadata (never a field value), making this
+ * safe to run against arbitrary checkout pages and straightforward to test as a pure
+ * function.
+ */
+function profileRequirementForInputField(field) {
+  switch (field) {
+    case 'email': return 'email';
+    case 'title': return 'title';
+    case 'full_name':
+    case 'first_name':
+    case 'last_name': return 'name';
+    case 'phone': return 'phone';
+    case 'line1':
+    case 'line2':
+    case 'city':
+    case 'postcode': return 'address';
+    default: return null;
+  }
+}
+
+function profileHasCheckoutRequirement(profile, requirement) {
+  if (!profile?.consent) return false;
+  switch (requirement) {
+    case 'email': return Boolean(profile.email);
+    case 'title': return Boolean(profile.title);
+    case 'name': return Boolean(profile.name);
+    case 'phone': return Boolean(profile.phone);
+    case 'address': return Boolean(profile.address?.line1 && profile.address?.city && profile.address?.postcode);
+    default: return false;
+  }
+}
+
+/**
+ * Returns the portable user information an arbitrary checkout visibly requires but the
+ * approved profile cannot supply. `observedFields` is intentionally just
+ * `{ hint, required, empty }`: no browser DOM, URL, merchant name, or sensitive values
+ * leak across this seam.
+ */
+function missingCheckoutInformation(profile, observedFields = []) {
+  const missing = new Set();
+  for (const field of observedFields) {
+    if (!field?.required || !field?.empty) continue;
+    const profileField = matchProfileFieldForInput(field.hint || '');
+    const requirement = profileRequirementForInputField(profileField);
+    if (requirement && !profileHasCheckoutRequirement(profile, requirement)) missing.add(requirement);
+  }
+  return [...missing].sort();
+}
+
+function describeCheckoutInformation(fields = []) {
+  return fields
+    .map((field) => CHECKOUT_INFORMATION_LABELS[field])
+    .filter(Boolean);
 }
 
 function parseEmailFromUserText(text) {
@@ -237,6 +307,7 @@ async function loadCheckoutProfile(supabase, userId) {
   const map = Object.fromEntries(data.map((r) => [r.key, r.value]));
 
   const email = map[PREF_EMAIL] ? String(map[PREF_EMAIL]).trim().toLowerCase() : null;
+  const title = map[PREF_TITLE] ? String(map[PREF_TITLE]).trim() : null;
   const name = map[PREF_NAME] ? String(map[PREF_NAME]).trim() : null;
   const phone = map[PREF_PHONE] ? String(map[PREF_PHONE]).trim() : null;
 
@@ -248,7 +319,7 @@ async function loadCheckoutProfile(supabase, userId) {
   // Consolidated consent OR legacy per-email consent
   const consent = map[PREF_CONSENT] === 'true' || map[PREF_EMAIL_CONSENT] === 'true';
 
-  return { email: email || null, name, phone, address, consent };
+  return { email: email || null, title: title || null, name, phone, address, consent };
 }
 
 /**
@@ -262,6 +333,10 @@ async function saveCheckoutProfile(supabase, userId, fields = {}, consent = fals
     if (normalised && EMAIL_IN_TEXT.test(normalised)) {
       writes.push(setPreferenceValue(supabase, userId, PREF_EMAIL, normalised));
     }
+  }
+  if (fields.title != null) {
+    const title = String(fields.title).trim();
+    if (title) writes.push(setPreferenceValue(supabase, userId, PREF_TITLE, title));
   }
   if (fields.name != null) {
     const n = String(fields.name).trim();
@@ -310,6 +385,7 @@ async function clearCheckoutProfile(supabase, userId) {
 module.exports = {
   PREF_EMAIL,
   PREF_EMAIL_CONSENT,
+  PREF_TITLE,
   PREF_NAME,
   PREF_PHONE,
   PREF_ADDRESS,
@@ -318,6 +394,10 @@ module.exports = {
   classifyCheckoutAsk,
   findEmailInputElement,
   matchProfileFieldForInput,
+  profileRequirementForInputField,
+  profileHasCheckoutRequirement,
+  missingCheckoutInformation,
+  describeCheckoutInformation,
   parseEmailFromUserText,
   parseCheckoutReplyFromUserText,
   wantsSaveDetailsConsent,

@@ -2,8 +2,6 @@ const axios = require('axios');
 const { resolvePlaceDestination, cleanPlaceSearchQuery } = require('../api/geocoding');
 const { getGoogleDirectionsKey } = require('../api/services/maps-config');
 
-const SUPPORTED_ACTIONS = ['find_place', 'get_directions', 'plan_trip'];
-
 function devTimingEnabled() {
   return process.env.OXY_DEV_TIMING === '1' || process.env.NODE_ENV === 'development';
 }
@@ -75,7 +73,9 @@ function mapsSearchFallback(query, err = null) {
     ? 'Exact nearest-place ranking needs a Google Places API key on the server.'
     : 'Exact nearest-place ranking needs the server Places key to be accepted.';
   return {
-    success: true,
+    success: false,
+    outcome: 'handoff_required',
+    handoffRequired: true,
     text: `I can open Maps for ${cleanedQuery}. ${setupText}`,
     actionSummary: 'Maps search ready',
     cardText: 'Open search in Maps',
@@ -100,7 +100,9 @@ function mapsDirectionsFallback(destination, params = {}) {
   const modeLabel = flag === 'r' ? 'transit' : flag === 'w' ? 'walking' : 'driving';
   if (flag === 'r') {
     return {
-      success: true,
+      success: false,
+      outcome: 'unavailable',
+      unavailable: true,
       text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
       actionSummary: 'Route unavailable',
       cardText: 'No transit route summary available',
@@ -113,7 +115,9 @@ function mapsDirectionsFallback(destination, params = {}) {
     };
   }
   return {
-    success: true,
+    success: false,
+    outcome: 'handoff_required',
+    handoffRequired: true,
     text: `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${cleanedDestination} are ready.`,
     actionSummary: 'Directions ready',
     cardText: `Open ${modeLabel} directions in Maps`,
@@ -393,7 +397,9 @@ async function planTrip(destination, params = {}) {
   });
   if (!getGoogleDirectionsKey()) {
     return {
-      success: true,
+      success: false,
+      outcome: 'handoff_required',
+      handoffRequired: true,
       text: `I couldn't get a rail route summary to ${cleanedDestination} because the server is missing a Google Directions key.`,
       actionSummary: 'Route unavailable',
       cardText: 'Open transit directions in Maps',
@@ -440,7 +446,9 @@ async function planTrip(destination, params = {}) {
   const best = chooseBestTripRoute(allRoutes || [], params.preference);
   if (!best) {
     return {
-      success: true,
+      success: false,
+      outcome: 'handoff_required',
+      handoffRequired: true,
       text: `I couldn't get a reliable transit route summary to ${cleanedDestination} right now.`,
       actionSummary: 'Route unavailable',
       cardText: 'Open transit directions in Maps',
@@ -649,7 +657,10 @@ async function execute(userId, action, params) {
         ? `I couldn't get a reliable transit route summary to ${label} right now.`
         : `${modeLabel[0].toUpperCase()}${modeLabel.slice(1)} directions to ${label} are ready.`);
       return {
-        success: true,
+        success: route || flag !== 'r',
+        ...(route || flag !== 'r'
+          ? {}
+          : { outcome: 'unavailable', unavailable: true }),
         text: routeText,
         deepLink: route ? link : (flag === 'r' ? undefined : link),
         webLink: route ? link : (flag === 'r' ? undefined : link),
@@ -700,4 +711,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute, chooseBestTripRoute, scoreTripRoute };
+module.exports = { execute, chooseBestTripRoute, scoreTripRoute };

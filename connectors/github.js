@@ -4,8 +4,6 @@ const { decryptTokens } = require('../api/services/token-crypto');
 
 const supabase = createSupabaseServiceClient();
 
-const SUPPORTED_ACTIONS = ['github_action', 'create_github_issue', 'get_github_prs'];
-
 async function getGitHubToken(userId) {
   try {
     const { data } = await supabase.from('connectors')
@@ -95,4 +93,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

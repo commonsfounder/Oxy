@@ -8,8 +8,6 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('telegram connector bootstrap');
 
-const SUPPORTED_ACTIONS = ['send_telegram', 'get_telegram_contacts'];
-
 function normalizeContactSearch(value) {
   return String(value || '')
     .normalize('NFKD')
@@ -234,6 +232,6 @@ function classifyTelegramError(err) {
 }
 
 module.exports = {
-  SUPPORTED_ACTIONS, execute, startAuth, verifyCode, verify2FA, getSelfDestination,
+  execute, startAuth, verifyCode, verify2FA, getSelfDestination,
   _private: { normalizeContactSearch, SELF_DESTINATION, classifyTelegramError }
 };

@@ -23,6 +23,7 @@ runtime.createSupabaseServiceClient = () => ({
 
 const taskManager = require('../../api/services/task-manager');
 const { runAgentLoop } = require('../../api/services/agent-orchestrator');
+const { createDelegatedRunLifecycle } = require('../../api/services/delegated-run-lifecycle');
 const brainProvider = require('../../api/services/brain-provider');
 
 /*
@@ -66,12 +67,28 @@ function stubTaskStore(initial = {}) {
   };
   taskManager.updateTask = async (_u, _id, updates) => { Object.assign(task, updates); return { ...task }; };
   taskManager.saveTrace = async () => {};
-  return { task, checkpoints };
+  return {
+    task,
+    checkpoints,
+    lifecycle: createDelegatedRunLifecycle({
+      taskStore: {
+        getTask: taskManager.getTask,
+        async updateTask(userId, taskId, updates) {
+          if (updates.checkpoint) checkpoints.push(realTaskFns.trimCheckpoint(updates.checkpoint));
+          return taskManager.updateTask(userId, taskId, updates);
+        },
+        async updateRun(userId, taskId, _attempt, updates) { return this.updateTask(userId, taskId, updates); },
+        async updateTaskCas(userId, taskId, _status, _attempt, updates) { return this.updateTask(userId, taskId, updates); },
+        saveTrace: taskManager.saveTrace,
+        trimCheckpoint: realTaskFns.trimCheckpoint
+      }
+    })
+  };
 }
 
 test('a checkpoint is written for every iteration, not just at the end', async (t) => {
   t.after(restore);
-  const { checkpoints } = stubTaskStore();
+  const { checkpoints, lifecycle } = stubTaskStore();
   brainProvider.callToolsBrain = scriptedBrain([
     { calls: [{ id: 'c1', name: 'web_search', args: { query: 'laptops' } }] },
     { calls: [{ id: 'c2', name: 'web_search', args: { query: 'reviews' } }] },
@@ -84,6 +101,7 @@ test('a checkpoint is written for every iteration, not just at the end', async (
     maxIterations: 4,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     executeActionsFn: async (_u, actions) => actions.map(a => ({ action: a.type, result: { success: true, text: 'ok' } }))
   });
 
@@ -104,7 +122,7 @@ test('resuming continues from the checkpoint instead of restarting the goal', as
     { role: 'model', parts: [{ functionCall: { id: 'c1', name: 'web_search', args: {} } }] },
     { role: 'function', parts: [{ functionResponse: { id: 'c1', name: 'web_search', response: { result: '{}' } } }] }
   ];
-  const { checkpoints } = stubTaskStore({
+  const { checkpoints, lifecycle } = stubTaskStore({
     checkpoint: {
       iteration: 1,
       contents: priorContents,
@@ -123,6 +141,7 @@ test('resuming continues from the checkpoint instead of restarting the goal', as
     maxIterations: 4,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     executeActionsFn: async (_u, actions) => {
       executed.push(...actions.map(a => a.type));
       return actions.map(a => ({ action: a.type, result: { success: true } }));
@@ -145,6 +164,7 @@ test('an unfinished run is left resumable, a finished one is not', async (t) => 
   await runAgentLoop({
     userId: 'user-1', initialMessage: 'Order a laptop', maxIterations: 3,
     persistTask: true, existingTaskId: 'task-1',
+    lifecycle: finished.lifecycle,
     executeActionsFn: async () => []
   });
   assert.equal(finished.task.status, 'completed');
@@ -157,9 +177,10 @@ test('an unfinished run is left resumable, a finished one is not', async (t) => 
   await runAgentLoop({
     userId: 'user-1', initialMessage: 'Order a laptop', maxIterations: 2,
     persistTask: true, existingTaskId: 'task-1',
+    lifecycle: stopped.lifecycle,
     executeActionsFn: async () => []
   });
-  assert.equal(stopped.task.status, 'paused', 'a stopped run must never be left at running');
+  assert.equal(stopped.task.status, 'failed', 'a model error must never be left at running');
   assert.match(stopped.task.last_error, /provider exploded/);
   assert.notEqual(stopped.task.checkpoint, null, 'an unfinished run keeps its checkpoint');
 });

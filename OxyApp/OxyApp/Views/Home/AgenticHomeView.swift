@@ -39,7 +39,6 @@ struct AgenticHomeView: View {
     @State private var composerDraft = ""
     @FocusState private var composerFocused: Bool
     private let service = ChatService()
-    @State private var agentTasks: [AgentTask] = []
     @State private var agentWatches: [AgentWatch] = []
     @State private var stoppingWatchIDs = Set<String>()
     @State private var isAgentWorkPresented = false
@@ -117,6 +116,15 @@ struct AgenticHomeView: View {
                                     }
                                 }
                                 .padding(.top, 4)
+                            }
+
+                            if !isLoading,
+                               errorMessage == nil,
+                               board.isEmpty,
+                               missions.isEmpty,
+                               visibleLifeBriefing == nil {
+                                homeEmptyState
+                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
                         }
 
@@ -310,39 +318,86 @@ struct AgenticHomeView: View {
 // MARK: - Greeting
 
     private var greetingBlock: some View {
-        ZStack(alignment: .bottomLeading) {
-            Ellipse()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            Color(red: 1.0, green: 0.88, blue: 0.75).opacity(0.65),
-                            Color(red: 0.9, green: 0.85, blue: 1.0).opacity(0.4),
-                            Color(red: 0.85, green: 0.93, blue: 1.0).opacity(0.25),
-                            .clear
-                        ],
-                        center: .center,
-                        startRadius: 4,
-                        endRadius: 120
-                    )
-                )
-                .frame(width: 280, height: 90)
-                .offset(x: 20, y: 10)
-                .allowsHitTesting(false)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(dateLine)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(GlebChrome.ink.opacity(0.4))
-
-                Text(greetingLine)
-                    .font(.system(size: 34, weight: .regular))
-                    .foregroundStyle(GlebChrome.ink)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("TODAY")
+                    .font(.appBody(11, weight: .semibold))
+                    .tracking(2.2)
+                    .foregroundStyle(Color.appAccent)
+                Spacer(minLength: 0)
+                Text(dateLine.uppercased())
+                    .font(.appMono(10, weight: .medium))
+                    .foregroundStyle(GlebChrome.ink.opacity(0.42))
             }
+
+            Text(greetingLine)
+                .font(.appDisplay(40, weight: .medium))
+                .foregroundStyle(GlebChrome.ink)
+                .lineSpacing(-2)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+
+            Text(homeSummary)
+                .font(.appBody(14, weight: .medium))
+                .foregroundStyle(GlebChrome.ink.opacity(0.56))
+                .fixedSize(horizontal: false, vertical: true)
+
+            AppRule()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 4)
+        .padding(.top, 4)
+        .padding(.bottom, 2)
+    }
+
+    private var homeSummary: String {
+        if board.isWorking {
+            return board.handling.count == 1 ? "One thing is moving." : "\(board.handling.count) things are moving."
+        }
+        if !missions.isEmpty {
+            return missions.count == 1 ? "One item needs your attention." : "\(missions.count) items need your attention."
+        }
+        return "Nothing needs your attention right now."
+    }
+
+    private var homeEmptyState: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                AppIcon("sparkles", size: 14)
+                    .foregroundStyle(Color.appAccent)
+                Text("READY WHEN YOU ARE")
+                    .font(.appBody(10, weight: .bold))
+                    .tracking(1.5)
+                    .foregroundStyle(Color.appAccent)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Start with one request.")
+                    .font(.appBody(20, weight: .semibold))
+                    .foregroundStyle(GlebChrome.ink)
+                Text("Ask for a plan, an update, or a next step.")
+                    .font(.appBody(14))
+                    .foregroundStyle(GlebChrome.ink.opacity(0.56))
+            }
+
+            Button {
+                HapticManager.shared.impact(.light)
+                openChat(autoSend: nil, startFresh: true)
+            } label: {
+                HStack(spacing: 7) {
+                    Text("Open chat")
+                        .font(.appBody(13, weight: .semibold))
+                    AppIcon("arrow-up-right", size: 12)
+                }
+                .foregroundStyle(Color.appOnAccent)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.appAccent, in: Capsule())
+            }
+            .buttonStyle(.appScale(0.97))
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { MissionGlassPlate() }
     }
 
     // MARK: - Board
@@ -465,8 +520,8 @@ struct AgenticHomeView: View {
             }
             .buttonStyle(.appScale)
 
-            HStack(spacing: 8) {
-                TextField("Message", text: $composerDraft)
+            HStack(spacing: 9) {
+                TextField("Ask or delegate", text: $composerDraft)
                     .font(.system(size: 16))
                     .foregroundStyle(GlebChrome.ink)
                     .focused($composerFocused)
@@ -493,11 +548,15 @@ struct AgenticHomeView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color.appSurface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.6))
-            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+            .padding(.vertical, 11)
+            .background(Color.appSurface.opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(composerFocused ? Color.appAccent.opacity(0.46) : Color.appHairline, lineWidth: composerFocused ? 1 : 0.6))
+            .shadow(color: Color.appAccent.opacity(composerFocused ? 0.10 : 0.04), radius: composerFocused ? 14 : 8, y: 4)
         }
+        .padding(5)
+        .background(Color.appBackground.opacity(0.72), in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Color.appHairline, lineWidth: 0.6))
     }
 
     // MARK: - Navigation gestures
@@ -578,7 +637,7 @@ struct AgenticHomeView: View {
             guard mission.kind != .agent else { return false }
             return hasEmailConnection || (mission.kind != .mailGroup && mission.kind != .incoming)
         }
-        return (watchMissions + persistentTaskMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
+        return (watchMissions + sessionMissions + localMissions + briefingMissions).compactMap { mission in
             guard mission.kind == .mailGroup else {
                 return dismissedMissionIDs.contains(mission.id) ? nil : mission
             }
@@ -634,55 +693,6 @@ struct AgenticHomeView: View {
                     isPrimary: true
                 )
             }
-    }
-
-    private var persistentTaskMissions: [HomeMission] {
-        let active = agentTasks
-            .filter { $0.isActive && $0.status.lowercased() != "recipe" }
-            .prefix(3)
-            .map { task in
-                let lower = task.status.lowercased()
-                let eyebrow: String
-                let cta: String?
-                switch lower {
-                case "running": eyebrow = "Handling"; cta = "Open"
-                case "failed": eyebrow = "Needs you"; cta = "Review"
-                case "paused": eyebrow = task.awaitingApproval ? "Needs your OK" : "Paused"; cta = "View"
-                default: eyebrow = "Ready"; cta = "View"
-                }
-                return HomeMission(
-                    id: "persistent-task-\(task.id)",
-                    kind: .agent,
-                    eyebrow: eyebrow,
-                    title: task.displayGoal,
-                    detail: nil,
-                    cta: cta,
-                    prompt: nil,
-                    symbol: "circle.dotted",
-                    isPrimary: lower != "running",
-                    taskID: task.id
-                )
-            }
-        let completedBookings = agentTasks
-            .filter { task in
-                task.status.lowercased() == "completed" &&
-                task.activities.contains { $0.action == "book_appointment" && $0.success }
-            }
-            .prefix(1)
-            .map { task in
-                HomeMission(
-                    id: "completed-booking-\(task.id)",
-                    kind: .status,
-                    eyebrow: "Booked",
-                    title: task.displayGoal,
-                    detail: nil,
-                    cta: nil,
-                    prompt: nil,
-                    symbol: "checkmark.circle.fill",
-                    isPrimary: false
-                )
-            }
-        return Array(completedBookings) + active
     }
 
     private func sessionMissionID(_ session: AgentTaskSession) -> String { "session-\(session.id)" }
@@ -864,9 +874,6 @@ struct AgenticHomeView: View {
             lifeBriefing = fetchedLifeBriefing
         }
 
-        if let fetchedTasks = try? await AgentTasksService.fetchTasks() {
-            agentTasks = fetchedTasks
-        }
         if let fetchedWatches = try? await AgentTasksService.fetchWatches() {
             agentWatches = fetchedWatches
         }
@@ -1611,10 +1618,19 @@ struct MissionCardView: View {
 struct MissionGlassPlate: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-        shape
-            .fill(Color.appAdaptive(dark: Color.appSurface2, light: .white.opacity(0.88)))
+        ZStack {
+            Color.appSurface.opacity(0.92)
+            AppGrain(intensity: 0.028)
+        }
+            .clipShape(shape)
             .overlay(shape.strokeBorder(Color.appHairline, lineWidth: 0.6))
-            .shadow(color: Color.black.opacity(0.035), radius: 6, y: 2)
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.20))
+                    .frame(height: 0.7)
+                    .clipShape(shape)
+            }
+            .shadow(color: Color(red: 0.19, green: 0.14, blue: 0.08).opacity(0.07), radius: 12, y: 5)
     }
 }
 

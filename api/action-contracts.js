@@ -21,6 +21,8 @@ const EMAIL_TONE_GUIDANCE = 'Draft the body as 1-3 short paragraphs. Default ton
 
 const ACTION_CONTRACTS = {
   send_message: {
+    adapter: { kind: 'inline' },
+    surfaceIds: ['imessage'],
     risk: 'medium',
     required: ['contact', 'message'],
     aliases: { message: ['body', 'text', 'content'] },
@@ -32,6 +34,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   make_call: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: ['contact'],
     inputExample: { contact: 'name' },
@@ -41,6 +44,8 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   create_reminder: {
+    adapter: { kind: 'inline' },
+    surfaceIds: ['reminders'],
     risk: 'medium',
     required: ['title', 'due_date'],
     inputExample: { title: 'reminder', due_date: 'ISO date' },
@@ -56,7 +61,8 @@ const ACTION_CONTRACTS = {
     guidance: 'For requests that depend on current facts, charts, rankings, popularity, or trends ("most popular song", "top song", "right now", "Billboard Hot 100"), first resolve the exact title/artist via search grounding — never pass a vague query like "most popular song" directly. If you cannot verify the current result, say you need to check instead of guessing.',
     successSummary: 'Music opened',
     failureSummary: 'Music failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'inline' }
   },
   add_to_music_playlist: {
     risk: 'medium',
@@ -67,7 +73,8 @@ const ACTION_CONTRACTS = {
     guidance: 'Use when the user asks to add a song or album to their music library or playlist — use play_music instead for immediate playback.',
     successSummary: 'Music added',
     failureSummary: 'Music add failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'inline' }
   },
   create_calendar_event: {
     risk: 'medium',
@@ -79,6 +86,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
     executionMode: 'review',
+    adapter: { kind: 'connector', id: 'google' },
     guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me. Calendar beats music: if the user says calendar, schedule, or event, do not use play_music or add_to_music_playlist just because the phrase contains "add".'
   },
   get_calendar_events: {
@@ -87,9 +95,11 @@ const ACTION_CONTRACTS = {
     inputExample: { max_results: 5 },
     successSummary: 'Calendar checked',
     failureSummary: 'Calendar failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'google' }
   },
   find_appointment_options: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['request'],
     optional: ['task_id'],
@@ -101,6 +111,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   book_appointment: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: ['task_id', 'choice_id'],
     optional: ['choice_label'],
@@ -135,9 +146,11 @@ const ACTION_CONTRACTS = {
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
-    executionMode: 'review'
+    executionMode: 'review',
+    adapter: { kind: 'connector', id: 'google' }
   },
   send_millie_email: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['to', 'body'],
     optional: ['subject', 'request_task_id', 'attach_document_ids', 'allow_cross_workflow'],
@@ -156,6 +169,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   send_millie_sms: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['to', 'body'],
     optional: ['request_task_id'],
@@ -178,7 +192,8 @@ const ACTION_CONTRACTS = {
     inputExample: { max_results: 5, label: 'INBOX' },
     successSummary: 'Emails checked',
     failureSummary: 'Email check failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'google' }
   },
   search_emails: {
     risk: 'low',
@@ -186,7 +201,8 @@ const ACTION_CONTRACTS = {
     inputExample: { query: 'search term', max_results: 5 },
     successSummary: 'Emails searched',
     failureSummary: 'Email search failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'google' }
   },
   // Real Gmail mutation: archiving removes the INBOX label — the message still exists and
   // stays searchable, it just isn't in the inbox view. Reversible, low-risk; never trashes
@@ -200,7 +216,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Emails archived',
     failureSummary: 'Archive failed',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    adapter: { kind: 'connector', id: 'google' }
   },
   // Also how mark-read/unread works (UNREAD is just another label) — no separate action
   // needed for that.
@@ -213,7 +230,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Labels updated',
     failureSummary: 'Label update failed',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    adapter: { kind: 'connector', id: 'google' }
   },
   unsubscribe_email: {
     risk: 'low',
@@ -223,7 +241,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Unsubscribed',
     failureSummary: 'Unsubscribe failed',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    adapter: { kind: 'connector', id: 'google' }
   },
   // The natural-language entry point for "clean my inbox" / "archive this junk" /
   // "unsubscribe me from X and clear the old emails" — orchestrates a real Gmail search, the
@@ -231,6 +250,7 @@ const ACTION_CONTRACTS = {
   // per-sender unsubscribe attempts in one call, so a 200-email cleanup doesn't need 200
   // conversational turns.
   clean_inbox: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['sender', 'since', 'before', 'unsubscribe_senders', 'query', 'max_results'],
@@ -252,6 +272,7 @@ const ACTION_CONTRACTS = {
   // same question as email triage (is this message urgent/promotional). Unread does not mean
   // needs-reply; read does not mean handled.
   find_reply_needed: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['max_threads'],
@@ -271,6 +292,7 @@ const ACTION_CONTRACTS = {
   // as a train/route planner between two points — a different, unrelated capability. Do not
   // rename either without checking both.
   plan_itinerary: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['destination'],
     optional: ['origin', 'start_date', 'end_date', 'duration_days', 'party_size', 'budget', 'budget_currency', 'transport_mode', 'interests', 'dietary', 'accessibility', 'pace', 'already_done', 'notes'],
@@ -288,6 +310,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   modify_itinerary: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['instruction'],
     optional: ['itinerary', 'workspace_path'],
@@ -305,6 +328,7 @@ const ACTION_CONTRACTS = {
   // Durable occasion data (occasions table) — NOT the memories table, which is free-text
   // only and can't reliably answer "whose birthday is coming up?" without re-parsing prose.
   save_occasion: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['person_name', 'month', 'day'],
     optional: ['occasion_type', 'year', 'relationship', 'notes', 'remind_days_before', 'remind_on_day'],
@@ -324,6 +348,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   find_occasions: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['person_name'],
@@ -336,6 +361,7 @@ const ACTION_CONTRACTS = {
   },
   // ── Calendar as an actionable surface ──────────────────────────────────────────────
   find_free_time: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['duration_minutes', 'days', 'earliest', 'latest', 'include_weekends', 'max_options'],
@@ -353,6 +379,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   schedule_block: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['title'],
     optional: ['duration_minutes', 'start', 'earliest', 'latest', 'days', 'description', 'attendees', 'allow_conflict', 'commitment_id'],
@@ -369,6 +396,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   move_calendar_event: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['start'],
     optional: ['event_id', 'title', 'duration_minutes', 'allow_conflict'],
@@ -381,6 +409,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   cancel_calendar_event: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: [],
     optional: ['event_id', 'title', 'when', 'date', 'person_name', 'attendee', 'scope', 'notify_attendees'],
@@ -398,8 +427,29 @@ const ACTION_CONTRACTS = {
     confirmation: 'review_required',
     executionMode: 'review'
   },
+  // Internal calendar primitives used by the higher-level move/cancel orchestration. They
+  // are executable through the same declared connector, but intentionally never model-visible.
+  update_calendar_event: {
+    adapter: { kind: 'connector', id: 'google' },
+    modelVisible: false,
+    availability: 'internal',
+    required: ['event_id', 'start_date']
+  },
+  delete_calendar_event: {
+    adapter: { kind: 'connector', id: 'google' },
+    modelVisible: false,
+    availability: 'internal',
+    required: ['event_id']
+  },
+  end_recurring_series: {
+    adapter: { kind: 'connector', id: 'google' },
+    modelVisible: false,
+    availability: 'internal',
+    required: ['event_id', 'from_date']
+  },
   // ── Commitments ────────────────────────────────────────────────────────────────────
   track_commitment: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['what'],
     optional: ['person_name', 'person_email', 'due', 'due_at', 'source', 'thread_id', 'source_ref'],
@@ -421,6 +471,7 @@ const ACTION_CONTRACTS = {
   // documents, correspondence, evidence, browser work — attaches to a workflow through the
   // primitives that already exist, rather than earning its own verb here.
   start_responsibility: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['goal'],
     optional: ['type', 'deadline', 'current_step'],
@@ -434,6 +485,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   update_responsibility: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['workflow_id'],
     optional: ['status', 'current_step', 'next_action', 'note', 'checkpoint_type', 'checkpoint_prompt', 'checkpoint_options'],
@@ -449,6 +501,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   list_responsibilities: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['include_finished'],
@@ -459,7 +512,39 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  list_paired_displays: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: [],
+    optional: [],
+    inputExample: {},
+    guidance: 'Use when the user asks which nearby displays are paired or before sending content to a display. Only report displays the service returns. Never invent a screen, connection, or pairing.',
+    successSummary: 'Displays checked',
+    failureSummary: 'Could not check displays',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
+  render_to_display: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: ['display_id', 'title', 'body'],
+    optional: ['kind'],
+    inputExample: { display_id: 'id from list_paired_displays', title: 'Dinner tonight', body: 'Reservation at 7:30pm — The Anchor' },
+    paramHints: {
+      display_id: 'the id of a display returned by list_paired_displays',
+      title: 'a short heading for the physical display',
+      body: 'the useful content to show, bounded to a short readable update',
+      kind: 'agent_update | reminder | approval | status'
+    },
+    guidance: 'Use only when the user explicitly asks to show, put, or display content on a paired nearby display. If no paired display is known, list them or ask the user to pair one. Send only the requested useful content; never include secrets, raw tool payloads, or internal ids in title/body.',
+    successSummary: 'Queued for display',
+    failureSummary: 'Could not show that on the display',
+    confirmation: 'none',
+    executionMode: 'direct',
+    requiresExplicitIntent: true
+  },
   find_commitments: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['person_name', 'scope', 'overdue_only'],
@@ -472,6 +557,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   resolve_commitment: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['what', 'id', 'person_name', 'outcome', 'resolved_by'],
@@ -487,6 +573,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   set_notification_preference: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['channel', 'category', 'urgency', 'fallback', 'urgent_only', 'quiet_hours', 'email_to'],
@@ -509,6 +596,7 @@ const ACTION_CONTRACTS = {
   // Spend awareness over the only two real sources that exist here: emailed receipts and
   // orders this system actually placed. There is deliberately no bank/card feed.
   find_spend: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['merchant', 'query', 'since', 'before', 'category', 'sources', 'max_results'],
@@ -532,6 +620,7 @@ const ACTION_CONTRACTS = {
   // them" — so tone, gift context, recipient selection and "her"/"my manager" stop being
   // rediscovered from scratch each conversation.
   remember_person: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['person_name', 'relationship', 'email', 'phone', 'facts', 'replaces', 'fact_kind', 'business_name', 'different_person'],
@@ -551,6 +640,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   find_people: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['query', 'relationship', 'email', 'phone'],
@@ -566,6 +656,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   forget_person_detail: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['person_name', 'facts', 'clear_relationship', 'delete_person', 'email', 'phone'],
@@ -585,6 +676,7 @@ const ACTION_CONTRACTS = {
   // it re-reads reply-needed threads, saved occasions, due/overdue reminders, background
   // watch state changes, calendar and pending approvals, and ranks them together.
   daily_digest: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['focus'],
@@ -609,7 +701,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Email sent',
     failureSummary: 'Email failed',
     confirmation: 'review_required',
-    executionMode: 'review'
+    executionMode: 'review',
+    adapter: { kind: 'connector', id: 'microsoft' }
   },
   get_outlook_emails: {
     risk: 'low',
@@ -618,7 +711,8 @@ const ACTION_CONTRACTS = {
     inputExample: { max: 10 },
     successSummary: 'Emails checked',
     failureSummary: 'Email check failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'microsoft' }
   },
   search_outlook_emails: {
     risk: 'low',
@@ -626,7 +720,8 @@ const ACTION_CONTRACTS = {
     inputExample: { query: 'search term' },
     successSummary: 'Emails searched',
     failureSummary: 'Email search failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'microsoft' }
   },
   create_outlook_event: {
     risk: 'medium',
@@ -637,6 +732,7 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Calendar failed',
     confirmation: 'review_required',
     executionMode: 'review',
+    adapter: { kind: 'connector', id: 'microsoft' },
     guidance: 'Use only when the user explicitly asks to add, create, schedule, book, put, make, or set up a calendar event. Never use for read-only calendar language such as check, read, show, look at, what is on, or tell me. Calendar beats music: if the user says calendar, schedule, or event, do not use play_music or add_to_music_playlist just because the phrase contains "add".'
   },
   get_outlook_events: {
@@ -645,7 +741,8 @@ const ACTION_CONTRACTS = {
     inputExample: {},
     successSummary: 'Calendar checked',
     failureSummary: 'Calendar failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'microsoft' }
   },
   book_uber: {
     risk: 'low',
@@ -656,7 +753,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Uber opened',
     failureSummary: 'Uber needs attention',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    adapter: { kind: 'connector', id: 'uber' }
   },
   find_place: {
     risk: 'low',
@@ -666,7 +764,8 @@ const ACTION_CONTRACTS = {
     guidance: 'For plain local place requests like "nearest gym", "closest McDonald\'s", or "coffee near me", pass the user\'s natural phrase as query — do not ask for a full address or branch details. Never use this for product searches, price lookups, or online shopping, even if the request names a retailer like "John Lewis", "ASOS", or "Amazon" — this is only for physical locations to visit (buildings, stores as places, restaurants). "Find me grey jeans on John Lewis" is a shopping task for run_browser_task, not a place lookup.',
     successSummary: 'Place found',
     failureSummary: 'Place search failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'maps' }
   },
   get_directions: {
     risk: 'low',
@@ -678,7 +777,8 @@ const ACTION_CONTRACTS = {
     guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff, or for generic local directions, walking, driving, and bus questions where a route summary is useful. Never pretend a route opened if all you have is a text answer. For live train times, platforms, or journey options, prefer a grounded search answer instead — this tool is not the source of truth for that.',
     successSummary: 'Directions ready',
     failureSummary: 'Directions failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'maps' }
   },
   plan_trip: {
     risk: 'low',
@@ -690,7 +790,8 @@ const ACTION_CONTRACTS = {
     guidance: 'Use only when the user explicitly asks to open a route, navigation, or a ride handoff for a rail trip. Prefer a grounded search answer over this for live train times, platforms, or journey options — this tool is not the source of truth for that.',
     successSummary: 'Trip planned',
     failureSummary: 'Trip failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'maps' }
   },
   send_telegram: {
     risk: 'high',
@@ -701,7 +802,8 @@ const ACTION_CONTRACTS = {
     successSummary: 'Telegram sent',
     failureSummary: 'Telegram failed',
     confirmation: 'review_required',
-    executionMode: 'review'
+    executionMode: 'review',
+    adapter: { kind: 'connector', id: 'telegram' }
   },
   get_telegram_contacts: {
     risk: 'low',
@@ -709,17 +811,19 @@ const ACTION_CONTRACTS = {
     inputExample: {},
     successSummary: 'Telegram contacts checked',
     failureSummary: 'Telegram contacts failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'telegram' }
   },
   search_trains: {
     risk: 'low',
     required: ['origin', 'destination'],
     aliases: { origin: ['from'], destination: ['to'] },
     inputExample: { origin: 'station name or CRS code', destination: 'station name or CRS code' },
-    guidance: 'Prefer a grounded search answer over this for live train times, platforms, or journey options — this connector is not the source of truth for that. Use it only when the user explicitly wants a formal train search result.',
+    guidance: 'Never use this connector to buy or book a ticket. For a ticket purchase, run the browser task against the appropriate direct rail operator and stop for payment review. Prefer a grounded search answer over this for live train times, platforms, or journey options — this connector is not the source of truth for those.',
     successSummary: 'Train route checked',
     failureSummary: 'Train search failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'trainline' }
   },
   station_board: {
     risk: 'low',
@@ -729,9 +833,11 @@ const ACTION_CONTRACTS = {
     guidance: 'Prefer a grounded search answer over this for live departures, arrivals, or platforms — this connector is not the source of truth for that. Use it only when the user explicitly wants a live station board.',
     successSummary: 'Station board ready',
     failureSummary: 'Station board failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    adapter: { kind: 'connector', id: 'trainline' }
   },
   forget_memory: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['scope'],
     inputExample: { scope: 'recent|all', query: 'optional memory topic to forget' },
@@ -742,6 +848,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   generate_visual: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['brief'],
     aliases: { brief: ['prompt', 'topic'] },
@@ -751,6 +858,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   create_diagram: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['topic'],
     aliases: { topic: ['brief'] },
@@ -760,6 +868,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   create_presentation: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['topic'],
     inputExample: { topic: 'subject', audience: 'who it is for', objective: 'what the deck should achieve', slide_count: 6 },
@@ -769,6 +878,7 @@ const ACTION_CONTRACTS = {
   },
   // New agentic + general tools
   web_browse: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['url'],
     optional: ['query'],
@@ -778,6 +888,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   web_search: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['query'],
     optional: ['num_results'],
@@ -787,6 +898,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   calculate: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['expression'],
     inputExample: { expression: '2 + 2 * 3 or natural math question' },
@@ -798,6 +910,7 @@ const ACTION_CONTRACTS = {
   // browse and the agent can never touch — notes, drafts and findings die with the turn
   // that produced them.
   workspace_write: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['path', 'content'],
     optional: ['kind'],
@@ -809,6 +922,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   workspace_read: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['path'],
     inputExample: { path: 'notes/laptop-research.md' },
@@ -819,6 +933,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   workspace_list: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['prefix'],
@@ -830,6 +945,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_status: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref'],
     inputExample: { project_ref: 'milgrain' },
@@ -840,6 +956,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_diff: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref'],
     inputExample: { project_ref: 'milgrain' },
@@ -850,6 +967,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_write: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref', 'path', 'content'],
     inputExample: { project_ref: 'milgrain', path: 'src/feature.js', content: 'code' },
@@ -860,6 +978,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_check: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref'],
     optional: ['check'],
@@ -872,6 +991,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_commit: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['project_ref', 'message'],
     inputExample: { project_ref: 'milgrain', message: 'Add referral credit flow' },
@@ -882,6 +1002,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   project_rollback: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['project_ref'],
     inputExample: { project_ref: 'milgrain' },
@@ -892,6 +1013,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   project_sync: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: ['project_ref'],
     inputExample: { project_ref: 'milgrain' },
@@ -902,17 +1024,19 @@ const ACTION_CONTRACTS = {
     executionMode: 'review'
   },
   create_agent_task: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['goal'],
-    optional: ['autonomy', 'plan'],
+    optional: ['autonomy', 'plan', 'guardMode'],
     inputExample: { goal: 'the long term goal', autonomy: 'Active|High', plan: 'optional initial plan json' },
     paramHints: { autonomy: 'Active|High' },
-    guidance: 'This is the ownership mechanism: use it for a genuine outcome that will take more than this turn to reach — something to keep working on, checking on, or driving toward completion without the user re-prompting every step. Do not use it for a single tool call that already finishes the request, for ordinary conversation, or for musing/thinking-aloud — the same carve-out that keeps a tool call from firing on a half-formed thought applies here too.',
-    successSummary: 'Task created for background execution',
+    guidance: 'This is the ownership mechanism: use it for a genuine outcome that will take more than this turn to reach — something to keep working on, checking on, or driving toward completion without the user re-prompting every step. Calling it creates and starts the durable run immediately; the result is in progress, not proof that the goal is finished. Do not use it for a single tool call that already finishes the request, for ordinary conversation, or for musing/thinking-aloud — the same carve-out that keeps a tool call from firing on a half-formed thought applies here too.',
+    successSummary: 'Persistent task started',
     failureSummary: 'Task creation failed',
     confirmation: 'none'
   },
   create_scheduled_task: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['title', 'instruction'],
     optional: ['recurrence', 'time', 'day_of_week', 'date', 'due_date', 'condition', 'interval_minutes', 'expires_at', 'budget_cap', 'watch_type', 'threshold', 'comparator', 'notify_rule', 'source_url', 'target_state'],
@@ -934,6 +1058,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   list_scheduled_tasks: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
@@ -944,6 +1069,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   update_scheduled_task: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['id', 'title', 'new_title', 'recurrence', 'interval_minutes', 'time', 'day_of_week', 'condition', 'threshold', 'comparator', 'notify_rule', 'source_url', 'instruction', 'budget_cap'],
@@ -961,6 +1087,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   record_watch_observation: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['watch_id'],
     optional: ['value', 'state', 'note', 'accessible', 'error'],
@@ -978,6 +1105,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   cancel_scheduled_task: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     optional: ['id', 'title'],
@@ -989,6 +1117,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   simulate_actions: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['goal'],
     optional: ['actions'],
@@ -997,67 +1126,79 @@ const ACTION_CONTRACTS = {
     failureSummary: 'Simulation failed',
     confirmation: 'none'
   },
-  log_health: { risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, paramHints: { metric: 'steps|heart_rate' }, successSummary: 'Health logged', failureSummary: 'Log failed', confirmation: 'none' },
-  control_smart_home: { risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, paramHints: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Control failed', confirmation: 'none' },
-  save_to_notion: { risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
+  log_health: { adapter: { kind: 'inline' },risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, paramHints: { metric: 'steps|heart_rate' }, successSummary: 'Health unavailable', failureSummary: 'Health unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
+  control_smart_home: { adapter: { kind: 'inline' },risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, paramHints: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home unavailable', failureSummary: 'Smart home unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
+  save_to_notion: { adapter: { kind: 'connector', id: 'notion' }, risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
   // Google Docs — implemented in connectors/google.js but had no contract at all, so the
   // agent's tool-calling interface could never reach them. Same low-risk/no-confirmation
   // shape as save_to_notion: creating/appending a doc is non-destructive and easily undone.
-  create_google_doc: { risk: 'low', required: ['title'], optional: ['content'], inputExample: { title: 'doc title', content: 'optional initial text' }, successSummary: 'Doc created', failureSummary: 'Create failed', confirmation: 'none' },
-  search_google_docs: { risk: 'low', required: [], optional: ['query', 'max_results'], inputExample: { query: 'search term' }, successSummary: 'Docs found', failureSummary: 'Search failed', confirmation: 'none' },
-  append_google_doc: { risk: 'low', required: ['content'], optional: ['document_id', 'title'], inputExample: { title: 'doc title', content: 'text to add' }, successSummary: 'Doc updated', failureSummary: 'Append failed', confirmation: 'none' },
-  get_google_doc: { risk: 'low', required: [], optional: ['document_id', 'title'], inputExample: { title: 'doc title' }, successSummary: 'Doc fetched', failureSummary: 'Fetch failed', confirmation: 'none' },
-  github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, paramHints: { action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review' },
-  create_github_issue: { risk: 'medium', required: ['repo', 'title'], optional: ['body'], inputExample: { repo: 'owner/repo', title: 'Issue title', body: 'Details' }, successSummary: 'GitHub issue created', failureSummary: 'GitHub issue failed', confirmation: 'review_required', executionMode: 'review' },
-  get_github_prs: { risk: 'low', required: ['repo'], inputExample: { repo: 'owner/repo' }, successSummary: 'GitHub pull requests loaded', failureSummary: 'GitHub pull requests failed', confirmation: 'none' },
-  track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none' },
-  edit_photo: { risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, paramHints: { brief: 'enhance|crop|filter' }, successSummary: 'Photo edit ready', failureSummary: 'Edit failed', confirmation: 'none' },
+  create_google_doc: { risk: 'low', required: ['title'], optional: ['content'], inputExample: { title: 'doc title', content: 'optional initial text' }, successSummary: 'Doc created', failureSummary: 'Create failed', confirmation: 'none', adapter: { kind: 'connector', id: 'google' } },
+  search_google_docs: { risk: 'low', required: [], optional: ['query', 'max_results'], inputExample: { query: 'search term' }, successSummary: 'Docs found', failureSummary: 'Search failed', confirmation: 'none', adapter: { kind: 'connector', id: 'google' } },
+  append_google_doc: { risk: 'low', required: ['content'], optional: ['document_id', 'title'], inputExample: { title: 'doc title', content: 'text to add' }, successSummary: 'Doc updated', failureSummary: 'Append failed', confirmation: 'none', adapter: { kind: 'connector', id: 'google' } },
+  get_google_doc: { risk: 'low', required: [], optional: ['document_id', 'title'], inputExample: { title: 'doc title' }, successSummary: 'Doc fetched', failureSummary: 'Fetch failed', confirmation: 'none', adapter: { kind: 'connector', id: 'google' } },
+  github_action: { risk: 'medium', required: ['repo', 'action'], inputExample: { repo: 'owner/repo', action: 'status|create_issue' }, paramHints: { action: 'status|create_issue' }, successSummary: 'GitHub action done', failureSummary: 'GitHub failed', confirmation: 'review_required', executionMode: 'review', adapter: { kind: 'connector', id: 'github' } },
+  create_github_issue: { risk: 'medium', required: ['repo', 'title'], optional: ['body'], inputExample: { repo: 'owner/repo', title: 'Issue title', body: 'Details' }, successSummary: 'GitHub issue created', failureSummary: 'GitHub issue failed', confirmation: 'review_required', executionMode: 'review', adapter: { kind: 'connector', id: 'github' } },
+  get_github_prs: { risk: 'low', required: ['repo'], inputExample: { repo: 'owner/repo' }, successSummary: 'GitHub pull requests loaded', failureSummary: 'GitHub pull requests failed', confirmation: 'none', adapter: { kind: 'connector', id: 'github' } },
+  track_flight: { risk: 'low', required: ['flight'], inputExample: { flight: 'flight number or query' }, successSummary: 'Flight tracked', failureSummary: 'Track failed', confirmation: 'none', adapter: { kind: 'connector', id: 'flights' } },
+  edit_photo: { adapter: { kind: 'inline' },risk: 'low', required: ['brief'], inputExample: { brief: 'enhance|crop|filter' }, paramHints: { brief: 'enhance|crop|filter' }, successSummary: 'Photo editing unavailable', failureSummary: 'Photo editing unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
   analyze_image: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['prompt'],
     optional: ['image_url'],
     inputExample: { prompt: 'describe this or extract text', image_url: 'optional' },
     successSummary: 'Image analyzed',
     failureSummary: 'Analysis failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    modelVisible: false,
+    availability: 'unavailable'
   },
   mcp_tool: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['name'],
     optional: ['arguments'],
     inputExample: { name: 'home_assistant_action', arguments: { entity: 'light.living', action: 'turn_on' } },
     successSummary: 'MCP tool executed',
     failureSummary: 'MCP tool failed',
-    confirmation: 'none'
+    confirmation: 'none',
+    modelVisible: false,
+    availability: 'unavailable'
   },
-  // Concierge account / virtual card - like giving a real concierge a company card
+  // No virtual concierge ledger; real money must use an acknowledged payment rail.
   check_concierge_balance: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
-    successSummary: 'Balance checked',
-    failureSummary: 'Check failed',
-    confirmation: 'none'
+    successSummary: 'Balance unavailable',
+    failureSummary: 'Balance unavailable',
+    confirmation: 'none',
+    modelVisible: false,
+    availability: 'unavailable'
   },
   spend_from_concierge_account: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: ['amount', 'description'],
     optional: ['merchant'],
     inputExample: { amount: 25.5, description: 'book table at restaurant', merchant: 'OpenTable' },
-    successSummary: 'Spent from account',
+    successSummary: 'Charged through a real payment rail',
     failureSummary: 'Spend failed',
     confirmation: 'review'
   },
   top_up_concierge_account: {
+    adapter: { kind: 'inline' },
     risk: 'medium',
     required: ['amount'],
     optional: ['source'],
     inputExample: { amount: 100, source: 'user bank' },
-    successSummary: 'Account topped up',
+    successSummary: 'Top-up unavailable',
     failureSummary: 'Top up failed',
     confirmation: 'review'
   },
   receive_to_concierge_account: {
+    adapter: { kind: 'inline' },
     // Was 'none' — inconsistent with top_up_concierge_account (same effect: inflates the
     // spendable virtual balance with no real-money verification) which already required
     // review. An unreviewed action that credits spendable balance is exactly the shape of bug
@@ -1066,31 +1207,33 @@ const ACTION_CONTRACTS = {
     required: ['amount', 'description'],
     optional: ['source'],
     inputExample: { amount: 50, description: 'payment for freelance gig', source: 'client' },
-    successSummary: 'Received to account',
+    successSummary: 'Receiving unavailable',
     failureSummary: 'Receive failed',
     confirmation: 'review'
   },
   // For broad money-making: use account to fund opportunities
   fund_opportunity: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: ['amount', 'opportunity'],
     inputExample: { amount: 25, opportunity: 'boost gig listing on platform' },
-    successSummary: 'Opportunity funded from concierge account',
+    successSummary: 'Funding unavailable',
     failureSummary: 'Funding failed',
     confirmation: 'review'
   },
   // New integrations
-  stripe_charge: { risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
+  stripe_charge: { adapter: { kind: 'inline' },risk: 'high', required: ['amount'], inputExample: { amount: 1000, description: 'payment' }, successSummary: 'Charged via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
   // These move (or purport to move) real money and previously had NO contract at all, so the
   // runner treated them as direct-execute. Register them high-risk + review so they can't.
-  stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review' },
-  spend_from_concierge_via_stripe: { risk: 'high', required: ['amount'], inputExample: { amount: 25, description: 'concierge spend' }, successSummary: 'Spent via Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review' },
-  get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none' },
-  search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none' },
-  send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none' },
-  book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none' },
-  get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none' },
+  stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review', adapter: { kind: 'connector', id: 'stripe' } },
+  spend_from_concierge_via_stripe: { risk: 'high', required: ['amount'], inputExample: { amount: 25, description: 'payment' }, successSummary: 'Charged through Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review', adapter: { kind: 'connector', id: 'stripe' } },
+  get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' } },
+  search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'amazon' } },
+  send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'slack' } },
+  book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'lyft' } },
+  get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'strava' } },
   search_flights: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['from', 'to'],
     optional: ['depart_date', 'return_date', 'adults', 'max_price', 'direct_only', 'max_stops', 'notes'],
@@ -1109,6 +1252,7 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   search_hotels: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: ['location'],
     optional: ['check_in', 'check_out', 'guests', 'max_price', 'area', 'min_rating', 'style', 'notes'],
@@ -1125,7 +1269,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
-  get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none' },
+  get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'stocks' } },
   // Real browser ordering (api/services/browser-task.js) — was built across many sessions
   // but never actually registered here, so it was unreachable from live chat. High risk
   // (it can reach a real checkout), but deliberately executionMode: 'direct' — it MUST
@@ -1136,6 +1280,7 @@ const ACTION_CONTRACTS = {
   // guardConciergeSpend cap check every other money action goes through. Never place an
   // order without this making it to a `confirmation: 'review_required'` result first.
   run_browser_task: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     // goal is OPTIONAL, not required: a continuation call for an already-open order
     // legitimately passes an empty goal, and runOrderingTurn itself resolves that from
@@ -1163,6 +1308,7 @@ const ACTION_CONTRACTS = {
   // 'direct' is correct here too: the human review already happened, this is the user's own
   // "yes" being carried out, not a fresh unreviewed spend.
   confirm_browser_payment: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: [],
     inputExample: {},
@@ -1173,6 +1319,7 @@ const ACTION_CONTRACTS = {
     guidance: 'Only call this after the user has explicitly said yes to the price shown by run_browser_task on a prior turn.'
   },
   cancel_browser_payment: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
@@ -1187,6 +1334,7 @@ const ACTION_CONTRACTS = {
   // executionMode: 'direct' is correct here for the same reason it is on
   // confirm_browser_payment: the human review already happened on the prior turn.
   confirm_credential_use: {
+    adapter: { kind: 'inline' },
     risk: 'high',
     required: [],
     inputExample: {},
@@ -1197,6 +1345,7 @@ const ACTION_CONTRACTS = {
     guidance: 'Only call this after the user has explicitly said yes to using their saved credential, offered by run_browser_task on a prior turn.'
   },
   cancel_credential_use: {
+    adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
@@ -1246,6 +1395,18 @@ function missingRequiredFields(type, input = {}) {
   });
 }
 
+function hasExplicitDisplayIntent(message) {
+  const text = String(message || '').trim();
+  if (!text) return false;
+  if (/^(?:did|why did|have you|has(?:n't| not)?|already)\b/i.test(text)) return false;
+  if (/\b(?:don['’]?t|do not|never)\b.*\b(?:show|put|display|render|send|project|mirror|publish)\b/i.test(text)) return false;
+  const affirmativeWrite = /\b(?:show|put|render|send|project|mirror|publish)\b/i.test(text)
+    || /\bdisplay\s+(?:this|that|the|my|[a-z0-9])/i.test(text);
+  if (!affirmativeWrite) return false;
+  return /\b(?:on|to|onto|at)\s+(?:(?:my|the|a|this|that|nearby)\s+)?(?:[a-z0-9][\w'-]*\s+){0,3}(?:display|screen|monitor|tv|television)\b/i.test(text)
+    || /\b(?:display|render)\s+(?:this|that|the|my)\b/i.test(text);
+}
+
 function validateActionWithContract(action, originalMessage = '') {
   const type = action?.type || '';
   const contract = getActionContract(type);
@@ -1259,6 +1420,17 @@ function validateActionWithContract(action, originalMessage = '') {
       error: `${type} needs ${missing.join(', ')}.`,
       cardText: `Missing ${missing.join(', ')}.`,
       retryable: true,
+      risk: contract.risk,
+      confirmation: contract.confirmation
+    };
+  }
+
+  if (contract.requiresExplicitIntent && !hasExplicitDisplayIntent(originalMessage)) {
+    return {
+      success: false,
+      error: 'Showing content on a nearby display requires a direct request in this turn.',
+      cardText: 'Needs an explicit display request.',
+      retryable: false,
       risk: contract.risk,
       confirmation: contract.confirmation
     };
@@ -1341,7 +1513,8 @@ function applyActionContractResultMetadata(action, result = {}) {
 }
 
 function actionPromptList() {
-  return Object.entries(ACTION_CONTRACTS).map(([type, contract]) => ({
+  const { getExecutableActionCatalog } = require('./services/action-catalog');
+  return getExecutableActionCatalog().map(({ type, ...contract }) => ({
     type,
     input: contract.inputExample,
     required: contract.required || [],
@@ -1391,13 +1564,16 @@ function actionToFunctionDeclaration(type, contract) {
 }
 
 function buildFunctionDeclarations() {
+  // Legacy export retained for dashboard/tests that inspect the complete schema manifest.
+  // Runtime model tools use buildToolsForGemini, which is filtered by executable catalog.
   return Object.entries(ACTION_CONTRACTS).map(([type, contract]) =>
     actionToFunctionDeclaration(type, contract)
   );
 }
 
 function buildToolsForGemini(includeSearch = false) {
-  const decls = buildFunctionDeclarations();
+  const { buildFunctionDeclarationsFromCatalog } = require('./services/action-catalog');
+  const decls = buildFunctionDeclarationsFromCatalog();
   const tools = [{ functionDeclarations: decls }];
   if (includeSearch) {
     tools.push({ googleSearch: {} });
@@ -1418,9 +1594,11 @@ module.exports = {
   ACTION_CONTRACTS,
   getActionContract,
   validateActionWithContract,
+  hasExplicitDisplayIntent,
   buildActionRecovery,
   applyActionContractResultMetadata,
   actionPromptBlock,
   buildFunctionDeclarations,
-  buildToolsForGemini
+  buildToolsForGemini,
+  actionToFunctionDeclaration,
 };

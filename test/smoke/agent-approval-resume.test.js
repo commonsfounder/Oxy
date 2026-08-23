@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const taskManager = require('../../api/services/task-manager');
 const { runAgentLoop } = require('../../api/services/agent-orchestrator');
+const { createDelegatedRunLifecycle } = require('../../api/services/delegated-run-lifecycle');
 const brainProvider = require('../../api/services/brain-provider');
 
 /*
@@ -40,7 +41,7 @@ function scriptedBrain(turns) {
 }
 
 function stubTaskStore(initial = {}) {
-  const task = { id: 'task-1', goal: 'Send the supplier a quote request', status: 'running', metadata: { guardMode: true }, ...initial };
+  const task = { id: 'task-1', goal: 'Send the supplier a quote request', status: 'running', attempt: 1, metadata: { guardMode: true }, ...initial };
   const checkpoints = [];
   taskManager.getTask = async () => ({ ...task });
   taskManager.saveCheckpoint = async (_u, _id, cp) => {
@@ -51,12 +52,28 @@ function stubTaskStore(initial = {}) {
   };
   taskManager.updateTask = async (_u, _id, updates) => { Object.assign(task, updates); return { ...task }; };
   taskManager.saveTrace = async () => {};
-  return { task, checkpoints };
+  return {
+    task,
+    checkpoints,
+    lifecycle: createDelegatedRunLifecycle({
+      taskStore: {
+        getTask: taskManager.getTask,
+        async updateTask(userId, taskId, updates) {
+          if (updates.checkpoint) checkpoints.push(realTaskFns.trimCheckpoint(updates.checkpoint));
+          return taskManager.updateTask(userId, taskId, updates);
+        },
+        async updateRun(userId, taskId, _attempt, updates) { return this.updateTask(userId, taskId, updates); },
+        async updateTaskCas(userId, taskId, _status, _attempt, updates) { return this.updateTask(userId, taskId, updates); },
+        saveTrace: taskManager.saveTrace,
+        trimCheckpoint: realTaskFns.trimCheckpoint
+      }
+    })
+  };
 }
 
 test('a pending approval parks the run instead of burning the remaining iterations', async (t) => {
   t.after(restore);
-  const { task } = stubTaskStore();
+  const { task, lifecycle } = stubTaskStore();
   let modelCalls = 0;
   brainProvider.callToolsBrain = async (...args) => {
     modelCalls++;
@@ -69,6 +86,7 @@ test('a pending approval parks the run instead of burning the remaining iteratio
     maxIterations: 6,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     executeActionsFn: async (_u, actions) => actions.map(a => ({
       action: a.type,
       result: { success: true, pending: true, text: 'Ready for review.', actionSummary: 'Send email' }
@@ -84,7 +102,7 @@ test('a pending approval parks the run instead of burning the remaining iteratio
 
 test('the run carries its task id so the approval knows what to continue', async (t) => {
   t.after(restore);
-  stubTaskStore();
+  const { lifecycle } = stubTaskStore();
   brainProvider.callToolsBrain = scriptedBrain([{ calls: [{ id: 'c1', name: 'send_email', args: {} }] }]);
 
   let seenContext = null;
@@ -94,6 +112,7 @@ test('the run carries its task id so the approval knows what to continue', async
     maxIterations: 3,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     executeActionsFn: async (_u, actions, context) => {
       seenContext = context;
       return actions.map(a => ({ action: a.type, result: { success: true, pending: true } }));
@@ -108,8 +127,8 @@ test('the run carries its task id so the approval knows what to continue', async
 
 test('resuming after approval continues the goal and does not re-ask', async (t) => {
   t.after(restore);
-  const { task } = stubTaskStore({
-    status: 'paused',
+  const { task, lifecycle } = stubTaskStore({
+    status: 'running',
     metadata: { guardMode: true, awaitingApproval: true },
     checkpoint: {
       iteration: 0,
@@ -136,6 +155,7 @@ test('resuming after approval continues the goal and does not re-ask', async (t)
     maxIterations: 6,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     resumeAction: { action: 'send_email', result: { success: true, text: 'Sent and logged.' } },
     resumeNote: 'The user approved "send_email" and it has now been executed: Sent. Continue the goal from here; do not ask for that approval again.',
     executeActionsFn: async () => []
@@ -155,8 +175,8 @@ test('resuming after approval continues the goal and does not re-ask', async (t)
 
 test('a resume after the final parked iteration still gets one model turn', async (t) => {
   t.after(restore);
-  const { task } = stubTaskStore({
-    status: 'paused',
+  const { task, lifecycle } = stubTaskStore({
+    status: 'running',
     checkpoint: {
       iteration: 5,
       maxIterations: 6,
@@ -173,6 +193,7 @@ test('a resume after the final parked iteration still gets one model turn', asyn
     maxIterations: 6,
     persistTask: true,
     existingTaskId: 'task-1',
+    lifecycle,
     resumeAction: { action: 'send_email', result: { success: true, text: 'Sent.' } },
     resumeNote: 'The user approved send_email and it completed successfully. Continue.',
     executeActionsFn: async () => { calls += 1; return []; }

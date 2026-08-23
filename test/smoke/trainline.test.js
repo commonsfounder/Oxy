@@ -17,7 +17,8 @@ test('Apsley resolves through the train fallback path without failing', async ()
       origin: 'Birmingham New Street',
       destination: 'Apsley'
     });
-    assert.equal(result.success, true);
+    assert.equal(result.success, false);
+    assert.equal(result.outcome, 'unavailable');
     assert.equal(result.transportApiDisabled, true);
     assert.equal(result.actionSummary, 'Route unavailable');
     assert.match(result.text, /route data is not configured/i);
@@ -47,7 +48,8 @@ test('unknown stations do not fall back to opening Trainline', async () => {
       origin: 'Milton Keynes Central',
       destination: 'Definitely Not A Station'
     });
-    assert.equal(result.success, true);
+    assert.equal(result.success, false);
+    assert.equal(result.outcome, 'unavailable');
     assert.equal(result.actionSummary, 'Route unavailable');
     assert.equal(result.webLink, undefined);
     assert.match(result.text, /couldn't get a train route summary/i);

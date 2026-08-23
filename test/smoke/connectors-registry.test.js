@@ -19,9 +19,9 @@ test('only the confirmed real external-account connections are classified as kin
   assert.deepEqual(actual, REAL_CONNECTIONS);
 });
 
-test('money/finance plumbing (concierge account, Stripe) is a functionality, not a connection', () => {
+test('Stripe remains a functionality and the fake concierge capability is absent', () => {
   const stripe = CONNECTORS.find(c => c.id === 'stripe');
   const concierge = CONNECTORS.find(c => c.id === 'concierge_account');
   assert.equal(stripe.kind, 'functionality');
-  assert.equal(concierge.kind, 'functionality');
+  assert.equal(concierge, undefined);
 });

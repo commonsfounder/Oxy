@@ -120,15 +120,19 @@ enum GlebChrome {
     static var pastelBlob: some View {
         ZStack {
             Color.appBackground
-            LinearGradient(
-                colors: [
-                    Color(red: 0.94, green: 0.95, blue: 0.99).opacity(0.72),
-                    Color(red: 0.98, green: 0.96, blue: 0.94).opacity(0.46),
-                    Color.clear
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            Circle()
+                .fill(Color.appAccent.opacity(0.10))
+                .frame(width: 310, height: 310)
+                .blur(radius: 58)
+                .offset(x: 138, y: -250)
+                .allowsHitTesting(false)
+            Circle()
+                .fill(Color(red: 0.72, green: 0.66, blue: 0.86).opacity(0.08))
+                .frame(width: 270, height: 270)
+                .blur(radius: 72)
+                .offset(x: -150, y: 110)
+                .allowsHitTesting(false)
+            AppGrain(intensity: 0.035)
         }
     }
 }
@@ -142,10 +146,11 @@ struct GlebTopChrome: View {
     @State private var weatherExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
+                BrandWordmark(height: 14, color: GlebChrome.ink.opacity(0.62))
+                Spacer(minLength: 0)
                 weatherPill
-                Spacer()
                 profileButton
             }
 
@@ -176,10 +181,10 @@ struct GlebTopChrome: View {
                     .foregroundStyle(GlebChrome.ink.opacity(0.4))
                     .rotationEffect(.degrees(weatherExpanded ? 180 : 0))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(Color.appSurface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(Color.appSurface.opacity(0.82), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.appAccent.opacity(0.20), lineWidth: 0.7))
         }
         .buttonStyle(.plain)
         }
@@ -222,21 +227,11 @@ struct GlebTopChrome: View {
 
     private var profileButton: some View {
         Button(action: onProfile) {
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color(red: 0.95, green: 0.75, blue: 0.7), Color(red: 0.55, green: 0.4, blue: 0.45)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 38, height: 38)
-                .overlay(
-                    AppIcon("person", size: 18)
-                        .foregroundStyle(.white.opacity(0.9))
-                )
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.5))
-                .shadow(color: .black.opacity(0.1), radius: 6, y: 2)
+            AppIcon("person", size: 16)
+                .foregroundStyle(GlebChrome.ink.opacity(0.72))
+                .frame(width: 36, height: 36)
+                .background(Color.appSurface.opacity(0.86), in: Circle())
+                .overlay(Circle().strokeBorder(Color.appAccent.opacity(0.26), lineWidth: 0.8))
         }
         .buttonStyle(.appScale)
     }

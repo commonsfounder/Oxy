@@ -26,6 +26,8 @@ const RETENTION_POLICY = {
   native_context: { maxAgeDays: 90, column: 'updated_at', label: 'Device context (location, health snapshots): the single latest snapshot is overwritten on each sync and purged after 90 days of inactivity.' },
   browser_sessions: { maxAgeDays: 90, column: 'updated_at', label: 'Saved website logins for browser tasks: deleted after 90 days unused.' },
   password_reset_tokens: { column: 'expires_at', expireWhenPast: true, label: 'Password-reset tokens: deleted as soon as they expire.' },
+  display_pairing_challenges: { column: 'expires_at', expireWhenPast: true, label: 'Nearby-display pairing codes: deleted as soon as they expire.' },
+  display_render_events: { column: 'expires_at', expireWhenPast: true, label: 'Nearby-display updates: deleted after delivery expires.' },
   // Identity, handle, participant, and conversation *records* are relationship
   // metadata, not message content, and are intentionally left out of this policy —
   // only the event bodies (the actual correspondence) get a retention clock, mirroring

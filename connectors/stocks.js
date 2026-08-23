@@ -1,12 +1,10 @@
 const axios = require('axios');
 
-const SUPPORTED_ACTIONS = ['get_stock_price', 'search_stocks'];
-
 async function execute(userId, action, params) {
   const key = process.env.ALPHA_VANTAGE_KEY;
   const symbol = params.symbol || params.query || 'AAPL';
   if (!key) {
-    return { success: true, text: `Stock info for ${symbol} - set ALPHA_VANTAGE_KEY for live quotes (free).`, webLink: `https://finance.yahoo.com/quote/${symbol}` };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: `Stock data is unavailable because no provider is configured for ${symbol}.` };
   }
 
   try {
@@ -28,4 +26,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

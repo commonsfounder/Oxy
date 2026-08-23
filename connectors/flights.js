@@ -7,8 +7,6 @@
 // api/index.js's executeAction, which reaches its own case before any connector dispatch —
 // leaving the old branch here would have been dead code that still LOOKED like a flight
 // search.
-const SUPPORTED_ACTIONS = ['track_flight'];
-
 async function execute(userId, action, params) {
   const from = params.from || 'origin';
   const to = params.to || params.destination || 'destination';
@@ -17,9 +15,9 @@ async function execute(userId, action, params) {
 
   if (action === 'track_flight') {
     const flight = params.flight || query;
-    return { success: true, text: `Tracking flight ${flight}.`, webLink: `https://www.google.com/search?q=flight+${encodeURIComponent(flight)}` };
+    return { success: false, outcome: 'handoff_required', handoffRequired: true, text: `Open a flight search to check ${flight}.`, webLink: `https://www.google.com/search?q=flight+${encodeURIComponent(flight)}` };
   }
   return { success: false, error: 'Unknown flights action' };
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

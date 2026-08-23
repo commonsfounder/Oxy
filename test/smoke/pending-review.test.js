@@ -83,9 +83,9 @@ test('MONEY_ACTION_TYPES covers every concierge-money action type', () => {
   assert.equal(MONEY_ACTION_TYPES.has('spend_from_concierge_account'), true);
 });
 
-test('review detail for a concierge spend with no linked card still shows the virtual-balance framing', () => {
+test('review detail for a concierge spend with no linked card names the real payment boundary', () => {
   const detail = reviewDetailForAction({ type: 'spend_from_concierge_account', input: { amount: 25.5, description: 'dinner reservation' } });
-  assert.equal(detail, 'Spend $25.50 from your concierge balance for dinner reservation.');
+  assert.equal(detail, 'Charge your linked payment method $25.50 for dinner reservation.');
 });
 
 test('review detail for a concierge spend with a linked card shows the real card', () => {

@@ -1,53 +1,19 @@
-const ACTION_CONNECTOR = {
-  send_email: 'google',
-  get_emails: 'google',
-  search_emails: 'google',
-  create_calendar_event: 'google',
-  get_calendar_events: 'google',
-  book_uber: 'uber',
-  find_place: 'maps',
-  get_directions: 'maps',
-  plan_trip: 'maps',
-  send_telegram: 'telegram',
-  get_telegram_contacts: 'telegram',
-  search_trains: 'trainline',
-  station_board: 'trainline',
-  search_github: 'github',
-  get_github_notifications: 'github',
-  create_github_issue: 'github',
-  github_action: 'github',
-  get_github_prs: 'github',
-  comment_github_issue: 'github',
-  send_outlook_email: 'microsoft',
-  get_outlook_emails: 'microsoft',
-  search_outlook_emails: 'microsoft',
-  create_outlook_event: 'microsoft',
-  get_outlook_events: 'microsoft',
-  search_youtube: 'youtube',
-  search_indeed_jobs: 'indeed',
-  search_linkedin_jobs: 'linkedin',
-  share_linkedin_post: 'linkedin',
-  search_notion: 'notion',
-  create_notion_page: 'notion',
-  append_notion_page: 'notion',
-  create_google_doc: 'google',
-  search_google_docs: 'google',
-  append_google_doc: 'google',
-  get_google_doc: 'google',
-  search_spotify: 'spotify',
-  play_spotify: 'spotify',
-  control_spotify_playback: 'spotify',
-  add_to_spotify_queue: 'spotify',
-  add_to_spotify_playlist: 'spotify',
-  get_now_playing_spotify: 'spotify',
-  search_linear_issues: 'linear',
-  get_linear_issues: 'linear',
-  create_linear_issue: 'linear',
-  comment_linear_issue: 'linear'
-};
+const { adapterForAction } = require('./action-catalog');
+
+// Compatibility export for callers that still import this name. Ownership is read from the
+// executable contract; there is no second action-to-connector table to drift.
+const ACTION_CONNECTOR = new Proxy({}, {
+  get: (_target, actionType) => {
+    if (typeof actionType !== 'string') return undefined;
+    return adapterForAction(actionType)?.kind === 'connector'
+      ? adapterForAction(actionType).id
+      : undefined;
+  }
+});
 
 function connectorForAction(actionType) {
-  return ACTION_CONNECTOR[actionType] || null;
+  const adapter = adapterForAction(actionType);
+  return adapter?.kind === 'connector' ? adapter.id : null;
 }
 
 function diagnoseConnectorIssue(action, result = {}) {

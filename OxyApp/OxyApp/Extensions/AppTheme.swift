@@ -10,17 +10,17 @@ private func appDynamicColor(dark: Color, light: Color) -> Color {
 extension Color {
     static let appBackground = appDynamicColor(
         dark: Color(red: 0.047, green: 0.043, blue: 0.043),   // #0C0B0B
-        light: Color(red: 0.969, green: 0.969, blue: 0.980)   // #F7F7FA — Gleb wash base
+        light: Color(red: 0.965, green: 0.953, blue: 0.933)   // warm paper
     )
 
     static let appSurface = appDynamicColor(
         dark: Color(red: 0.082, green: 0.078, blue: 0.075),   // #151413
-        light: Color(red: 0.965, green: 0.967, blue: 0.980)   // #F6F7FA
+        light: Color(red: 0.988, green: 0.980, blue: 0.963)   // raised paper
     )
 
     static let appSurface2 = appDynamicColor(
         dark: Color(red: 0.118, green: 0.110, blue: 0.102),   // #1E1C1A
-        light: Color(red: 0.929, green: 0.933, blue: 0.957)   // #EDEEF4
+        light: Color(red: 0.918, green: 0.894, blue: 0.858)   // sand inset
     )
 
     static let appHairline = appDynamicColor(
@@ -30,17 +30,17 @@ extension Color {
 
     static let appInk = appDynamicColor(
         dark: Color(red: 0.949, green: 0.933, blue: 0.906),   // #F2EEE7
-        light: Color(red: 0.180, green: 0.192, blue: 0.220)   // #2E313A — Gleb ink
+        light: Color(red: 0.145, green: 0.133, blue: 0.118)   // deep umber
     )
 
     static let appMuted = appDynamicColor(
         dark: Color(red: 0.655, green: 0.631, blue: 0.604),   // #A7A19A
-        light: Color(red: 0.451, green: 0.471, blue: 0.520)   // #737885 — Gleb muted
+        light: Color(red: 0.420, green: 0.391, blue: 0.350)   // warm secondary
     )
 
     static let appAccent = appDynamicColor(
         dark: Color(red: 0.784, green: 0.663, blue: 0.420),   // #C8A96B
-        light: Color(red: 0.612, green: 0.471, blue: 0.188)   // #9C7830
+        light: Color(red: 0.575, green: 0.407, blue: 0.145)   // antique gold
     )
 
     static let appOnAccent = Color(red: 0.106, green: 0.098, blue: 0.086)

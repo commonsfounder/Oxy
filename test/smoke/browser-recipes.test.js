@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { parseSizeFromGoal, matchSizeChip } = require('../../api/services/browser-recipes');
+const { parseSizeFromGoal, matchSizeChip, parseTrainlineJourney, parseTrainlineDate, parseTrainReturn } = require('../../api/services/browser-recipes');
 
 test('parseSizeFromGoal pulls an explicit "size X"', () => {
   assert.equal(parseSizeFromGoal('add the joggers in size M to my basket'), 'm');
@@ -20,6 +20,34 @@ test('parseSizeFromGoal returns null when no size is present', () => {
   assert.equal(parseSizeFromGoal(''), null);
   // "small" as part of another word must not false-match
   assert.equal(parseSizeFromGoal('a smallish bag'), null);
+});
+
+test('parseTrainlineJourney keeps the exact requested stations', () => {
+  assert.deepEqual(
+    parseTrainlineJourney('buy a ticket from Birmingham Moor Street to Wembley Stadium on Wednesday 19 August, arriving by 17:30'),
+    { origin: 'Birmingham Moor Street', destination: 'Wembley Stadium' }
+  );
+  assert.equal(parseTrainlineJourney('find me a cheap train'), null);
+});
+
+test('parseTrainlineDate supports ordinal dates with or without an explicit year', () => {
+  assert.deepEqual(
+    parseTrainlineDate('buy a ticket on Wednesday the 19th of August 2026'),
+    { day: 19, month: 'August', year: 2026 }
+  );
+  assert.equal(parseTrainlineDate('find a ticket tomorrow'), null);
+});
+
+test('parseTrainReturn defaults an event-night return to 23:00 and honours an explicit time', () => {
+  assert.deepEqual(parseTrainReturn('buy a return ticket from Birmingham Moor Street to Wembley Stadium on Wednesday 19 August'), {
+    hour: 23,
+    assumedHour: true,
+  });
+  assert.deepEqual(parseTrainReturn('buy a return ticket and travel back after 23:30'), {
+    hour: 23,
+    assumedHour: false,
+  });
+  assert.equal(parseTrainReturn('buy a one way ticket'), null);
 });
 
 test('matchSizeChip matches normalized labels, exact before contains', () => {
@@ -203,16 +231,68 @@ test('recipe health disables after N misses and a hit resets the streak', () => 
   assert.equal(health.isDisabled('h', 's'), false);
 });
 
-const { nextRecipeMove, resolveSizeMove } = require('../../api/services/browser-recipes');
+const { nextRecipeMove, resolveSizeMove, resolveTrainlineJourney, resolveChilternJourney } = require('../../api/services/browser-recipes');
 
 // A fake page: url() returns the given url; evaluate(fn, arg) runs fn against a scripted
 // "DOM answer" table keyed by a tag we pass in arg.probe, so tests stay declarative.
 function fakePage(url, answers = {}) {
   return {
     url: () => url,
-    evaluate: async (_fn, arg) => (arg && arg.probe in answers ? answers[arg.probe] : null),
+    evaluate: async (_fn, arg) => {
+      if (!arg || !(arg.probe in answers)) return null;
+      const answer = answers[arg.probe];
+      return typeof answer === 'function' ? answer(arg) : answer;
+    },
   };
 }
+
+test('resolveTrainlineJourney fills the exact departure before any generic form move', async () => {
+  const session = {
+    goal: 'buy a ticket from Birmingham Moor Street to Wembley Stadium on Wednesday 19 August',
+    history: [],
+  };
+  const page = fakePage('https://www.thetrainline.com/', {
+    trainlineStation: ({ station }) => station === 'Birmingham Moor Street'
+      ? { kind: 'input', locatorIndex: 4, text: 'Departure station' }
+      : { kind: 'missing' },
+  });
+  const move = await resolveTrainlineJourney({ page, session, clickable: 'input, [role="option"]' });
+  assert.deepEqual(move, {
+    action: 'fill', locatorIndex: 4, value: 'Birmingham Moor Street', text: 'Departure station', stepName: 'trainline-origin'
+  });
+  assert.equal(session.trainlineJourneyStage, 'origin-filled');
+});
+
+test('resolveTrainlineJourney selects the requested calendar day after both stations', async () => {
+  const session = {
+    goal: 'buy a ticket from Birmingham Moor Street to Wembley Stadium on Wednesday the 19th of August 2026',
+    trainlineOriginSelected: true,
+    trainlineDestinationSelected: true,
+    history: [],
+  };
+  const page = fakePage('https://www.thetrainline.com/', {
+    trainlineDate: { kind: 'day', locatorIndex: 34, text: '19 £18' },
+  });
+  const move = await resolveTrainlineJourney({ page, session, clickable: 'input, [role="option"]' });
+  assert.deepEqual(move, {
+    action: 'click', locatorIndex: 34, text: '19 £18', stepName: 'trainline-date'
+  });
+  assert.equal(session.trainlineDateSelected, true);
+});
+
+test('resolveChilternJourney commits the requested arrival hour before closing the date picker', async () => {
+  const page = fakePage('https://www.chilternrailways.co.uk/', {
+    chilternJourney: { kind: 'select', locatorIndex: 53, value: 'arrive-before', text: 'Depart after' },
+  });
+  const move = await resolveChilternJourney({
+    page,
+    session: { goal: 'arrive by 17:00' },
+    clickable: 'select, button',
+  });
+  assert.deepEqual(move, {
+    action: 'select', locatorIndex: 53, value: 'arrive-before', text: 'Depart after', stepName: 'chiltern-journey'
+  });
+});
 
 test('nextRecipeMove returns null off any recipe phase (e.g. search page)', async () => {
   const jl = RECIPES['johnlewis.com'];

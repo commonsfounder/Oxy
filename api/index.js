@@ -22,7 +22,7 @@ const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
 const { GoogleGenAI: ModernGoogleGenAI } = require('@google/genai');
-const { dispatch, IMPLEMENTED_CONNECTORS } = require('../connectors');
+const { dispatch: dispatchConnector, IMPLEMENTED_CONNECTORS } = require('../connectors');
 const { extractIncoming } = require('./services/incoming');
 const { isNonEmptyString, isValidCalendarDate } = require('./services/request-validation');
 const googleConnector = require('../connectors/google');
@@ -30,7 +30,10 @@ const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const browserTask = require('./services/browser-task');
-const { createActionRunner } = require('./services/action-runner');
+const { createActionExecution, unavailableActionResult } = require('./services/action-execution');
+const { createDeclaredAdapterInvoker } = require('./services/declared-adapter-invoker');
+const { normalizeActionOutcome } = require('./services/action-outcome');
+const { createUserDataLifecycle, createUserDataRouteHandlers } = require('./services/user-data-lifecycle');
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const { detectCurrency } = require('./services/money-guard');
 const {
@@ -41,10 +44,34 @@ const {
 } = require('./services/pending-review');
 const {
   ACTION_CONTRACTS,
+  getActionContract,
   validateActionWithContract,
   buildFunctionDeclarations,
   buildToolsForGemini
 } = require('./action-contracts');
+const {
+  getExecutableActionCatalog,
+  buildPublicActionCatalog,
+  buildAgentToolsResponse,
+  buildPublicConnectorCatalog,
+  assertValidActionCatalog
+} = require('./services/action-catalog');
+
+// Fail at composition time if a model-visible contract has no valid explicit adapter.
+// This validates only the env-free manifest; connector modules remain lazy until execution.
+assertValidActionCatalog();
+
+// Legacy orchestration helpers still call dispatch(userId, action, input). Resolve those
+// calls once at this application boundary; the declared Action Execution path passes the
+// canonical connector id directly to connectors/index.js.
+async function dispatch(userId, action, input) {
+  const contract = getActionContract(action);
+  const adapter = contract?.adapter;
+  if (adapter?.kind !== 'connector') {
+    return { success: false, outcome: 'unavailable', unavailable: true, error: 'That capability is not available yet. No action was taken.' };
+  }
+  return dispatchConnector(adapter.id, userId, action, input);
+}
 const {
   createGeminiServiceClient,
   createSupabaseServiceClient,
@@ -84,12 +111,14 @@ const {
   verifySignedPayload
 } = require('../auth');
 const {
-  runAgentLoop: runAgenticLoop,
+  runAgentLoop: runAgenticLoopCore,
   generatePlan,
   reflectOnResults,
   replacePendingToolResult
 } = require('./services/agent-orchestrator');
 const taskManager = require('./services/task-manager');
+const { createDelegatedRunLifecycle, createDelegatedRunRouteHandlers } = require('./services/delegated-run-lifecycle');
+const { createDelegatedRunStarter, resolveDelegatedGuardMode } = require('./services/delegated-run-starter');
 const { loadAgentContext } = require('./services/agent-context');
 const agentWorkspace = require('./services/agent-workspace');
 const agentRuntime = require('./services/agent-runtime');
@@ -110,10 +139,9 @@ const { createDeliveryRuntime, availableChannels, describeUnavailable } = requir
 const { sendEmail: sendEmailService } = require('./services/email');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
-const { connectorForAction } = require('./services/connector-health');
 const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
-const { clearCheckoutProfile } = require('./services/checkout-profile');
+const { clearCheckoutProfile, saveCheckoutProfile, loadCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens } = require('./services/token-crypto');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
 const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
@@ -210,21 +238,20 @@ function appointmentCheckpoint(booking) {
 }
 
 async function saveAppointmentTask(userId, existingTaskId, booking, updates = {}) {
-  let task = existingTaskId ? await taskManager.getTask(userId, existingTaskId) : null;
+  let task = existingTaskId ? await delegatedRunLifecycle.get(userId, existingTaskId) : null;
   if (!task) {
-    task = await taskManager.createTask(userId, appointmentTaskGoal(booking.service, booking.preference), {
+    task = await delegatedRunLifecycle.create(userId, appointmentTaskGoal(booking.service, booking.preference), {
       autonomy: 'Balanced',
       metadata: { appointmentBooking: booking }
     });
   }
-  return taskManager.updateTask(userId, task.id, {
-    status: updates.status || 'paused',
+  const state = updates.status === 'completed' ? 'completed' : updates.status === 'failed' ? 'failed' : 'paused';
+  return delegatedRunLifecycle.updateAppointmentProgress(userId, task.id, {
+    state,
+    booking,
     checkpoint: updates.checkpoint === false ? null : appointmentCheckpoint(booking),
-    last_error: updates.lastError || null,
+    lastError: updates.lastError || null,
     results: updates.results || task.results || [],
-    completed_at: updates.completedAt || null,
-    heartbeat_at: null,
-    metadata: { ...(task.metadata || {}), appointmentBooking: booking }
   });
 }
 
@@ -239,7 +266,7 @@ function appointmentChoiceIndex(message) {
 async function inferAppointmentBookingTurn(userId, message) {
   let tasks;
   try {
-    tasks = await taskManager.listTasks(userId, null);
+    tasks = await delegatedRunLifecycle.list(userId, null);
   } catch {
     return null;
   }
@@ -639,6 +666,14 @@ app.use((req, res, next) => {
   ]);
 
   if (publicPaths.has(req.path)) return next();
+  // A nearby browser display is not a signed-in app client. Its page and its
+  // token-scoped poll/ack endpoints authenticate with the one-time pairing token.
+  const publicDisplayRoute =
+    (req.method === 'GET' && (req.path === '/display' || /^\/display\/[^/]+\/events$/.test(req.path)))
+    || (req.method === 'POST' && (req.path === '/display/pair' || /^\/display\/[^/]+\/events\/[^/]+\/ack$/.test(req.path)));
+  if (publicDisplayRoute) {
+    return next();
+  }
 
   // requireSessionAuth verifies signature + expiry, then we check token_version for revocation
   return requireSessionAuth(req, res, async () => {
@@ -728,6 +763,58 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref();
 
 const supabase = createSupabaseServiceClient();
+
+// Durable delegated runs have one lifecycle owner. The adapter keeps the
+// existing runtime service's Supabase-shaped API at the boundary; callers do
+// not decide task/runtime states independently.
+const delegatedRunLifecycle = createDelegatedRunLifecycle({
+  taskStore: taskManager.createTaskManager(supabase),
+  runtimeStore: {
+    async project(userId, task, _state, patch, runtimeOptions = {}) {
+      let sessionId = task.metadata?.runtimeSessionId || task.runtimeSessionId;
+      if (!sessionId) {
+        const session = await agentRuntime.ensureSession(supabase, userId, {
+          taskId: task.id,
+          ...runtimeOptions,
+          title: task.goal,
+          state: patch.state
+        });
+        sessionId = session?.id;
+      }
+      if (sessionId) await agentRuntime.updateSession(supabase, userId, sessionId, patch);
+      return { sessionId };
+    }
+  }
+});
+
+// Every production durable loop receives the same lifecycle. Tests and other
+// callers may still inject a different one explicitly.
+const runAgenticLoop = options => runAgenticLoopCore({
+  ...options,
+  lifecycle: options?.lifecycle || delegatedRunLifecycle
+});
+const delegatedRunRouteHandlers = createDelegatedRunRouteHandlers({ lifecycle: delegatedRunLifecycle });
+
+async function startChatExecutionIdentity({
+  userId,
+  message,
+  autonomy,
+  metadata = {},
+  runtime = {},
+  lifecycle = delegatedRunLifecycle,
+  ensureRuntime,
+  updateTaskMetadata
+}) {
+  const resumableTasks = await lifecycle.list(userId, null);
+  const matchedTask = resolveTaskReference(resumableTasks, message);
+  const task = matchedTask || await lifecycle.create(userId, message, { autonomy, metadata });
+  const claimed = await lifecycle.claimStart(userId, task.id, { runtime });
+  if (!claimed) return { error: matchedTask ? 'That goal is already being handled.' : 'The new delegated run could not be started.' };
+  const executionTask = claimed || task;
+  const session = await ensureRuntime(executionTask);
+  await updateTaskMetadata(executionTask, session);
+  return { matchedTask, executionTask, session };
+}
 const genAI = createGeminiServiceClient();
 const modernGenAI = new ModernGoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY });
 logMissingRuntimeEnvOnce('api bootstrap');
@@ -735,6 +822,17 @@ logMissingRuntimeEnvOnce('api bootstrap');
 const CONTEXT_CACHE_TTL = 5 * 60 * 1000;
 const CONTEXT_CACHE_MAX = 500;
 const contextCache = new Map();
+
+// Account export and deletion share one explicit, audited resource registry.  Keep the HTTP
+// routes below thin: this seam is also what makes the lifecycle testable without a live
+// database or storage bucket.
+const userDataLifecycle = createUserDataLifecycle({
+  db: supabase,
+  storage: supabase.storage,
+  clearCaches: userId => contextCache.delete(userId),
+  signUrl: (storagePath, expiresInSeconds) => supabase.storage.from('documents').createSignedUrl(storagePath, expiresInSeconds)
+});
+const userDataRoutes = createUserDataRouteHandlers({ lifecycle: userDataLifecycle, requireMatchingUser, logger: console });
 
 // Prune expired context cache entries (skip in serverless)
 setInterval(() => {
@@ -2324,7 +2422,16 @@ function getActionStatusLabel(actionType, phase = 'start') {
 }
 
 function actionCompletionPhase(result) {
-  return result?.success === false ? 'failed' : 'complete';
+  switch (result?.outcome) {
+    case 'completed': return 'complete';
+    case 'awaiting_user': return 'awaiting_user';
+    case 'handoff_required': return 'handoff_required';
+    case 'simulated': return 'simulated';
+    case 'incomplete': return 'incomplete';
+    case 'unavailable':
+    case 'failed': return 'failed';
+    default: return result?.success === true ? 'complete' : 'failed';
+  }
 }
 
 async function* generateSpeechStream(text, voiceName = 'Aoede') {
@@ -2837,20 +2944,7 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
   return { captured, resolved };
 }
 
-async function executeAction(userId, action, params, context = {}) {
-  const connectorId = connectorForAction(action);
-  if (connectorId && connectorId !== 'maps') {
-    const enabledConnectors = Array.isArray(context.enabledConnectors)
-      ? context.enabledConnectors
-      : await getEnabledConnectors(userId, context.trace || null);
-    if (!enabledConnectors.includes(connectorId)) {
-      return {
-        success: false,
-        error: `${connectorId} is disabled. Re-enable it in Connectors before confirming this action.`
-      };
-    }
-  }
-
+async function executeActionRaw(userId, action, params, context = {}) {
   const enrichedParams = {
     ...(params || {}),
     ...(context.location ? { location: context.location } : {}),
@@ -2888,7 +2982,9 @@ async function executeAction(userId, action, params, context = {}) {
       // own compose UI handles recipient selection), so no contact resolution/ambiguity check applies.
       if (params?.platform === 'whatsapp' || action === 'whatsapp') {
         return {
-          success: true,
+          success: false,
+          outcome: 'handoff_required',
+          handoffRequired: true,
           text: `Opening WhatsApp for ${contact}.`,
           deepLink: `https://wa.me/?text=${encodeURIComponent(message)}`,
           cardText: message.slice(0, 60)
@@ -2909,7 +3005,9 @@ async function executeAction(userId, action, params, context = {}) {
         };
       }
       return {
-        success: true,
+        success: false,
+        outcome: 'awaiting_user',
+        pending: true,
         text: `Message ready for ${resolvedContact.label}. Review and tap Send.`,
         cardText: `To ${resolvedContact.label} · ${message}`,
         actionSummary: 'Message ready',
@@ -3122,7 +3220,9 @@ async function executeAction(userId, action, params, context = {}) {
       const contact = String(params?.contact || '').trim();
       if (!contact) return { success: false, error: 'make_call requires a contact' };
       return {
-        success: true,
+        success: false,
+        outcome: 'handoff_required',
+        handoffRequired: true,
         text: `Opening FaceTime for ${contact}.`,
         deepLink: `facetime://${encodeURIComponent(contact)}`
       };
@@ -3131,7 +3231,9 @@ async function executeAction(userId, action, params, context = {}) {
       const query = String(params?.query || params?.song || params?.title || '').trim();
       if (!query) return { success: false, error: 'play_music requires a query' };
       return {
-        success: true,
+        success: false,
+        outcome: 'handoff_required',
+        handoffRequired: true,
         text: `Starting playback for ${query}.`,
         cardText: query,
         actionSummary: 'Music requested',
@@ -3145,7 +3247,9 @@ async function executeAction(userId, action, params, context = {}) {
       const playlist = String(params?.playlist || params?.playlistName || '').trim();
       if (!query) return { success: false, error: 'add_to_music_playlist requires a query' };
       return {
-        success: true,
+        success: false,
+        outcome: 'handoff_required',
+        handoffRequired: true,
         text: playlist
           ? `Opening Apple Music for ${query}. Add it to ${playlist} there.`
           : `Opening Apple Music for ${query}.`,
@@ -3157,6 +3261,38 @@ async function executeAction(userId, action, params, context = {}) {
     }
     case 'forget_memory':
       return forgetMemory(userId, params || {});
+    case 'list_paired_displays': {
+      const pairedDisplays = require('./services/paired-displays');
+      const displays = await pairedDisplays.listDisplays(supabase, userId);
+      return {
+        success: true,
+        displays,
+        text: displays.length
+          ? displays.map(display => display.name + ' (' + display.type + ')').join('\n')
+          : 'No nearby displays are paired yet.'
+      };
+    }
+    case 'render_to_display': {
+      const pairedDisplays = require('./services/paired-displays');
+      const event = await pairedDisplays.queueRender(supabase, userId, {
+        displayId: params?.display_id || params?.displayId,
+        title: params?.title,
+        body: params?.body,
+        kind: params?.kind
+      });
+      return {
+        // The server has queued the event; the display still has to poll and acknowledge
+        // it. Do not claim that a physical screen rendered anything until that boundary is
+        // observed.
+        success: false,
+        outcome: 'incomplete',
+        incomplete: true,
+        eventId: event.id,
+        displayId: event.displayId,
+        text: 'Queued for the paired display: ' + event.title,
+        actionSummary: 'Queued for display'
+      };
+    }
     case 'generate_visual': {
       const brief = params?.brief || params?.prompt || params?.topic;
       if (!brief) return { success: false, error: 'generate_visual needs a brief.' };
@@ -3393,13 +3529,24 @@ async function executeAction(userId, action, params, context = {}) {
       const credentialSites = Array.isArray(params?.credentialSites) ? params.credentialSites : [];
       let outcome;
       try {
-        outcome = await browserTask.runOrderingTurn(userId, { url, goal, location: context.location, credentialSites });
+        outcome = await browserTask.runOrderingTurn(userId, {
+          url,
+          goal,
+          location: context.location,
+          credentialSites,
+          // Browser work can take several real site interactions. Stream its bounded,
+          // human-readable step labels into the active chat task so the person can see
+          // the current page action rather than a generic "Browsing the web" spinner.
+          onProgress: (label) => context.onBrowserProgress?.(String(label || '').replace(/\s+/g, ' ').trim())
+        });
       } catch (e) {
         return { success: false, error: `Browse task failed: ${e.message}` };
       }
       if (outcome.type === 'ready_for_credential_use') {
         return {
-          success: true,
+          success: false,
+          outcome: 'awaiting_user',
+          pending: true,
           confirmation: 'review_required',
           text: `I found a sign-in for ${outcome.site} — use your saved "${outcome.label}" credential to sign in?`,
           actionSummary: 'Sign-in ready',
@@ -3423,7 +3570,9 @@ async function executeAction(userId, action, params, context = {}) {
           ? ` I'll pay with your ${agentCard.brand} ending ${agentCard.last4}.`
           : ' (No payment card is saved — if this checkout asks for card details, add one on the Payments screen first.)';
         return {
-          success: true,
+          success: false,
+          outcome: 'awaiting_user',
+          pending: true,
           confirmation: 'review_required',
           text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}.${cardNote} Say the word and I'll place the order.`,
           total: outcome.total,
@@ -3433,6 +3582,19 @@ async function executeAction(userId, action, params, context = {}) {
           ...(outcome.productName ? { productName: outcome.productName } : {}),
           ...(outcome.colorOptions?.length ? { colorOptions: outcome.colorOptions } : {}),
           ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
+        };
+      }
+      if (outcome.type === 'needs_user_information') {
+        return {
+          success: false,
+          error: outcome.question || 'I need some checkout information to continue.',
+          recoverable: true,
+          recoveryAction: {
+            type: 'checkout_information',
+            label: 'Add details',
+            fields: Array.isArray(outcome.fields) ? outcome.fields : []
+          },
+          taskId: outcome.taskId
         };
       }
       if (outcome.type === 'done') {
@@ -3445,8 +3607,8 @@ async function executeAction(userId, action, params, context = {}) {
           ...(outcome.price ? { price: outcome.price } : {})
         };
       }
-      if (outcome.type === 'awaiting_more') return { success: true, text: outcome.summary, continuesBrowsing: true, taskId: outcome.taskId };
-      if (outcome.type === 'ask') return { success: true, text: outcome.question, taskId: outcome.taskId };
+      if (outcome.type === 'awaiting_more') return { success: false, outcome: 'incomplete', incomplete: true, text: outcome.summary, continuesBrowsing: true, taskId: outcome.taskId };
+      if (outcome.type === 'ask') return { success: false, outcome: 'awaiting_user', pending: true, text: outcome.question, taskId: outcome.taskId };
       if (outcome.type === 'reauth') {
         // Regression: this outcome type had no case here at all, so it fell through to the
         // generic "Browse task failed." error below — the actual "I need to sign in" question
@@ -3548,7 +3710,7 @@ async function executeAction(userId, action, params, context = {}) {
         const val = (0, eval)(safe || '0');
         return { success: true, text: `${expr} = ${val}`, result: val };
       } catch {
-        return { success: true, text: `I interpreted "${expr}" but used LLM fallback. Result: approx computation done.`, result: expr };
+        return { success: false, outcome: 'failed', error: `Could not calculate "${expr}" safely.` };
       }
     }
     // Workspace tools. Path traversal, size and kind are all enforced inside
@@ -3619,12 +3781,40 @@ async function executeAction(userId, action, params, context = {}) {
       const goal = String(params?.goal || '').trim();
       if (!goal) return { success: false, error: 'create_agent_task requires goal' };
       try {
-        const task = await taskManager.createTask(userId, goal, {
+        // A child task can inherit a stricter approval policy, never weaken the
+        // policy that governs the current user turn.
+        const guardMode = resolveDelegatedGuardMode(params.guardMode, context.guardMode);
+        const task = await delegatedRunLifecycle.create(userId, goal, {
           autonomy: params.autonomy,
           plan: params.plan,
-          metadata: typeof params.guardMode === 'boolean' ? { guardMode: params.guardMode } : undefined
+          metadata: guardMode === undefined ? undefined : { guardMode }
         });
-        return { success: true, text: `Persistent agent task created: "${goal}". ID: ${task.id}. I will work on it in background where possible.`, taskId: task.id };
+        const started = await startDelegatedTaskExecution({
+          userId,
+          task,
+          runtime: {
+            deviceType: context.deviceType || 'ambient_home',
+            kind: 'task'
+          }
+        });
+        if (started.status !== 200) {
+          return {
+            success: false,
+            outcome: 'failed',
+            error: started.body?.error || 'The task was saved but could not be started.',
+            taskId: task.id,
+            started: false
+          };
+        }
+        return {
+          success: true,
+          outcome: 'incomplete',
+          text: `Persistent agent task started: "${goal}". ID: ${task.id}. It is running in the background and can be resumed from Work.`,
+          actionSummary: 'Persistent task started',
+          taskId: task.id,
+          started: true,
+          delegatedTask: true
+        };
       } catch (e) {
         return { success: false, error: e.message };
       }
@@ -3793,9 +3983,9 @@ async function executeAction(userId, action, params, context = {}) {
       try {
         const outcomes = actions.length ? actions.map(a => ({ action: a, simulated: 'would execute if approved' })) : [{ simulated: 'full plan simulation would run here' }];
         await taskManager.recordSimulation(userId, goal, actions, outcomes);
-        return { success: true, text: `Simulation for "${goal}" complete. ${outcomes.length} steps previewed. No real actions taken.`, outcomes };
+        return { success: false, outcome: 'simulated', simulated: true, text: `Simulation for "${goal}" complete. ${outcomes.length} steps previewed. No real actions taken.`, outcomes };
       } catch (e) {
-        return { success: true, text: `Simulated: ${goal}. (storage note: ${e.message})`, simulated: true };
+        return { success: false, outcome: 'simulated', simulated: true, text: `Simulation previewed for "${goal}", but its history could not be saved.`, storageError: e.message };
       }
     }
 
@@ -3803,53 +3993,32 @@ async function executeAction(userId, action, params, context = {}) {
     case 'log_health': {
       const metric = params?.metric || 'steps';
       const value = params?.value || 'updated';
-      return { success: true, text: `Logged ${metric}: ${value} via HealthKit.`, nativeExecution: 'health' };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `HealthKit logging is not available on this device (${metric}: ${value}).` };
     }
     case 'control_smart_home': {
       const device = params?.device || 'lights';
       const command = params?.command || 'toggle';
-      return { success: true, text: `${command} ${device} (via Home Assistant / native).`, deepLink: 'homekit://' };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `Smart-home control is not connected for ${device}.` };
     }
-    case 'save_to_notion': {
-      const content = params?.content || params?.text || 'note';
-      return { success: true, text: `Saved to Notion: ${String(content).slice(0,80)}`, webLink: 'https://notion.so' };
-    }
-    case 'github_action':
-      return dispatch(userId, action, enrichedParams);
-    // track_flight is handled by connectors/flights.js (dispatch fallthrough) — this used to
-    // duplicate it inline, making the connector's own branch permanently dead code for no
-    // reason (unlike stripe_charge, there's no cap/review logic that needs it inline).
     case 'edit_photo': {
       const brief = params?.brief || 'enhance';
-      return { success: true, text: `Photo edit request: ${brief}. (Use image tools or Shortcuts.)`, nativeExecution: 'photo' };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `Photo editing is not available yet (${brief}).` };
     }
 
     case 'analyze_image': {
       const prompt = params?.prompt || 'Describe this image and extract any actionable info';
-      return { success: true, text: `Image analysis for: "${prompt}". Use chat with image upload for Gemini vision to get details, text, or task steps.`, nativeExecution: 'vision' };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `Image analysis needs an uploaded image; no image was provided for "${prompt}".` };
     }
 
     case 'mcp_tool': {
       const name = params?.name;
       const args = params?.arguments || {};
-      // Forward to MCP server for extensibility (cream-of-crop extensibility)
-      try {
-        // In prod, call the mcp-server /tools
-        return { success: true, text: `Executed MCP tool ${name} with ${JSON.stringify(args)}. Extend mcp-server.js for more external capabilities.`, mcp: { name, args } };
-      } catch (e) {
-        return { success: true, text: `MCP tool ${name} prepared.`, mcp: { name, args } };
-      }
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `MCP tool execution is not configured${name ? ` for ${name}` : ''}.`, mcp: { name, args } };
     }
 
-    // Concierge account / virtual card logic - gives the agent its own "account" like a real concierge
+    // No virtual concierge ledger exists. Real money actions use Stripe or remain unavailable.
     case 'check_concierge_balance': {
-      const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance']);
-      if (isNaN(balance)) {
-        balance = 0; // default for new users; user or agent can top up
-        await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      }
-      return { success: true, text: `Concierge account balance: $${balance.toFixed(2)}`, balance };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: 'No real concierge balance is connected.' };
     }
     case 'spend_from_concierge_account': {
       const amount = Number(params?.amount || 0);
@@ -3858,17 +4027,8 @@ async function executeAction(userId, action, params, context = {}) {
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
       const spendGuard = await guardConciergeSpend(userId, amount);
       if (!spendGuard.ok) return { success: false, error: spendGuard.error };
-      const prefs = await getPreferenceMap(userId);
-      const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
-
       if (!stripeClient) {
-        if (balanceBeforeSpend < amount) {
-          return { success: false, error: 'Insufficient balance', balance: balanceBeforeSpend };
-        }
-        const balance = Number((balanceBeforeSpend - amount).toFixed(2));
-        await setPreferenceValue(userId, 'concierge_account.balance', balance);
-        const cardRef = '****-****-****-' + Math.floor(1000 + Math.random() * 9000);
-        return { success: true, text: `Spent $${amount.toFixed(2)} on ${description} at ${merchant} using concierge card ${cardRef}. New balance: $${balance.toFixed(2)}.`, balance, card: cardRef };
+        return { success: false, outcome: 'unavailable', unavailable: true, error: 'Real concierge spending is unavailable until a payment rail is configured. No money moved.' };
       }
 
       const idempotencyKey = crypto.randomUUID();
@@ -3881,7 +4041,7 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
       }
       if (outcome.status === 'failed') {
-        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}` };
       }
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
@@ -3889,39 +4049,27 @@ async function executeAction(userId, action, params, context = {}) {
           amountCents: Math.round(amount * 100), description: `${description} at ${merchant}`, currency
         });
         return {
-          success: true,
+          success: false,
+          outcome: 'awaiting_user',
+          pending: true,
           text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
           requiresAction: true,
           paymentIntentId: outcome.paymentIntentId
         };
       }
 
-      // outcome.status === 'succeeded'
-      let balance = balanceBeforeSpend;
-      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      await setPreferenceValue(userId, 'concierge_account.last_spend', JSON.stringify({ amount, description, merchant, ts: Date.now() }));
-      return { success: true, text: `Charged $${amount.toFixed(2)} on ${description} at ${merchant} to your linked card. New balance: $${balance.toFixed(2)}.`, balance, paymentIntentId: outcome.paymentIntentId };
+      return { success: true, text: `Charged $${amount.toFixed(2)} on ${description} at ${merchant} to your linked card.`, paymentIntentId: outcome.paymentIntentId };
     }
     case 'top_up_concierge_account': {
       const amount = Number(params?.amount || 0);
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
-      const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance'] || 0);
-      balance += amount;
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      return { success: true, text: `Topped up $${amount.toFixed(2)}. New balance: $${balance.toFixed(2)}`, balance };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: 'Concierge top-ups are unavailable until a real payment rail is configured. No balance was changed.', amount };
     }
     case 'receive_to_concierge_account': {
       const amount = Number(params?.amount || 0);
       const description = params?.description || 'payment';
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
-      const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance'] || 0);
-      balance += amount;
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      await setPreferenceValue(userId, 'concierge_account.last_receive', JSON.stringify({ amount, description, ts: Date.now() }));
-      return { success: true, text: `Received $${amount.toFixed(2)} for ${description}. New balance: $${balance.toFixed(2)}`, balance };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `Receiving ${description} is unavailable until a real payment rail is configured. No balance was changed.`, amount };
     }
 
     case 'fund_opportunity': {
@@ -3930,13 +4078,7 @@ async function executeAction(userId, action, params, context = {}) {
       if (amount <= 0) return { success: false, error: 'Invalid amount' };
       const fundGuard = await guardConciergeSpend(userId, amount);
       if (!fundGuard.ok) return { success: false, error: fundGuard.error };
-      const prefs = await getPreferenceMap(userId);
-      let balance = Number(prefs['concierge_account.balance'] || 0);
-      if (balance < amount) return { success: false, error: 'Insufficient balance', balance };
-      balance -= amount;
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      await setPreferenceValue(userId, 'concierge_account.last_fund', JSON.stringify({ amount, opportunity, ts: Date.now() }));
-      return { success: true, text: `Funded "${opportunity}" with $${amount.toFixed(2)} from concierge account. New balance: $${balance.toFixed(2)}. This can seed earnings streams.`, balance };
+      return { success: false, outcome: 'unavailable', unavailable: true, error: `Funding "${opportunity}" is unavailable until a real payment rail is configured. No balance was changed.`, amount };
     }
 
     case 'stripe_charge': {
@@ -3945,15 +4087,8 @@ async function executeAction(userId, action, params, context = {}) {
       const amount = amountCents / 100;
       const chargeGuard = await guardConciergeSpend(userId, amount);
       if (!chargeGuard.ok) return { success: false, error: chargeGuard.error };
-      const prefs = await getPreferenceMap(userId);
-      const balanceBeforeSpend = Number(prefs['concierge_account.balance'] || 0);
-
       if (!stripeClient) {
-        // Honest about what actually happened: no real charge was attempted, this is a
-        // virtual-only ledger entry, not a real Stripe transaction.
-        const balance = Math.max(0, Number((balanceBeforeSpend - amount).toFixed(2)));
-        if (balanceBeforeSpend >= amount) await setPreferenceValue(userId, 'concierge_account.balance', balance);
-        return { success: true, text: `No Stripe key configured, so this was a virtual concierge-balance entry only — no real charge was made for ${desc}. Balance: $${balance.toFixed(2)}.`, amount, balance };
+        return { success: false, outcome: 'unavailable', unavailable: true, error: `Stripe is not configured, so no charge was attempted for ${desc}.`, amount };
       }
 
       const idempotencyKey = crypto.randomUUID();
@@ -3966,25 +4101,23 @@ async function executeAction(userId, action, params, context = {}) {
         return { success: false, error: 'No card linked yet. Link a card in Payments settings to spend for real.' };
       }
       if (outcome.status === 'failed') {
-        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}`, balance: balanceBeforeSpend };
+        return { success: false, error: `Stripe charge failed, so nothing was spent: ${outcome.error}` };
       }
       if (outcome.status === 'requires_action') {
         await setPaymentActionRequired(supabase, userId, {
           paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc, currency
         });
         return {
-          success: true,
+          success: false,
+          outcome: 'awaiting_user',
+          pending: true,
           text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
           requiresAction: true,
           paymentIntentId: outcome.paymentIntentId
         };
       }
 
-      // outcome.status === 'succeeded'
-      let balance = balanceBeforeSpend;
-      if (balance >= amount) balance = Number((balance - amount).toFixed(2));
-      await setPreferenceValue(userId, 'concierge_account.balance', balance);
-      return { success: true, text: `Stripe charged $${amount.toFixed(2)} (${desc}) to your linked card. Balance: $${balance.toFixed(2)}.`, amount, balance, paymentIntentId: outcome.paymentIntentId };
+      return { success: true, text: `Stripe charged $${amount.toFixed(2)} (${desc}) to your linked card.`, amount, paymentIntentId: outcome.paymentIntentId };
     }
 
     // Super easy consumer Reminders (uses your iPhone's built-in, no extra login)
@@ -3992,7 +4125,9 @@ async function executeAction(userId, action, params, context = {}) {
       const title = params?.title || params?.text || 'Reminder';
       const due = params?.due_date || '';
       return {
-        success: true,
+        success: false,
+        outcome: 'handoff_required',
+        handoffRequired: true,
         text: `Reminder set for "${title}"${due ? ' ' + due : ''}.`,
         nativeExecution: 'reminder',
         cardText: title,
@@ -5361,7 +5496,7 @@ async function executeAction(userId, action, params, context = {}) {
     }
 
     case 'book_appointment': {
-      const task = await taskManager.getTask(userId, params?.task_id);
+      const task = await delegatedRunLifecycle.get(userId, params?.task_id);
       const booking = task?.metadata?.appointmentBooking;
       const choice = booking?.choices?.find(item => item.id === params?.choice_id);
       if (!task || !booking || !choice) return { success: false, error: "I couldn't find that appointment choice. Please ask me to look again." };
@@ -5401,8 +5536,19 @@ async function executeAction(userId, action, params, context = {}) {
     }
 
     default:
-      return dispatch(userId, action, enrichedParams);
+      return { success: false, outcome: 'unavailable', unavailable: true, error: 'That capability is not available yet. No action was taken.' };
   }
+}
+
+// Keep direct callers honest as well as the action runner. The runner adds review and
+// logging metadata; this wrapper owns the public result invariant for every action path.
+async function executeAction(userId, action, params, context = {}) {
+  const declared = getExecutableActionCatalog().find(item => item.type === action);
+  if (!getActionContract(action) || !declared) {
+    return normalizeActionOutcome(unavailableActionResult(action));
+  }
+  const result = await invokeDeclaredAdapter({ adapter: declared.adapter, userId, type: action, input: params, context });
+  return normalizeActionOutcome(result);
 }
 
 // Proactive outbound delivery, wired to the real senders. Everything Millie notices in the
@@ -5455,8 +5601,14 @@ const notificationDelivery = createDeliveryRuntime({
   }
 });
 
-const executeActions = createActionRunner({
-  executeAction,
+const invokeDeclaredAdapter = createDeclaredAdapterInvoker({
+  executeInline: ({ userId, type, input, context }) => executeActionRaw(userId, type, input, context),
+  dispatchConnector: ({ connectorId, userId, type, input }) => dispatchConnector(connectorId, userId, type, input),
+  getEnabledConnectors
+});
+
+const executeActions = createActionExecution({
+  invokeAdapter: invokeDeclaredAdapter,
   invalidateUserContextCache,
   setPendingAction,
   validateAction: validateActionWithContract,
@@ -5464,10 +5616,31 @@ const executeActions = createActionRunner({
   logAction: (userId, action, result) => supabase.from('action_log').insert({
     user_id: userId,
     action: serializeLoggedAction(action, result),
-    status: result.pending ? 'pending' : result.success ? 'executed' : 'failed',
-    error: result.success ? null : (result.error || null),
+    // The action log records whether the adapter ran, not whether the user's
+    // larger goal is finished. A durable handoff is executed even though its
+    // outcome remains incomplete until the background task settles.
+    status: result.pending ? 'pending' : ['completed', 'incomplete', 'handoff_required', 'simulated'].includes(result.outcome) ? 'executed' : 'failed',
+    error: ['completed', 'incomplete', 'handoff_required', 'simulated'].includes(result.outcome) ? null : (result.error || null),
     created_at: new Date().toISOString()
   })
+});
+
+// All durable task entry points (chat delegation, Work, recipes) share this starter.
+// The function is created after executeActions is wired, but is only called after the
+// module has finished bootstrapping, so the later prompt/route declarations are ready.
+const startDelegatedTaskExecution = createDelegatedRunStarter({
+  lifecycle: delegatedRunLifecycle,
+  routeHandlers: delegatedRunRouteHandlers,
+  ensureRuntime: (userId, task, runtime) => agentRuntime.ensureSession(supabase, userId, {
+    taskId: task.id,
+    ...runtime,
+    title: task.goal,
+    state: 'running'
+  }),
+  resolveRoute: resolveAgentTaskRoute,
+  buildSystemPrompt: buildBackgroundSystemPrompt,
+  runLoop: options => runAgenticLoop(options),
+  executeActions
 });
 
 async function getMemory(userId, trace = null, query = '') {
@@ -6070,13 +6243,15 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
   if (!taskId) return { resumed: false };
   let claimedTask = null;
   try {
-    const task = await taskManager.getTask(userId, taskId);
+    const task = await delegatedRunLifecycle.get(userId, taskId);
     // Only a parked run with a checkpoint can continue. A run already finished, cancelled,
     // or picked up by another instance must not be restarted underneath it.
     if (!task || !task.checkpoint) return { resumed: false };
     if (!['paused', 'pending', 'failed'].includes(String(task.status || '').toLowerCase())) return { resumed: false };
 
-    claimedTask = await taskManager.claimRun(userId, taskId, { allowAwaitingApproval: true });
+    claimedTask = await delegatedRunLifecycle.resumeAfterApproval(userId, taskId, {
+      runtime: { deviceId: pendingAction.deviceId, deviceType: pendingAction.deviceType, kind: 'task' }
+    });
     if (!claimedTask) return { resumed: false };
 
     const settledEntry = settleApprovalEntry(pendingAction, actionResults);
@@ -6090,10 +6265,8 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
       : null;
 
     if (!approvedActionSucceeded(actionResults)) {
-      await taskManager.updateTask(userId, taskId, {
-        status: 'paused',
-        heartbeat_at: null,
-        last_error: 'The approved action did not complete.',
+      await delegatedRunLifecycle.interrupt(userId, taskId, 'The approved action did not complete.', {
+        ownerAttempt: claimedTask.attempt,
         results: settledResults,
         checkpoint: settledCheckpoint,
         metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
@@ -6114,19 +6287,14 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
       useSearch = Boolean(useSearch || refreshed.useSearch);
     } catch {}
 
-    await taskManager.updateTask(userId, taskId, {
+    await delegatedRunLifecycle.recordApprovalResult(userId, taskId, {
       results: settledResults,
       checkpoint: settledCheckpoint,
-      metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
+      metadata: claimedTask.metadata || {},
+      ownerAttempt: claimedTask.attempt
     });
 
     const runtimeSessionId = pendingAction.sessionId || claimedTask.metadata?.runtimeSessionId || null;
-    if (runtimeSessionId) {
-      await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
-        state: 'running',
-        heartbeatAt: new Date().toISOString()
-      }).catch(() => {});
-    }
 
     trace?.log?.('agent.run.resume_after_approval', taskId);
 
@@ -6153,42 +6321,17 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
       // contain secrets, prompt-injection text, or unbounded payloads. The settled tool
       // response is already in the checkpoint for the model to inspect as structured data.
       resumeNote: `The user approved "${pendingAction.action?.type}" and it completed successfully. Continue the goal from here; do not ask for that approval again.`
-    }).then(async (outcome) => {
-      if (!runtimeSessionId) return;
-      const traceStatus = outcome?.agentTrace?.status;
-      const state = traceStatus === 'completed'
-        ? 'completed'
-        : traceStatus === 'awaiting_approval'
-          ? 'waiting_approval'
-          : traceStatus === 'error' ? 'failed' : 'paused';
-      await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
-        state,
-        heartbeatAt: null,
-        completedAt: state === 'completed' ? new Date().toISOString() : null
-      }).catch(() => {});
     }).catch(async (e) => {
-      try {
-        await taskManager.updateTask(userId, taskId, {
-          status: 'paused',
-          heartbeat_at: null,
-          last_error: String(e?.message || e).slice(0, 500)
-        });
-      } catch {}
-      if (runtimeSessionId) {
-        await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
-          state: 'failed',
-          heartbeatAt: null
-        }).catch(() => {});
+      if (e?.authoritativeSaved) {
+        await delegatedRunLifecycle.repairProjection(userId, taskId).catch(() => {});
+      } else {
+        await delegatedRunLifecycle.interrupt(userId, taskId, e, { ownerAttempt: claimedTask?.attempt }).catch(() => {});
       }
     });
     return { resumed: true };
   } catch {
     if (claimedTask) {
-      await taskManager.updateTask(userId, taskId, {
-        status: 'paused',
-        heartbeat_at: null,
-        last_error: 'The approved action completed, but the task could not resume.'
-      }).catch(() => {});
+      await delegatedRunLifecycle.interrupt(userId, taskId, 'The approved action completed, but the task could not resume.', { ownerAttempt: claimedTask.attempt }).catch(() => {});
     }
     return { resumed: false };
   }
@@ -6197,23 +6340,20 @@ async function resumeRunAfterApproval(userId, pendingAction, actionResults, trac
 async function cancelApprovalRun(userId, pendingAction) {
   const taskId = pendingAction?.taskId;
   if (!taskId) return false;
-  const task = await taskManager.getTask(userId, taskId);
+  const task = await delegatedRunLifecycle.get(userId, taskId);
   if (!task?.checkpoint) return false;
-  const claimedTask = await taskManager.claimRun(userId, taskId, { allowAwaitingApproval: true });
+  const claimedTask = await delegatedRunLifecycle.resumeAfterApproval(userId, taskId, {
+    runtime: { deviceId: pendingAction.deviceId, deviceType: pendingAction.deviceType, kind: 'task' }
+  });
   if (!claimedTask) return false;
   try {
-    await taskManager.updateTask(userId, taskId, {
-      status: 'cancelled',
-      heartbeat_at: null,
-      completed_at: new Date().toISOString(),
-      checkpoint: null,
+    await delegatedRunLifecycle.cancel(userId, taskId, {
+      ownerAttempt: claimedTask.attempt,
       metadata: { ...(claimedTask.metadata || {}), awaitingApproval: false }
     });
   } catch (error) {
-    await taskManager.updateTask(userId, taskId, {
-      status: 'paused',
-      heartbeat_at: null,
-      last_error: 'Cancellation could not be saved.',
+    await delegatedRunLifecycle.interrupt(userId, taskId, 'Cancellation could not be saved.', {
+      ownerAttempt: claimedTask.attempt,
       metadata: { ...(claimedTask.metadata || {}), awaitingApproval: true }
     }).catch(() => {});
     throw error;
@@ -6275,31 +6415,6 @@ async function getEnabledConnectors(userId, trace = null) {
 }
 
 function buildAvailableActions(enabled) {
-  const actionMap = {
-    google: ['send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events'],
-    microsoft: ['send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events'],
-    imessage: ['send_message'],
-    whatsapp: ['send_message'],
-    reminders: ['create_reminder'],
-    spotify: ['play_music'],
-    homekit: ['homekit_control'],
-    maps: ['find_place', 'get_directions', 'plan_trip'],
-    uber: ['book_uber'],
-    lyft: ['book_lyft'],
-    telegram: ['send_telegram', 'get_telegram_contacts'],
-    notion: ['create_note', 'search_notes'],
-    trainline: ['search_trains', 'station_board'],
-    concierge_account: ['check_concierge_balance', 'spend_from_concierge_account', 'top_up_concierge_account', 'receive_to_concierge_account', 'fund_opportunity'],
-    stripe: ['stripe_charge', 'create_stripe_payment_link'],
-    weather: ['get_weather', 'get_forecast'],
-    amazon: ['search_amazon', 'add_to_amazon_cart'],
-    slack: ['send_slack_message', 'search_slack'],
-    strava: ['get_strava_activities'],
-    oura: ['get_oura_sleep', 'get_oura_readiness'],
-    flights: ['search_flights', 'track_flight'],
-    hotels: ['search_hotels'],
-    stocks: ['get_stock_price']
-  };
   const live = enabled.filter(id => IMPLEMENTED_CONNECTORS.has(id));
   if (live.length === 0) return 'No connectors enabled. Internal actions still available: forget_memory, find_place, play_music, add_to_music_playlist, generate_visual, create_diagram, create_presentation.';
 
@@ -6347,76 +6462,6 @@ async function getUserAccountByEmail(email) {
 
   if (error) throw error;
   return data;
-}
-
-const USER_DATA_TABLES = [
-  'agent_traces',
-  'simulation_runs',
-  'agent_tasks',
-  'agent_workspace_files',
-  'agent_workspace_sessions',
-  'agent_workspaces',
-  'agent_imports',
-  'briefings',
-  'native_context',
-  'devices',
-  'preferences',
-  'connectors',
-  'action_log',
-  'memories',
-  'conversations',
-  'users'
-];
-
-async function fetchUserDataTable(table, userId) {
-  const { data, error } = await supabase
-    .from(table)
-    .select('*')
-    .eq('user_id', userId);
-  if (error) throw error;
-  return data || [];
-}
-
-function sanitizeExportRows(table, rows) {
-  if (table === 'connectors') {
-    return rows.map(({ tokens, ...row }) => ({
-      ...row,
-      hasTokens: Boolean(tokens)
-    }));
-  }
-  if (table === 'users') {
-    return rows.map(({ password_hash, ...row }) => row);
-  }
-  return rows;
-}
-
-async function buildUserExport(userId) {
-  const entries = await Promise.all(
-    USER_DATA_TABLES.map(async table => [table, sanitizeExportRows(table, await fetchUserDataTable(table, userId))])
-  );
-  const data = Object.fromEntries(entries);
-  return {
-    exportedAt: new Date().toISOString(),
-    userId,
-    user: data.users?.[0] || null,
-    conversations: data.conversations || [],
-    memories: data.memories || [],
-    actionLog: (data.action_log || []).map(row => ({ ...row, action: safeParseJSON(row.action) })),
-    connectors: data.connectors || [],
-    preferences: data.preferences || [],
-    devices: data.devices || [],
-    nativeContext: data.native_context || [],
-    briefings: data.briefings || [],
-    agentTasks: data.agent_tasks || [],
-    agentTraces: data.agent_traces || [],
-    simulationRuns: data.simulation_runs || [],
-    workspace: {
-      workspaces: data.agent_workspaces || [],
-      files: data.agent_workspace_files || [],
-      sessions: data.agent_workspace_sessions || []
-    },
-    continuityImports: data.agent_imports || []
-  };
 }
 
 async function getUserContext(userId, trace = null) {
@@ -7284,32 +7329,11 @@ app.delete('/memory/:userId', async (req, res) => {
 });
 
 app.get('/user/:userId/export', async (req, res) => {
-  const { userId } = req.params;
-  if (!requireMatchingUser(req, res, userId)) return;
-  try {
-    const data = await buildUserExport(userId);
-    res.setHeader('Content-Disposition', 'attachment; filename="milgrain-data-export.json"');
-    res.json(data);
-  } catch (err) {
-    console.error('/user/export error:', err.message);
-    res.status(500).json({ error: 'Could not export your data right now.' });
-  }
+  return userDataRoutes.export(req, res);
 });
 
 app.delete('/user/:userId', async (req, res) => {
-  const { userId } = req.params;
-  if (!requireMatchingUser(req, res, userId)) return;
-  try {
-    for (const table of USER_DATA_TABLES) {
-      const { error } = await supabase.from(table).delete().eq('user_id', userId);
-      if (error) throw error;
-    }
-    contextCache.delete(userId);
-    res.json({ success: true, deleted: true });
-  } catch (err) {
-    console.error('/user/delete error:', err.message);
-    res.status(500).json({ error: 'Could not delete your account right now.' });
-  }
+  return userDataRoutes.delete(req, res);
 });
 
 app.post('/action-log', async (req, res) => {
@@ -7369,7 +7393,7 @@ app.get('/action-log/:userId', async (req, res) => {
 });
 
 app.get('/action-contracts', requireSessionAuth, (req, res) => {
-  res.json({ actions: ACTION_CONTRACTS });
+  res.json({ actions: buildPublicActionCatalog() });
 });
 
 // `kind` distinguishes a genuine external-account connection (OAuth or a personal token the
@@ -7379,45 +7403,41 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
 // handling. The Connections screen only lists `kind: 'connection'` items — a functionality
 // isn't something to browse/toggle, it just works when invoked from chat.
 const CONNECTORS = [
-  { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', type: 'api', kind: 'connection' },
   // icon 'outlook' (not 'microsoft') — that's the actual bundled asset name; id stays
   // 'microsoft' since that's what the OAuth provider matching keys off of.
-  { id: 'microsoft', name: 'Outlook & Calendar', icon: 'outlook', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'github', name: 'GitHub', icon: 'github', category: 'Dev', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'slack', name: 'Slack', icon: 'slack', category: 'Productivity', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'microsoft', name: 'Outlook & Calendar', icon: 'outlook', category: 'Productivity', type: 'api', kind: 'connection' },
+  { id: 'telegram',  name: 'Telegram', icon: 'telegram', category: 'Messages', type: 'api', kind: 'connection' },
+  { id: 'maps',      name: 'Maps & Places', icon: 'maps', category: 'Travel', type: 'api', kind: 'functionality' },
+  { id: 'notion', name: 'Notion', icon: 'notion', category: 'Productivity', type: 'api', kind: 'connection' },
+  { id: 'github', name: 'GitHub', icon: 'github', category: 'Dev', type: 'api', kind: 'connection' },
+  { id: 'slack', name: 'Slack', icon: 'slack', category: 'Productivity', type: 'api', kind: 'connection' },
   // Easy Apple stuff (no extra login needed on iPhone) — on-device permission, not a
   // third-party account, so this is a functionality, not a connection.
-  { id: 'reminders', name: 'Reminders', icon: 'reminders', category: 'Productivity', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'imessage',  name: 'iMessage', icon: 'imessage', category: 'Messages', implemented: true, type: 'handoff', kind: 'functionality' },
+  { id: 'reminders', name: 'Reminders', icon: 'reminders', category: 'Productivity', type: 'api', kind: 'functionality' },
+  { id: 'imessage',  name: 'iMessage', icon: 'imessage', category: 'Messages', type: 'handoff', kind: 'functionality' },
   // Finance & Money (tied to concierge account for real spends/earns)
-  { id: 'concierge_account', name: 'Concierge Account (Virtual Card)', icon: 'card', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
   // Stripe here is the app's OWN payment processor for concierge money movement, not a
   // personal Stripe account the user links — a functionality, not a connection.
-  { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'stripe', name: 'Stripe (Payments)', icon: 'stripe', category: 'Finance', type: 'api', kind: 'functionality' },
   // Handoffs — I open the app perfectly pre-filled (easiest for you). No account is linked
   // in any of these; they're functionalities, not connections.
-  { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
-  { id: 'lyft',      name: 'Lyft', icon: 'lyft', category: 'Transport', implemented: true, type: 'handoff', kind: 'functionality' },
-  { id: 'spotify',   name: 'Spotify', icon: 'spotify', category: 'Entertainment', implemented: true, type: 'handoff', kind: 'functionality' },
-  { id: 'trainline', name: 'Trains', icon: 'trainline', category: 'Transport', implemented: true, type: 'hybrid', kind: 'functionality' },
+  { id: 'uber',      name: 'Uber', icon: 'uber', category: 'Transport', type: 'handoff', kind: 'functionality' },
+  { id: 'lyft',      name: 'Lyft', icon: 'lyft', category: 'Transport', type: 'handoff', kind: 'functionality' },
+  { id: 'spotify',   name: 'Spotify', icon: 'spotify', category: 'Entertainment', type: 'handoff', kind: 'functionality' },
+  { id: 'trainline', name: 'Trains', icon: 'trainline', category: 'Transport', type: 'hybrid', kind: 'functionality' },
   // Travel deeper — search/link-generators only, no account, no real booking.
-  { id: 'flights', name: 'Flights', icon: 'flight', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'hotels', name: 'Hotels', icon: 'hotel', category: 'Travel', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'flights', name: 'Flights', icon: 'flight', category: 'Travel', type: 'api', kind: 'functionality' },
+  { id: 'hotels', name: 'Hotels', icon: 'hotel', category: 'Travel', type: 'api', kind: 'functionality' },
   // Shopping
-  { id: 'amazon', name: 'Amazon', icon: 'amazon', category: 'Shopping', implemented: true, type: 'handoff', kind: 'functionality' },
+  { id: 'amazon', name: 'Amazon', icon: 'amazon', category: 'Shopping', type: 'handoff', kind: 'functionality' },
   // Health & Fitness
-  { id: 'strava', name: 'Strava', icon: 'strava', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
-  { id: 'oura', name: 'Oura', icon: 'oura', category: 'Health', implemented: true, type: 'api', kind: 'connection' },
+  { id: 'strava', name: 'Strava', icon: 'strava', category: 'Health', type: 'api', kind: 'connection' },
+  { id: 'oura', name: 'Oura', icon: 'oura', category: 'Health', type: 'api', kind: 'connection' },
   // Events & Info — public/server-key APIs, no personal account.
-  { id: 'weather', name: 'Weather', icon: 'weather', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
-  { id: 'stocks', name: 'Stocks & Markets', icon: 'stocks', category: 'Info', implemented: true, type: 'api', kind: 'functionality' },
+  { id: 'weather', name: 'Weather', icon: 'weather', category: 'Info', type: 'api', kind: 'functionality' },
+  { id: 'stocks', name: 'Stocks & Markets', icon: 'stocks', category: 'Info', type: 'api', kind: 'functionality' },
 ];
-
-// Mark concierge_account as always available (not connector dependent)
-const CONCIERGE_ACCOUNT_ALWAYS_AVAILABLE = true;
 
 // Honest classification for prompts and UI
 const CONNECTOR_TYPES = {
@@ -7457,7 +7477,12 @@ app.get('/connectors/:userId', async (req, res) => {
       data.forEach(c => rowsById.set(c.connector_id, c));
     }
     
-    const result = CONNECTORS.map(c => {
+    const connectorPresentation = buildPublicConnectorCatalog(
+      CONNECTORS,
+      [...rowsById.entries()].filter(([, row]) => row?.enabled === true).map(([id]) => id)
+    );
+    const result = connectorPresentation.map(c => {
+      const { connected, ...presentation } = c;
       const row = rowsById.get(c.id);
       const enabled = row?.enabled === true;
       const hasRefreshToken = Boolean(row?.tokens?.refresh_token || row?.tokens?.session || row?.tokens?.encrypted);
@@ -7475,7 +7500,7 @@ app.get('/connectors/:userId', async (req, res) => {
               ? 'connected'
               : 'available';
       return {
-        ...c,
+        ...presentation,
         enabled,
         connectionState,
         statusText: connectionState === 'needs_reconnect'
@@ -8303,7 +8328,7 @@ async function gatherCalendarContext(userId) {
 
 async function loadLifeBriefing(userId, now = new Date()) {
   const [tasks, emailContext, events, pending, legacyPending, scheduled] = await Promise.all([
-    taskManager.listTasks(userId, null).catch(() => []),
+    delegatedRunLifecycle.list(userId, null).catch(() => []),
     gatherEmailContext(userId),
     gatherCalendarContext(userId),
     agentApprovals.listPendingApprovals(supabase, userId).catch(() => ({ approvals: [] })),
@@ -8684,14 +8709,13 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
 
     // For money-making persistent tasks, proactively advance or report using account
     try {
-      const tasks = await taskManager.listTasks(userId, null);
+      const tasks = await delegatedRunLifecycle.list(userId, null);
       const moneyTasks = tasks.filter(t => t.status !== 'completed' && /money|earn|income|monetize|profit|side hustle/i.test(t.goal || ''));
       for (const t of moneyTasks.slice(0, 2)) {
         const dedupKey = `proactive.money_task.${t.id}.${getLocalDateKey(now)}`;
         const prefs = await getPreferenceMap(userId);
         if (prefs[dedupKey] === 'sent') continue;
-        const bal = Number(prefs['concierge_account.balance'] || 0);
-        const body = `Money task "${t.goal}" active. Current concierge account balance: $${bal.toFixed(2)}. Progress: ${t.results ? t.results.length : 0} steps. Say "update money plan" to advance.`;
+        const body = `Money task "${t.goal}" active. No real payment balance is connected. Progress: ${t.results ? t.results.length : 0} steps. Say "update money plan" to advance.`;
         await createBriefing(userId, {
           kind: 'money_task_update',
           title: 'Money-making update',
@@ -8707,7 +8731,7 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
     // Unify task logic: surface relevant agent_tasks (including recipes) as briefings for Today tab
     // This ensures persistent goals, recipes, and agent work appear alongside nudges
     try {
-      const tasks = await taskManager.listTasks(userId, null);
+      const tasks = await delegatedRunLifecycle.list(userId, null);
       const todayTasks = tasks.filter(t => {
         if (t.status === 'completed' || t.status === 'cancelled') return false;
         if (t.status === 'recipe') return true; // always surface recipes
@@ -8780,7 +8804,7 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
     let persistedTask = null;
     let runtimeSession = null;
     try {
-      persistedTask = await taskManager.createTask(userId, claimed.title, {
+      persistedTask = await delegatedRunLifecycle.create(userId, claimed.title, {
         autonomy: 'Active',
         metadata: {
           scheduledTaskId: claimed.id,
@@ -8788,13 +8812,16 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
           scheduledCondition: claimed.condition || null
         }
       });
-      const claimedTask = await taskManager.claimRun(userId, persistedTask.id, { now });
+      const claimedTask = await delegatedRunLifecycle.claimStart(userId, persistedTask.id, {
+        now,
+        runtime: { deviceType: 'ambient_home', kind: 'task' }
+      });
       if (!claimedTask) throw new Error('The scheduled run could not be claimed.');
       persistedTask = claimedTask;
 
       const route = await resolveAgentTaskRoute(userId, persistedTask);
-      await taskManager.updateTask(userId, persistedTask.id, {
-        metadata: { ...(persistedTask.metadata || {}), modelRoute: route }
+      await delegatedRunLifecycle.updateControls(userId, persistedTask.id, {
+        metadata: { modelRoute: route }
       });
       persistedTask.metadata = { ...(persistedTask.metadata || {}), modelRoute: route };
 
@@ -8804,10 +8831,6 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
         kind: 'task',
         title: claimed.title,
         state: 'running'
-      });
-      await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-        state: 'running',
-        heartbeatAt: new Date().toISOString()
       });
 
       const result = await runAgenticLoop({
@@ -8835,12 +8858,6 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       const { data: afterRun } = await supabase.from('scheduled_tasks')
         .select('watch_state').eq('id', claimed.id).maybeSingle();
       const conditionTriggered = scheduledTasks.scheduledConditionTriggered(claimed, result, afterRun?.watch_state || null);
-      await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-        state: waiting ? 'waiting_approval' : failed ? 'failed' : 'completed',
-        heartbeatAt: null,
-        completedAt: waiting ? null : new Date().toISOString()
-      }).catch(() => {});
-
       if (failed) {
         await scheduledTasks.deferScheduledTask(claimed, now);
       } else if (conditionTriggered) {
@@ -8908,18 +8925,11 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       runs += 1;
     } catch (error) {
       if (persistedTask?.id) {
-        await taskManager.updateTask(userId, persistedTask.id, {
-          status: 'paused',
-          heartbeat_at: null,
-          last_error: 'Scheduled work could not start or finish.'
-        }).catch(() => {});
-      }
-      if (runtimeSession?.id) {
-        await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-          state: 'failed',
-          heartbeatAt: null,
-          completedAt: new Date().toISOString()
-        }).catch(() => {});
+        if (error?.authoritativeSaved) {
+          await delegatedRunLifecycle.repairProjection(userId, persistedTask.id).catch(() => {});
+        } else {
+          await delegatedRunLifecycle.interrupt(userId, persistedTask.id, 'Scheduled work could not start or finish.', { ownerAttempt: persistedTask.attempt }).catch(() => {});
+        }
       }
       await scheduledTasks.deferScheduledTask(claimed, now).catch(() => {});
       logger.error?.(`[scheduled] run failed for ${claimed.id}: ${error.message}`);
@@ -8942,7 +8952,7 @@ async function runProactiveSweep(logger = console) {
   // 'paused' with their checkpoint intact, so the user (or a later sweep) can resume them
   // instead of finding a task stuck at 'running' with no explanation.
   try {
-    const recovered = await taskManager.recoverStaleRuns(new Date());
+    const recovered = await delegatedRunLifecycle.recoverStale(new Date());
     if (recovered.length) {
       summary.recoveredRuns = recovered.length;
       logger.log?.(`[sweep] recovered ${recovered.length} interrupted agent run(s): ${recovered.map(t => t.id).join(', ')}`);
@@ -9033,7 +9043,7 @@ function normalizeActionResultsForClient(actionResults) {
   const seen = new Set();
   const out = [];
   for (const entry of actionResults || []) {
-    const result = { ...(entry?.result || {}) };
+    const result = normalizeActionOutcome({ ...(entry?.result || {}) });
     if ((entry?.action === 'get_emails' || entry?.action === 'search_emails') && Array.isArray(result.emails)) {
       const count = result.emails.length;
       result.cardText = `${count} ${count === 1 ? 'email' : 'emails'} reviewed`;
@@ -9061,6 +9071,34 @@ function normalizeActionResultsForClient(actionResults) {
   return out;
 }
 
+function agenticFailurePayload(actionResults = []) {
+  return {
+    text: 'The turn stopped after starting. It was not retried.',
+    actions: normalizeActionResultsForClient(actionResults)
+  };
+}
+
+// Own the boundary between an agentic execution and its settlement. Once the loop has
+// produced an action receipt, a later checkpoint/session failure must return that receipt
+// to the same caller; there is deliberately no classic fallback in this seam.
+async function runAgenticTurn({ runLoop, settle = async () => {} } = {}) {
+  let actionResults = [];
+  try {
+    if (typeof runLoop !== 'function') throw new Error('Agentic execution is unavailable.');
+    const agentResult = await runLoop();
+    actionResults = normalizeActionResultsForClient(agentResult?.actions || []);
+    await settle(agentResult, actionResults);
+    return { ok: true, agentResult, actionResults };
+  } catch (error) {
+    return {
+      ok: false,
+      error,
+      actionResults,
+      failure: agenticFailurePayload(actionResults)
+    };
+  }
+}
+
 const AGENT_AUTONOMY_LEVELS = new Set([
   'Reactive', 'Reserved', 'Balanced', 'Proactive', 'Autonomous',
   'Quiet', 'Low', 'Medium', 'Active', 'Medium-High', 'High', 'Bold', 'Assertive'
@@ -9079,22 +9117,26 @@ function sanitizeAgentTaskText(value, fallback) {
 function safeAgentTaskSummary(task) {
   const rawResults = Array.isArray(task?.results) ? task.results : [];
   const results = rawResults.slice(-20).map((entry, index) => {
-    const result = entry?.result || {};
-    const pending = result.pending === true;
-    const success = !pending && result.success !== false && !result.error;
+    const result = normalizeActionOutcome(entry?.result || {});
+    const pending = result.outcome === 'awaiting_user' || result.pending === true;
+    const success = result.outcome === 'completed';
+    const incomplete = result.outcome === 'incomplete';
     const summarySource = pending
       ? result.text || result.actionSummary
       : success
         ? result.actionSummary || result.cardText || result.text
+        : incomplete
+          ? result.text || result.actionSummary || 'Still in progress'
         : actionFailureMessage(entry?.action, result.error || result.text);
     return {
       id: index + '-' + String(entry?.action || 'step'),
       action: sanitizeAgentTaskText(entry?.action, 'Agent step'),
       success,
       pending,
+      in_progress: incomplete,
       summary: sanitizeAgentTaskText(
         summarySource,
-        pending ? 'Waiting for your approval' : success ? 'Completed' : 'Could not complete this step'
+        pending ? 'Waiting for your approval' : success ? 'Completed' : incomplete ? 'Still in progress' : 'Could not complete this step'
       )
     };
   });
@@ -9137,10 +9179,10 @@ function safeAgentTaskSummary(task) {
 function enrichActionForBrowser(entry) {
   if (!entry) return entry;
   const actionType = entry.action || (typeof entry === 'string' ? entry : '');
-  const result = entry.result || entry || {};
-  const success = result.success !== false && !result.error;
-  const pending = !!result.pending;
-  const isError = !success && !pending;
+  const result = normalizeActionOutcome(entry.result || entry || {});
+  const success = result.outcome === 'completed';
+  const pending = result.outcome === 'awaiting_user' || !!result.pending;
+  const isError = ['failed', 'unavailable'].includes(result.outcome);
 
   const label = humanizeActionType(actionType);
 
@@ -9166,14 +9208,32 @@ function enrichActionForBrowser(entry) {
     // Rich presentation fields for browser "tasks" UI
     label,
     icon,
-    status: pending ? 'pending' : (success ? 'success' : 'error'),
+    status: pending
+      ? 'pending'
+      : result.outcome === 'handoff_required'
+        ? 'handoff'
+        : result.outcome === 'simulated'
+          ? 'simulated'
+          : result.outcome === 'incomplete'
+            ? 'incomplete'
+            : (success ? 'success' : 'error'),
     summary: isError ? safeError : summary,
     isData: DATA_ACTIONS.has(actionType),
     isPendingReview: pending,
     displayTitle: pending
       ? (result.text || `${label} needs your OK`)
       : label,
-    outcome: isError ? safeError : (pending ? 'Needs your OK' : 'Done'),
+    outcome: isError
+      ? safeError
+      : pending
+        ? 'Needs your OK'
+        : result.outcome === 'handoff_required'
+          ? 'Open to continue'
+          : result.outcome === 'simulated'
+            ? 'Simulated'
+            : result.outcome === 'incomplete'
+              ? 'In progress'
+              : 'Done',
   };
 }
 
@@ -9217,20 +9277,33 @@ function summarizeCompletedActionsConcise(actionResults) {
 function summarizeFinishedActionsForUser(actionResults) {
   const normalizedResults = normalizeActionResultsForClient(actionResults);
   if (!normalizedResults.length) return '';
-  const failures = normalizedResults.filter(entry => entry?.result?.success === false);
-  if (failures.length) {
-    return failures
-      .map(entry => {
-        const error = userFacingActionFailure(entry);
-        return error;
-      })
-      .join('\n');
-  }
-  const pending = normalizedResults.filter(entry => entry?.result?.pending);
+  const pending = normalizedResults.filter(entry => entry?.result?.outcome === 'awaiting_user' || entry?.result?.pending);
   if (pending.length) {
     return pending
       .map(entry => entry.result?.text || `${reviewTitleForAction({ type: entry.action })}. Say "confirm" to continue or "cancel" to stop.`)
       .join('\n');
+  }
+  const handoffs = normalizedResults.filter(entry => entry?.result?.outcome === 'handoff_required');
+  if (handoffs.length) {
+    return handoffs
+      .map(entry => entry.result?.text || `Open ${humanizeActionType(entry.action)} to continue.`)
+      .join('\n');
+  }
+  const simulations = normalizedResults.filter(entry => entry?.result?.outcome === 'simulated');
+  if (simulations.length) {
+    return simulations
+      .map(entry => entry.result?.text || `${humanizeActionType(entry.action)} was simulated; nothing changed.`)
+      .join('\n');
+  }
+  const incomplete = normalizedResults.filter(entry => entry?.result?.outcome === 'incomplete');
+  if (incomplete.length) {
+    return incomplete
+      .map(entry => entry.result?.text || `${humanizeActionType(entry.action)} is not finished yet.`)
+      .join('\n');
+  }
+  const failures = normalizedResults.filter(entry => ['failed', 'unavailable'].includes(entry?.result?.outcome) || entry?.result?.success === false);
+  if (failures.length) {
+    return failures.map(entry => userFacingActionFailure(entry)).join('\n');
   }
   return summarizeCompletedActionsConcise(normalizedResults);
 }
@@ -10140,50 +10213,51 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       // to call tools. If the optional runtime migration is not present yet, retain the
       // existing task-loop behaviour and surface the failure in the trace.
       try {
-        const resumableTasks = await taskManager.listTasks(userId, null);
-        matchedTask = resolveTaskReference(resumableTasks, message);
-        const task = matchedTask || await taskManager.createTask(userId, message, {
+        const identity = await startChatExecutionIdentity({
+          userId,
+          message,
           autonomy: autonomyLevel,
           metadata: {
             guardMode: settings.guardMode === true,
             modelRoute: { provider: chatProvider, model: chatModel },
             useSearch: Boolean(isBroadMoneyGoal || useSearch),
             deviceType: req.body?.deviceType || 'ambient_home'
-          }
+          },
+          runtime: {
+            deviceId: req.body?.deviceId,
+            deviceType: req.body?.deviceType || 'ambient_home',
+            projectRef: req.body?.projectRef,
+            kind: 'task'
+          },
+          lifecycle: delegatedRunLifecycle,
+          ensureRuntime: async executionTask => agentRuntime.ensureSession(supabase, userId, {
+            taskId: executionTask.id,
+            deviceId: req.body?.deviceId,
+            deviceType: req.body?.deviceType || 'ambient_home',
+            projectRef: req.body?.projectRef || executionTask.metadata?.projectRef,
+            title: executionTask.goal || message,
+            state: 'running'
+          }),
+          updateTaskMetadata: async (executionTask, session) => delegatedRunLifecycle.updateControls(userId, executionTask.id, {
+            metadata: {
+              runtimeSessionId: session.id,
+              ...(req.body?.projectRef ? { projectRef: req.body.projectRef } : {}),
+              modelRoute: { provider: chatProvider, model: chatModel },
+              useSearch: Boolean(isBroadMoneyGoal || useSearch),
+              deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
+            }
+          })
         });
-        const claimed = await taskManager.claimRun(userId, task.id);
-        if (matchedTask && !claimed) {
-          runtimeStartError = 'That goal is already being handled.';
-          throw new Error(runtimeStartError);
+        if (identity.error) {
+          runtimeStartError = identity.error;
+          throw new Error(identity.error);
         }
-        const executionTask = claimed || task;
-        runtimeTaskId = executionTask.id;
-        const projectRef = req.body?.projectRef || executionTask.metadata?.projectRef;
-        const session = await agentRuntime.ensureSession(supabase, userId, {
-          taskId: executionTask.id,
-          deviceId: req.body?.deviceId,
-          deviceType: req.body?.deviceType || 'ambient_home',
-          projectRef,
-          title: executionTask.goal || message,
-          state: 'running'
-        });
-        runtimeSessionId = session.id;
-        await agentRuntime.updateSession(supabase, userId, session.id, {
-          state: 'running',
-          heartbeatAt: new Date().toISOString()
-        });
-        await taskManager.updateTask(userId, executionTask.id, {
-          metadata: {
-            ...(executionTask.metadata || {}),
-            runtimeSessionId: session.id,
-            ...(projectRef ? { projectRef } : {}),
-            modelRoute: { provider: chatProvider, model: chatModel },
-            useSearch: Boolean(isBroadMoneyGoal || useSearch),
-            deviceType: req.body?.deviceType || executionTask.metadata?.deviceType || 'ambient_home'
-          }
-        });
+        matchedTask = identity.matchedTask;
+        runtimeTaskId = identity.executionTask.id;
+        runtimeSessionId = identity.session.id;
       } catch (error) {
         trace.log('agent.runtime_session.start_failed', String(error?.message || error).slice(0, 240));
+        if (!runtimeStartError) runtimeStartError = 'The work session could not be started. Nothing was run.';
       }
 
       // Open the SSE stream BEFORE the loop runs, not after — the loop internally
@@ -10228,80 +10302,76 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         heartbeat = setInterval(() => agenticSendStatus('agent_thinking', 'Working on it'), 15000);
       }
 
+      let actionResultsForFailure = [];
       try {
-        const agentResult = await runAgenticLoop({
-          userId,
-          initialMessage: matchedTask ? (matchedTask.goal || message) : message,
-          dynamicSystemPrompt,
-          baseHistory,
-          useSearch: isBroadMoneyGoal || useSearch, // force real-time research for money goals
-          provider: chatProvider,
-          modelName: chatModel,
-          maxIterations: isBroadMoneyGoal || autonomyLevel === 'High' || autonomyLevel === 'Bold' ? 10 : 6,
-          context: {
-            userMessage: message,
-            location,
-            nativeHints,
-            autonomy: autonomyLevel,
-            modelRoute: { provider: chatProvider, model: chatModel },
-            useSearch: isBroadMoneyGoal || useSearch,
-            runtimeSessionId,
-            ...(matchedTask ? { continuationMessage: message } : {})
-          },
-          executeActionsFn: executeActions,
-          trace,
-          onStep: !agenticSendStatus ? null : step => {
-            if (step.phase === 'thinking') {
-              agenticSendStatus('agent_thinking', 'Working on it');
-            } else if (step.phase === 'executing') {
-              for (const action of step.actions || []) {
-                agenticSendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type });
+        const agentTurn = await runAgenticTurn({
+          runLoop: () => runAgenticLoop({
+            userId,
+            initialMessage: matchedTask ? (matchedTask.goal || message) : message,
+            dynamicSystemPrompt,
+            baseHistory,
+            useSearch: isBroadMoneyGoal || useSearch, // force real-time research for money goals
+            provider: chatProvider,
+            modelName: chatModel,
+            maxIterations: isBroadMoneyGoal || autonomyLevel === 'High' || autonomyLevel === 'Bold' ? 10 : 6,
+            context: {
+              userMessage: message,
+              location,
+              nativeHints,
+              autonomy: autonomyLevel,
+              modelRoute: { provider: chatProvider, model: chatModel },
+              useSearch: isBroadMoneyGoal || useSearch,
+              runtimeSessionId,
+              onBrowserProgress: agenticSendStatus
+                ? (label) => agenticSendStatus('browser_progress', label, { action: 'run_browser_task' })
+                : null,
+              ...(matchedTask ? { continuationMessage: message } : {})
+            },
+            executeActionsFn: executeActions,
+            trace,
+            onStep: !agenticSendStatus ? null : step => {
+              if (step.phase === 'thinking') {
+                agenticSendStatus('agent_thinking', 'Working on it');
+              } else if (step.phase === 'executing') {
+                for (const action of step.actions || []) {
+                  agenticSendStatus('action_start', getActionStatusLabel(action.type, 'start'), { action: action.type });
+                }
+              } else if (step.phase === 'observed') {
+                for (const r of step.results || []) {
+                  agenticSendStatus('action_complete', getActionStatusLabel(r.action, actionCompletionPhase(r.result)), {
+                    action: r.action,
+                    success: r.result?.outcome === 'completed' || (r.result?.outcome == null && r.result?.success === true)
+                  });
+                }
               }
-            } else if (step.phase === 'observed') {
-              for (const r of step.results || []) {
-                agenticSendStatus('action_complete', getActionStatusLabel(r.action, actionCompletionPhase(r.result)), {
-                  action: r.action,
-                  success: r.result?.success !== false
-                });
-              }
-            }
-          },
-          persistTask: true,
-          existingTaskId: runtimeTaskId || null
+            },
+            persistTask: true,
+            existingTaskId: runtimeTaskId || null
+          }),
+          settle: async () => {
+            clearInterval(heartbeat);
+            // The lifecycle-backed agent loop has already settled the
+            // authoritative task and projected runtime state.
+          }
         });
-        clearInterval(heartbeat);
-
-        if (runtimeSessionId) {
-          const traceStatus = agentResult?.agentTrace?.status;
-          const state = traceStatus === 'completed'
-            ? 'completed'
-            : traceStatus === 'awaiting_approval'
-              ? 'waiting_approval'
-              : traceStatus === 'error' ? 'failed' : 'paused';
-          await agentRuntime.updateSession(supabase, userId, runtimeSessionId, {
-            state,
-            heartbeatAt: null,
-            completedAt: state === 'completed' ? new Date().toISOString() : null
-          }).catch(error => trace.log('agent.runtime_session.settle_failed', error.message));
+        if (!agentTurn.ok) {
+          actionResultsForFailure = agentTurn.actionResults;
+          throw agentTurn.error;
         }
-
-        let actionResults = normalizeActionResultsForClient(agentResult.actions || []);
+        clearInterval(heartbeat);
+        const agentResult = agentTurn.agentResult;
+        let actionResults = agentTurn.actionResults;
+        actionResultsForFailure = actionResults;
         let spoken = agentResult.spoken || 'Completed agent turn.';
 
         // For broad goals like making money, force a solid plan + research summary + persistent tracking
         if (isBroadMoneyGoal) {
           try {
             const plan = await generatePlan(userId, message, spoken, chatModel, chatProvider);
-            spoken = `**Concierge Plan for "${message}":**\n${plan.title || 'Money-making strategy'}\n\nSteps:\n${(plan.steps || []).map((s, i) => `${i+1}. ${s.description}${s.actionType ? ` (use: ${s.actionType})` : ''}`).join('\n')}\n\nRisks: ${(plan.risks || []).join('; ')}\n\nAccount plan: ${plan.accountUsage || 'Use account to seed opportunities and receive earnings.'}\n\n${spoken}\n\nI've created a persistent task to monitor and advance this using the concierge account. With real API keys (e.g. STRIPE_SECRET_KEY), I can do actual charges and payouts. Check back or say "update money plan".`;
-            if (agentResult.taskId) {
-              await taskManager.appendResultToTask(userId, agentResult.taskId, { action: 'money_plan', result: { plan, research: 'used web_search' } });
-            }
-            // Auto-suggest small fund from account for seed if balance allows (will go through review)
-            const prefs = await getPreferenceMap(userId);
-            const bal = Number(prefs['concierge_account.balance'] || 0);
-            if (bal >= 10) {
-              spoken += `\n\nSuggestion: I can fund a small test opportunity (~$10-20) from the concierge account to get started (real via Stripe if keys wired).`;
-            }
+            spoken = `**Money Plan for "${message}":**\n${plan.title || 'Money-making strategy'}\n\nSteps:\n${(plan.steps || []).map((s, i) => `${i+1}. ${s.description}${s.actionType ? ` (use: ${s.actionType})` : ''}`).join('\n')}\n\nRisks: ${(plan.risks || []).join('; ')}\n\nPayment rail: real charges or payouts require a configured provider and explicit approval.\n\n${spoken}\n\nI've created a persistent task to monitor and advance this. Check back or say "update money plan".`;
+            // The plan is returned to the user. It is intentionally not
+            // appended with the legacy read/modify/write helper: the loop's
+            // lifecycle owns the complete durable result set.
           } catch (planErr) {}
         }
 
@@ -10346,7 +10416,22 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       } catch (agentErr) {
         clearInterval(heartbeat);
         trace && trace.log && trace.log('agent.loop.error', agentErr.message);
-        // fall through to classic path
+        if (agentErr?.authoritativeSaved && runtimeTaskId) {
+          await delegatedRunLifecycle.repairProjection(userId, runtimeTaskId).catch(() => {});
+        }
+        // The agentic path owns this turn once it has started. Falling through to classic
+        // generation after a checkpoint/settlement error can execute the same side effect
+        // twice. Return the failure on this path instead.
+        const failure = agenticFailurePayload(actionResultsForFailure);
+        if (agenticSse) {
+          if (failure.actions.length) agenticSse({ type: 'actions', results: failure.actions });
+          agenticSse({ type: 'error', error: failure.text });
+          agenticSse({ type: 'done' });
+          res.end();
+        } else {
+          res.status(500).json(failure);
+        }
+        return;
       }
     }
 
@@ -11396,28 +11481,145 @@ app.get('/agent/tools', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const enabled = new Set(await getEnabledConnectors(userId));
-    const tools = Object.entries(ACTION_CONTRACTS).map(([id, contract]) => ({
-      id,
-      risk: contract.risk || 'low',
-      executionMode: contract.executionMode || 'direct',
-      confirmation: contract.confirmation || 'none',
-      required: contract.required || [],
-      available: !contract.connector || enabled.has(contract.connector)
-    }));
-    res.json({
-      tools,
-      connectors: CONNECTORS.map(connector => ({
-        id: connector.id,
-        name: connector.name,
-        category: connector.category,
-        kind: connector.kind,
-        implemented: connector.implemented,
-        connected: enabled.has(connector.id)
-      })),
-      capabilities: ['communication', 'productivity', 'development', 'travel', 'shopping', 'health', 'finance']
-    });
+    res.json(buildAgentToolsResponse(CONNECTORS, [...enabled]));
   } catch (e) {
     res.status(500).json({ error: 'Could not load tool catalog.' });
+  }
+});
+
+function displayBearerToken(req) {
+  const header = String(req.headers.authorization || '');
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+}
+
+function displayPageHtml() {
+  return [
+    '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<title>Milgrain display</title><style>',
+    'body{margin:0;background:#111;color:#f5f1ec;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}',
+    'main{min-height:100vh;display:grid;place-items:center;padding:8vw;box-sizing:border-box}',
+    'section{width:min(720px,100%)}h1{font-size:clamp(28px,6vw,64px);margin:0 0 18px}',
+    'p{color:#b8b0a8;line-height:1.5}input,button{font:inherit;padding:13px 15px;border-radius:10px;border:1px solid #514b46}',
+    'input{background:#1d1b1a;color:#fff;width:100%;box-sizing:border-box;margin:8px 0}',
+    'button{background:#e97961;color:#111;border:0;font-weight:700;cursor:pointer}',
+    '#content{white-space:pre-wrap;font-size:clamp(20px,4vw,42px);line-height:1.35;color:#f5f1ec}',
+    '.muted{font-size:13px;color:#8f8781}</style></head><body><main><section id="app"></section></main>',
+    '<script>',
+    'const app=document.getElementById("app");',
+    'const params=new URLSearchParams(location.search);',
+    'const savedId=localStorage.getItem("milgrain_display_id");',
+    'const savedToken=localStorage.getItem("milgrain_display_token");',
+    'function renderPair(){app.innerHTML="<h1>Pair this display</h1><p>Enter the one-time code shown in Milgrain.</p><input id=\\"code\\" autocomplete=\\"one-time-code\\" placeholder=\\"Pairing code\\"><input id=\\"name\\" placeholder=\\"Display name\\"><button id=\\"pair\\">Pair display</button><p id=\\"error\\" class=\\"muted\\"></p>";document.getElementById("pair").onclick=async()=>{const response=await fetch("/display/pair",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({challengeId:params.get("challenge"),code:document.getElementById("code").value,displayName:document.getElementById("name").value})});const data=await response.json();if(!response.ok){document.getElementById("error").textContent=data.error||"Pairing failed.";return}localStorage.setItem("milgrain_display_id",data.display.id);localStorage.setItem("milgrain_display_token",data.token);location.search=""}};',
+    'function renderEvent(event){app.innerHTML="<p class=\\"muted\\">Milgrain</p><h1 id=\\"title\\"></h1><div id=\\"content\\"></div>";document.getElementById("title").textContent=event.title;document.getElementById("content").textContent=event.body}',
+    'async function poll(){const id=localStorage.getItem("milgrain_display_id"),token=localStorage.getItem("milgrain_display_token");if(!id||!token){renderPair();return}const response=await fetch("/display/"+encodeURIComponent(id)+"/events",{headers:{Authorization:"Bearer "+token}});if(response.status===401){localStorage.removeItem("milgrain_display_id");localStorage.removeItem("milgrain_display_token");renderPair();return}if(!response.ok)return;const data=await response.json();if(data.event){renderEvent(data.event);await fetch("/display/"+encodeURIComponent(id)+"/events/"+encodeURIComponent(data.event.id)+"/ack",{method:"POST",headers:{Authorization:"Bearer "+token}})}}',
+    'if(savedId&&savedToken)poll();else renderPair();setInterval(poll,2000);',
+    '</script></body></html>'
+  ].join('');
+}
+
+app.get('/display', (_req, res) => {
+  res.type('html').send(displayPageHtml());
+});
+
+app.post('/display/pair', async (req, res) => {
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const result = await pairedDisplays.redeemPairingChallenge(supabase, req.body || {});
+    res.json(result);
+  } catch (e) {
+    log('warn', 'display.pair.failed', { error: e.message });
+    if (e?.code === 'invalid_pairing_input') {
+      return res.status(400).json({ error: 'The pairing link and code are required.' });
+    }
+    if (e?.code === 'invalid_pairing' || e?.code === 'P0001') {
+      return res.status(400).json({ error: 'That pairing code is invalid or expired.' });
+    }
+    res.status(503).json({ error: 'Pairing is temporarily unavailable.' });
+  }
+});
+
+app.get('/display/:id/events', async (req, res) => {
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const result = await pairedDisplays.pollNextRender(supabase, req.params.id, displayBearerToken(req));
+    if (!result) return res.status(401).json({ error: 'Display authorization is invalid.' });
+    res.json({ event: result.event });
+  } catch (e) {
+    res.status(503).json({ error: 'Display updates are unavailable.' });
+  }
+});
+
+app.post('/display/:id/events/:eventId/ack', async (req, res) => {
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const result = await pairedDisplays.acknowledgeRender(
+      supabase, req.params.id, displayBearerToken(req), req.params.eventId
+    );
+    if (!result.authorized) return res.status(401).json({ error: 'Display authorization is invalid.' });
+    if (result.reason === 'not_found') return res.status(404).json({ error: 'Display update not found.' });
+    res.json({ acknowledged: true, alreadyAcknowledged: result.alreadyAcknowledged === true });
+  } catch (e) {
+    res.status(503).json({ error: 'Display acknowledgement failed.' });
+  }
+});
+
+app.post('/agent/displays/pairing', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const baseUrl = process.env.APP_URL || ((req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.get('host'));
+    res.json(await pairedDisplays.createPairingChallenge(supabase, userId, {
+      baseUrl,
+      displayName: req.body?.displayName
+    }));
+  } catch (e) {
+    res.status(500).json({ error: 'Could not start display pairing.' });
+  }
+});
+
+app.get('/agent/displays', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    res.json({ displays: await pairedDisplays.listDisplays(supabase, userId) });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load paired displays.' });
+  }
+});
+
+app.delete('/agent/displays/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const revoked = await pairedDisplays.revokeDisplay(supabase, userId, req.params.id);
+    if (!revoked) return res.status(404).json({ error: 'Display not found.' });
+    res.json({ revoked: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not forget that display.' });
+  }
+});
+
+app.post('/agent/displays/:id/render', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const pairedDisplays = require('./services/paired-displays');
+    const event = await pairedDisplays.queueRender(supabase, userId, {
+      displayId: req.params.id,
+      title: req.body?.title,
+      body: req.body?.body,
+      kind: req.body?.kind
+    });
+    res.json({ event });
+  } catch (e) {
+    log('warn', 'display.render.failed', { error: e.message, userId, displayId: req.params.id });
+    if (e?.code === 'invalid_display' || e?.code === 'not_paired' || e?.code === 'invalid_content') {
+      return res.status(400).json({ error: e.message });
+    }
+    res.status(503).json({ error: 'Display updates are temporarily unavailable.' });
   }
 });
 
@@ -11498,7 +11700,7 @@ app.post('/agent/tasks', requireSessionAuth, async (req, res) => {
     return res.status(400).json({ error: 'guardMode must be a boolean' });
   }
   try {
-    const task = await taskManager.createTask(userId, goal, {
+    const task = await delegatedRunLifecycle.create(userId, goal, {
       autonomy,
       plan,
       metadata: typeof guardMode === 'boolean' ? { guardMode } : undefined
@@ -11512,7 +11714,7 @@ app.get('/agent/tasks', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   const status = req.query.status;
   try {
-    const tasks = await taskManager.listTasks(userId, status || null);
+    const tasks = await delegatedRunLifecycle.list(userId, status || null);
     res.json({ tasks: tasks.map(safeAgentTaskSummary) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11521,7 +11723,7 @@ app.get('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const task = await taskManager.getTask(userId, req.params.id);
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
     res.json({ task: safeAgentTaskSummary(task) });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -11566,7 +11768,7 @@ app.get('/agent/tasks/:id/runtime', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const task = await taskManager.getTask(userId, req.params.id);
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
     const sessionId = task.metadata?.runtimeSessionId;
     res.json({ runtime: sessionId ? await agentRuntime.getSnapshot(supabase, userId, sessionId) : null });
@@ -11579,7 +11781,7 @@ app.get('/agent/tasks/:id/runtime/diff', requireSessionAuth, async (req, res) =>
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const task = await taskManager.getTask(userId, req.params.id);
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
     const sessionId = task.metadata?.runtimeSessionId;
     if (!sessionId) return res.status(404).json({ error: 'No work session has started.' });
@@ -11611,14 +11813,14 @@ app.patch('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
     return res.status(400).json({ error: 'No task controls supplied' });
   }
   try {
-    const task = await taskManager.getTask(userId, req.params.id);
+    const task = await delegatedRunLifecycle.get(userId, req.params.id);
     if (!task) return res.status(404).json({ error: 'Not found' });
     const updates = {};
     if (autonomy !== undefined) updates.autonomy = autonomy;
     if (guardMode !== undefined) {
-      updates.metadata = { ...(task.metadata || {}), guardMode };
+      updates.metadata = { guardMode };
     }
-    const updated = await taskManager.updateTask(userId, task.id, updates);
+    const updated = await delegatedRunLifecycle.updateControls(userId, task.id, updates);
     res.json({ task: safeAgentTaskSummary(updated) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -11626,96 +11828,19 @@ app.patch('/agent/tasks/:id', requireSessionAuth, async (req, res) => {
 app.post('/agent/tasks/:id/run', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  const task = await taskManager.getTask(userId, req.params.id);
+  const task = await delegatedRunLifecycle.get(userId, req.params.id);
   if (!task) return res.status(404).json({ error: 'Not found' });
-  if (task.metadata?.awaitingApproval === true) {
-    return res.status(409).json({ error: 'That task is waiting for your approval.', awaitingApproval: true, taskId: task.id });
-  }
-
-  const resuming = Boolean(task.checkpoint);
-  // Claim with a compare-and-set update before handing off to the background loop.
-  // This closes the read-then-update race between Work, approval resume, and two
-  // simultaneous requests on different Cloud Run instances.
-  const claimedTask = await taskManager.claimRun(userId, task.id);
-  if (!claimedTask) {
-    return res.status(409).json({ error: 'That task is already running or was claimed by another request.', taskId: task.id });
-  }
-  let runtimeSession;
-  try {
-    runtimeSession = await agentRuntime.ensureSession(supabase, userId, {
-      taskId: claimedTask.id,
-      deviceId: req.body?.deviceId || claimedTask.metadata?.deviceId,
-      deviceType: req.body?.deviceType || claimedTask.metadata?.deviceType || 'ambient_home',
-      projectRef: req.body?.projectRef || claimedTask.metadata?.projectRef,
-      kind: req.body?.kind || claimedTask.metadata?.runtimeKind || 'task',
-      title: claimedTask.goal,
-      state: 'running'
-    });
-    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-      state: 'running',
-      heartbeatAt: new Date().toISOString()
-    });
-  } catch (error) {
-    await taskManager.updateTask(userId, claimedTask.id, {
-      status: 'paused',
-      heartbeat_at: null,
-      last_error: 'The work session could not be started.'
-    }).catch(() => {});
-    return res.status(503).json({ error: 'Could not start the work session.' });
-  }
-  const route = await resolveAgentTaskRoute(userId, claimedTask);
-  await taskManager.updateTask(userId, claimedTask.id, {
-    metadata: {
-      ...(claimedTask.metadata || {}),
-      modelRoute: route,
-      runtimeSessionId: runtimeSession.id
+  const started = await startDelegatedTaskExecution({
+    userId,
+    task,
+    runtime: {
+      deviceId: req.body?.deviceId,
+      deviceType: req.body?.deviceType,
+      projectRef: req.body?.projectRef,
+      kind: req.body?.kind
     }
   });
-
-  buildBackgroundSystemPrompt(userId).then(dynamicSystemPrompt => runAgenticLoop({
-    userId,
-    initialMessage: claimedTask.goal,
-    dynamicSystemPrompt,
-    provider: route.provider,
-    modelName: route.model,
-    maxIterations: Number.isFinite(claimedTask.checkpoint?.maxIterations) ? claimedTask.checkpoint.maxIterations : 6,
-    context: {
-      autonomy: claimedTask.autonomy,
-      guardMode: claimedTask.metadata?.guardMode === true,
-      modelRoute: route,
-      runtimeSessionId: runtimeSession.id
-    },
-    executeActionsFn: executeActions,
-    persistTask: true,
-    existingTaskId: claimedTask.id
-  }).then(async (outcome) => {
-    const traceStatus = outcome?.agentTrace?.status;
-    const state = traceStatus === 'completed'
-      ? 'completed'
-      : traceStatus === 'awaiting_approval'
-        ? 'waiting_approval'
-        : traceStatus === 'error' ? 'failed' : 'paused';
-    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-      state,
-      heartbeatAt: null,
-      completedAt: state === 'completed' ? new Date().toISOString() : null
-    }).catch(error => console.warn('[agent-runtime] session settlement failed:', error.message));
-  }).catch(async (e) => {
-    // Swallowing this left the task stranded at 'running' forever with nothing to explain
-    // it. Record the failure and keep the checkpoint so it stays resumable.
-    try {
-      await taskManager.updateTask(userId, claimedTask.id, {
-        status: 'paused',
-        heartbeat_at: null,
-        last_error: String(e?.message || e).slice(0, 500)
-      });
-    } catch {}
-    await agentRuntime.updateSession(supabase, userId, runtimeSession.id, {
-      state: 'failed',
-      heartbeatAt: null
-    }).catch(() => {});
-  }));
-  res.json({ started: true, resumed: resuming, taskId: claimedTask.id });
+  res.status(started.status).json(started.body);
 });
 
 app.post('/agent/simulate', requireSessionAuth, async (req, res) => {
@@ -11753,8 +11878,17 @@ app.post('/agent/recipes/:id/execute', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const result = await taskManager.executeRecipe(userId, req.params.id, req.body || {});
-    res.json(result);
+    const recipe = await delegatedRunLifecycle.get(userId, req.params.id);
+    if (!recipe || recipe.status !== 'recipe') return res.status(404).json({ error: 'Recipe not found' });
+    const plan = recipe.plan || {};
+    const overrides = req.body || {};
+    const task = await delegatedRunLifecycle.create(userId, overrides.goal || plan.goalTemplate || recipe.goal, {
+      autonomy: 'High',
+      plan: plan.steps || [],
+      metadata: { fromRecipe: recipe.id }
+    });
+    res.json({ recipeId: recipe.id, newTaskId: task.id, created: true, started: false,
+      note: 'Task created. Use /agent/tasks/:id/run or high autonomy chat to execute.' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -11845,6 +11979,34 @@ app.delete('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   try {
     await deleteAgentCard(supabase, userId);
     res.json({ saved: false });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Portable checkout identity for ordinary merchant forms. This deliberately accepts no
+// payment fields, passwords, or account identifiers: those stay at the merchant's own
+// secure surface. The browser task consumes this profile generically across sites.
+app.post('/checkout-profile', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { email, title, name, phone, address } = req.body || {};
+    if (address != null && (typeof address !== 'object' || Array.isArray(address))) {
+      return res.status(400).json({ error: 'Address must be structured checkout information.' });
+    }
+    await saveCheckoutProfile(supabase, userId, { email, title, name, phone, address }, true);
+    const profile = await loadCheckoutProfile(supabase, userId);
+    res.json({
+      saved: true,
+      fields: {
+        email: Boolean(profile.email),
+        title: Boolean(profile.title),
+        name: Boolean(profile.name),
+        phone: Boolean(profile.phone),
+        address: Boolean(profile.address?.line1 && profile.address?.city && profile.address?.postcode)
+      }
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -12140,9 +12302,7 @@ app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    const prefs = await getPreferenceMap(userId);
-    const balance = Number(prefs['concierge_account.balance'] || 0);
-    res.json({ balance });
+    res.json({ available: false, balance: null, error: 'No real concierge balance is connected.' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -12169,6 +12329,8 @@ module.exports.isBroadEmailTriageRequest = isBroadEmailTriageRequest;
 module.exports.triageEmailsForRequest = triageEmailsForRequest;
 module.exports.emailTriageSignals = emailTriageSignals;
 module.exports.normalizeActionResultsForClient = normalizeActionResultsForClient;
+module.exports.agenticFailurePayload = agenticFailurePayload;
+module.exports.runAgenticTurn = runAgenticTurn;
 module.exports.safeAgentTaskSummary = safeAgentTaskSummary;
 module.exports.approvedActionSucceeded = approvedActionSucceeded;
 module.exports.executeAction = executeAction;
@@ -12194,6 +12356,9 @@ module.exports.buildMorningBriefing = buildMorningBriefing;
 module.exports.buildIntervalBriefing = buildIntervalBriefing;
 module.exports.checkMillieSendCap = checkMillieSendCap;
 module.exports.runAgenticLoop = runAgenticLoop;
+module.exports.delegatedRunLifecycle = delegatedRunLifecycle;
+module.exports.delegatedRunRouteHandlers = delegatedRunRouteHandlers;
+module.exports.startChatExecutionIdentity = startChatExecutionIdentity;
 module.exports.executeActions = executeActions;
 module.exports.runScheduledTasksForUser = runScheduledTasksForUser;
 module.exports.notificationDelivery = notificationDelivery;

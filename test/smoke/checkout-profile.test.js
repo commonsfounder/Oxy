@@ -13,6 +13,10 @@ const {
   buildEmailAskWithConsent,
   buildDetailsAskWithConsent,
   matchProfileFieldForInput,
+  profileRequirementForInputField,
+  profileHasCheckoutRequirement,
+  missingCheckoutInformation,
+  describeCheckoutInformation,
   loadCheckoutProfile,
   saveCheckoutProfile,
   saveCheckoutEmail,
@@ -232,6 +236,82 @@ test('matchProfileFieldForInput returns null for payment and unknown hints', () 
   assert.equal(matchProfileFieldForInput('sort code'), null);
   assert.equal(matchProfileFieldForInput('something random'), null);
   assert.equal(matchProfileFieldForInput(''), null);
+});
+
+test('checkout-information capability maps field variants to portable profile categories', () => {
+  assert.equal(profileRequirementForInputField('full_name'), 'name');
+  assert.equal(profileRequirementForInputField('given-name'), null);
+  assert.equal(profileRequirementForInputField('postcode'), 'address');
+  assert.equal(profileRequirementForInputField('card_number'), null);
+});
+
+test('checkout-information capability handles a bounded corpus of unrelated form schemas', () => {
+  const completeProfile = {
+    consent: true,
+    email: 'person@example.com',
+    title: 'Mx',
+    name: 'Person Example',
+    phone: '07700900123',
+    address: { line1: '12 High Street', city: 'London', postcode: 'SW1A 1AA' },
+  };
+  const schemas = [
+    // Conventional retail checkout.
+    [
+      { hint: 'input email Email address', required: true, empty: true },
+      { hint: 'input autocomplete given-name First name', required: true, empty: true },
+      { hint: 'input autocomplete family-name Last name', required: true, empty: true },
+      { hint: 'input autocomplete tel Mobile number', required: true, empty: true },
+      { hint: 'input autocomplete street-address Address line 1', required: true, empty: true },
+      { hint: 'input autocomplete address-level2 Town', required: true, empty: true },
+      { hint: 'input autocomplete postal-code Postcode', required: true, empty: true },
+    ],
+    // Reservation-style contact form with different labels.
+    [
+      { hint: 'input Guest e-mail', required: true, empty: true },
+      { hint: 'input forename', required: true, empty: true },
+      { hint: 'input surname', required: true, empty: true },
+      { hint: 'input Contact number', required: true, empty: true },
+    ],
+    // A regional form that asks for a title and address separately.
+    [
+      { hint: 'select Salutation', required: true, empty: true },
+      { hint: 'input House number and street', required: true, empty: true },
+      { hint: 'input City', required: true, empty: true },
+      { hint: 'input ZIP code', required: true, empty: true },
+    ],
+  ];
+  for (const schema of schemas) {
+    assert.deepEqual(missingCheckoutInformation(completeProfile, schema), [], JSON.stringify(schema));
+  }
+});
+
+test('checkout-information capability reports missing user data but never payment data', () => {
+  const partialProfile = { consent: true, email: 'person@example.com', name: null, phone: null, address: null };
+  const missing = missingCheckoutInformation(partialProfile, [
+    { hint: 'input Given name', required: true, empty: true },
+    { hint: 'input Family name', required: true, empty: true },
+    { hint: 'input Mobile number', required: true, empty: true },
+    { hint: 'input Address line 1', required: true, empty: true },
+    { hint: 'input Card number autocomplete cc-number', required: true, empty: true },
+    { hint: 'input CVC autocomplete cc-csc', required: true, empty: true },
+  ]);
+  assert.deepEqual(missing, ['address', 'name', 'phone']);
+  assert.deepEqual(describeCheckoutInformation(missing), ['billing address', 'full name', 'mobile number']);
+});
+
+test('checkout-information capability requires an explicit profile consent', () => {
+  const profile = {
+    consent: false,
+    email: 'person@example.com',
+    name: 'Person Example',
+    phone: '07700900123',
+    address: { line1: '12 High Street', city: 'London', postcode: 'SW1A 1AA' },
+  };
+  assert.equal(profileHasCheckoutRequirement(profile, 'email'), false);
+  assert.deepEqual(missingCheckoutInformation(profile, [
+    { hint: 'input email address', required: true, empty: true },
+    { hint: 'input full name', required: true, empty: true },
+  ]), ['email', 'name']);
 });
 
 // --------------- loadCheckoutProfile / saveCheckoutProfile ---------------

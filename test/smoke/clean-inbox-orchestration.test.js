@@ -15,15 +15,15 @@ const test = require('node:test');
 const connectors = require('../../connectors');
 const app = require('../../api/index');
 
-const originalRegistry = { ...connectors.registry };
+const originalDispatchOverrides = { ...connectors.dispatchOverrides };
 
 function installFakeConnector(action, execute) {
-  connectors.registry[action] = { execute };
+  connectors.dispatchOverrides[action] = { execute };
 }
 
 function restoreRegistry() {
-  for (const key of Object.keys(connectors.registry)) delete connectors.registry[key];
-  Object.assign(connectors.registry, originalRegistry);
+  for (const key of Object.keys(connectors.dispatchOverrides)) delete connectors.dispatchOverrides[key];
+  Object.assign(connectors.dispatchOverrides, originalDispatchOverrides);
 }
 
 test.afterEach(restoreRegistry);

@@ -153,7 +153,9 @@ test('runScheduledTasksForUser, the routine sweep, and the manual task-run endpo
   assert.match(body, /surface:\s*'background'/);
 
   const callSites = [...src.matchAll(/buildBackgroundSystemPrompt\(/g)];
-  assert.ok(callSites.length >= 4, `expected buildBackgroundSystemPrompt to be defined once and called at least 3 times, found ${callSites.length} occurrences total`);
+  const starterSrc = fs.readFileSync(require.resolve('../../api/services/delegated-run-starter.js'), 'utf8');
+  assert.match(starterSrc, /buildSystemPrompt\(userId\)/, 'the shared durable-run starter must build the injected background prompt before launching');
+  assert.ok(callSites.length >= 3, `expected buildBackgroundSystemPrompt to be defined once and called at least twice in index.js, found ${callSites.length} occurrences total`);
 });
 
 test('the briefing builders call buildSystemPrompt with surface briefing, not a hand-rolled persona string', () => {

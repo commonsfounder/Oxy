@@ -94,7 +94,7 @@ test('buildModernGenerateRequest attaches the full declaration set when tools ar
     baseHistory: [], userContent: { role: 'user', parts: [{ text: 'hi' }] }, useAgentTools: true
   });
   const decls = withTools.config.tools.find((t) => t.functionDeclarations)?.functionDeclarations || [];
-  assert.equal(decls.length, Object.keys(ACTION_CONTRACTS).length);
+  assert.equal(decls.length, Object.values(ACTION_CONTRACTS).filter(contract => contract.modelVisible !== false && contract.availability !== 'unavailable').length);
 
   const without = buildModernGenerateRequest({
     dynamicSystemPrompt: 'x', useSearch: false, cachedContentName: '',

@@ -1441,6 +1441,10 @@ private struct ActivityStepRow: View {
         case .failed:
             AppIcon(sf: "exclamationmark", size: 11)
                 .foregroundStyle(Color.appDanger)
+        case .neutral:
+            Circle()
+                .fill(Color.appMuted.opacity(0.5))
+                .frame(width: 6, height: 6)
         }
     }
 }

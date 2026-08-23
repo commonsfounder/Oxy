@@ -1,11 +1,9 @@
 const axios = require('axios');
 
-const SUPPORTED_ACTIONS = ['get_strava_activities', 'log_strava_activity'];
-
 async function execute(userId, action, params) {
   const token = process.env.STRAVA_ACCESS_TOKEN;
   if (!token) {
-    return { success: true, text: `Strava ${action} - set STRAVA_ACCESS_TOKEN for real fitness data.`, webLink: 'https://strava.com' };
+    return { success: false, outcome: 'unavailable', unavailable: true, error: `Strava ${action} is unavailable because Strava is not connected.` };
   }
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -34,4 +32,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

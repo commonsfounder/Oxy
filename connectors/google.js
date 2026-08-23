@@ -5,29 +5,6 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
 
-const SUPPORTED_ACTIONS = [
-  'send_email', 'get_emails', 'search_emails', 'create_calendar_event', 'get_calendar_events',
-  'create_google_doc', 'search_google_docs', 'append_google_doc', 'get_google_doc',
-  // Deliberately NOT registered in action-contracts.js — this is never offered to the
-  // agent/tool-calling loop as an option, only ever called directly by the dashboard's
-  // "handle this email" endpoint. See buildEmailActionPlan in api/index.js for why.
-  'get_email_action_links',
-  // Real Gmail mutation primitives (inbox cleanup) — see api/services/gmail-cleanup.js for
-  // the classification/orchestration layer that decides WHAT to archive/unsubscribe; these
-  // three only ever do WHAT they're told, against the real Gmail API.
-  'archive_emails', 'label_emails', 'unsubscribe_email',
-  // Real calendar mutation. create_calendar_event existed; moving or resizing an event did
-  // not, so "move it to 4pm" could only be done by creating a second event.
-  'update_calendar_event',
-  // Real cancellation. delete_calendar_event removes a single event (an instance or a whole
-  // non-recurring event); end_recurring_series ends a repeating series after a given
-  // occurrence without touching the ones already past. Neither is a "hide in Millie" —
-  // both change the real calendar, and both use Google's own attendee-notification
-  // semantics (sendUpdates) rather than silently vanishing a meeting someone else was
-  // invited to.
-  'delete_calendar_event', 'end_recurring_series'
-];
-
 // Comfortably under Gmail's own 1000-ids-per-batchModify-call cap — chunking this small
 // means one bad id in a huge request doesn't force re-doing thousands of already-valid
 // ones, and keeps the per-chunk verification pass below to a reasonable number of extra
@@ -1309,7 +1286,6 @@ async function execute(userId, action, params) {
 }
 
 module.exports = {
-  SUPPORTED_ACTIONS,
   execute,
   getThreadContext,
   getMailbox,

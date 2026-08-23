@@ -189,18 +189,23 @@ private struct ReceiptStep: Identifiable {
 
     var state: State {
         if isSoftMiss { return .neutral }
-        return action.success ? .success : .failure
+        if action.isCompleted { return .success }
+        if action.isFailure { return .failure }
+        return .neutral
     }
 
     /// Lowercase sentence fragment, joinable into the collapsed summary:
     /// "read 7 emails", "checked your calendar", "searched the web".
     var fragment: String {
         let compact = compactText
-        if !action.success {
+        if action.isFailure {
             if action.action == "find_place" {
                 return "couldn't find nearby places"
             }
             return "couldn't finish \(shortName)"
+        }
+        if action.isHandoff {
+            return "ready to open \(shortName)"
         }
         if isSoftMiss {
             switch action.action {
@@ -236,12 +241,12 @@ private struct ReceiptStep: Identifiable {
     var detail: String? {
         let compact = compactText
         guard !compact.isEmpty else { return nil }
-        if !action.success, action.action == "find_place" {
+        if action.isFailure, action.action == "find_place" {
             return "Location access is off. Enable location permissions, then retry."
         }
         if isSoftMiss { return nil }
         // Counted reads are fully described by the fragment; a repeat is noise.
-        if action.success, !isSoftMiss {
+        if action.isCompleted, !isSoftMiss {
             switch action.action {
             case "get_emails", "search_emails", "get_calendar_events", "web_search":
                 return nil

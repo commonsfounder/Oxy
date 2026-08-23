@@ -1,30 +1,7 @@
 const { getPaymentActionRequired, clearPaymentActionRequired, claimPaymentActionRequired } = require('./stripe-cards');
 
-async function getBalance(supabase, userId) {
-  const { data } = await supabase
-    .from('preferences')
-    .select('value')
-    .eq('user_id', userId)
-    .eq('key', 'concierge_account.balance')
-    .maybeSingle();
-  return Number(data?.value || 0);
-}
-
-async function setBalance(supabase, userId, balance) {
-  await supabase.from('preferences').upsert({
-    user_id: userId,
-    key: 'concierge_account.balance',
-    value: String(balance),
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'user_id,key' });
-}
-
-// The synchronous charge path (chargeLinkedCard, called from connectors/stripe.js)
-// already deducts the balance when a charge succeeds immediately. This handler only
-// needs to act when the charge was previously parked with requires_action (SCA) —
-// i.e. when a payment_action_required record still points at this exact
-// PaymentIntent id. Any other 'succeeded' event for a PaymentIntent already handled
-// synchronously is an expected, harmless no-op here.
+// The webhook only settles the pending SCA checkpoint. Stripe receipts and payment
+// intent ids are authoritative; there is no local concierge balance to maintain.
 //
 // Stripe delivers webhooks at-least-once, so the same payment_intent.succeeded
 // event can arrive twice (redelivery, slow 2xx, etc). claimPaymentActionRequired
@@ -44,10 +21,7 @@ async function handleStripeWebhookEvent(supabase, event) {
     if (!claimed) {
       return { handled: true, userId, outcome: 'succeeded', deducted: false };
     }
-    const amount = Number(pi.amount || 0) / 100;
-    const balance = Math.max(0, Number((await getBalance(supabase, userId) - amount).toFixed(2)));
-    await setBalance(supabase, userId, balance);
-    return { handled: true, userId, outcome: 'succeeded', deducted: true };
+    return { handled: true, userId, outcome: 'succeeded', settled: true, deducted: false };
   }
 
   if (type === 'payment_intent.payment_failed') {

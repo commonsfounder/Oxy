@@ -18,8 +18,6 @@ const supabase = createSupabaseServiceClient();
 // file, so there is no branch for it here.
 const SPEND_ACTIONS = new Set(['spend_from_concierge_via_stripe', 'stripe_payout_to_user']);
 
-const SUPPORTED_ACTIONS = ['stripe_payout_to_user', 'create_stripe_payment_link', 'spend_from_concierge_via_stripe'];
-
 async function getStripeKey(userId) {
   try {
     const { data } = await supabase
@@ -65,7 +63,12 @@ async function execute(userId, action, params) {
 
   const key = await getStripeKey(userId);
   if (!key) {
-    return { success: true, text: `Stripe ${action} - add your STRIPE_SECRET_KEY for real payments. Falling back to concierge account simulation.`, webLink: 'https://stripe.com' };
+    return {
+      success: false,
+      outcome: 'unavailable',
+      unavailable: true,
+      error: `Stripe ${action} is unavailable because no payment rail is configured. No money moved.`
+    };
   }
 
   const currency = resolveCurrencyForLocation(params?.location);
@@ -119,27 +122,20 @@ async function execute(userId, action, params) {
           paymentIntentId: outcome.paymentIntentId, clientSecret: outcome.clientSecret, amountCents, description: desc, currency
         });
         return {
-          success: true,
+          success: false,
+          outcome: 'awaiting_user',
+          pending: true,
           text: `This charge needs you to re-authenticate your card — check Today for a prompt to confirm it.`,
           requiresAction: true,
           paymentIntentId: outcome.paymentIntentId
         };
       }
 
-      // outcome.status === 'succeeded': deduct the tracked balance immediately. The
-      // Stripe webhook (api/services/stripe-webhook.js) is a no-op for this same
-      // PaymentIntent since no payment_action_required record was ever written for it.
-      const { data } = await supabase.from('preferences').select('value').eq('user_id', userId).eq('key', 'concierge_account.balance');
-      let balance = Number(data?.[0]?.value || 0);
       const amount = amountCents / 100;
-      if (balance >= amount) balance -= amount;
-      balance = Number(balance.toFixed(2));
-      await supabase.from('preferences').upsert({ user_id: userId, key: 'concierge_account.balance', value: balance });
       return {
         success: true,
-        text: `Charged $${amount.toFixed(2)} (${desc}) to your linked card. Balance updated to $${balance.toFixed(2)}.`,
-        paymentIntentId: outcome.paymentIntentId,
-        balance
+        text: `Charged $${amount.toFixed(2)} (${desc}) to your linked card.`,
+        paymentIntentId: outcome.paymentIntentId
       };
     }
 
@@ -161,4 +157,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute };
+module.exports = { execute };

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   resolveRetailerFromGoal,
+  resolveRailTicketProvider,
   resolveSearchSite,
   detectRegionFromGoal,
   inferRegionFromLocation,
@@ -65,6 +66,18 @@ test('resolveRetailerFromGoal matches multi-word aliases longest-first', () => {
 test('resolveRetailerFromGoal returns null when no retailer named', () => {
   assert.equal(resolveRetailerFromGoal('order me a pizza', { location: LONDON }), null);
   assert.equal(resolveRetailerFromGoal('nearest coffee shop', { location: NYC }), null);
+});
+
+test('resolveRailTicketProvider chooses the operator-direct retailer for Birmingham Moor Street to Wembley Stadium', () => {
+  const rail = resolveRailTicketProvider('get me a train ticket from Birmingham Moor Street to Wembley Stadium on Wednesday 19 August');
+  assert.deepEqual(rail, {
+    host: 'chilternrailways.co.uk',
+    homeUrl: 'https://www.chilternrailways.co.uk/',
+    displayName: 'Chiltern Railways',
+    kind: 'rail',
+    region: 'uk',
+  });
+  assert.equal(resolveRailTicketProvider('get me a train ticket from Manchester to Leeds'), null);
 });
 
 test('multi-locale brands use location for ikea and nike', () => {

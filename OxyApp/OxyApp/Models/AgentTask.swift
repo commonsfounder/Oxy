@@ -143,7 +143,23 @@ struct AgentTaskActivity: Codable, Identifiable, Equatable {
     let action: String
     let success: Bool
     let pending: Bool
+    let inProgress: Bool
     let summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, action, success, pending, summary
+        case inProgress = "in_progress"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        action = try values.decode(String.self, forKey: .action)
+        success = try values.decodeIfPresent(Bool.self, forKey: .success) ?? false
+        pending = try values.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+        inProgress = try values.decodeIfPresent(Bool.self, forKey: .inProgress) ?? false
+        summary = try values.decode(String.self, forKey: .summary)
+    }
 }
 
 struct AgentTasksResponse: Codable {

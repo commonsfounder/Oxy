@@ -1,8 +1,6 @@
 const axios = require('axios');
 const { geocodeLocation, resolvePlaceDestination } = require('../api/geocoding');
 
-const SUPPORTED_ACTIONS = ['book_uber'];
-
 const METERS_PER_MILE = 1609.344;
 const ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 
@@ -117,7 +115,9 @@ function fallbackUberLink(destination) {
     `dropoff[formatted_address]=${enc(destination)}`
   ].join('&');
   return {
-    success: true,
+    success: false,
+    outcome: 'handoff_required',
+    handoffRequired: true,
     text: `Opening Uber to search for ${destination}. Pick the exact destination in Uber.`,
     actionSummary: 'Uber search ready',
     cardText: 'Confirm destination in Uber',
@@ -215,7 +215,9 @@ async function execute(userId, action, params) {
         }
 
         return {
-          success: true,
+          success: false,
+          outcome: 'handoff_required',
+          handoffRequired: true,
           text: `Opening Uber to ${destinationLabel(destCoords)}. Confirm in Uber.`,
           cardText,
           deepLink: `uber://?${query}`,
@@ -231,4 +233,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute, estimateUberFare };
+module.exports = { execute, estimateUberFare };

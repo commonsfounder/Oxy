@@ -98,10 +98,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // find_commitments, resolve_commitment. Plus 3 for the calendar: find_free_time,
 // schedule_block, move_calendar_event. Plus 1 for calendar cancellation: cancel_calendar_event.
 // Plus 3 for the durable responsibility: start_responsibility, update_responsibility,
-// list_responsibilities.)
-test('exactly 64 contracts define guidance, and every one appears verbatim in its native description', () => {
+// list_responsibilities. Plus 2 for authorised nearby displays: list_paired_displays and
+// render_to_display.)
+test('exactly 66 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 64);
+  assert.equal(withGuidance.length, 66);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);
@@ -330,10 +331,8 @@ test('format/enum parameter hints were added only where a wrong value breaks arg
     forget_memory: { scope: 'recent|all' },
     project_check: { check: 'test|release' },
     create_agent_task: { autonomy: 'Active|High' },
-    log_health: { metric: 'steps|heart_rate' },
-    control_smart_home: { device: 'lights|thermostat', command: 'on|off|set 22' },
     github_action: { action: 'status|create_issue' },
-    edit_photo: { brief: 'enhance|crop|filter' }
+    // Unavailable device/photo capabilities are intentionally absent from model tools.
   };
   for (const [type, params] of Object.entries(expected)) {
     for (const [param, hint] of Object.entries(params)) {
@@ -357,7 +356,7 @@ test('trivial inputExample values were NOT promoted to parameter descriptions', 
 
 test('every native declaration still has a name, a non-empty description, and an OBJECT parameter schema', () => {
   const decls = buildToolsForGemini(false)[0].functionDeclarations;
-  assert.equal(decls.length, Object.keys(ACTION_CONTRACTS).length);
+  assert.equal(decls.length, Object.values(ACTION_CONTRACTS).filter(contract => contract.modelVisible !== false && contract.availability !== 'unavailable').length);
   for (const decl of decls) {
     assert.ok(decl.name);
     assert.ok(decl.description && decl.description.length > 0, `${decl.name} has an empty description`);

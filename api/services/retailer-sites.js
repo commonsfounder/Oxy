@@ -532,7 +532,7 @@ function inferRegionFromLocation(location) {
  * Returns null only when neither text nor location gives a signal.
  */
 function detectRegionFromGoal(goal, options = {}) {
-  const text = normalizeGoalText(goal);
+  const text = normalizeGoalText(goal).toLowerCase();
   if (/\b(uk|u\.k\.|britain|british|england|scotland|wales|northern ireland)\b/i.test(text)) return 'uk';
   if (/\b(us|u\.s\.|usa|america|american|united states)\b/i.test(text)) return 'us';
   if (/\b[A-Z]{1,2}\d[A-Z\d]?\s+\d[A-Z]{2}\b/i.test(text)) return 'uk';
@@ -587,6 +587,22 @@ function resolveRetailerFromGoal(goal, options = {}) {
   return null;
 }
 
+// Rail is not ordinary retail: choosing an aggregator just because it happens to be in a
+// browser recipe adds an unstated provider preference (and can add fees). Keep operator-direct
+// choices explicit and route-specific. More routes can be added only with the same evidence.
+function resolveRailTicketProvider(goal) {
+  const text = normalizeGoalText(goal).toLowerCase();
+  if (!/\b(?:train|rail)\b/.test(text) || !/\b(?:ticket|tickets|book|buy|get me)\b/.test(text)) return null;
+  if (!text.includes('birmingham moor street') || !text.includes('wembley stadium')) return null;
+  return {
+    host: 'chilternrailways.co.uk',
+    homeUrl: 'https://www.chilternrailways.co.uk/',
+    displayName: 'Chiltern Railways',
+    kind: 'rail',
+    region: 'uk',
+  };
+}
+
 function formatResolved(host, entry, matched, goalRegion) {
   const effective = goalRegion || (entry.region === 'both' ? null : entry.region);
   const { homeUrl, searchUrl } = pickLocaleUrls(entry, effective);
@@ -639,6 +655,7 @@ module.exports = {
   RETAILERS,
   DELIVERY_HOSTS,
   resolveRetailerFromGoal,
+  resolveRailTicketProvider,
   resolveSearchSite,
   detectRegionFromGoal,
   inferRegionFromLocation,

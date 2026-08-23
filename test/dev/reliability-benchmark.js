@@ -56,6 +56,8 @@ function autoReplyForAsk(c, question) {
 
 const MAX_TURNS = Number(process.env.OXY_BENCH_TURNS || 8);
 const MAX_CASE_MS = Number(process.env.OXY_BENCH_MAX_MS || 10 * 60 * 1000);
+const MAX_TURN_MS = Number(process.env.OXY_BENCH_TURN_MS || 45 * 1000);
+const REPORT_PATH = process.env.OXY_BENCH_REPORT || '';
 const filters = process.argv.slice(2).map(s => s.toLowerCase());
 const excludeTags = (process.env.OXY_BENCH_EXCLUDE || 'known-botwall')
   .split(',')
@@ -71,6 +73,23 @@ function selected(c) {
 
 const cases = FIXTURES.filter(selected);
 const stamp = () => new Date().toISOString().slice(11, 19);
+
+// `runOrderingTurn` has its own browser budget, but a benchmark needs a harder wall:
+// the suite must not spend multiple full turns on one pathological site. Racing the turn
+// leaves the normal `closeSession` cleanup below responsible for closing its browser.
+async function runWithDeadline(promise, ms) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise.then((outcome) => ({ timedOut: false, outcome })),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ timedOut: true }), Math.max(1, ms));
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // Run one case: the auto-continue chain, capped at MAX_TURNS, returning the final outcome +
 // a compact trace tail. A per-case try/catch so one thrown case never aborts the batch.
@@ -94,7 +113,17 @@ async function runCase(c) {
       ? { url: c.url, goal, onProgress: () => {} }
       : { url: null, goal, onProgress: () => {} };
     try {
-      outcome = await runOrderingTurn(user, args);
+      const remainingMs = MAX_CASE_MS - (Date.now() - t0);
+      if (remainingMs <= 0) {
+        outcome = { type: 'error', error: `benchmark case timeout (${MAX_CASE_MS}ms)` };
+        break;
+      }
+      const result = await runWithDeadline(runOrderingTurn(user, args), Math.min(MAX_TURN_MS, remainingMs));
+      if (result.timedOut) {
+        outcome = { type: 'error', error: `benchmark turn timeout (${Math.min(MAX_TURN_MS, remainingMs)}ms)` };
+        break;
+      }
+      outcome = result.outcome;
     } catch (e) {
       threw = e.message.split('\n')[0];
       break;
@@ -123,7 +152,7 @@ function reasonOf(r) {
 }
 
 (async () => {
-  console.log(`\nRELIABILITY BENCHMARK — ${cases.length} case(s), up to ${MAX_TURNS} turns each`);
+  console.log(`\nRELIABILITY BENCHMARK — ${cases.length} case(s), up to ${MAX_TURNS} turns each, ${MAX_TURN_MS}ms/turn, ${MAX_CASE_MS}ms/case`);
   if (filters.length) console.log(`filter: ${filters.join(', ')}`);
   console.log('');
 
@@ -173,6 +202,34 @@ function reasonOf(r) {
       site: r.case.site, expect: r.case.expect, bucket: r.bucket,
       type: r.outcome && r.outcome.type, turns: r.turns, ms: r.ms, reason: reasonOf(r)
     })), null, 2));
+  }
+
+  // Detached CI/terminal sessions can lose stdout before a long browser run ends.
+  // Persist the same redacted scorecard when explicitly requested, so the benchmark
+  // remains auditable without recording screenshots, checkout form values, or cookies.
+  if (REPORT_PATH) {
+    const rows = results.map(r => ({
+      site: r.case.site,
+      goal: r.case.goal,
+      expect: r.case.expect,
+      tags: r.case.tags || [],
+      bucket: r.bucket,
+      type: r.outcome && r.outcome.type,
+      turns: r.turns,
+      ms: r.ms,
+      reason: reasonOf(r),
+      trace: r.trace,
+    }));
+    fs.writeFileSync(REPORT_PATH, JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      total,
+      passes,
+      infra,
+      loopFails,
+      scorable,
+      rows,
+    }, null, 2));
+    console.log(`Report: ${REPORT_PATH}`);
   }
 
   console.log('\n--- benchmark done ---');

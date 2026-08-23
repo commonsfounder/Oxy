@@ -83,9 +83,12 @@ struct AgentWorkView: View {
                 }
             }
             .sheet(isPresented: $isShowingComposer) {
-                AgentGoalComposerView { created in
+                AgentGoalComposerView { created, started in
                     tasks.insert(created, at: 0)
                     isShowingComposer = false
+                    if !started {
+                        errorMessage = "Saved, but could not start it. Tap Start to retry."
+                    }
                 }
             }
             .task {
@@ -266,7 +269,7 @@ private struct AgentWatchRow: View {
 
 private struct AgentGoalComposerView: View {
     @Environment(\.dismiss) private var dismiss
-    let onCreated: (AgentTask) -> Void
+    let onCreated: (AgentTask, Bool) -> Void
     @State private var goal = ""
     @State private var autonomy = "Balanced"
     @State private var guardMode = true
@@ -348,14 +351,23 @@ private struct AgentGoalComposerView: View {
         errorMessage = nil
         Task {
             do {
-                let task = try await AgentTasksService.createTask(
+                var task = try await AgentTasksService.createTask(
                     goal: trimmedGoal,
                     autonomy: autonomy,
                     guardMode: guardMode
                 )
+                var started = false
+                do {
+                    try await AgentTasksService.runTask(id: task.id)
+                    task.status = "running"
+                    started = true
+                } catch {
+                    // Creation succeeded. Keep the task visible as ready so the user can
+                    // retry from Work; do not claim that the background run began.
+                }
                 await MainActor.run {
                     isSaving = false
-                    onCreated(task)
+                    onCreated(task, started)
                     dismiss()
                 }
             } catch {
@@ -632,10 +644,10 @@ private struct AgentTaskDetailView: View {
                     ForEach(task.activities.reversed()) { activity in
                         HStack(alignment: .top, spacing: 10) {
                             AppIcon(
-                                activity.pending ? "clock" : activity.success ? "check-circle" : "alert-circle",
+                                activity.pending ? "clock" : activity.inProgress ? "dotted" : activity.success ? "check-circle" : "alert-circle",
                                 size: 15
                             )
-                            .foregroundStyle(activity.pending ? Color.appAccent : activity.success ? Color.appSuccess : Color.mgDestructive)
+                            .foregroundStyle(activity.pending || activity.inProgress ? Color.appAccent : activity.success ? Color.appSuccess : Color.mgDestructive)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(activity.action)
                                     .font(.appBody(12, weight: .semibold))

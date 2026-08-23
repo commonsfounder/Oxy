@@ -32,14 +32,14 @@ const googleConnector = require('../../connectors/google');
 Module._load = originalLoad;
 
 const connectors = require('../../connectors');
-const originalRegistry = { ...connectors.registry };
+const originalDispatchOverrides = { ...connectors.dispatchOverrides };
 
 function installFakeConnector(action, execute) {
-  connectors.registry[action] = { execute };
+  connectors.dispatchOverrides[action] = { execute };
 }
 function restoreRegistry() {
-  for (const key of Object.keys(connectors.registry)) delete connectors.registry[key];
-  Object.assign(connectors.registry, originalRegistry);
+  for (const key of Object.keys(connectors.dispatchOverrides)) delete connectors.dispatchOverrides[key];
+  Object.assign(connectors.dispatchOverrides, originalDispatchOverrides);
 }
 
 const originalGetThreadContext = googleConnector.getThreadContext;

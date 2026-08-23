@@ -5,17 +5,6 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('microsoft connector bootstrap');
 
-const SUPPORTED_ACTIONS = [
-  'send_outlook_email', 'get_outlook_emails', 'search_outlook_emails', 'create_outlook_event', 'get_outlook_events',
-  // Deliberately NOT registered in action-contracts.js — never offered to the
-  // agent/tool-calling loop, only ever called directly by the dashboard's "handle this
-  // email" endpoint. See buildEmailActionPlan in api/index.js. Named distinctly from
-  // google.js's own get_email_action_links — connectors/index.js's registry is a flat
-  // action-name -> module map, so two connectors registering the same action name would
-  // silently overwrite each other (whichever loads last wins for every request).
-  'get_outlook_email_action_links'
-];
-
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const TENANT = process.env.MS_TENANT || 'common';
 const TOKEN_URL = `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/token`;
@@ -271,4 +260,4 @@ async function execute(userId, action, params) {
   }
 }
 
-module.exports = { SUPPORTED_ACTIONS, execute, saveTokens, getTokens };
+module.exports = { execute, saveTokens, getTokens };

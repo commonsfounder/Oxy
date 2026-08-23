@@ -15,7 +15,7 @@ struct SettingsView: View {
     @AppStorage("oxy_custom_backend_url") private var customBackendURL = ""
 
     enum MoreSettingsDestination: Identifiable {
-        case payments, savedLogins, continuity, trust
+        case payments, savedLogins, continuity, trust, displays
         var id: String { "\(self)" }
     }
     @Environment(\.colorScheme) private var colorScheme
@@ -124,6 +124,8 @@ struct SettingsView: View {
                         }
 
                         settingsSection(title: "More") {
+                            navRow(label: "Displays") { moreDestination = .displays }
+                            MilgrainDivider()
                             navRow(label: "Payments") { moreDestination = .payments }
                             MilgrainDivider()
                             navRow(label: "Saved sign-ins") { moreDestination = .savedLogins }
@@ -179,6 +181,7 @@ struct SettingsView: View {
                     case .savedLogins: VaultView()
                     case .continuity: AgentContinuityView()
                     case .trust: TrustCenterView()
+                    case .displays: PairedDisplaysView()
                     }
                 }
                 .swipeToDismiss()
@@ -447,6 +450,204 @@ private struct BackendURLEditorSheet: View {
             }
         }
         .onAppear { draft = currentURL }
+    }
+}
+
+private struct PairedDisplaysView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var displays: [PairedDisplay] = []
+    @State private var pairingName = ""
+    @State private var challenge: DisplayPairingChallenge?
+    @State private var pendingRevoke: PairedDisplay?
+    @State private var showRevokeConfirmation = false
+    @State private var isLoading = false
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                GlebChrome.pastelBlob.ignoresSafeArea()
+
+                VStack(spacing: 0) {
+                    ScreenHeaderView(title: "Displays", onBack: { dismiss() })
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                AppSectionTitle("Nearby displays", size: 20)
+                                Text("Pair a browser display nearby. It receives only updates you explicitly send.")
+                                    .font(.appBody(13))
+                                    .foregroundStyle(Color.mgSecondary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Start pairing")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Color.mgHeading)
+                                AppLineField(placeholder: "Display name (optional)", text: $pairingName)
+                                Button {
+                                    Task { await createPairing() }
+                                } label: {
+                                    HStack {
+                                        Text(isWorking ? "Creating code…" : "Create pairing code")
+                                        Spacer()
+                                    }
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Color.mgHeading)
+                                    .padding(.vertical, 14)
+                                }
+                                .disabled(isWorking)
+                            }
+                            .padding(16)
+                            .background { MissionGlassPlate() }
+
+                            if let challenge {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Open this link on the display, then enter the code")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Color.mgHeading)
+                                    Text(challenge.displayUrl)
+                                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                        .foregroundStyle(Color.mgSecondary)
+                                        .textSelection(.enabled)
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text(challenge.code)
+                                            .font(.system(size: 32, weight: .bold, design: .monospaced))
+                                            .foregroundStyle(Color.mgHeading)
+                                            .textSelection(.enabled)
+                                        Spacer()
+                                        Button(copied ? "Copied" : "Copy code") {
+                                            UIPasteboard.general.string = challenge.code
+                                            copied = true
+                                        }
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.appAccent)
+                                    }
+                                    Text("One-time code. It expires after 10 minutes.")
+                                        .font(.appBody(12))
+                                        .foregroundStyle(Color.mgCaption)
+                                }
+                                .padding(16)
+                                .background { MissionGlassPlate() }
+                            }
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                AppSectionTitle("Paired", size: 20)
+                                if isLoading {
+                                    ProgressView()
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else if displays.isEmpty {
+                                    Text("No displays paired yet.")
+                                        .font(.appBody(13))
+                                        .foregroundStyle(Color.mgSecondary)
+                                } else {
+                                    VStack(spacing: 0) {
+                                        ForEach(displays) { display in
+                                            HStack(alignment: .top, spacing: 12) {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(display.name)
+                                                        .font(.system(size: 15, weight: .semibold))
+                                                        .foregroundStyle(Color.mgHeading)
+                                                    Text(displayPresenceLabel(display))
+                                                        .font(.appBody(12))
+                                                        .foregroundStyle(Color.mgSecondary)
+                                                }
+                                                Spacer()
+                                                Button("Forget") {
+                                                    pendingRevoke = display
+                                                    showRevokeConfirmation = true
+                                                }
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(Color.mgDestructive)
+                                            }
+                                            .padding(.vertical, 14)
+                                            if display.id != displays.last?.id {
+                                                MilgrainDivider()
+                                            }
+                                        }
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .background { MissionGlassPlate() }
+                                }
+                            }
+
+                            if let errorMessage {
+                                Text(errorMessage)
+                                    .font(.appBody(12))
+                                    .foregroundStyle(Color.mgDestructive)
+                            }
+                        }
+                        .padding(.horizontal, AppSpacing.margin)
+                        .padding(.top, 12)
+                        .padding(.bottom, 32)
+                    }
+                }
+            }
+            .toolbar(.hidden, for: .navigationBar)
+            .task { await loadDisplays() }
+            .refreshable { await loadDisplays() }
+            .confirmationDialog(
+                "Forget this display?",
+                isPresented: $showRevokeConfirmation,
+                titleVisibility: .visible
+            ) {
+                if let display = pendingRevoke {
+                    Button("Forget \(display.name)", role: .destructive) {
+                        Task { await revoke(display) }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+
+    private func loadDisplays() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            displays = try await PairedDisplaysService.fetchDisplays()
+        } catch {
+            errorMessage = "Couldn’t load paired displays."
+        }
+        isLoading = false
+    }
+
+    private func createPairing() async {
+        isWorking = true
+        errorMessage = nil
+        copied = false
+        do {
+            challenge = try await PairedDisplaysService.createPairing(displayName: pairingName)
+        } catch {
+            errorMessage = "Couldn’t start pairing."
+        }
+        isWorking = false
+    }
+
+    private func revoke(_ display: PairedDisplay) async {
+        isWorking = true
+        errorMessage = nil
+        do {
+            try await PairedDisplaysService.revokeDisplay(id: display.id)
+            displays.removeAll { $0.id == display.id }
+        } catch {
+            errorMessage = "Couldn’t forget that display."
+        }
+        isWorking = false
+    }
+
+    private func displayPresenceLabel(_ display: PairedDisplay) -> String {
+        guard let raw = display.lastSeenAt,
+              let seenAt = DisplayTimestampParser.date(from: raw) else {
+            return "Not seen yet"
+        }
+        let age = max(0, Date().timeIntervalSince(seenAt))
+        if age < 120 { return "Seen just now" }
+        if age < 3_600 { return "Seen \(Int(age / 60)) min ago" }
+        if age < 86_400 { return "Seen \(Int(age / 3_600)) hr ago" }
+        return "Last seen \(Int(age / 86_400)) d ago"
     }
 }
 

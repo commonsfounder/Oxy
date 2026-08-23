@@ -99,6 +99,13 @@ test('external_conversation_events has a retention policy entry', () => {
   assert.equal(RETENTION_POLICY.external_conversation_events.maxAgeDays, 180);
 });
 
+test('nearby-display secrets and rendered content expire from the retention policy', () => {
+  assert.equal(RETENTION_POLICY.display_pairing_challenges.column, 'expires_at');
+  assert.equal(RETENTION_POLICY.display_pairing_challenges.expireWhenPast, true);
+  assert.equal(RETENTION_POLICY.display_render_events.column, 'expires_at');
+  assert.equal(RETENTION_POLICY.display_render_events.expireWhenPast, true);
+});
+
 test('documents retention is keyed on last_used_at, not created_at', () => {
   // A passport scan uploaded once and used every few months must not be deleted for the
   // crime of being old. Age since last USE is the only defensible clock for a file.

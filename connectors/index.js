@@ -1,58 +1,51 @@
-const google = require('./google');
-const microsoft = require('./microsoft');
-const uber = require('./uber');
-const telegram = require('./telegram');
-const trainline = require('./trainline');
-const maps = require('./maps');
-const spotify = require('./spotify');
-const notion = require('./notion');
-const github = require('./github');
-const stripe = require('./stripe');
-const weather = require('./weather');
-const amazon = require('./amazon');
-const slack = require('./slack');
-const lyft = require('./lyft');
-const strava = require('./strava');
-const oura = require('./oura');
-const flights = require('./flights');
-const stocks = require('./stocks');
+const {
+  CONNECTOR_MODULES,
+  getExecutableActionCatalog
+} = require('../api/services/action-catalog');
 
-// Registry: action name → connector module
-// To add a new connector: create connectors/myservice.js and register its actions here
-const registry = {};
+// Connector modules are effectful at import time (some create a Supabase client), so only
+// their paths are loaded here. A module is required after an action has passed validation.
+const moduleCache = new Map();
+// Explicit test seam only. This does not own or advertise actions; production ownership
+// remains the declared adapter passed into dispatch below.
+const dispatchOverrides = {};
 
-for (const action of google.SUPPORTED_ACTIONS) registry[action] = google;
-for (const action of microsoft.SUPPORTED_ACTIONS) registry[action] = microsoft;
-for (const action of uber.SUPPORTED_ACTIONS) registry[action] = uber;
-for (const action of telegram.SUPPORTED_ACTIONS) registry[action] = telegram;
-for (const action of trainline.SUPPORTED_ACTIONS) registry[action] = trainline;
-for (const action of maps.SUPPORTED_ACTIONS) registry[action] = maps;
-for (const action of spotify.SUPPORTED_ACTIONS) registry[action] = spotify;
-for (const action of notion.SUPPORTED_ACTIONS) registry[action] = notion;
-for (const action of github.SUPPORTED_ACTIONS) registry[action] = github;
-for (const action of stripe.SUPPORTED_ACTIONS) registry[action] = stripe;
-for (const action of weather.SUPPORTED_ACTIONS) registry[action] = weather;
-for (const action of amazon.SUPPORTED_ACTIONS) registry[action] = amazon;
-for (const action of slack.SUPPORTED_ACTIONS) registry[action] = slack;
-for (const action of lyft.SUPPORTED_ACTIONS) registry[action] = lyft;
-for (const action of strava.SUPPORTED_ACTIONS) registry[action] = strava;
-for (const action of oura.SUPPORTED_ACTIONS) registry[action] = oura;
-for (const action of flights.SUPPORTED_ACTIONS) registry[action] = flights;
-for (const action of stocks.SUPPORTED_ACTIONS) registry[action] = stocks;
-
-// Real API connectors (actual server actions)
-const REAL_API_CONNECTORS = new Set(['google', 'microsoft', 'telegram', 'maps', 'notion', 'github', 'stripe', 'weather', 'slack', 'strava', 'oura', 'flights', 'stocks']);
-
-// Handoff / convenience connectors (open apps with prefill - still useful for consumer)
-const HANDOFF_CONNECTORS = new Set(['uber', 'trainline', 'spotify', 'lyft', 'amazon']);
-
-// All "implemented" for UI purposes
-const IMPLEMENTED_CONNECTORS = new Set([...REAL_API_CONNECTORS, ...HANDOFF_CONNECTORS]);
-
-async function dispatch(userId, action, params) {
-  const connector = registry[action];
-  if (connector) return connector.execute(userId, action, params);
-  return { success: false, error: `No connector registered for action: ${action}` };
+function loadConnector(connectorId) {
+  const path = CONNECTOR_MODULES[connectorId];
+  if (!path) return null;
+  if (!moduleCache.has(connectorId)) moduleCache.set(connectorId, require(path));
+  return moduleCache.get(connectorId);
 }
 
-module.exports = { dispatch, registry, IMPLEMENTED_CONNECTORS };
+function getConnector(connectorId) {
+  const connector = loadConnector(connectorId);
+  return connector;
+}
+
+async function dispatch(connectorId, userId, action, params) {
+  if (dispatchOverrides[action]) return dispatchOverrides[action].execute(userId, action, params);
+  if (!CONNECTOR_MODULES[connectorId]) {
+    return { success: false, outcome: 'unavailable', unavailable: true, error: 'That capability is not available yet. No action was taken.' };
+  }
+  const connector = getConnector(connectorId);
+  if (typeof connector?.execute !== 'function') {
+    throw new Error(`Connector ${connectorId} does not export execute`);
+  }
+  return connector.execute(userId, action, params);
+}
+
+// A module existing on disk is not enough to advertise it as an executable connector:
+// only named adapters referenced by an executable contract count. Inline handoffs such as
+// Apple Music intentionally do not make the Spotify connector a second owner.
+const IMPLEMENTED_CONNECTORS = new Set(getExecutableActionCatalog()
+  .filter(action => action.adapter.kind === 'connector')
+  .map(action => action.adapter.id));
+
+module.exports = {
+  CONNECTOR_MODULES,
+  dispatchOverrides,
+  IMPLEMENTED_CONNECTORS,
+  getConnector,
+  loadConnector,
+  dispatch
+};

@@ -114,7 +114,8 @@ test('Core actions validate required fields consistently', () => {
   for (const [type, contract] of Object.entries(ACTION_CONTRACTS)) {
     const input = {};
     for (const field of contract.required || []) input[field] = `sample ${field}`;
-    const result = validateActionWithContract({ type, input }, `${type} smoke`);
+    const originalMessage = type === 'render_to_display' ? 'Put this on my display' : `${type} smoke`;
+    const result = validateActionWithContract({ type, input }, originalMessage);
     assert.equal(result, null, `${type} rejected complete sample input`);
   }
 });

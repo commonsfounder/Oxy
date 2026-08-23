@@ -112,6 +112,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     var id: String { action + (text ?? "") }
     let action: String
     let success: Bool
+    let outcome: String?
     let text: String?
     let error: String?
     let deepLink: String?
@@ -140,8 +141,22 @@ struct ActionResult: Codable, Identifiable, Equatable {
     /// Completed browser-task identifier.
     let taskId: String?
 
+    /// Bounded backend outcomes keep handoffs and review pauses visible without
+    /// treating their legacy `success` compatibility flag as a completed effect.
+    var isCompleted: Bool { outcome == "completed" || (outcome == nil && success) }
+    var needsUser: Bool { pending || outcome == "awaiting_user" }
+    var isHandoff: Bool { outcome == "handoff_required" }
+    var isFailure: Bool {
+        switch outcome {
+        case "completed", "awaiting_user", "handoff_required", "simulated": return false
+        case "failed", "unavailable": return true
+        case "incomplete": return false
+        default: return !success
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
-        case action, result, success, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
+        case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
         case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction, imageUrls
         case productName, price, total, colorOptions, taskId
     }
@@ -149,6 +164,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     init(
         action: String,
         success: Bool,
+        outcome: String? = nil,
         text: String? = nil,
         error: String? = nil,
         deepLink: String? = nil,
@@ -176,6 +192,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
     ) {
         self.action = action
         self.success = success
+        self.outcome = outcome
         self.text = text
         self.error = error
         self.deepLink = deepLink
@@ -206,6 +223,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.init(
             action: result.action,
             success: result.success,
+            outcome: result.success ? "completed" : "failed",
             text: result.text,
             error: result.error,
             deepLink: result.deepLink,
@@ -223,6 +241,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
 
         if let result = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .result) {
             success = try result.decodeIfPresent(Bool.self, forKey: .success) ?? false
+            outcome = try result.decodeIfPresent(String.self, forKey: .outcome)
             text = try result.decodeIfPresent(String.self, forKey: .text)
             error = try result.decodeIfPresent(String.self, forKey: .error)
             deepLink = try result.decodeIfPresent(String.self, forKey: .deepLink)
@@ -249,6 +268,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
+            outcome = try container.decodeIfPresent(String.self, forKey: .outcome)
             text = try container.decodeIfPresent(String.self, forKey: .text)
             error = try container.decodeIfPresent(String.self, forKey: .error)
             deepLink = try container.decodeIfPresent(String.self, forKey: .deepLink)
@@ -280,6 +300,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(action, forKey: .action)
         try container.encode(success, forKey: .success)
+        try container.encodeIfPresent(outcome, forKey: .outcome)
         try container.encodeIfPresent(text, forKey: .text)
         try container.encodeIfPresent(error, forKey: .error)
         try container.encodeIfPresent(deepLink, forKey: .deepLink)
@@ -317,6 +338,9 @@ struct BrowserRecoveryAction: Codable, Equatable {
     /// Set on `reauth_login` — the site the sign-in sheet should post the typed
     /// credential for (POST /browser-task/reauth-login).
     let site: String?
+    /// Portable checkout profile categories currently required by the visible merchant
+    /// form. No values or merchant DOM data are returned to the chat layer.
+    let fields: [String]?
 }
 
 struct TravelLeg: Codable, Equatable, Identifiable {
@@ -544,7 +568,8 @@ struct LifeBriefingItem: Codable, Identifiable, Equatable {
         let isEmail = ["send_email", "send_outlook_email"].contains(review.action)
         return ActionResult(
             action: review.action,
-            success: true,
+            success: false,
+            outcome: "awaiting_user",
             text: isEmail ? "Check the email, then tap Send." : "Check the details, then choose what to do.",
             cardText: detail.isEmpty ? nil : detail,
             actionSummary: isEmail ? "Email ready to send" : nil,

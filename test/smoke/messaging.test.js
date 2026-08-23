@@ -11,7 +11,8 @@ const { executeAction } = require('../../api/index');
 test('send_message: one exact contact match resolves and builds a deep link', async () => {
   const nativeHints = { contacts: [{ displayName: 'Sarah', phone: '+447700900123' }] };
   const result = await executeAction('demo-test-user', 'send_message', { contact: 'Sarah', message: 'hi' }, { nativeHints });
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'awaiting_user');
   assert.equal(result.deepLink, 'sms:%2B447700900123?&body=hi');
 });
 
@@ -53,7 +54,8 @@ test('send_message: the same contact appearing twice (identical target) is not f
     ]
   };
   const result = await executeAction('demo-test-user', 'send_message', { contact: 'Sarah', message: 'hi' }, { nativeHints });
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'awaiting_user');
   assert.equal(result.deepLink, 'sms:%2B447700900123?&body=hi');
 });
 
@@ -66,7 +68,8 @@ test('send_message: no Contacts permission / no nativeHints at all fails honestl
 
 test('send_message: a literal phone number as the contact resolves directly, no contacts lookup needed', async () => {
   const result = await executeAction('demo-test-user', 'send_message', { contact: '+447700900999', message: 'hi' }, {});
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'awaiting_user');
   assert.equal(result.deepLink, 'sms:%2B447700900999?&body=hi');
 });
 
@@ -78,7 +81,8 @@ test('send_message: a literal phone number as the contact resolves directly, no 
 test('send_message: WhatsApp handoff is reachable and produces the wa.me deep link', async () => {
   const nativeHints = { contacts: [{ displayName: 'Sarah', phone: '+447700900123' }] };
   const result = await executeAction('demo-test-user', 'send_message', { contact: 'Sarah', message: 'hi', platform: 'whatsapp' }, { nativeHints });
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'handoff_required');
   assert.equal(result.deepLink, 'https://wa.me/?text=hi');
 });
 
@@ -90,6 +94,7 @@ test('send_message: WhatsApp handoff skips contact-ambiguity checks entirely (it
     ]
   };
   const result = await executeAction('demo-test-user', 'send_message', { contact: 'Sarah', message: 'hi', platform: 'whatsapp' }, { nativeHints });
-  assert.equal(result.success, true);
+  assert.equal(result.success, false);
+  assert.equal(result.outcome, 'handoff_required');
   assert.equal(result.deepLink, 'https://wa.me/?text=hi');
 });

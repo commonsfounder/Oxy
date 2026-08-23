@@ -251,8 +251,8 @@ test('tool ecosystem and browser agent expose one safe capability catalog', () =
   assert.match(source, /app\.get\('\/agent\/permissions'/);
   assert.match(source, /app\.get\('\/agent\/audit'/);
   assert.match(source, /undo: null/);
-  assert.match(source, /agentTasks: data\.agent_tasks/);
-  assert.match(source, /continuityImports: data\.agent_imports/);
+  assert.match(source, /createUserDataLifecycle/);
+  assert.doesNotMatch(source, /USER_DATA_TABLES/);
 });
 
 test('agent orchestrator exports core agentic functions', () => {
@@ -267,12 +267,20 @@ test('persistent task runs expose a stable existing-task seam', () => {
   assert.match(source, /existingTaskId\s*\?/);
 });
 
-test('persistent task run marks running before starting the background loop', () => {
-  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../api/index.js'), 'utf8');
+test('persistent task run claims before handing off to the shared starter', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../../api/index.js'), 'utf8');
   const routeStart = source.indexOf("app.post('/agent/tasks/:id/run'");
   const routeEnd = source.indexOf("app.post('/agent/simulate'", routeStart);
   const route = source.slice(routeStart, routeEnd);
-  assert.ok(route.indexOf("updateTask(userId, task.id, { status: 'running' })") < route.indexOf('runAgenticLoop({'));
+  assert.match(route, /startDelegatedTaskExecution\(\{/);
+  const starter = fs.readFileSync(path.join(__dirname, '../../api/services/delegated-run-starter.js'), 'utf8');
+  const claimIndex = starter.indexOf('routeHandlers.run({');
+  const loopIndex = starter.indexOf('runLoop({');
+  assert.notEqual(claimIndex, -1, 'manual run must claim through the lifecycle route seam');
+  assert.notEqual(loopIndex, -1, 'manual run must start the delegated loop');
+  assert.ok(claimIndex < loopIndex);
 });
 
 test('persistent task summaries keep activity useful without exposing raw payloads', () => {
@@ -301,13 +309,38 @@ test('persistent task summaries keep activity useful without exposing raw payloa
   assert.equal(summary.results[0].action, 'web_browse');
 });
 
+test('persistent task summaries call a started handoff in-progress, not failed', () => {
+  const summary = safeAgentTaskSummary({
+    id: 'task-2',
+    goal: 'Keep checking this until it changes',
+    status: 'running',
+    results: [{
+      action: 'create_agent_task',
+      result: {
+        outcome: 'incomplete',
+        success: false,
+        text: 'Persistent agent task started in the background.'
+      }
+    }]
+  });
+
+  assert.equal(summary.results[0].success, false);
+  assert.equal(summary.results[0].in_progress, true);
+  assert.equal(summary.results[0].summary, 'Persistent agent task started in the background.');
+});
+
 test('persistent task controls route carries guard mode into the agent loop', () => {
-  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../api/index.js'), 'utf8');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../../api/index.js'), 'utf8');
   const routeStart = source.indexOf("app.patch('/agent/tasks/:id'");
   const routeEnd = source.indexOf("app.post('/agent/tasks/:id/run'", routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart, 'task controls route must exist');
   const route = source.slice(routeStart, routeEnd);
-  assert.match(route, /updates\.metadata\s*=\s*\{\s*\.\.\.\(task\.metadata \|\| \{\}\), guardMode\s*\}/);
-  assert.match(source, /context:\s*\{\s*autonomy: claimedTask\.autonomy,\s*guardMode: claimedTask\.metadata\?\.guardMode === true,\s*modelRoute: route,\s*runtimeSessionId: runtimeSession\.id\s*\}/s);
+  assert.match(route, /updates\.metadata\s*=\s*\{\s*guardMode\s*\}/);
+  assert.match(route, /delegatedRunLifecycle\.updateControls\s*\(/);
+  const starter = fs.readFileSync(path.join(__dirname, '../../api/services/delegated-run-starter.js'), 'utf8');
+  assert.match(starter, /autonomy: claimedTask\.autonomy,\s*guardMode: claimedTask\.metadata\?\.guardMode === true,\s*modelRoute: route,\s*runtimeSessionId: runtimeSession\.id/s);
 });
 
 test('action contracts now include new agentic tools', () => {

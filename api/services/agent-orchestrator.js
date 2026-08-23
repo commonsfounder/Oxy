@@ -9,7 +9,6 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
-const taskManager = require('./task-manager');
 const { isTravelPlanningRequest } = require('./travel-concierge');
 
 // Simple in-memory for traces during a run; production should persist
@@ -117,9 +116,25 @@ async function runAgentLoop({
   persistTask = false,
   existingTaskId = null,
   resumeNote = null,
-  resumeAction = null
+  resumeAction = null,
+  lifecycle = null
 }) {
   const agentTrace = createAgentTrace(userId, initialMessage);
+  if (persistTask && !lifecycle) throw new Error('Persistent delegated runs require an injected lifecycle.');
+  if (typeof executeActionsFn !== 'function') {
+    const error = 'Actions are unavailable right now.';
+    agentTrace.status = 'error';
+    agentTrace.lastError = error;
+    agentTrace.finalSpoken = error;
+    return {
+      spoken: agentTrace.finalSpoken,
+      actions: [],
+      traceId: agentTrace.id,
+      iterations: 0,
+      agentTrace,
+      taskId: null
+    };
+  }
   let persistedTask = null;
   if (persistTask) {
     try {
@@ -127,8 +142,8 @@ async function runAgentLoop({
       // Reusing it keeps the run, results, and later history attached to the same
       // user-visible goal instead of silently creating a duplicate row.
       persistedTask = existingTaskId
-        ? await taskManager.getTask(userId, existingTaskId)
-        : await taskManager.createTask(userId, initialMessage, {
+        ? await lifecycle.get(userId, existingTaskId)
+        : await lifecycle.create(userId, initialMessage, {
           autonomy: context.autonomy || 'Active',
           metadata: {
             ...(context.taskMetadata || {}),
@@ -139,10 +154,7 @@ async function runAgentLoop({
       if (!persistedTask) throw new Error('Persistent task not found');
       agentTrace.persistedTaskId = persistedTask.id;
     } catch (e) {
-      // Background/scheduled work can still run without persistence if the
-      // optional task table is unavailable. A user explicitly resuming a known
-      // task is different: silently detaching that run would break continuity.
-      if (existingTaskId) throw e;
+      throw e;
     }
   }
 
@@ -193,19 +205,15 @@ async function runAgentLoop({
 
   async function checkpoint(iteration) {
     if (!persistedTask) return;
-    try {
-      await taskManager.saveCheckpoint(userId, persistedTask.id, {
+    const checkpointData = {
         iteration,
         maxIterations,
         contents: resumedContents,
         executedActions,
         spoken,
         goal: initialMessage
-      });
-    } catch {
-      // A checkpoint write failing must not kill a run that is otherwise working; the
-      // stale-run sweep is the backstop if this keeps failing.
-    }
+      };
+    await lifecycle.checkpoint(userId, persistedTask.id, checkpointData, persistedTask.attempt);
   }
 
   // Cream-of-the-crop: auto plan for complex goals. Keyword-gated only — message length
@@ -317,8 +325,6 @@ async function runAgentLoop({
       } catch (e) {
         results = actions.map(a => ({ action: a.type, result: { success: false, error: e.message } }));
       }
-    } else {
-      results = actions.map(a => ({ action: a.type, result: { success: true, text: `Executed ${a.type}` } }));
     }
 
     executedActions.push(...results);
@@ -368,6 +374,16 @@ async function runAgentLoop({
     // crash between iterations resumes at the next one rather than repeating this one.
     await checkpoint(i);
 
+    // create_agent_task is an ownership handoff, not another tool result for this
+    // foreground run to reason about. Once the child is queued, finish this turn;
+    // otherwise a later iteration (or a sibling action batch) can duplicate the goal.
+    const delegatedHandoff = results.find(entry => entry.result?.delegatedTask === true);
+    if (delegatedHandoff) {
+      spoken = delegatedHandoff.result?.text || 'I queued that as background work.';
+      agentTrace.status = 'completed';
+      break;
+    }
+
     // A review-gated action parks the run instead of ending it. Burning the remaining
     // iterations here would be worse than useless: the model would re-plan around an action
     // it believes failed, and the approval — when it arrives — would have nothing to
@@ -383,7 +399,7 @@ async function runAgentLoop({
 
   agentTrace.actionsTaken = executedActions;
   agentTrace.finalSpoken = spoken;
-  if (agentTrace.status === 'running') agentTrace.status = 'completed';
+  if (agentTrace.status === 'running') agentTrace.status = 'incomplete';
 
   if (persistedTask) {
     try {
@@ -408,18 +424,35 @@ async function runAgentLoop({
       // finished work. An unfinished run keeps its checkpoint — that is what makes it
       // resumable — so the key is omitted rather than set to undefined.
       if (finished) updates.checkpoint = null;
-      await taskManager.updateTask(userId, persistedTask.id, updates);
-      await taskManager.saveTrace(persistedTask.id, userId, agentTrace.steps.length, 'agent_run_complete', { spoken, actions: executedActions.length });
-    } catch (e) {}
+      await lifecycle.settleFromTrace(userId, persistedTask.id, agentTrace, {
+          results: executedActions,
+          plan: agentTrace.plan,
+          metadata: updates.metadata,
+          lastError: updates.last_error,
+          ownerAttempt: persistedTask.attempt,
+          step: agentTrace.steps.length,
+          traceData: { spoken, actions: executedActions.length }
+        });
+    } catch (e) {
+      // A lifecycle-backed run cannot claim settlement when its authoritative
+      // task write (or runtime projection) failed. Legacy non-durable callers
+      // retain their historical best-effort diagnostic behaviour.
+      throw e;
+    }
   }
 
   // Never claim "Done." when the loop died without doing anything — that reads as a
   // (false) success to the user. Surface the failure so they know to retry.
   const fallback = agentTrace.status === 'error' && !executedActions.length
-    ? "I hit a problem finishing that — give me a moment and try again."
-    : 'Done.';
+    ? 'The action could not be completed.'
+    : agentTrace.status === 'incomplete'
+      ? 'The action is incomplete.'
+      : 'Done.';
+  const finalSpoken = agentTrace.status === 'incomplete'
+    ? fallback
+    : (spoken || lastToolResultsText || fallback);
   return {
-    spoken: spoken || lastToolResultsText || fallback,
+    spoken: finalSpoken,
     actions: executedActions,
     traceId: agentTrace.id,
     iterations: agentTrace.steps.length,
@@ -486,7 +519,10 @@ async function reflectOnResults(goal, actionsTaken, results, modelName = PRIMARY
     config: {}
   });
   const t = extractSpokenFromResponseSafe(resp);
-  try { return JSON.parse(t.replace(/```/g,'').trim()); } catch { return { achieved: true, summary: 'Completed.', nextAction: null, issues: [] }; }
+  try { return JSON.parse(t.replace(/```/g,'').trim()); } catch {
+    // Reflection is verification, not a reason to invent completion.
+    return { achieved: false, summary: 'Could not verify completion.', nextAction: null, issues: ['reflection_parse_failed'] };
+  }
 }
 
 // Simple branching/conditional execution for plans (advanced orchestration)
@@ -515,12 +551,6 @@ function evaluateSimpleCondition(cond, prevResults, ctx) {
   return true;
 }
 
-// Multi-agent stub: delegate to specialist
-async function delegateToSpecialist(specialist, goal, context) {
-  // In real would call sub model or different prompt
-  return { specialist, handled: goal, note: 'Delegated (stub - extend with specialist prompts)' };
-}
-
 module.exports = {
   runAgentLoop,
   generatePlan,
@@ -528,7 +558,6 @@ module.exports = {
   createAgentTrace,
   logAgentStep,
   executePlanWithBranching,
-  delegateToSpecialist,
   extractToolCalls,
   replacePendingToolResult
 };

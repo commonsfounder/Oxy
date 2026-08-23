@@ -12,11 +12,11 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const app = require('../../api/index');
-const { registry } = require('../../connectors');
+const { dispatchOverrides } = require('../../connectors');
 
 const USER_ID = 'demo-test-user';
 const CALENDAR_ACTIONS = ['get_calendar_events', 'create_calendar_event', 'update_calendar_event'];
-const originals = Object.fromEntries(CALENDAR_ACTIONS.map(a => [a, registry[a]]));
+const originals = Object.fromEntries(CALENDAR_ACTIONS.map(a => [a, dispatchOverrides[a]]));
 
 let calendar;
 function installFakeCalendar(events = []) {
@@ -47,11 +47,11 @@ function installFakeCalendar(events = []) {
       return { success: false, error: 'unexpected action' };
     }
   };
-  for (const action of CALENDAR_ACTIONS) registry[action] = fake;
+  for (const action of CALENDAR_ACTIONS) dispatchOverrides[action] = fake;
 }
 
 test.afterEach(() => {
-  for (const action of CALENDAR_ACTIONS) registry[action] = originals[action];
+  for (const action of CALENDAR_ACTIONS) dispatchOverrides[action] = originals[action];
 });
 
 // Exactly the shape connectors/google.js's get_calendar_events returns.

@@ -1,19 +1,22 @@
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();
-const { createSupabaseServiceClient, createGeminiServiceClient } = require('../../runtime');
+const runtime = require('../../runtime');
 const { learnTemplateFromUrl, createFastpathStore } = require('./browser-fastpaths');
-const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, RECIPES, readCtx, CONVENTION, SHOPIFY } = require('./browser-recipes');
+const { nextRecipeMove, selectRecipeForHost, recipeHealth, isJohnLewisExpressOnlyPdp, johnLewisSizeQueryValue, parseSizeFromGoal, parseTrainlineJourney, parseTrainlineDate, parseTrainlineArrivalHour, parseTrainReturn, RECIPES, readCtx, CONVENTION, SHOPIFY } = require('./browser-recipes');
 const platformCommerce = require('./browser-platform-commerce');
 const wooCommerce = require('./browser-platform-woocommerce');
 const { createLearnedRecipeStore, ADD_TEXT_PATTERN } = require('./browser-learned-recipes');
 const { logRecipeHit, logVisionStep, logSessionOutcome } = require('./session-events');
-const { resolveRetailerFromGoal, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
+const { resolveRetailerFromGoal, resolveRailTicketProvider, resolveSearchSite, buildSearchSites, isDeliveryHost } = require('./retailer-sites');
 const { extractPrice, extractProductName, extractFirstProductUrl, extractVisibleDeals } = require('./browser-price-parser');
 const { parseGoalContext } = require('./browser-goal-context');
+const { assessLookupCompletion, lookupCompletionCorrection, requestedFacts } = require('./browser-completion');
 const {
   classifyCheckoutAsk,
   findEmailInputElement,
   matchProfileFieldForInput,
+  missingCheckoutInformation,
+  describeCheckoutInformation,
   parseEmailFromUserText,
   parseCheckoutReplyFromUserText,
   wantsSaveDetailsConsent,
@@ -131,13 +134,13 @@ function browserThinkingConfig() {
 
 let geminiClient = null;
 function getGemini() {
-  if (!geminiClient) geminiClient = createGeminiServiceClient();
+  if (!geminiClient) geminiClient = runtime.createGeminiServiceClient();
   return geminiClient;
 }
 
 let supabaseClient = null;
 function getSupabase() {
-  if (!supabaseClient) supabaseClient = createSupabaseServiceClient();
+  if (!supabaseClient) supabaseClient = runtime.createSupabaseServiceClient();
   return supabaseClient;
 }
 
@@ -196,6 +199,35 @@ async function loadStorageState(userId, site) {
 function siteKeyFromUrl(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); }
   catch { return 'unknown'; }
+}
+
+// The public Chiltern home page has a custom date widget whose current state is not
+// encoded in its visible fields. For the one route we have explicitly mapped to this
+// operator, go straight to its documented booking search state. This preserves both
+// legs of a return search instead of letting the browser model reconstruct them from
+// the homepage a click at a time.
+function buildChilternRailSearchUrl(goal) {
+  const journey = parseTrainlineJourney(goal);
+  const date = parseTrainlineDate(goal);
+  const arrivalHour = parseTrainlineArrivalHour(goal);
+  if (!journey || !date || arrivalHour == null) return null;
+  if (journey.origin.toLowerCase() !== 'birmingham moor street' || journey.destination.toLowerCase() !== 'wembley stadium') return null;
+  const datePrefix = `${date.year}-${String(new Date(`${date.month} 1, ${date.year}`).getMonth() + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+  const query = new URLSearchParams({
+    origin: 'GBBMO',
+    destination: 'GBWCX',
+    adults: '1',
+    children: '0',
+    outboundTime: `${datePrefix}T${String(arrivalHour).padStart(2, '0')}:00:00`,
+    outboundTimeType: 'ARRIVAL',
+  });
+  const returnJourney = parseTrainReturn(goal);
+  if (returnJourney) {
+    query.set('inbound', 'true');
+    query.set('inboundTime', `${datePrefix}T${String(returnJourney.hour).padStart(2, '0')}:00:00`);
+    query.set('inboundTimeType', 'DEPARTURE');
+  }
+  return `https://buy.chilternrailways.co.uk/search?${query.toString()}`;
 }
 
 // Real sign-in flows often live on a dedicated subdomain (signin.delta.com,
@@ -457,7 +489,19 @@ async function closeWarmPool() {
 const PAYMENT_KEYWORD_PATTERN = /\bpay\b|\bbuy\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)|checkout\s*(and|&)?\s*pay|proceed\s+to\s+payment|continue\s+to\s+payment|go\s+to\s+payment|payment\s+method|pay\s+with\s+card|pay\s+securely|slide\s+to\s+pay/i;
 
 function matchesPaymentKeyword(text) {
-  return PAYMENT_KEYWORD_PATTERN.test(String(text || ''));
+  const label = String(text || '').trim();
+  // Chiltern's ticket-results shell exposes "Quick buy" before it has found a fare or
+  // added a ticket. It is a shopping shortcut, not a payment commitment; treating it as
+  // a pay control produced a false ready-for-payment handoff on an empty £0.00 basket.
+  if (/^quick\s+buy$/i.test(label)) return false;
+  return PAYMENT_KEYWORD_PATTERN.test(label);
+}
+
+const TRANSIENT_CHECKOUT_PATTERN = /\b(?:loading,?\s*please wait|please wait while we search for tickets)\b/i;
+
+async function isPaymentHandoffBlockedByLoading(page) {
+  const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+  return TRANSIENT_CHECKOUT_PATTERN.test(text);
 }
 
 function isCheckoutPaymentUrl(url) {
@@ -960,10 +1004,21 @@ async function detectLoginWall(page, goal) {
 // Goals that mean "place an order" — for these, "done" is ALWAYS premature inside the
 // loop: a real order only completes through ready_for_payment → confirmPayment, so an
 // early "done" (e.g. right after setting the address) must not close the browser.
-const ORDER_GOAL_PATTERN = /\b(order|deliver(?:y|ed)?|buy|cart|basket|checkout|food|eats|pizza|meal|grocer|takeaway|takeout)\b/i;
+// This is deliberately an *action* classifier, not a category classifier. Treating a
+// word such as "food", "pizza" or "meal" as an order turned harmless questions (for
+// example, "find dry cat food and report the price") into checkout automation. A task
+// becomes an order only when it asks us to purchase, add, deliver or check out.
+const ORDER_GOAL_PATTERN = /\b(order|deliver(?:y|ed)?|buy|add|cart|basket|checkout|takeaway|takeout)\b/i;
 
 function isOrderGoal(goal) {
   return ORDER_GOAL_PATTERN.test(String(goal || ''));
+}
+
+// Search/add/checkout recipes are a capability for delegated purchases only. Applying
+// them to a read-only question is how a price lookup drifted into a cart: the browser had
+// enough imperative controls to act, but no authority to purchase.
+function shouldUseOrderingAutomation(session) {
+  return Boolean(session?.isOrder);
 }
 
 // A model "ask" whose text is really "I've hit a bot/security wall" — Cloudflare and similar
@@ -1856,7 +1911,7 @@ const LEAD_NOISE = /^(?:can you\s+|could you\s+|please\s+|i\s+(?:want|need|would
 // the exact price shown", "…how much", "…and the price") so it eats the whole tail regardless
 // of adjectives, but does NOT touch a product name that merely contains "price"/"cost".
 // Also strip "i think its", "probably", "about" qualifiers.
-const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$|\s*i\s+think\s+(?:its?|it'?s)\s*(?!\d)/i;
+const TRAIL_NOISE = /\s*(?:and\s+)?(?:tell\s+me|let\s+me\s+know|show\s+me|give\s+me|report|how\s+much)\b.*$|\s*and\s+(?:the\s+|its\s+)?(?:price|cost)\b.*$|\s+(?:near|for)\s+me\s*$|\s*please\s*$|\s*i\s+think\s+(?:its?|it'?s)\s*(?!\d)/i;
 // Ordering-instruction tails: the "…add to basket and go to checkout" half of an order goal
 // describes what to DO with the product, not what to search for. Passing it through produced
 // garbage queries ("add a wireless mouse to basket and go to checkout") that opened every
@@ -1946,11 +2001,12 @@ function tier0ProductLooksValid(name, searchTerm) {
   return tier0NameMatchesGoal(name, searchTerm);
 }
 
-function tier0FormatDone(name, price, html) {
+function tier0FormatDone(goal, searchTerm, name, price, html) {
   const deals = extractVisibleDeals(html || '');
   let text = `The ${name} is priced at ${price}.`;
   if (deals.length) text += ` Deals spotted: ${deals.slice(0, 3).join(', ')}.`;
-  return { type: 'done', text };
+  const completion = assessLookupCompletion({ goal, searchTerm, text, productName: name, price });
+  return completion.complete ? { type: 'done', text, productName: name, price } : null;
 }
 
 async function tryTier0HttpLookup(url, goal, searchTerm) {
@@ -1959,7 +2015,7 @@ async function tryTier0HttpLookup(url, goal, searchTerm) {
     if (!price) return null;
     const name = extractProductName(html);
     if (!tier0ProductLooksValid(name, searchTerm)) return null;
-    return tier0FormatDone(name, price, html);
+    return tier0FormatDone(goal, searchTerm, name, price, html);
   };
 
   try {
@@ -2042,9 +2098,11 @@ async function tryTier0SearchGrounding(url, goal, searchTerm) {
   let host = '';
   try { host = new URL(url).hostname.replace(/^www\./, ''); } catch {}
 
+  const factNames = Object.entries(requestedFacts(goal)).filter(([, required]) => required).map(([name]) => name.replace('departureTime', 'departure time').replace('reviews', 'review count'));
+  const requested = factNames.length ? factNames.join(', ') : 'the requested information';
   const prompt = host
-    ? `What is the current price of "${searchTerm}" on ${host}? Give the exact product name and price in GBP only. If you cannot find it on that specific site, say so — do not guess.`
-    : `What is the current price of "${searchTerm}" in the UK? Give the exact product name, retailer, and price in GBP. Do not guess.`;
+    ? `Find ${requested} for "${searchTerm}" on ${host}. Include the exact matching item name and every requested fact. If you cannot verify every requested fact on that specific site, say so — do not guess.`
+    : `Find ${requested} for "${searchTerm}" in the UK. Include the exact matching item name and every requested fact. Do not guess.`;
 
   try {
     const result = await withTimeout(
@@ -2064,11 +2122,10 @@ async function tryTier0SearchGrounding(url, goal, searchTerm) {
     const text = (result?.text || '').trim();
     if (!text) return null;
 
-    const hasPrice = /£\s*[\d]|[\d]+\s*(?:pounds?|gbp)/i.test(text);
     const admitsUnknown = /(?:couldn'?t|can'?t|don'?t|unable|not (?:able|find|found|available|listed|show)|no (?:price|result|listing)|sorry)/i.test(text);
-    if (!hasPrice || admitsUnknown) return null;
+    if (admitsUnknown) return null;
     if (TIER0_GENERIC_NAME.test(text)) return null;
-    if (!tier0NameMatchesGoal(text, searchTerm)) return null;
+    if (!assessLookupCompletion({ goal, searchTerm, text }).complete) return null;
 
     return { type: 'done', text };
   } catch {
@@ -2097,9 +2154,11 @@ async function tryTier0OpenAISearchGrounding(url, goal, searchTerm) {
   let host = '';
   try { host = new URL(url).hostname.replace(/^www\./, ''); } catch {}
 
+  const factNames = Object.entries(requestedFacts(goal)).filter(([, required]) => required).map(([name]) => name.replace('departureTime', 'departure time').replace('reviews', 'review count'));
+  const requested = factNames.length ? factNames.join(', ') : 'the requested information';
   const prompt = host
-    ? `What is the current price of "${searchTerm}" on ${host}? Give the exact product name and price in GBP only. If you cannot find it on that specific site, say so — do not guess.`
-    : `What is the current price of "${searchTerm}" in the UK? Give the exact product name, retailer, and price in GBP. Do not guess.`;
+    ? `Find ${requested} for "${searchTerm}" on ${host}. Include the exact matching item name and every requested fact. If you cannot verify every requested fact on that specific site, say so — do not guess.`
+    : `Find ${requested} for "${searchTerm}" in the UK. Include the exact matching item name and every requested fact. Do not guess.`;
 
   try {
     const res = await withTimeout(
@@ -2127,11 +2186,10 @@ async function tryTier0OpenAISearchGrounding(url, goal, searchTerm) {
       .trim();
     if (!text) return null;
 
-    const hasPrice = /£\s*[\d]|[\d]+\s*(?:pounds?|gbp)/i.test(text);
     const admitsUnknown = /(?:couldn'?t|can'?t|don'?t|unable|not (?:able|find|found|available|listed|show)|no (?:price|result|listing)|sorry)/i.test(text);
-    if (!hasPrice || admitsUnknown) return null;
+    if (admitsUnknown) return null;
     if (TIER0_GENERIC_NAME.test(text)) return null;
-    if (!tier0NameMatchesGoal(text, searchTerm)) return null;
+    if (!assessLookupCompletion({ goal, searchTerm, text }).complete) return null;
 
     return { type: 'done', text };
   } catch {
@@ -2441,7 +2499,35 @@ async function fillEmailInputDirect(session, email, steps, onProgress) {
     }
     return false;
   }, { patSrc: GUEST_CHECKOUT_PATTERN.source, patFlags: GUEST_CHECKOUT_PATTERN.flags }).catch(() => false);
-  if (hasGuestCta) return false;
+  // Some retailers keep a "Guest Checkout" tab visible after that guest path has already
+  // been selected (Chiltern does this beside its now-visible email fields). Once the
+  // session has actually entered guest checkout, that tab is navigation chrome, not a
+  // reason to refuse the checkout email form.
+  if (hasGuestCta && !session.guestCheckoutDone) return false;
+
+  // A number of guest checkouts ask for the address twice. Fill every visible real email
+  // input together; only filling the first leaves the confirmation field blank and its
+  // checkout button disabled (observed on Chiltern's guest form).
+  const typedEmailInputs = session.page.locator('input[type="email"]:visible');
+  const typedEmailCount = await typedEmailInputs.count().catch(() => 0);
+  if (typedEmailCount > 0) {
+    let filledCount = 0;
+    for (let i = 0; i < typedEmailCount; i++) {
+      const loc = typedEmailInputs.nth(i);
+      if (!(await isRealEmailInput(loc))) continue;
+      try {
+        await loc.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+        await loc.fill(String(email || ''), { timeout: 8000 });
+        filledCount++;
+      } catch { /* try the next visible address field */ }
+    }
+    if (filledCount > 0) {
+      onProgress('Typing into email field…');
+      session.checkoutEmailFilled = true;
+      session.history.push(`Step ${steps}: [checkout-profile] filled ${filledCount} email field${filledCount === 1 ? '' : 's'}`);
+      return true;
+    }
+  }
 
   const selectors = [
     'input[type="email"]:visible',
@@ -2602,7 +2688,8 @@ async function autoFillCheckoutEmail(session, elements, email, steps, onProgress
 const FORM_FIELD_SELECTOR = 'input, select, textarea';
 
 function buildCheckoutFieldValues(profile) {
-  const values = { title: 'Mr' };
+  const values = {};
+  if (profile.title) values.title = profile.title;
   if (profile.email) values.email = profile.email;
   if (profile.name) {
     const parts = String(profile.name).trim().split(/\s+/);
@@ -2618,6 +2705,53 @@ function buildCheckoutFieldValues(profile) {
     if (profile.address.postcode) values.postcode = profile.address.postcode;
   }
   return values;
+}
+
+// Every checkout form reaches this observer through the same adapter. It captures only
+// field metadata needed to decide whether an approved profile can complete the page:
+// never a value, never payment fields, and never a merchant-specific selector.
+async function findMissingCheckoutInformation(page, profile) {
+  const observedFields = await page.evaluate(({ paymentPatSrc, paymentPatFlags }) => {
+    const paymentPattern = new RegExp(paymentPatSrc, paymentPatFlags);
+    const fields = [];
+    for (const el of document.querySelectorAll('input, select, textarea')) {
+      const tag = el.tagName.toLowerCase();
+      const type = (el.getAttribute('type') || tag).toLowerCase();
+      if (type === 'hidden' || type === 'password' || type === 'checkbox' || type === 'radio') continue;
+      const style = window.getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      if (style.display === 'none' || style.visibility === 'hidden' || !box.width || !box.height) continue;
+      const id = el.getAttribute('id') || '';
+      const labelNode = (el.labels && el.labels[0])
+        || (id && document.querySelector(`label[for="${CSS.escape(id)}"]`))
+        || el.closest('label');
+      const hint = [
+        tag,
+        type,
+        el.getAttribute('name'),
+        id,
+        el.getAttribute('placeholder'),
+        el.getAttribute('aria-label'),
+        el.getAttribute('autocomplete'),
+        labelNode && labelNode.innerText,
+      ].filter(Boolean).join(' ');
+      if (paymentPattern.test(hint)) continue;
+      const empty = tag === 'select'
+        ? !(el.value && el.selectedIndex > 0)
+        : !String(el.value || '').trim();
+      fields.push({
+        hint,
+        empty,
+        required: el.required || el.getAttribute('aria-required') === 'true',
+      });
+    }
+    return fields;
+  }, {
+    paymentPatSrc: /\b(card\s*(?:number|details)?|credit\s*card|payment\s*details|cvv|cvc|security\s*code|sort\s*code|account\s*number|cc-(?:number|csc|exp|exp-month|exp-year))\b/.source,
+    paymentPatFlags: 'i',
+  }).catch(() => []);
+  const fields = missingCheckoutInformation(profile, observedFields);
+  return fields.length ? fields : null;
 }
 
 // Multi-field pass for delivery-details pages. Enumerates visible inputs/selects,
@@ -2777,7 +2911,7 @@ async function autoFillCheckoutDetails(session, profile, steps, onProgress) {
 
 // After a recipe click, wait for the DOM/URL state the NEXT recipe gate reads — stops the
 // Wickes basket/checkout double-fire (flyout not open yet → checkout invisible → spin).
-async function waitAfterRecipeStep(page, site, stepName, session) {
+async function waitAfterRecipeStep(page, site, stepName, session, onProgress = () => {}) {
   // Generic "did the add actually land in the cart" detector — one implementation for every
   // site instead of a hand-written badge-selector function per site (jl/nike/asos/m&s/
   // screwfix/currys/waitrose used to each have their own copy of this same three-signal
@@ -3335,7 +3469,12 @@ async function tryAdvanceCheckoutStep(session, page, steps, onProgress, { allowS
 
 // True when the guest-labelled control is the email-step submit (Currys/M&S), not a login fork.
 function guestEmailSubmitLocator(page) {
-  return page.locator('button, a, [role="button"], input[type="submit"]').filter({ hasText: /continue as guest|guest checkout/i }).first();
+  // Prefer a real email-form submitter before generic guest-tab labels. Chiltern leaves a
+  // "Guest Checkout" tab visible after the form is active; clicking that tab again is a
+  // no-op, while its actual submit control reads "Continue to Checkout".
+  return page.getByRole('button', { name: /continue (?:to )?checkout|confirm email address/i }).first()
+    .or(page.locator('input[type="submit"], button').filter({ hasText: /continue (?:to )?checkout|confirm email address/i }).first())
+    .or(page.locator('button, a, [role="button"], input[type="submit"]').filter({ hasText: /continue as guest|guest checkout/i }).first());
 }
 
 async function isGuestEmailSubmitStep(page) {
@@ -3530,6 +3669,10 @@ async function completeCheckoutEmailFill(session, userId, page, steps, onProgres
 // here — the one place every ready_for_payment path funnels through — before declaring
 // the page ready, regardless of which call site noticed the pay button first.
 async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) {
+  // A visible "buy" label alone is not enough while the retailer is still loading the
+  // search results. Wait for a concrete fare/cart state rather than handing an empty
+  // basket to payment confirmation.
+  if (await isPaymentHandoffBlockedByLoading(page)) return null;
   const elements = await extractClickableElements(page).catch(() => []);
   const payEl = elements.find((el) => matchesPaymentKeyword(el.text));
   const paymentUrl = !payEl && isCheckoutPaymentUrl(page.url());
@@ -3567,6 +3710,15 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
     const profile = session.checkoutProfile;
     if (profile?.consent && (profile.phone || profile.name || profile.address)) {
       await autoFillCheckoutDetails(session, profile, steps, onProgress).catch(() => {});
+    }
+    const missingInformation = await findMissingCheckoutInformation(page, profile || {});
+    if (missingInformation) {
+      const labels = describeCheckoutInformation(missingInformation);
+      return {
+        type: 'needs_user_information',
+        fields: missingInformation,
+        question: `I need your ${labels.join(', ')} to finish this checkout.`,
+      };
     }
     session.pendingPaymentLabel = payEl ? payEl.text : 'Pay';
     return { type: 'ready_for_payment', summary: 'Checkout — payment step', total: '' };
@@ -3782,9 +3934,9 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
     let openUrl = url;
     let priorHistory = null;
     if (!openUrl && goal) {
-      const retailer = resolveRetailerFromGoal(goal, retailOptions);
+      const retailer = resolveRailTicketProvider(goal) || resolveRetailerFromGoal(goal, retailOptions);
       if (retailer) {
-        openUrl = retailer.homeUrl;
+        openUrl = retailer.kind === 'rail' ? (buildChilternRailSearchUrl(goal) || retailer.homeUrl) : retailer.homeUrl;
         onProgress(`Opening ${retailer.displayName}…`);
       }
     }
@@ -4441,16 +4593,19 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           }
         }
       }
-      const searchPick = session.isOrder ? await tryOrderSearchPick(session.page, session) : null;
       // A learned recipe only ever applies where there's no hand-authored one — never
       // override a curated recipe with something the loop taught itself.
-      const learnedRecipe = RECIPES_ENABLED && !RECIPES[session.site] ? learnedRecipeStore.getLearnedRecipe(session.site) : null;
+      const canUseOrderingAutomation = shouldUseOrderingAutomation(session);
+      // Search-result picking is an ordering move too: on a lookup it can silently turn a
+      // question such as "what is the cheapest price" into an add-to-basket journey.
+      const searchPick = canUseOrderingAutomation ? await tryOrderSearchPick(session.page, session) : null;
+      const learnedRecipe = canUseOrderingAutomation && RECIPES_ENABLED && !RECIPES[session.site] ? learnedRecipeStore.getLearnedRecipe(session.site) : null;
       // Shopify checkout is capability-selected: once the platform tier detects Shopify, its
       // standardized checkout is driven by the SHOPIFY recipe (see resolveShopifyCheckout) rather
       // than the generic CONVENTION tail, whose selectors don't fit Shopify. A hand-authored
       // host recipe still wins if one ever exists for a Shopify store.
-      const shopifyRecipe = RECIPES_ENABLED && session.isShopify && !RECIPES[session.site] ? SHOPIFY : null;
-      const recipe = RECIPES_ENABLED ? (learnedRecipe || shopifyRecipe || selectRecipeForHost(session.site)) : null;
+      const shopifyRecipe = canUseOrderingAutomation && RECIPES_ENABLED && session.isShopify && !RECIPES[session.site] ? SHOPIFY : null;
+      const recipe = canUseOrderingAutomation && RECIPES_ENABLED ? (learnedRecipe || shopifyRecipe || selectRecipeForHost(session.site)) : null;
       let recipeMove = !searchPick && recipe ? await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null) : null;
 
       // Poll for cart confirmation before re-firing "add" — an unconfirmed add would
@@ -4459,7 +4614,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       // be seven near-identical per-site copies of this same two-step pattern (poll, then
       // re-derive the next recipe move once confirmed or given up on).
       if (!isDeliveryHost(session.site) && session.cartAddSent && !session.cartAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'add', session);
+        await waitAfterRecipeStep(session.page, session.site, 'add', session, onProgress);
         if (!session.cartAddConfirmed && session.site === 'johnlewis.com') {
           // John Lewis specifically: a direct /basket nav is itself strong confirmation and
           // also gets the order further along, so it's worth the extra round-trip here in a
@@ -4478,7 +4633,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
       // Delivery: modal-add must register in the cart before re-clicking Add.
       if (isDeliveryHost(session.site) && session.deliveryAddSent && !session.deliveryAddConfirmed) {
-        await waitAfterRecipeStep(session.page, session.site, 'modal-add', session);
+        await waitAfterRecipeStep(session.page, session.site, 'modal-add', session, onProgress);
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
       if (recipeMove?.stepName === 'modal-add' && session.deliveryAddSent && session.deliveryAddConfirmed) {
@@ -4727,7 +4882,6 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
 
       if (decision.action === 'done') {
-        await checkpointBrowserState(session, { nextIntendedAction: null, lastObservation: decision.summary || null });
         // For an order, "done" inside the loop is always premature — a real order only
         // completes via ready_for_payment → confirmPayment. Don't throw away the cart.
         if (session.isOrder) {
@@ -4738,6 +4892,21 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           }
           continue;
         }
+        const lookupCompletion = assessLookupCompletion({
+          goal: session.goal,
+          searchTerm: deriveSearchTerm(session.goal, { names: [session.site?.split('.')[0] || ''] }) || session.goal,
+          text: decision.summary,
+          productName: decision.productName,
+          price: decision.price,
+        });
+        if (!lookupCompletion.complete) {
+          consecutiveBadDecisions += 1;
+          pendingCorrection = lookupCompletionCorrection(lookupCompletion.missing);
+          session.history.push(`Step ${steps}: rejected incomplete lookup completion (missing ${lookupCompletion.missing.join(', ')})`);
+          if (consecutiveBadDecisions >= 3) return STUCK();
+          continue;
+        }
+        await checkpointBrowserState(session, { nextIntendedAction: null, lastObservation: decision.summary || null });
         // Goal answered via a fast-path → the learned/seed template worked; reward it.
         if (session.usedFastpath) fastpathStore.recordOutcome(session.usedFastpath, true);
         // Keep the browser open on a finished lookup: "what's the price of X" is often followed
@@ -4902,14 +5071,28 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         // Info/lookup goals must never enter the payment handoff — treat a price summary as done.
         if (!session.isOrder) {
           const summary = String(decision.summary || decision.total || '').trim();
-          if (summary && /£\s*[\d]/.test(summary)) {
+          const lookupCompletion = assessLookupCompletion({
+            goal: session.goal,
+            searchTerm: deriveSearchTerm(session.goal, { names: [session.site?.split('.')[0] || ''] }) || session.goal,
+            text: summary,
+            productName: decision.productName,
+            price: decision.price || decision.total,
+          });
+          if (lookupCompletion.complete) {
             touchSession(userId);
             await persistStorage(userId, session);
             return { type: 'done', text: summary };
           }
           consecutiveBadDecisions += 1;
-          session.history.push(`Step ${steps}: ignored ready_for_payment on info lookup`);
+          pendingCorrection = lookupCompletionCorrection(lookupCompletion.missing);
+          session.history.push(`Step ${steps}: ignored incomplete ready_for_payment on info lookup (missing ${lookupCompletion.missing.join(', ')})`);
           if (consecutiveBadDecisions >= 3) return STUCK();
+          continue;
+        }
+        if (await isPaymentHandoffBlockedByLoading(session.page)) {
+          session.history.push(`Step ${steps}: deferred payment handoff while the retailer is still loading results`);
+          consecutiveBadDecisions = 0;
+          await settle(session.page, RECIPE_SETTLE_MS);
           continue;
         }
         const rfpProductName = decision.productName ? String(decision.productName).trim() : undefined;
@@ -5009,7 +5192,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
           session.recipeStepRepeats = 0;
           stepsSinceProgress = 0;
           stepsSinceNewState = 0;
-          await waitAfterRecipeStep(session.page, session.site, recipeStepName, session);
+          await waitAfterRecipeStep(session.page, session.site, recipeStepName, session, onProgress);
         }
         consecutiveBadDecisions = 0;
         consecutiveWaits = 0;
@@ -5033,7 +5216,15 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         }
       }
 
-      if (matchesPaymentKeyword(target.text)) {
+      if (matchesPaymentKeyword(target.text) && !session.isOrder) {
+        consecutiveBadDecisions += 1;
+        pendingCorrection = 'This is a read-only lookup. Do not open checkout or click a Buy/Pay control; extract the requested facts from the product or results page.';
+        session.history.push(`Step ${steps}: suppressed checkout control "${target.text}" on lookup goal`);
+        if (consecutiveBadDecisions >= 3) return STUCK();
+        continue;
+      }
+
+      if (matchesPaymentKeyword(target.text) && !(await isPaymentHandoffBlockedByLoading(session.page))) {
         session.pendingPaymentLabel = target.text;
         session.pendingPaymentTotal = '';
         return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
@@ -5479,7 +5670,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
             session.stepsSinceCartProgress = stepsSinceCartProgress;
           }
           session.lastWasRecipe = true;
-          await waitAfterRecipeStep(session.page, session.site, recipeStepName, session);
+          await waitAfterRecipeStep(session.page, session.site, recipeStepName, session, onProgress);
           if (recipeStepName === 'add') {
             // Always verify now that the detector is generic and cheap — the old allowlist
             // (probe only on 6 named sites, trust everyone else blind) was itself part of
@@ -6128,6 +6319,7 @@ module.exports = {
   tryTier0PriceLookup,
   tier0NameMatchesGoal,
   matchesPaymentKeyword,
+  isPaymentHandoffBlockedByLoading,
   isCheckoutishUrl,
   isTechnicalAsk,
   isCheckoutLoginWallUrl,
@@ -6146,6 +6338,7 @@ module.exports = {
   detectBlockWall,
   describesBlockWall,
   isOrderGoal,
+  shouldUseOrderingAutomation,
   assessProgress,
   shouldAttemptTextOnlyDecision,
   isTextOnlyDeclined,
@@ -6170,6 +6363,7 @@ module.exports = {
   CLICKABLE_SELECTOR,
   runOrderingTurn,
   siteKeyFromUrl,
+  buildChilternRailSearchUrl,
   siteInScope,
   makePersistingProgress,
   shouldRecordEntity,

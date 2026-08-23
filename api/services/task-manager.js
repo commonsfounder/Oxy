@@ -6,49 +6,16 @@ function getSupabase() {
   return supabase;
 }
 
-async function createTask(userId, goal, options = {}) {
-  const sb = getSupabase();
-  const { data, error } = await sb.from('agent_tasks').insert({
-    user_id: userId,
-    goal,
-    status: 'pending',
-    plan: options.plan || null,
-    autonomy: options.autonomy || 'Active',
-    metadata: options.metadata || {}
-  }).select().single();
-  if (error) throw error;
-  return data;
+let defaultTaskManager;
+function getDefaultTaskManager() {
+  if (!defaultTaskManager) defaultTaskManager = createTaskManager(getSupabase());
+  return defaultTaskManager;
 }
 
-async function getTask(userId, taskId) {
-  const sb = getSupabase();
-  const { data } = await sb.from('agent_tasks')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('id', taskId)
-    .maybeSingle();
-  return data;
-}
-
-async function listTasks(userId, statusFilter = null) {
-  const sb = getSupabase();
-  let q = sb.from('agent_tasks').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
-  if (statusFilter) q = q.eq('status', statusFilter);
-  const { data } = await q;
-  return data || [];
-}
-
-async function updateTask(userId, taskId, updates) {
-  const sb = getSupabase();
-  const { data, error } = await sb.from('agent_tasks')
-    .update({ ...updates, updated_at: new Date().toISOString() })
-    .eq('user_id', userId)
-    .eq('id', taskId)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
+async function createTask(...args) { return getDefaultTaskManager().createTask(...args); }
+async function getTask(...args) { return getDefaultTaskManager().getTask(...args); }
+async function listTasks(...args) { return getDefaultTaskManager().listTasks(...args); }
+async function updateTask(...args) { return getDefaultTaskManager().updateTask(...args); }
 
 /*
  * Atomically claim a task for one background run. The old read-then-update shape
@@ -56,44 +23,12 @@ async function updateTask(userId, taskId, updates) {
  * checkpoint. The status (and, for stale running rows, heartbeat) is part of the
  * update predicate, so only one caller receives the claimed row.
  */
-async function claimRun(userId, taskId, { now = new Date(), allowAwaitingApproval = false } = {}) {
-  const sb = getSupabase();
-  const task = await getTask(userId, taskId);
-  if (!task) return null;
-
-  const status = String(task.status || '').toLowerCase();
-  const active = isRunActive(task, now);
-  const staleRunning = status === 'running' && !active;
-  const claimable = ['pending', 'paused', 'failed'].includes(status) || staleRunning;
-  if (!claimable || (task.metadata?.awaitingApproval === true && !allowAwaitingApproval)) return null;
-
-  const updates = {
-    status: 'running',
-    heartbeat_at: now.toISOString(),
-    attempt: (task.attempt || 0) + 1,
-    last_error: null,
-    updated_at: now.toISOString()
-  };
-  let query = sb.from('agent_tasks')
-    .update(updates)
-    .eq('user_id', userId)
-    .eq('id', taskId)
-    .eq('status', task.status);
-  if (status === 'running') {
-    // Supabase/PostgREST treats SQL NULL as a missing value, not as a literal that
-    // `.eq()` can match. A freshly claimed row can therefore have a null heartbeat
-    // in tests/older schemas; keep the compare-and-set atomic in that case too.
-    query = task.heartbeat_at === null
-      ? query.is('heartbeat_at', null)
-      : query.eq('heartbeat_at', task.heartbeat_at);
-  }
-
-  const { data, error } = await query.select().maybeSingle();
-  if (error || !data) return null;
-  return data;
-}
+async function claimRun(...args) { return getDefaultTaskManager().claimRun(...args); }
 
 async function appendResultToTask(userId, taskId, resultEntry) {
+  // Compatibility only. This read/modify/write operation is not safe under
+  // concurrent delegated runs and is intentionally excluded from lifecycle
+  // settlement. New code must write the complete owned result set instead.
   const task = await getTask(userId, taskId);
   if (!task) return null;
   const results = Array.isArray(task.results) ? task.results : [];
@@ -101,16 +36,7 @@ async function appendResultToTask(userId, taskId, resultEntry) {
   return updateTask(userId, taskId, { results, current_step: (task.current_step || 0) + 1 });
 }
 
-async function saveTrace(taskId, userId, step, type, data) {
-  const sb = getSupabase();
-  await sb.from('agent_traces').insert({
-    task_id: taskId,
-    user_id: userId,
-    step,
-    type,
-    data
-  }).catch(() => {});
-}
+async function saveTrace(...args) { return getDefaultTaskManager().saveTrace(...args); }
 
 async function completeTask(userId, taskId, finalStatus = 'completed') {
   return updateTask(userId, taskId, {
@@ -161,21 +87,7 @@ async function saveCheckpoint(userId, taskId, checkpoint) {
  * checkpoint is intact, so the work is resumable and calling it a failure would throw away
  * everything already done.
  */
-async function recoverStaleRuns(now = new Date(), staleMs = STALE_RUN_MS) {
-  const sb = getSupabase();
-  const cutoff = new Date(now.getTime() - staleMs).toISOString();
-  const { data, error } = await sb.from('agent_tasks')
-    .update({
-      status: 'paused',
-      last_error: 'Run was interrupted before it finished. Resume to continue where it stopped.',
-      updated_at: now.toISOString()
-    })
-    .eq('status', 'running')
-    .lt('heartbeat_at', cutoff)
-    .select('id, user_id, goal');
-  if (error) return [];
-  return data || [];
-}
+async function recoverStaleRuns(...args) { return getDefaultTaskManager().recoverStaleRuns(...args); }
 
 function isRunActive(task, now = new Date(), staleMs = STALE_RUN_MS) {
   if (task?.status !== 'running') return false;
@@ -236,17 +148,107 @@ async function listRecipes(userId) {
   }));
 }
 
-async function executeRecipe(userId, recipeId, overrides = {}) {
-  const task = await getTask(userId, recipeId);
-  if (!task || task.status !== 'recipe') throw new Error('Recipe not found');
-  const plan = task.plan || {};
-  const goal = overrides.goal || plan.goalTemplate || task.goal;
-  // Create a real persistent task from the recipe. User or sweep can trigger agent run.
-  const newTask = await createTask(userId, goal, { autonomy: 'High', plan: plan.steps || [], metadata: { fromRecipe: recipeId } });
-  return { recipeId, newTaskId: newTask.id, started: true, note: 'Task created. Use /agent/tasks/:id/run or high autonomy chat to execute.' };
+/*
+ * Explicit-client store for deep services and tests. The legacy exports below
+ * retain their compatibility surface, but new lifecycle code can no longer
+ * acquire a hidden Supabase client through this module.
+ */
+function createTaskManager(client) {
+  if (!client) throw new TypeError('createTaskManager requires a Supabase client');
+  const sb = client;
+  const store = {
+    async createTask(userId, goal, options = {}) {
+      const { data, error } = await sb.from('agent_tasks').insert({
+        user_id: userId,
+        goal,
+        status: 'pending',
+        plan: options.plan || null,
+        autonomy: options.autonomy || 'Active',
+        metadata: options.metadata || {}
+      }).select().single();
+      if (error) throw error;
+      return data;
+    },
+    async getTask(userId, taskId) {
+      const { data, error } = await sb.from('agent_tasks').select('*')
+        .eq('user_id', userId).eq('id', taskId).maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    async listTasks(userId, statusFilter = null) {
+      let query = sb.from('agent_tasks').select('*').eq('user_id', userId)
+        .order('created_at', { ascending: false }).limit(50);
+      if (statusFilter) query = query.eq('status', statusFilter);
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    async updateTask(userId, taskId, updates) {
+      const { data, error } = await sb.from('agent_tasks').update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('id', taskId).select().single();
+      if (error) throw error;
+      return data;
+    },
+    async updateRun(userId, taskId, attempt, updates) {
+      const { data, error } = await sb.from('agent_tasks')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('id', taskId).eq('status', 'running').eq('attempt', attempt)
+        .select().maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('The delegated run no longer owns this task.');
+      return data;
+    },
+    async updateTaskCas(userId, taskId, expectedStatus, expectedAttempt, updates) {
+      let query = sb.from('agent_tasks').update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('id', taskId).eq('status', expectedStatus);
+      if (expectedAttempt != null) query = query.eq('attempt', expectedAttempt);
+      const { data, error } = await query.select().maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error('The delegated run changed before this write completed.');
+      return data;
+    },
+    async claimRun(userId, taskId, options = {}) {
+      const now = options.now || new Date();
+      const task = await store.getTask(userId, taskId);
+      if (!task) return null;
+      const status = String(task.status || '').toLowerCase();
+      const active = isRunActive(task, now);
+      const staleRunning = status === 'running' && !active;
+      const claimable = ['pending', 'paused', 'failed'].includes(status) || staleRunning;
+      if (!claimable || (task.metadata?.awaitingApproval === true && !options.allowAwaitingApproval)) return null;
+      let query = sb.from('agent_tasks').update({
+        status: 'running', heartbeat_at: now.toISOString(), attempt: (task.attempt || 0) + 1,
+        last_error: null, updated_at: now.toISOString()
+      }).eq('user_id', userId).eq('id', taskId).eq('status', task.status);
+      query = status === 'running'
+        ? (task.heartbeat_at === null ? query.is('heartbeat_at', null) : query.eq('heartbeat_at', task.heartbeat_at))
+        : query;
+      const { data, error } = await query.select().maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+    async saveTrace(taskId, userId, step, type, data) {
+      const { error } = await sb.from('agent_traces').insert({ task_id: taskId, user_id: userId, step, type, data });
+      if (error) throw error;
+      return { saved: true };
+    },
+    trimCheckpoint,
+    async recoverStaleRuns(now = new Date(), staleMs = STALE_RUN_MS) {
+      const cutoff = new Date(now.getTime() - staleMs).toISOString();
+      const { data, error } = await sb.from('agent_tasks').update({
+        status: 'paused', heartbeat_at: null,
+        last_error: 'Run was interrupted before it finished. Resume to continue where it stopped.',
+        updated_at: now.toISOString()
+      }).eq('status', 'running').lt('heartbeat_at', cutoff).select('id, user_id, goal, metadata, checkpoint, status, attempt');
+      if (error) throw error;
+      return data || [];
+    }
+  };
+  return store;
 }
 
 module.exports = {
+  createTaskManager,
   createTask,
   getTask,
   listTasks,
@@ -263,6 +265,5 @@ module.exports = {
   recordSimulation,
   getRecentSimulations,
   saveRecipe,
-  listRecipes,
-  executeRecipe
+  listRecipes
 };

@@ -48,7 +48,7 @@ function conciergeMoneyReviewDetail(action, cardInfo) {
     const brand = cardInfo.brand ? `${cardInfo.brand} ` : '';
     return `Charge your ${brand}card ending in ${cardInfo.last4} ${amountStr} for ${description}.`;
   }
-  return `Spend ${amountStr} from your concierge balance for ${description}.`;
+  return `Charge your linked payment method ${amountStr} for ${description}.`;
 }
 
 function reviewTitleForAction(action) {
@@ -182,7 +182,8 @@ function buildPendingReviewResult(action, cardInfo = null) {
                   ? 'Check the order, then tap Place order.'
                 : `${reviewTitleForAction(action)}. Check the details, then tap Confirm or Cancel.`;
   return applyActionContractResultMetadata(action, {
-    success: true,
+    success: false,
+    outcome: 'awaiting_user',
     pending: true,
     text: prompt,
     cardText: reviewDetailForAction(action, cardInfo) || 'Ready for review.',

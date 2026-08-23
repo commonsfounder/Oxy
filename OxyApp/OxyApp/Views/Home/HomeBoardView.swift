@@ -12,17 +12,25 @@ struct LiveWorkHeader: View {
         HStack(spacing: 10) {
             PulsingWorkDot(active: true)
 
-            Text(label)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(GlebChrome.ink.opacity(0.8))
-                .contentTransition(.numericText())
+            VStack(alignment: .leading, spacing: 2) {
+                Text("LIVE")
+                    .font(.appBody(10, weight: .bold))
+                    .tracking(1.7)
+                    .foregroundStyle(Color.appAccent)
+                Text(label)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(GlebChrome.ink.opacity(0.82))
+                    .contentTransition(.numericText())
+            }
 
             Spacer(minLength: 0)
+
+            AppIcon("arrow-right", size: 13)
+                .foregroundStyle(GlebChrome.ink.opacity(0.32))
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(Capsule().fill(Color.appSurface))
-        .overlay(Capsule().strokeBorder(Color.appHairline, lineWidth: 0.5))
+        .padding(.horizontal, 15)
+        .padding(.vertical, 13)
+        .background { MissionGlassPlate() }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
@@ -77,14 +85,14 @@ struct BoardLaneSection: View {
             HStack(spacing: 8) {
                 Text(lane.title)
                     .font(.appBody(14, weight: .semibold))
-                    .foregroundStyle(GlebChrome.ink.opacity(lane == .needsYou ? 0.75 : 0.42))
+                    .foregroundStyle(GlebChrome.ink.opacity(lane == .needsYou ? 0.82 : 0.52))
 
                 Text("\(items.count)")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(GlebChrome.ink.opacity(0.5))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(GlebChrome.ink.opacity(0.07)))
+                    .background(Capsule().fill(Color.appAccent.opacity(lane == .needsYou ? 0.12 : 0.07)))
 
                 Spacer(minLength: 0)
             }

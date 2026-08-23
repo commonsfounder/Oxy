@@ -382,6 +382,22 @@ const DELIVERY = {
 // Host-keyed registry. Selectors prefer durable attributes; visible text is last.
 // NOTE: John Lewis product-page URLs end in `/pNNNNNN`; basket is `/basket`; checkout `/checkout`.
 const RECIPES = {
+  'thetrainline.com': {
+    phases: { journey: () => true },
+    size: { container: [], chip: [], selected: [] },
+    steps: [
+      { phase: 'journey', name: 'trainline-journey', resolve: (a) => resolveTrainlineJourney(a) },
+    ],
+  },
+
+  'chilternrailways.co.uk': {
+    phases: { journey: () => true },
+    size: { container: [], chip: [], selected: [] },
+    steps: [
+      { phase: 'journey', name: 'chiltern-journey', resolve: (a) => resolveChilternJourney(a) },
+    ],
+  },
+
   'johnlewis.com': {
     phases: {
       product:  (u) => /\/p\d+(?:\b|\/|$)/i.test(u.pathname),
@@ -1135,6 +1151,421 @@ async function resolveSizeMove({ page, session, recipe, clickable }) {
   return { action: 'click', locatorIndex: chips[pick].idx, text: chips[pick].label, stepName: 'size' };
 }
 
+// Trainline's station autocomplete is a real choice, not free text. The generic loop can
+// type both station names and then drift into a grouped suggestion such as "London (Any)".
+// Keep the mechanical form work deterministic: fill one field, then select the exact
+// station suggestion before moving on to the next field. The requested travel date is
+// also a deterministic form value; time and the actual fare remain live decisions in
+// the normal browser loop.
+function parseTrainlineJourney(text) {
+  const match = String(text || '').match(/\bfrom\s+(.+?)\s+to\s+(.+?)(?=\s+(?:on|for|arriv(?:e|ing)|by)\b|[,.]|$)/i);
+  if (!match) return null;
+  const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+  const origin = clean(match[1]);
+  const destination = clean(match[2]);
+  return origin && destination ? { origin, destination } : null;
+}
+
+function parseTrainlineDate(text) {
+  const months = 'january|february|march|april|may|june|july|august|september|october|november|december';
+  const match = String(text || '').match(new RegExp(`\\b(?:on\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)?\\s*(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${months})(?:\\s+(20\\d{2}))?\\b`, 'i'));
+  if (!match) return null;
+  const day = Number(match[1]);
+  if (day < 1 || day > 31) return null;
+  return {
+    day,
+    month: match[2].charAt(0).toUpperCase() + match[2].slice(1).toLowerCase(),
+    year: match[3] ? Number(match[3]) : new Date().getFullYear(),
+  };
+}
+
+function parseTrainlineArrivalHour(text) {
+  const match = String(text || '').match(/\barriv(?:e|ing)(?:\s+by)?\s+(\d{1,2})(?::\d{2})?\s*(am|pm)?\b/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  if (hour > 23) return null;
+  if (/pm/i.test(match[2] || '') && hour < 12) hour += 12;
+  if (/am/i.test(match[2] || '') && hour === 12) hour = 0;
+  return hour;
+}
+
+// A return is a separate, material part of a rail search: stations and the outward
+// arrival time alone are not enough to produce a usable round-trip fare. For an
+// event-night request with no explicit return time, use 23:00 as a conservative
+// *provisional* departure. The caller still stops at payment review, where the
+// user can see and amend that assumption before any charge is possible.
+function parseTrainReturn(text) {
+  const goal = String(text || '');
+  if (!/\b(?:return|round[ -]?trip)\b/i.test(goal)) return null;
+  const match = goal.match(/\b(?:return(?:ing)?|back)\b[\s\S]{0,60}?\b(?:after|at)\s+(\d{1,2})(?::\d{2})?\s*(am|pm)?\b/i);
+  let hour = match ? Number(match[1]) : null;
+  if (hour != null && (hour > 23 || hour < 0)) hour = null;
+  if (hour != null && /pm/i.test(match[2] || '') && hour < 12) hour += 12;
+  if (hour != null && /am/i.test(match[2] || '') && hour === 12) hour = 0;
+  return {
+    // The supplied journey date is the only date in a same-night concert request.
+    // This is deliberately surfaced in the payment-review receipt rather than hidden.
+    hour: hour == null ? 23 : hour,
+    assumedHour: hour == null,
+  };
+}
+
+async function resolveTrainlineStation({ page, station, field, clickable }) {
+  return page.evaluate(({ station, field, clickableSelector, probe }) => {
+    const normalise = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const wanted = normalise(station);
+    const visible = el => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const label = el => [el.innerText, el.value, el.getAttribute('aria-label'), el.getAttribute('title')]
+      .filter(Boolean).join(' ');
+    const all = [...document.querySelectorAll(clickableSelector)];
+    const fieldPattern = field === 'departure' ? /departure station/i : /arrival station/i;
+    // Labels and wrapping buttons may share the station wording. Only the real combobox
+    // exposes the selected state in aria-label, so examine it before those wrappers.
+    const fields = [...document.querySelectorAll('input[aria-label], [role="combobox"][aria-label]')];
+    const fieldElement = fields.find(el => fieldPattern.test(label(el)) && visible(el))
+      || all.find(el => fieldPattern.test(label(el)) && visible(el));
+    if (!fieldElement) return { kind: 'missing' };
+    // `input.value` becomes the typed station before Trainline has accepted the autocomplete
+    // option, so it must not count as selected. The control's aria label changes to
+    // "<station> selected" only after the site has committed the choice.
+    const fieldAria = normalise(fieldElement.getAttribute('aria-label'));
+    if (fieldAria.includes(wanted) && /\bselected\b/.test(fieldAria)) return { kind: 'selected' };
+
+    const suggestions = all
+      .filter(el => visible(el) && !fieldPattern.test(label(el)))
+      .map((el, locatorIndex) => ({ el, locatorIndex, text: String(el.innerText || el.getAttribute('aria-label') || el.value || '').trim() }))
+      .filter(candidate => normalise(candidate.text).includes(wanted));
+    if (suggestions.length) {
+      suggestions.sort((a, b) => a.text.length - b.text.length);
+      const choice = suggestions[0];
+      return { kind: 'suggestion', locatorIndex: all.indexOf(choice.el), text: choice.text };
+    }
+    return { kind: 'input', locatorIndex: all.indexOf(fieldElement), text: field === 'departure' ? 'Departure station' : 'Arrival station', probe };
+  }, { station, field, clickableSelector: clickable, probe: 'trainlineStation' }).catch(() => ({ kind: 'missing' }));
+}
+
+async function resolveTrainlineDate({ page, date, clickable }) {
+  return page.evaluate(({ date, clickableSelector, probe }) => {
+    const visible = el => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const text = el => String(el.innerText || el.getAttribute('aria-label') || el.value || '').replace(/\s+/g, ' ').trim();
+    const all = [...document.querySelectorAll(clickableSelector)];
+    // The visible month heading is occasionally aria-hidden, so body innerText alone is
+    // not a reliable signal. The month-navigation control is an exposed, stable marker
+    // for this popup on the production form.
+    const calendarOpen = new RegExp(`\\b${date.month}\\s+${date.year}\\b`, 'i').test(document.body.innerText || '')
+      || all.some(el => visible(el) && /go to the (?:previous|next) month/i.test(text(el)));
+    if (!calendarOpen) {
+      const opener = all.find(el => visible(el) && /date and time of departure|\bout\b/i.test(text(el)));
+      return opener ? { kind: 'open', locatorIndex: all.indexOf(opener), text: text(opener) } : { kind: 'missing' };
+    }
+    // Calendar-day cells include a displayed fare (for example, "19 £18"). Pick only
+    // the exact day at the start of the cell so no fare, month navigation, or time field
+    // can be mistaken for the requested date.
+    const dayPattern = new RegExp(`^${date.day}(?:\\s|$)`);
+    const opener = all.find(el => visible(el) && /date and time of departure|\bout\b/i.test(text(el)));
+    const day = all.find(el => visible(el) && dayPattern.test(text(el)));
+    return day ? {
+      kind: 'day', locatorIndex: all.indexOf(day), text: text(day),
+      openerIndex: opener ? all.indexOf(opener) : -1, openerText: opener ? text(opener) : '',
+    } : { kind: 'missing' };
+  }, { date, clickableSelector: clickable, probe: 'trainlineDate' }).catch(() => ({ kind: 'missing' }));
+}
+
+async function resolveTrainlineJourney({ page, session, clickable }) {
+  if (session?.trainlineJourneyDone) return null;
+  const journey = parseTrainlineJourney(session?.goal);
+  if (!journey) return null;
+
+  const stages = [
+    ['origin', journey.origin, 'departure'],
+    ['destination', journey.destination, 'arrival'],
+  ];
+  for (const [key, station, field] of stages) {
+    if (session[`trainline${key[0].toUpperCase()}${key.slice(1)}Selected`]) continue;
+    const move = await resolveTrainlineStation({ page, station, field, clickable });
+    if (move.kind === 'selected') {
+      session[`trainline${key[0].toUpperCase()}${key.slice(1)}Selected`] = true;
+      session.trainlineJourneyStage = `${key}-selected`;
+      continue;
+    }
+    if (move.kind === 'suggestion') {
+      session.trainlineJourneyStage = `${key}-selecting`;
+      return { action: 'click', locatorIndex: move.locatorIndex, text: move.text, stepName: `trainline-${key}` };
+    }
+    if (move.kind === 'input') {
+      // Trainline binds an autocomplete option to the field that currently owns keyboard
+      // focus. Routing the option through the generic click executor can lose that focus
+      // between a fill and click, assigning the station to the other field. Fill and accept
+      // the first exact-match suggestion as one native interaction instead.
+      if (page?.keyboard && typeof page.locator === 'function') {
+        // Do not carry a broad selector index across an autocomplete re-render. Trainline
+        // replaces the departure field after selection, so the old index can resolve to its
+        // station-swap button. The field's accessible-name prefix and option role are stable.
+        const ariaPrefix = field === 'departure' ? 'Departure station' : 'Arrival station';
+        const input = page.locator(`input[aria-label^="${ariaPrefix}"]`).first();
+        if (await input.count()) {
+          await input.fill(station);
+          await page.waitForTimeout(350);
+          const option = page.locator('[role="option"]').filter({ hasText: station }).first();
+          // Trainline keeps an XHR spinner alive after a choice; do not let Playwright wait
+          // for that unrelated network activity before the next resolver pass checks the
+          // field's selected aria label.
+          if (await option.count()) await option.click({ noWaitAfter: true, timeout: 3000 });
+          else {
+            await page.keyboard.press('ArrowDown');
+            await page.keyboard.press('Enter');
+          }
+          await page.waitForTimeout(150);
+          session.trainlineJourneyStage = `${key}-committed`;
+          return { action: 'wait', text: `Selected ${station}`, stepName: `trainline-${key}` };
+        }
+      }
+      const fillStage = `${key}-filled`;
+      if (session.trainlineJourneyStage === fillStage) {
+        session.trainlineJourneyStage = `${key}-waiting-for-suggestions`;
+        return { action: 'wait', text: `Waiting for ${station} suggestions`, stepName: `trainline-${key}` };
+      }
+      session.trainlineJourneyStage = fillStage;
+      return { action: 'fill', locatorIndex: move.locatorIndex, value: station, text: move.text, stepName: `trainline-${key}` };
+    }
+    return null;
+  }
+  if (!session.trainlineDateSelected) {
+    const date = parseTrainlineDate(session.goal);
+    if (date) {
+      const move = await resolveTrainlineDate({ page, date, clickable });
+      if (move.kind === 'open') {
+        session.trainlineJourneyStage = 'date-opening';
+        return { action: 'click', locatorIndex: move.locatorIndex, text: move.text, stepName: 'trainline-date' };
+      }
+      if (move.kind === 'day') {
+        session.trainlineDateSelected = true;
+        session.trainlineJourneyStage = 'date-selected';
+        return { action: 'click', locatorIndex: move.locatorIndex, text: move.text, stepName: 'trainline-date' };
+      }
+      return null;
+    }
+  }
+  // A click on Trainline's date control only closes the calendar while it is open; it
+  // does not run the search. Close it once any requested arrival-hour constraint is
+  // visibly satisfied, then leave one unambiguous "Find cheap tickets" click to submit.
+  const selectedDate = parseTrainlineDate(session.goal);
+  if (selectedDate) {
+    const move = await resolveTrainlineDate({ page, date: selectedDate, clickable });
+    if (move.kind === 'day') {
+      const wantedHour = parseTrainlineArrivalHour(session.goal);
+      const displayed = (move.openerText || '').match(/\b(\d{1,2}):(\d{2})\s*(AM|PM)\b/i);
+      let displayedHour = null;
+      if (displayed) {
+        displayedHour = Number(displayed[1]);
+        if (/PM/i.test(displayed[3]) && displayedHour < 12) displayedHour += 12;
+        if (/AM/i.test(displayed[3]) && displayedHour === 12) displayedHour = 0;
+      }
+      if ((wantedHour == null || displayedHour === wantedHour) && move.openerIndex >= 0) {
+        session.trainlineJourneyStage = 'date-closing';
+        return { action: 'click', locatorIndex: move.openerIndex, text: move.openerText, stepName: 'trainline-date' };
+      }
+      return null;
+    }
+  }
+  session.trainlineJourneyDone = true;
+  return null;
+}
+
+async function resolveChilternJourney({ page, session, clickable }) {
+  const wantedHour = parseTrainlineArrivalHour(session?.goal);
+  const returnJourney = parseTrainReturn(session?.goal);
+  const journey = parseTrainlineJourney(session?.goal);
+  // Chiltern's station widgets do not accept free text: they only become valid after
+  // the highlighted autocomplete result is committed. Use the widget's native keyboard
+  // behaviour so we are not relying on a vision model to spot a transient dropdown.
+  const liveChiltern = Boolean(page?.keyboard && typeof page.locator === 'function');
+  if (journey && liveChiltern) {
+    const stations = [
+      ['origin', '#qtt-widget-origin-station-input', journey.origin],
+      ['destination', '#qtt-widget-destination-station-input', journey.destination],
+    ];
+    for (const [key, selector, station] of stations) {
+      const selectedKey = `chiltern${key[0].toUpperCase()}${key.slice(1)}Selected`;
+      if (session[selectedKey]) continue;
+      const input = page.locator(selector).first();
+      if (!(await input.count())) break;
+      const value = await input.inputValue().catch(() => '');
+      if (String(value).toLowerCase().includes(station.toLowerCase()) && /\([A-Z]{3}\)/.test(value)) {
+        session[selectedKey] = true;
+        continue;
+      }
+      await input.fill(station);
+      // The destination suggestions arrive later than the origin on the production form;
+      // committing earlier leaves a visually-filled but invalid station field.
+      await page.waitForTimeout(800);
+      await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(400);
+      return { action: 'wait', text: `Selected ${station}`, stepName: 'chiltern-journey' };
+    }
+
+    if (wantedHour != null && !session.chilternDateDone) {
+      const done = page.getByText('Done', { exact: true }).last();
+      if (await done.count()) {
+        const nativeMove = await page.locator('select').evaluateAll((selects, hour) => {
+          const optionList = select => [...select.options].map(option => ({ label: option.textContent.trim(), value: option.value }));
+          const selected = select => select.options[select.selectedIndex]?.textContent.trim() || '';
+          for (let index = 0; index < selects.length; index++) {
+            const labels = optionList(selects[index]);
+            if (labels.some(option => option.label === 'Depart after') && labels.some(option => option.label === 'Arrive before')) {
+              const arrive = labels.find(option => option.label === 'Arrive before');
+              if (selected(selects[index]) !== arrive.label) return { kind: 'select', index, value: arrive.value, label: arrive.label };
+            }
+          }
+          const wanted = `${String(hour).padStart(2, '0')}:00`;
+          for (let index = 0; index < selects.length; index++) {
+            const labels = optionList(selects[index]);
+            const time = labels.find(option => option.label === wanted) || labels.find(option => option.label.startsWith(`${String(hour).padStart(2, '0')}:`));
+            if (time && selected(selects[index]) !== time.label) return { kind: 'select', index, value: time.value, label: time.label };
+          }
+          return { kind: 'done' };
+        }, wantedHour).catch(() => null);
+        if (nativeMove?.kind === 'select') {
+          await page.locator('select').nth(nativeMove.index).selectOption({ value: nativeMove.value });
+          return { action: 'wait', text: `Set ${nativeMove.label}`, stepName: 'chiltern-journey' };
+        }
+        if (nativeMove?.kind === 'done') {
+          await done.click({ noWaitAfter: true });
+          session.chilternDateDone = true;
+          return { action: 'wait', text: 'Confirmed journey date and time', stepName: 'chiltern-journey' };
+        }
+        if (!session.chilternArrivalModeSelected) {
+          const departAfter = page.getByText('Depart after', { exact: true }).last();
+          const arriveBefore = page.getByText('Arrive before', { exact: true }).last();
+          if (!(await departAfter.count()) && await arriveBefore.count()) {
+            session.chilternArrivalModeSelected = true;
+          }
+          if (await departAfter.count()) {
+            await departAfter.click({ noWaitAfter: true });
+            await page.waitForTimeout(100);
+            if (await arriveBefore.count()) {
+              await arriveBefore.click({ noWaitAfter: true });
+              session.chilternArrivalModeSelected = true;
+              return { action: 'wait', text: 'Set arrival time', stepName: 'chiltern-journey' };
+            }
+          }
+        }
+        if (session.chilternArrivalModeSelected && !session.chilternArrivalTimeSelected) {
+          const clock = page.locator('button').filter({ hasText: /^\d{2}:\d{2}$/ }).last();
+          if (await clock.count()) {
+            await clock.click({ noWaitAfter: true });
+            await page.waitForTimeout(100);
+            const wantedTime = `${String(wantedHour).padStart(2, '0')}:00`;
+            const option = page.getByText(wantedTime, { exact: true }).last();
+            if (await option.count()) {
+              await option.click({ noWaitAfter: true });
+              session.chilternArrivalTimeSelected = true;
+              return { action: 'wait', text: `Set arrival by ${wantedTime}`, stepName: 'chiltern-journey' };
+            }
+          }
+        }
+        if (session.chilternArrivalModeSelected && session.chilternArrivalTimeSelected) {
+          await done.click({ noWaitAfter: true });
+          session.chilternDateDone = true;
+          return { action: 'wait', text: 'Confirmed journey date and time', stepName: 'chiltern-journey' };
+        }
+      }
+    }
+
+    // The outbound calendar is now closed. Add the return journey and select a
+    // same-night departure before the form is submitted. Chiltern exposes native
+    // select controls here, which lets us set the option without guessing at a
+    // visual menu state.
+    if (returnJourney && !session.chilternReturnDone) {
+      const returnToggle = page.locator('#qtt-widget-return-date-popup-toggle').first();
+      const returnTime = page.locator('#qtt-widget-return-calendar-departure-time').first();
+      const returnMode = page.locator('#qtt-widget-return-calendar-travel-option').first();
+      if (await returnToggle.count() && !(await returnTime.count())) {
+        await returnToggle.click({ noWaitAfter: true });
+        await page.waitForTimeout(150);
+        return { action: 'wait', text: 'Adding return journey', stepName: 'chiltern-return' };
+      }
+      if (await returnMode.count() && (await returnMode.inputValue().catch(() => '')) !== 'depart_after') {
+        await returnMode.selectOption('depart_after');
+        return { action: 'wait', text: 'Set return departure time', stepName: 'chiltern-return' };
+      }
+      const wantedReturnTime = `${String(returnJourney.hour).padStart(2, '0')}:00`;
+      if (await returnTime.count() && (await returnTime.inputValue().catch(() => '')) !== wantedReturnTime) {
+        await returnTime.selectOption(wantedReturnTime);
+        return { action: 'wait', text: `Set return after ${wantedReturnTime}`, stepName: 'chiltern-return' };
+      }
+      const done = page.getByText('Done', { exact: true }).last();
+      if (await done.count()) {
+        await done.click({ noWaitAfter: true });
+        session.chilternReturnDone = true;
+        session.chilternReturnAssumedHour = returnJourney.assumedHour;
+        return { action: 'wait', text: 'Confirmed return journey', stepName: 'chiltern-return' };
+      }
+    }
+  }
+
+  // A live picker that we cannot yet resolve is for the vision fallback. Do not use the
+  // test-only native-select probe below to click Done prematurely on its custom controls.
+  if (liveChiltern) return null;
+
+  // Unit-test fallback: test pages deliberately have no Playwright locators. The live path
+  // above is the authoritative interaction, while this keeps the decision shape testable.
+  if (wantedHour == null) return null;
+  return page.evaluate(({ wantedHour, clickableSelector, probe }) => {
+    const visible = el => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const text = el => String(el.innerText || el.getAttribute('aria-label') || el.value || '').replace(/\s+/g, ' ').trim();
+    const all = [...document.querySelectorAll(clickableSelector)];
+    const selects = [...document.querySelectorAll('select')].filter(visible);
+    const options = select => [...select.options].map(option => ({ label: text(option), value: option.value }));
+    const selectedLabel = select => text(select.options[select.selectedIndex]);
+
+    // The Chiltern date picker has a real Done button. Without it, this is the home form
+    // and normal browsing should handle station autocomplete and opening the calendar.
+    const done = all.find(el => visible(el) && /^done$/i.test(text(el)));
+    if (!done) return { kind: 'missing' };
+
+    const mode = selects.find(select => {
+      const labels = options(select).map(option => option.label.toLowerCase());
+      return labels.includes('depart after') && labels.includes('arrive before');
+    });
+    if (mode && !/^arrive before$/i.test(selectedLabel(mode))) {
+      const arrive = options(mode).find(option => /^arrive before$/i.test(option.label));
+      return { kind: 'select', locatorIndex: all.indexOf(mode), value: arrive.value, text: selectedLabel(mode) };
+    }
+
+    const wantedTime = `${String(wantedHour).padStart(2, '0')}:00`;
+    const time = selects.find(select => options(select).some(option => new RegExp(`^${wantedTime}$`).test(option.label)));
+    if (time) {
+      const choice = options(time).find(option => option.label === wantedTime)
+        || options(time).find(option => option.label.startsWith(`${String(wantedHour).padStart(2, '0')}:`));
+      if (choice && selectedLabel(time) !== choice.label) {
+        return { kind: 'select', locatorIndex: all.indexOf(time), value: choice.value, text: selectedLabel(time) };
+      }
+    }
+    return { kind: 'done', locatorIndex: all.indexOf(done), text: text(done) };
+  }, { wantedHour, clickableSelector: clickable, probe: 'chilternJourney' }).then(move => {
+    if (!move || move.kind === 'missing') return null;
+    if (move.kind === 'select') return { action: 'select', locatorIndex: move.locatorIndex, value: move.value, text: move.text, stepName: 'chiltern-journey' };
+    return { action: 'click', locatorIndex: move.locatorIndex, text: move.text, stepName: 'chiltern-journey' };
+  }).catch(() => null);
+}
+
 // CLICKABLE_SELECTOR is owned by browser-task.js; keep one copy here that MUST equal it.
 // (Task 5 asserts they're identical so a future edit to one can't silently diverge.)
 const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, select, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
@@ -1206,8 +1637,17 @@ async function nextRecipeMove(page, session, recipe, health = recipeHealth) {
   // that alone can loop forever. If we're about to hand back the exact same step on the
   // exact same page state (same URL + basketCount) we already returned last time, treat it
   // as a miss instead and let vision see the page and react.
-  const stallSignature = `${host}:${step.name}:${page.url()}:${ctx.basketCount}`;
-  if (session) {
+  // Trainline's journey recipe is one named step with several material stages
+  // (fill origin → choose origin → fill destination → choose destination). Include that
+  // internal stage so the generic repeat guard does not abandon it midway through a valid
+  // autocomplete interaction.
+  const recipeStage = session?.trainlineJourneyStage || '';
+  const stallSignature = `${host}:${step.name}:${page.url()}:${ctx.basketCount}:${recipeStage}`;
+  // The Trainline journey resolver is its own bounded state machine: a successful
+  // autocomplete commit can take several render frames before the accessible name flips
+  // to "selected". Applying the generic same-stage click guard here disables the recipe
+  // before that acknowledgement arrives. Its outer task watchdog remains the backstop.
+  if (session && host !== 'thetrainline.com') {
     if (session._recipeStallSig === stallSignature) {
       session._recipeStallCount = (session._recipeStallCount || 0) + 1;
     } else {
@@ -1241,8 +1681,9 @@ function hostOfRecipe(recipe, fallback = 'unknown') {
 }
 
 module.exports = {
-  parseSizeFromGoal, matchSizeChip, johnLewisSizeQueryValue, GENERIC, CONVENTION, DELIVERY, SHOPIFY, RECIPES,
+  parseSizeFromGoal, matchSizeChip, parseTrainlineJourney, parseTrainlineDate, parseTrainlineArrivalHour, parseTrainReturn, johnLewisSizeQueryValue, GENERIC, CONVENTION, DELIVERY, SHOPIFY, RECIPES,
   resolveNavigateBasket, resolveUpsellDismiss, resolveEmailFill, resolveShopifyCheckout,
+  resolveTrainlineJourney, resolveTrainlineDate, resolveChilternJourney,
   UPSELL_DISMISS_PATTERN,
   phaseFromUrl, createRecipeHealth, selectStep, selectRecipeForHost,
   RECIPE_FAIL_DISABLE_THRESHOLD, nextRecipeMove, resolveSizeMove, recipeHealth, CLICKABLE_SELECTOR,

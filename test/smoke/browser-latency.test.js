@@ -24,6 +24,13 @@ test('deriveSearchTerm strips a request-clause even with adjectives before "pric
   assert.equal(deriveSearchTerm('find a price comparison tool', jlSite), 'price comparison tool');
 });
 
+test('deriveSearchTerm strips report-style outcome clauses before opening a site search', () => {
+  assert.equal(
+    deriveSearchTerm('find dry cat food and report the cheapest displayed price', jlSite),
+    'dry cat food'
+  );
+});
+
 test('deriveSearchTerm strips ordering-instruction tails so the query is just the product', () => {
   // Regression: the 2026-07-02 benchmark showed every seeded site opening on a garbage
   // no-results page because the whole "add to basket and go to checkout" instruction was
