@@ -40,6 +40,9 @@ test('signup goals bypass product search and price lookup', () => {
   assert.equal(isSignupGoal('Sign me up for the newsletter on the John Lewis website.'), true);
   assert.equal(isSignupGoal('Create an account on the retailer website.'), true);
   assert.equal(isSignupGoal('Compare the current price of a sweatshirt on John Lewis.'), false);
+  const prompt = buildDecisionPrompt('Sign me up for the newsletter on the John Lewis website.', [], []);
+  assert.match(prompt, /do NOT use the product search or shopping controls/i);
+  assert.match(prompt, /never invent, autofill, or submit user\s+data/i);
 });
 
 test('buildChilternRailSearchUrl keeps both legs and their time constraints', () => {

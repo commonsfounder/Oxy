@@ -1183,6 +1183,17 @@ function buildDecisionPrompt(goal, history, elements, correction = '', goalConte
   const elementsText = elements.map(renderElementLine).join('\n');
   const lastId = elements.length ? elements.length - 1 : 0;
   const correctionBlock = correction ? `\n⚠️ CORRECTION: ${correction}\n` : '';
+  const signupBlock = isSignupGoal(goal)
+    ? `
+For this signup/account/newsletter goal, do NOT use the product search or shopping controls.
+Find the site's visible Sign up, Register, Create account, Newsletter, or Subscribe control.
+If it is below the fold, scroll down once by a medium amount and look again; do not bounce up
+and down or repeat the same scroll. When the site asks for an email address, phone number,
+password, or marketing consent, use "ask" and stop — never invent, autofill, or submit user
+data without the user providing it in this conversation. If the site shows a CAPTCHA or bot
+wall, use "ask" and say that plainly.
+`
+    : '';
 
   let contextBlock = '';
   if (goalContext) {
@@ -1203,6 +1214,7 @@ function buildDecisionPrompt(goal, history, elements, correction = '', goalConte
 
   return `You are controlling a real web browser to help with this goal: "${goal}"
 ${contextBlock}${documentsBlock}
+${signupBlock}
 You can SEE the current page in the attached screenshot. Every clickable element has a
 small numbered badge drawn on it; the number is its element id and matches the list
 below. LOOK at the screenshot first — find the thing you need (search box, address
