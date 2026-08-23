@@ -1,7 +1,50 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { inferDeterministicAction, buildWatchRequest, buildWatchCancellation, cleanDestinationPhrase } = require('../../api/intent-router');
+const {
+  inferDeterministicAction,
+  buildWatchRequest,
+  buildWatchCancellation,
+  cleanDestinationPhrase,
+  inferPersonalAdminAction,
+  inferOutboundCommunicationAction
+} = require('../../api/intent-router');
+
+test('ordinary personal-admin reads reach their declared actions', () => {
+  assert.deepEqual(inferPersonalAdminAction('Show me my active responsibilities.'), {
+    reason: 'list_responsibilities',
+    spoken: "I'll check what I'm handling.",
+    actions: [{ type: 'list_responsibilities', input: {} }]
+  });
+  assert.deepEqual(inferPersonalAdminAction('What do you remember about Alex?'), {
+    reason: 'find_people',
+    spoken: "I'll look up Alex.",
+    actions: [{ type: 'find_people', input: { query: 'Alex' } }]
+  });
+  assert.deepEqual(inferPersonalAdminAction('Find the email with my Amazon receipt from last month.'), {
+    reason: 'search_emails',
+    spoken: "I'll search your email.",
+    actions: [{ type: 'search_emails', input: { query: 'my Amazon receipt from last month', max_results: 10 } }]
+  });
+});
+
+test('clear outbound requests reach the review-gated action with bounded inputs', () => {
+  assert.deepEqual(inferOutboundCommunicationAction('Text Alex that I am running ten minutes late.'), {
+    reason: 'send_message',
+    spoken: 'I’ll prepare that message for review.',
+    actions: [{ type: 'send_message', input: { contact: 'Alex', message: 'I am running ten minutes late.' } }]
+  });
+  assert.deepEqual(inferOutboundCommunicationAction('Email the restaurant and ask whether they can move our booking to 8pm.'), {
+    reason: 'send_millie_email',
+    spoken: 'I’ll prepare that message for review.',
+    actions: [{ type: 'send_millie_email', input: { to: 'the restaurant', body: 'whether they can move our booking to 8pm.' } }]
+  });
+  assert.deepEqual(inferOutboundCommunicationAction('Call the dentist and ask for their next available appointment.'), {
+    reason: 'make_call',
+    spoken: 'I’ll prepare that call for review.',
+    actions: [{ type: 'make_call', input: { contact: 'the dentist' } }]
+  });
+});
 
 // ── Question-opener filler stripped from place/directions queries ─────────────────────────
 // Regression, 2026-08-07 live verification: "is there a gym near Old Street" reached
@@ -33,11 +76,14 @@ test('find a gym near Old Street: still resolves via the deterministic local-pla
 // the model ever saw it. Narrow fix, mirrors the existing looksLikeShoppingRequest guard
 // immediately above the same fallback in api/intent-router.js.
 test('a request to email a restaurant about a booking does not become a nearby-place search', () => {
-  assert.equal(inferDeterministicAction('Send an email to test-business@example.com asking if they can move our 7pm restaurant booking to 8pm tonight.'), null);
+  assert.equal(
+    inferDeterministicAction('Send an email to test-business@example.com asking if they can move our 7pm restaurant booking to 8pm tonight.').actions[0].type,
+    'send_email'
+  );
 });
 
-test('"email the restaurant and ask if they can move us to 8" defers to the model, not find_place', () => {
-  assert.equal(inferDeterministicAction('email the restaurant and ask if they can move us to 8'), null);
+test('"email the restaurant and ask if they can move us to 8" reaches Millie\'s review boundary', () => {
+  assert.equal(inferDeterministicAction('email the restaurant and ask if they can move us to 8').actions[0].type, 'send_millie_email');
 });
 
 test('"text the restaurant" and "contact the restaurant" also defer, not just "email"', () => {

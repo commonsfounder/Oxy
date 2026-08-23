@@ -1919,11 +1919,21 @@ function addDaysToYMD(ymd, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function extractRelativeDateYMD(text) {
+function extractRelativeDateYMD(text, now = new Date()) {
   const lower = String(text || '').toLowerCase();
-  const today = formatLondonYMD();
+  const today = formatLondonYMD(now);
   if (/\btomorrow\b/.test(lower)) return addDaysToYMD(today, 1);
   if (/\btoday\b/.test(lower)) return today;
+  const weekdayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const nextWeekday = lower.match(/\bnext\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  if (nextWeekday) {
+    const todayName = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, weekday: 'long' })
+      .format(now).toLowerCase();
+    const currentIndex = weekdayNames.indexOf(todayName);
+    const targetIndex = weekdayNames.indexOf(nextWeekday[1]);
+    const days = ((targetIndex - currentIndex + 7) % 7) || 7;
+    return addDaysToYMD(today, days);
+  }
   return null;
 }
 
@@ -1933,11 +1943,15 @@ function cleanCalendarTitle(text) {
     .replace(/\b(i\s+mean\s+)?add\s+(it|that)?\s*to\s+my\s+calendar\b/i, '')
     .replace(/\b(add|create|put|schedule)\b/i, '')
     .replace(/\b(to|in|on)\s+my\s+calendar\b/i, '')
-    .replace(/\bfor\s+(today|tomorrow)\b/i, '')
-    .replace(/\b(today|tomorrow)\b/i, '')
+    .replace(/\bfor\s+(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i, '')
+    .replace(/\b(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i, '')
     .replace(/\ball\s+day\b/i, '')
+    .replace(/\bfrom\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+to\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b/i, '')
     .replace(/\bat\s+\d{1,2}(?::\d{2})?\s*(am|pm)?\b/i, '')
     .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:a|an)\s+/i, '')
+    .replace(/[?.!]+$/, '')
     .trim()
     .replace(/^["']|["']$/g, '');
 }
@@ -1981,20 +1995,68 @@ function extractCalendarEventInput(message, fallbackMessage = '') {
     };
   }
 
-  const timeMatch = combined.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
-  let hour = 9;
-  let minute = 0;
-  if (timeMatch) {
-    hour = Number(timeMatch[1]);
-    minute = Number(timeMatch[2] || 0);
-    const suffix = (timeMatch[3] || '').toLowerCase();
+  const clockPattern = '(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?';
+  const rangeMatch = combined.match(new RegExp('\\bfrom\\s+' + clockPattern + '\\s+to\\s+' + clockPattern + '\\b', 'i'));
+  const timeMatch = combined.match(new RegExp('\\bat\\s+' + clockPattern + '\\b', 'i'));
+  const to24Hour = (hourText, minuteText, suffixText) => {
+    let hour = Number(hourText);
+    const minute = Number(minuteText || 0);
+    const suffix = String(suffixText || '').toLowerCase();
     if (suffix === 'pm' && hour < 12) hour += 12;
     if (suffix === 'am' && hour === 12) hour = 0;
-  }
-  const start = `${dateYMD}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-  const endHour = Math.min(hour + 1, 23);
-  const end = `${dateYMD}T${String(endHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
+    return { hour, minute };
+  };
+  const startClock = rangeMatch
+    ? to24Hour(rangeMatch[1], rangeMatch[2], rangeMatch[3])
+    : timeMatch ? to24Hour(timeMatch[1], timeMatch[2], timeMatch[3]) : { hour: 9, minute: 0 };
+  const endClock = rangeMatch
+    ? to24Hour(rangeMatch[4], rangeMatch[5], rangeMatch[6])
+    : { hour: Math.min(startClock.hour + 1, 23), minute: startClock.minute };
+  const hour = startClock.hour;
+  const minute = startClock.minute;
+  const start = dateYMD + 'T' + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0') + ':00';
+  const end = dateYMD + 'T' + String(endClock.hour).padStart(2, '0') + ':' + String(endClock.minute).padStart(2, '0') + ':00';
   return { title, start_date: start, end_date: end, timezone: TIMEZONE };
+}
+
+function inferExplicitCalendarMutationTurn(text, now = new Date()) {
+  const value = String(text || '').trim();
+  const weekday = '(?:today|tomorrow|next\\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))';
+  const clock = '(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?';
+
+  const move = value.match(new RegExp('^(?:please\\s+)?move\\s+(?:my\\s+)?(.+?)\\s+(' + weekday + ')\\s+to\\s+' + clock + '[?.!]*$', 'i'));
+  if (move) {
+    const dateYMD = extractRelativeDateYMD(move[2], now);
+    if (dateYMD) {
+      let hour = Number(move[3]);
+      const minute = Number(move[4] || 0);
+      const suffix = String(move[5] || '').toLowerCase();
+      if (suffix === 'pm' && hour < 12) hour += 12;
+      if (suffix === 'am' && hour === 12) hour = 0;
+      return {
+        reason: 'calendar_move',
+        spoken: "I'll move that calendar event for review.",
+        actions: [{ type: 'move_calendar_event', input: {
+          title: move[1].trim(),
+          start: dateYMD + 'T' + String(hour).padStart(2, '0') + ':' + String(minute).padStart(2, '0') + ':00'
+        } }]
+      };
+    }
+  }
+
+  const cancel = value.match(new RegExp('^(?:please\\s+)?cancel\\s+(?:my\\s+)?(.+?)\\s+(' + weekday + ')[?.!]*$', 'i'));
+  if (cancel) {
+    const dateYMD = extractRelativeDateYMD(cancel[2], now);
+    if (dateYMD) {
+      return {
+        reason: 'calendar_cancel',
+        spoken: "I'll prepare that cancellation for review.",
+        actions: [{ type: 'cancel_calendar_event', input: { title: cancel[1].trim(), date: dateYMD } }]
+      };
+    }
+  }
+
+  return null;
 }
 
 async function getRecentLoggedActions(userId, trace = null, limit = 8, options = {}) {
@@ -2045,6 +2107,20 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
 
   const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
   if (appointmentTurn) return appointmentTurn;
+
+  const structuredMemory = parseStructuredMemoryRequest(text);
+  if (structuredMemory) {
+    const spokenByType = {
+      track_commitment: "I'll track that commitment.",
+      save_occasion: "I'll save that occasion.",
+      remember_person: "I'll save that preference."
+    };
+    return {
+      reason: 'structured_memory_' + structuredMemory.type,
+      spoken: spokenByType[structuredMemory.type] || 'Saved.',
+      actions: [{ type: structuredMemory.type, input: structuredMemory.input }]
+    };
+  }
 
   const explicitMemory = parseExplicitMemoryRequest(text);
   if (explicitMemory) {
@@ -2106,6 +2182,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
 
   const compoundReadOnly = inferCompoundReadOnlyTurn(text);
   if (compoundReadOnly) return compoundReadOnly;
+
+  const calendarMutation = inferExplicitCalendarMutationTurn(text);
+  if (calendarMutation) return calendarMutation;
 
   if (isCalendarReadRequest(text)) {
     return buildCalendarReadAction(text);
@@ -5814,6 +5893,68 @@ function parseExplicitMemoryRequest(text) {
   const fact = match[1].trim();
   if (/^(?:this|that|it)$/i.test(fact) || !isUsefulMemoryContent(fact)) return null;
   return fact;
+}
+
+function parseStructuredMemoryRequest(text) {
+  const fact = parseExplicitMemoryRequest(text);
+  if (!fact) return null;
+
+  const months = {
+    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+  };
+  const datePart = '(\\d{1,2})(?:st|nd|rd|th)?\\s+(January|February|March|April|May|June|July|August|September|October|November|December)(?:\\s+(\\d{4}))?';
+
+  const occasion = fact.match(new RegExp('^(.+?)\\s+has\\s+(?:a\\s+)?(birthday|anniversary)\\s+(?:on\\s+)?' + datePart + '$', 'i')) ||
+    fact.match(new RegExp('^(.+?)[' + "'’" + ']s\\s+(birthday|anniversary)\\s+is\\s+' + datePart + '$', 'i'));
+  if (occasion) {
+    const personName = occasion[1].trim();
+    const occasionType = occasion[2].toLowerCase();
+    const month = months[occasion[4].toLowerCase()];
+    const day = Number(occasion[3]);
+    const year = occasion[5] ? Number(occasion[5]) : undefined;
+    const input = { person_name: personName, occasion_type: occasionType, month, day };
+    if (year) input.year = year;
+    return { type: 'save_occasion', input };
+  }
+
+  const commitment = fact.match(/^i\s+(?:said\s+)?i\s+(?:will|'ll|am going to|need to|promise(?:d)? to)\s+(.+)$/i);
+  if (commitment) {
+    let promise = commitment[1].trim();
+    let due;
+    const dueMatch = promise.match(/\s+(this week|next week|today|tomorrow|tonight|this weekend|by\s+.+|on\s+.+)$/i);
+    if (dueMatch) {
+      due = dueMatch[1].trim();
+      promise = promise.slice(0, dueMatch.index).trim();
+    }
+    if (promise) {
+      const input = { what: promise, source: 'stated' };
+      if (due) input.due = due;
+      return { type: 'track_commitment', input };
+    }
+  }
+
+  const preference = fact.match(/^((?!my\b|our\b|i\b)[a-z][a-z'’ -]{0,80}?)\s+(prefers|likes|loves|hates|dislikes)\s+(.+)$/i);
+  if (preference) {
+    return {
+      type: 'remember_person',
+      input: {
+        person_name: preference[1].trim(),
+        facts: preference[2] + ' ' + preference[3].trim(),
+        fact_kind: /^(prefers|likes|loves|dislikes)$/i.test(preference[2]) ? 'preference' : 'note'
+      }
+    };
+  }
+
+  const relationship = fact.match(/^((?!my\b|our\b|i\b)[a-z][a-z'’ -]{0,80}?)\s+is\s+my\s+(.+)$/i);
+  if (relationship) {
+    return {
+      type: 'remember_person',
+      input: { person_name: relationship[1].trim(), relationship: relationship[2].trim() }
+    };
+  }
+
+  return null;
 }
 
 async function forgetMemory(userId, { scope = '', query = '' } = {}) {
@@ -12415,6 +12556,10 @@ module.exports.isUserFacingMemory = isUserFacingMemory;
 module.exports.isUsefulMemoryContent = isUsefulMemoryContent;
 module.exports.isDurableProfileFact = isDurableProfileFact;
 module.exports.parseExplicitMemoryRequest = parseExplicitMemoryRequest;
+module.exports.parseStructuredMemoryRequest = parseStructuredMemoryRequest;
+module.exports.extractRelativeDateYMD = extractRelativeDateYMD;
+module.exports.extractCalendarEventInput = extractCalendarEventInput;
+module.exports.inferExplicitCalendarMutationTurn = inferExplicitCalendarMutationTurn;
 module.exports.isEmailDraftRequest = isEmailDraftRequest;
 module.exports.findRecentEmailTarget = findRecentEmailTarget;
 module.exports.CONNECTORS = CONNECTORS;

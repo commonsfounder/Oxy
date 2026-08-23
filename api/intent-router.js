@@ -100,6 +100,100 @@ function looksLikeCommunicationRequest(message) {
   return EMAIL_ADDRESS_RE.test(text) || COMMUNICATION_TERMS.test(text);
 }
 
+function trimTrailingPunctuation(value) {
+  return normalizeText(value).replace(/[?.!]+$/, '').trim();
+}
+
+function inferPersonalAdminAction(message) {
+  const text = normalizeText(message);
+  if (!text) return null;
+
+  if (/\bresponsibilit(?:y|ies)\b/i.test(text) &&
+      /\b(show|list|what|which|active|current)\b/i.test(text)) {
+    return {
+      reason: 'list_responsibilities',
+      spoken: "I'll check what I'm handling.",
+      actions: [{ type: 'list_responsibilities', input: {} }]
+    };
+  }
+
+  const personMatch = text.match(/^(?:what do you remember about|what do you know about|who is)\s+(.+?)[?.!]*$/i);
+  if (personMatch?.[1]) {
+    return {
+      reason: 'find_people',
+      spoken: `I'll look up ${trimTrailingPunctuation(personMatch[1])}.`,
+      actions: [{ type: 'find_people', input: { query: trimTrailingPunctuation(personMatch[1]) } }]
+    };
+  }
+
+  const receiptMatch = text.match(/^(?:find|search(?:\s+for)?|look\s+for)\s+(?:the\s+)?email\s+(?:with|containing|about)\s+(.+?)[?.!]*$/i);
+  if (receiptMatch?.[1]) {
+    return {
+      reason: 'search_emails',
+      spoken: "I'll search your email.",
+      actions: [{ type: 'search_emails', input: { query: trimTrailingPunctuation(receiptMatch[1]), max_results: 10 } }]
+    };
+  }
+
+  return null;
+}
+
+function inferOutboundCommunicationAction(message) {
+  const text = normalizeText(message);
+  if (!text) return null;
+
+  const telegram = text.match(/^(?:please\s+)?send\s+(.+?)\s+a\s+telegram\s+message\s+(?:saying|that)\s+(.+)$/i);
+  if (telegram) {
+    return {
+      reason: 'send_telegram',
+      spoken: 'I’ll prepare that message for review.',
+      actions: [{ type: 'send_telegram', input: { contact: trimTrailingPunctuation(telegram[1]), message: telegram[2].trim() } }]
+    };
+  }
+
+  const slack = text.match(/^(?:please\s+)?send\s+(#[\w-]+)\s+a\s+slack\s+message\s+(?:saying|that)\s+(.+)$/i);
+  if (slack) {
+    return {
+      reason: 'send_slack_message',
+      spoken: 'I’ll prepare that message for review.',
+      actions: [{ type: 'send_slack_message', input: { channel: slack[1], message: slack[2].trim() } }]
+    };
+  }
+
+  const call = text.match(/^(?:please\s+)?call\s+(.+?)(?:\s+and\s+(?:ask|find out|see if)\s+.+)?[?.!]*$/i);
+  if (call && /\b(call|ring)\b/i.test(text)) {
+    return {
+      reason: 'make_call',
+      spoken: 'I’ll prepare that call for review.',
+      actions: [{ type: 'make_call', input: { contact: trimTrailingPunctuation(call[1]) } }]
+    };
+  }
+
+  const email = text.match(/^(?:please\s+)?(?:send\s+an?\s+)?e-?mail\s+(?:to\s+)?(.+?)\s+(?:and\s+)?(?:ask(?:ing)?|saying|that)\s+(.+)$/i);
+  if (email) {
+    const recipient = trimTrailingPunctuation(email[1]);
+    const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(recipient)
+      ? 'send_millie_email'
+      : 'send_email';
+    return {
+      reason: type,
+      spoken: 'I’ll prepare that message for review.',
+      actions: [{ type, input: { to: recipient, body: email[2].trim() } }]
+    };
+  }
+
+  const messageMatch = text.match(/^(?:please\s+)?(?:text|message)\s+(.+?)\s+(?:that|saying|and\s+ask)\s+(.+)$/i);
+  if (messageMatch) {
+    return {
+      reason: 'send_message',
+      spoken: 'I’ll prepare that message for review.',
+      actions: [{ type: 'send_message', input: { contact: trimTrailingPunctuation(messageMatch[1]), message: messageMatch[2].trim() } }]
+    };
+  }
+
+  return null;
+}
+
 function looksLikeDirectionsRequest(message) {
   return DIRECTIONS_TERMS.test(normalizeText(message));
 }
@@ -337,6 +431,12 @@ function inferDeterministicAction(message, options = {}) {
   const preferredMode = options?.settings?.preferredTransportMode;
   const defaultMode = ['driving', 'transit', 'walking'].includes(preferredMode) ? preferredMode : 'driving';
 
+  const personalAdmin = inferPersonalAdminAction(text);
+  if (personalAdmin) return personalAdmin;
+
+  const outboundCommunication = inferOutboundCommunicationAction(text);
+  if (outboundCommunication) return outboundCommunication;
+
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
   // find_appointment_options only ever talks to the sandbox provider (see
@@ -450,6 +550,8 @@ function inferDeterministicAction(message, options = {}) {
 
 module.exports = {
   inferDeterministicAction,
+  inferPersonalAdminAction,
+  inferOutboundCommunicationAction,
   inferCapabilitySweepAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,

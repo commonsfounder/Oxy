@@ -201,16 +201,17 @@ async function postChat(base, token, task, userId) {
   }
 }
 
-async function runLive({ base, token, userId, tasks }) {
+async function runLive({ base, token, userId, tasks, verbose = true, delayMs = 0 }) {
   const results = [];
   for (const task of tasks) {
+    if (delayMs > 0 && results.length) await new Promise(resolve => setTimeout(resolve, delayMs));
     const reply = await postChat(base, token, task, userId);
     const classification = reply.error || reply.httpStatus
       ? { status: 'http_error', receipts: [], error: reply.error || `HTTP ${reply.httpStatus}` }
       : classify(task, reply);
     const result = { id: task.id, group: task.group, mode: task.mode, expectedAction: task.expectedAction, message: task.message, ...classification };
     results.push(result);
-    console.log(JSON.stringify(result));
+    if (verbose) console.log(JSON.stringify(result));
   }
   return results;
 }
@@ -223,7 +224,8 @@ if (require.main === module) {
     console.error('Set OXY_MATRIX_USER_ID and OXY_MATRIX_SESSION_TOKEN for a live run. Use --list to print the corpus.');
     process.exit(1);
   }
-  const results = runLive({ base, token, userId, tasks: selectTasks(parseArgs()) });
+  const delayMs = Number(process.env.OXY_MATRIX_DELAY_MS || 0);
+  const results = runLive({ base, token, userId, tasks: selectTasks(parseArgs()), delayMs });
   results.then(rows => {
     const counts = rows.reduce((out, row) => { out[row.status] = (out[row.status] || 0) + 1; return out; }, {});
     console.log(JSON.stringify({ total: rows.length, counts }, null, 2));
