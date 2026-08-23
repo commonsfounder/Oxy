@@ -94,6 +94,10 @@ const envInt = (name, fallback) => {
 // so a normal order can complete in one `run_browser_task` call instead of 2-4.
 // MAX_STEPS above remains the real backstop against a runaway loop, independent of time.
 const MAX_DURATION_MS = envInt('OXY_BROWSER_MAX_DURATION_MS', 180 * 1000);
+// The loop's deadline is checked between browser steps, but an individual Playwright/model
+// phase can still be in flight when that check becomes true. Keep the public action bounded
+// as well, so a bad retailer page cannot hold the phone request open for several minutes.
+const TURN_HARD_TIMEOUT_GRACE_MS = envInt('OXY_BROWSER_TURN_HARD_TIMEOUT_GRACE_MS', 5000);
 
 // --- Latency knobs (see docs/superpowers/specs/2026-07-01-browser-task-latency-design.md) ---
 // ~70% of each step is the Gemini vision call, so the screenshot we send dominates cost.
@@ -579,6 +583,18 @@ function parseDeliveryPreferenceFromText(text) {
   if (/\b(deliver(?:y)?|ship|post it|to my (?:address|home|house|door))\b/.test(t)) return 'delivery';
   if (/\b(collect(?:ion)?|click\s*(?:&|and)\s*collect|pick\s*up|pickup|(?:from|at)\s+(?:a\s+|the\s+)?(?:store|shop))\b/.test(t)) return 'collection';
   return null;
+}
+
+// A continuation is only a routing hint when it looks like a reply to a paused browser
+// task. Keep this deliberately narrow: a live browser session must not steal ordinary chat
+// such as "what is the delivery time?" from the general assistant.
+function isBrowserContinuationText(text) {
+  const value = String(text || '').trim();
+  if (!value) return false;
+  return /^(?:please\s+)?(?:continue|keep\s+going|carry\s+on|resume|go\s+on)\s*[.!?]*$/i.test(value)
+    || /^(?:please\s+)?(?:deliver(?:\s+it)?|ship\s+it|post\s+it|collect(?:\s+it)?|pick\s*up(?:\s+it)?|pickup)\b/i.test(value)
+    || /^(?:use\s+)?my\s+(?:address|postcode|post\s*code|phone|name|email)\b/i.test(value)
+    || /^(?:address|postcode|post\s*code|phone|name|email|delivery|collection)\s*[.!?]*$/i.test(value);
 }
 
 // Click whichever side of the choice matches the stored preference. Same click idiom as
@@ -2498,6 +2514,11 @@ async function loadResumeContext(userId) {
   return data?.last_url ? data : null;
 }
 
+async function hasResumableSession(userId) {
+  const resume = await loadResumeContext(userId).catch(() => null);
+  return Boolean(resume?.last_url && resume?.goal);
+}
+
 // One place for the "site is blocking us" bail: mark a used fast-path as failed (so a stale
 // learned template self-heals) and return the calm, order-aware copy the classifier reads as
 // a bot-wall ceiling rather than a loop bug.
@@ -3979,7 +4000,45 @@ async function runOrderingTurnImpl(userId, { url, goal, location = null, onProgr
     rawOnProgress?.(text);
     persistingProgress(text);
   };
-  const outcome = await runOrderingTurnImplInner(userId, { url, goal, location, onProgress, credentialSites });
+  const inner = runOrderingTurnImplInner(userId, { url, goal, location, onProgress, credentialSites });
+  let timeoutId;
+  const hardTimeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error(`browser turn exceeded ${MAX_DURATION_MS + TURN_HARD_TIMEOUT_GRACE_MS}ms`);
+      error.code = 'browser_turn_timeout';
+      reject(error);
+    }, MAX_DURATION_MS + TURN_HARD_TIMEOUT_GRACE_MS);
+  });
+  let outcome;
+  try {
+    outcome = await Promise.race([inner, hardTimeout]);
+  } catch (error) {
+    if (error?.code !== 'browser_turn_timeout') throw error;
+    // Preserve the current URL, cookies and history before closing the in-flight page. The
+    // next "keep going" turn reopens this exact browser state instead of starting over.
+    const session = getSession(userId);
+    if (session) {
+      await persistStorage(userId, session).catch(() => {});
+      await closeSession(userId).catch(() => {});
+    }
+    onProgress('Pausing here — say “keep going” to resume.');
+    outcome = {
+      type: 'awaiting_more',
+      summary: 'The site took too long to respond, so I paused safely before checkout. Say “keep going” and I’ll resume from here.',
+      recoverable: true,
+      timedOut: true,
+      recoveryAction: {
+        type: 'continue_browser_task',
+        message: 'keep going',
+        label: 'Keep going',
+        autoContinue: false,
+        code: 'browser_turn_timeout',
+        reason: 'turn_deadline'
+      }
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (outcome.type === 'ready_for_credential_use') {
     const session = getSession(userId);
     if (session) session.pendingCredentialTaskId = taskId;
@@ -4023,6 +4082,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
     // off from persisted context so an idle-evicted order resumes instead of dead-ending.
     let openUrl = url;
     let priorHistory = null;
+    const continuationReply = goal;
     if (!openUrl && goal) {
       const retailer = resolveRailTicketProvider(goal) || resolveRetailerFromGoal(goal, retailOptions);
       if (retailer) {
@@ -4040,6 +4100,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       // An empty incoming goal is a silent continuation — recover the real goal from
       // what was persisted rather than re-opening with nothing to work toward.
       goal = goal || resume.goal || '';
+      if (isBrowserContinuationText(continuationReply) && resume.goal) goal = resume.goal;
       onProgress('Picking up where we left off…');
     } else {
       onProgress('Opening browser…');
@@ -4064,6 +4125,15 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         // A resumed session that already has steps is an order in progress — latch the
         // flag so a premature "done" (on a bare reply like "mcdonald's") can't close it.
         if (priorHistory.length) session.isOrder = true;
+        if (isBrowserContinuationText(continuationReply)) {
+          const parsed = parseCheckoutReplyFromUserText(continuationReply);
+          if (Object.keys(parsed).length > 0) session.pendingCheckoutFill = { fields: parsed };
+          const pref = parseDeliveryPreferenceFromText(continuationReply);
+          if (pref) {
+            session.deliveryPreference = pref;
+            session.deliveryChoiceAsked = true;
+          }
+        }
       }
       // Re-parse or keep context
       if (!session.goalContext) session.goalContext = parseGoalContext(goal || session.goal);
@@ -6448,6 +6518,7 @@ module.exports = {
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
+  isBrowserContinuationText,
   looksLikeLoginWall,
   findGuestCheckoutElement,
   classifyCheckoutAsk,
@@ -6480,6 +6551,7 @@ module.exports = {
   shouldStartFreshSession,
   createSession,
   getSession,
+  hasResumableSession,
   touchSession,
   closeSession,
   closeWarmPool,

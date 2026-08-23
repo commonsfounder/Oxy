@@ -2110,9 +2110,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   // Playwright session before the general model sees it; otherwise the model can merely
   // acknowledge the choice while the retailer page remains untouched.
   const browserSession = browserTask.getSession(userId);
-  const browserContinuation = browserSession?.page && (
-    browserTask.parseDeliveryPreferenceFromText(text) ||
-    /\b(?:continue|keep\s+going|deliver|collect|pickup|pick\s*up|email|address|postcode|post\s*code|phone|name)\b/i.test(normalized)
+  const browserContinuationText = browserTask.isBrowserContinuationText(text);
+  const browserContinuation = browserContinuationText && (
+    browserSession?.page || await browserTask.hasResumableSession(userId)
   );
   if (browserContinuation) {
     return {

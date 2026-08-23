@@ -8,6 +8,7 @@ const {
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
+  isBrowserContinuationText,
   isOrderGoal,
   isSignupGoal,
   buildDecisionPrompt,
@@ -44,6 +45,14 @@ test('signup goals bypass product search and price lookup', () => {
   const prompt = buildDecisionPrompt('Sign me up for the newsletter on the John Lewis website.', [], []);
   assert.match(prompt, /do NOT use the product search or shopping controls/i);
   assert.match(prompt, /never invent, autofill, or submit user\s+data/i);
+});
+
+test('browser continuation replies are narrow enough not to hijack ordinary chat', () => {
+  assert.equal(isBrowserContinuationText('keep going'), true);
+  assert.equal(isBrowserContinuationText('deliver it to my address'), true);
+  assert.equal(isBrowserContinuationText('use my email'), true);
+  assert.equal(isBrowserContinuationText('what is the delivery time?'), false);
+  assert.equal(isBrowserContinuationText('show me email providers'), false);
 });
 
 test('buildChilternRailSearchUrl keeps both legs and their time constraints', () => {
