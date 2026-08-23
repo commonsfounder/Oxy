@@ -142,6 +142,7 @@ const OPEN_HYDRATE_MS = envInt('OXY_BROWSER_OPEN_HYDRATE_MS', 150);
 // explicit A/B for sites where it is proven useful.
 const ORDER_PDP_PREFETCH = process.env.OXY_BROWSER_ORDER_PDP_PREFETCH === 'true';
 const OPEN_POST_CONSENT_MS = envInt('OXY_BROWSER_OPEN_POST_CONSENT_MS', 100);
+const SETTLE_LOAD_WAIT_MS = envInt('OXY_BROWSER_SETTLE_LOAD_WAIT_MS', 750);
 const STEP_SETTLE_MS = envInt('OXY_BROWSER_STEP_SETTLE_MS', 80);
 // Recipe-driven steps chain quickly — a shorter beat between them saves ~0.5–1s per step vs the
 // full vision-path settle without risking the old networkidle trap.
@@ -1715,7 +1716,11 @@ async function captureMarkedScreenshot(page, elements) {
 // that are still visibly loading are handled by the model's "wait" action, not by us
 // blocking the whole loop. Never throws — best-effort.
 async function settle(page, pauseMs = 600) {
-  await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+  // Playwright's load-state waiter can spend its whole timeout on retailer SPAs that
+  // already have a usable document but never emit the expected event. Check the actual
+  // document state first and only wait briefly when the page is genuinely still loading.
+  const ready = await page.evaluate(() => document.readyState !== 'loading').catch(() => false);
+  if (!ready) await page.waitForLoadState('domcontentloaded', { timeout: SETTLE_LOAD_WAIT_MS }).catch(() => {});
   await page.waitForTimeout(Math.max(0, pauseMs)).catch(() => {});
 }
 
@@ -4049,7 +4054,7 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
     await page.waitForURL((u) => /\/basket/i.test(u.toString()), { timeout: 4000 }).then(() => { navigated = true; }).catch(() => {});
   }
   if (!navigated) {
-    navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
+    navigated = await page.goto(`${origin}/basket`, { waitUntil: 'commit', timeout: 5000 }).then(() => true).catch(() => false);
   }
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
