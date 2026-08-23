@@ -7,7 +7,8 @@ const {
   buildWatchCancellation,
   cleanDestinationPhrase,
   inferPersonalAdminAction,
-  inferOutboundCommunicationAction
+  inferOutboundCommunicationAction,
+  inferBrowserSignupAction
 } = require('../../api/intent-router');
 
 test('ordinary personal-admin reads reach their declared actions', () => {
@@ -49,6 +50,15 @@ test('clear outbound requests reach the review-gated action with bounded inputs'
     spoken: 'I’ll prepare that call for review.',
     actions: [{ type: 'make_call', input: { contact: 'the dentist' } }]
   });
+});
+
+test('explicit newsletter and account requests reach the browser task boundary', () => {
+  assert.deepEqual(inferBrowserSignupAction('Sign me up for the newsletter on the John Lewis website.'), {
+    reason: 'browser_signup',
+    spoken: "I'll open the website and take this as far as I can.",
+    actions: [{ type: 'run_browser_task', input: { goal: 'Sign me up for the newsletter on the John Lewis website.' } }]
+  });
+  assert.equal(inferDeterministicAction('Create an account for me on the retailer website so I can save items.').actions[0].type, 'run_browser_task');
 });
 
 // ── Question-opener filler stripped from place/directions queries ─────────────────────────

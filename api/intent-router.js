@@ -59,6 +59,8 @@ function looksLikeLocalPlaceRequest(message) {
 const { allRetailerAliases } = require('./services/retailer-sites');
 
 const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
+const BROWSER_SIGNUP_VERB = /\b(?:sign\s+(?:me\s+)?up|register|create\s+(?:an?\s+)?account|open\s+(?:an?\s+)?account|join|subscribe)\b/i;
+const BROWSER_SIGNUP_TARGET = /\b(?:website|site|online|newsletter|account|retailer|membership|service|subscription)\b/i;
 
 function retailerMentioned(text) {
   const norm = normalizeText(text).toLowerCase();
@@ -78,6 +80,20 @@ function looksLikeShoppingRequest(message) {
   if (/\b(get|grab|find|order|want|need)\b/i.test(text) && retailerMentioned(text)) return true;
   if (/\b(?:on|from|at|using)\s+/i.test(text) && retailerMentioned(text)) return true;
   return false;
+}
+
+// Account/newsletter requests are browser work, not a web search or nearby-place lookup.
+// Keep this narrow: an explicit signup verb plus a website/account target is enough to
+// start the real browser flow, which will stop for email/password/confirmation rather
+// than silently submitting user data.
+function inferBrowserSignupAction(message) {
+  const text = normalizeText(message);
+  if (!text || !BROWSER_SIGNUP_VERB.test(text) || !BROWSER_SIGNUP_TARGET.test(text)) return null;
+  return {
+    reason: 'browser_signup',
+    spoken: "I'll open the website and take this as far as I can.",
+    actions: [{ type: 'run_browser_task', input: { goal: text } }]
+  };
 }
 
 function looksLikeRideRequest(message) {
@@ -443,6 +459,9 @@ function inferDeterministicAction(message, options = {}) {
   const outboundCommunication = inferOutboundCommunicationAction(text);
   if (outboundCommunication) return outboundCommunication;
 
+  const browserSignup = inferBrowserSignupAction(text);
+  if (browserSignup) return browserSignup;
+
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
   // find_appointment_options only ever talks to the sandbox provider (see
@@ -558,6 +577,7 @@ module.exports = {
   inferDeterministicAction,
   inferPersonalAdminAction,
   inferOutboundCommunicationAction,
+  inferBrowserSignupAction,
   inferCapabilitySweepAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,
