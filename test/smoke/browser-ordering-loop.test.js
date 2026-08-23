@@ -19,7 +19,8 @@ const {
   pickFallbackCandidate,
   findElementByText,
   shouldStartFreshSession,
-  buildChilternRailSearchUrl
+  buildChilternRailSearchUrl,
+  classifyJohnLewisBasketText
 } = require('../../api/services/browser-task');
 const { validateActionWithContract } = require('../../api/action-contracts');
 
@@ -404,6 +405,12 @@ test('pickFallbackCandidate falls back to the search URL when nothing scores pos
 test('pickFallbackCandidate handles nulls from failed PDP fetches', () => {
   const checked = [null, { productUrl: 'https://x/iphone17', name: 'Apple iPhone 17, 256GB', score: 2 }, null];
   assert.equal(pickFallbackCandidate(checked, 'https://x/search'), 'https://x/iphone17');
+});
+
+test('John Lewis basket confirmation distinguishes an empty basket from a populated one', () => {
+  assert.equal(classifyJohnLewisBasketText('Basket 0 Items Your basket is empty.'), 'empty');
+  assert.equal(classifyJohnLewisBasketText('Basket 1 Item John Lewis Crew Neck Sweatshirt'), 'populated');
+  assert.equal(classifyJohnLewisBasketText('Basket Loading…'), 'unknown');
 });
 
 test('scoreProductNameVsGoal rewards matching words and punishes an unrequested tier word', () => {

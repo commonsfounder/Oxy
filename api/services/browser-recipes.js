@@ -1116,7 +1116,8 @@ async function resolveJohnLewisAdd({ page, clickable }) {
   const hit = await resolveSelectorIndex(page, [
     '[data-testid="basket:add"]',
     '[data-testid="add-to-basket-ui"] [data-testid="basket:add"]',
-    'text=Add to basket',
+    '[id="basket:add:button"]',
+    '[id="basket:add"]',
   ], clickable, 'resolve:jl-add');
   if (!hit) return null;
   return { action: 'click', locatorIndex: hit.locatorIndex, text: hit.text, stepName: 'add' };

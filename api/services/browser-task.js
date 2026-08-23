@@ -2454,7 +2454,12 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   await timed('open.settle2', () => settle(page, OPEN_POST_CONSENT_MS));
   const goalContext = parseGoalContext(goal);
   const usedFastpath = (openUrl !== url) ? siteKeyFromUrl(url) : null;
-  return createSession(userId, { browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null, isOrder: isOrderGoal(goal), usedFastpath });
+  const searchUrl = directSearchUrl(url, goal, retailOptions)
+    || (isSearchResultsUrl(url) ? url : null);
+  return createSession(userId, {
+    browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null,
+    isOrder: isOrderGoal(goal), usedFastpath, requestedUrl: url, searchUrl,
+  });
 }
 
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
@@ -3371,13 +3376,17 @@ function pickBestSearchResult(candidates, term) {
 async function tryOrderSearchPick(page, session) {
   if (!session.isOrder || session.searchPickDone || !isSearchResultsUrl(page.url())) return null;
   const term = deriveSearchTerm(session.goal, { names: [session.site?.split('.')[0] || ''] }) || session.goal || '';
-  const candidates = await page.evaluate((sel) => {
+  const excludedPaths = Array.isArray(session.jlExcludedProductPaths) ? session.jlExcludedProductPaths : [];
+  const candidates = await page.evaluate(({ sel, excludedPaths }) => {
     const patterns = [/\/p\/[^/?#]+/i, /\/p\/\d+/i, /\/p\d+(?:\/|$)/i, /\/prd\//i, /\/product\//i, /\/dp\/[A-Z0-9]/i, /\/gp\/product\//i];
     const all = [...document.querySelectorAll(sel)];
     const out = [];
     for (const a of document.querySelectorAll('a[href]')) {
       const href = a.getAttribute('href') || '';
       if (!patterns.some((p) => p.test(href))) continue;
+      try {
+        if (excludedPaths.includes(new URL(href, location.origin).pathname)) continue;
+      } catch { /* keep a malformed link out of the exclusion check */ }
       const r = a.getBoundingClientRect();
       if (r.width < 20 || r.height < 10) continue;
       const el = a.closest(sel) || a;
@@ -3389,7 +3398,7 @@ async function tryOrderSearchPick(page, session) {
       if (out.length >= 24) break; // plenty to score from; cap DOM scan cost
     }
     return out;
-  }, CLICKABLE_SELECTOR).catch(() => []);
+  }, { sel: CLICKABLE_SELECTOR, excludedPaths }).catch(() => []);
   const hit = pickBestSearchResult(candidates, term);
   if (!hit) return null;
   session.searchPickDone = true;
@@ -3731,6 +3740,7 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
   const payEl = elements.find((el) => matchesPaymentKeyword(el.text));
   const paymentUrl = !payEl && isCheckoutPaymentUrl(page.url());
   if (payEl || paymentUrl) {
+    const profile = session.checkoutProfile;
     // Delivery vs Collection is a real preference — don't declare the order ready with an
     // unaddressed choice sitting on the very same page (JL shows both radios right next to
     // "Continue to payment"). This is a second, later check alongside the per-step one in
@@ -3761,7 +3771,15 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
         }
       }
     }
-    const profile = session.checkoutProfile;
+    // John Lewis (and similar UK checkouts) can show a postcode/address lookup as the only
+    // visible delivery field. The profile autofill cannot safely put a street address into
+    // that search box, and the old ready check treated the optional lookup input as non-
+    // required, so it could hand off to payment with no delivery address at all. Switch to
+    // the merchant's explicit manual-entry path before evaluating payment readiness.
+    if (session.isOrder && profile?.consent && profile.address
+      && await tryManualAddressEntryClick(page, session, steps, onProgress)) {
+      return null;
+    }
     if (profile?.consent && (profile.phone || profile.name || profile.address)) {
       await autoFillCheckoutDetails(session, profile, steps, onProgress).catch(() => {});
     }
@@ -3835,6 +3853,14 @@ async function tryGenericCheckoutProgress(session, userId, page, steps, onProgre
   return null;
 }
 
+function classifyJohnLewisBasketText(text) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (/your basket is empty/i.test(normalized) || /\bbasket\s+0\s+items?\b/i.test(normalized)) return 'empty';
+  if (/\bbasket\s+[1-9]\d*\s+items?\b/i.test(normalized)
+    || /\bbasket\s+[1-9]\d*\s+item\b/i.test(normalized)) return 'populated';
+  return 'unknown';
+}
+
 async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress) {
   if (session.jlBasketFallbackDone) return false;
   let origin;
@@ -3868,12 +3894,22 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
   if (!navigated) {
     navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
   }
-  // A successful navigation to /basket is itself strong confirmation the add went through —
-  // no need to poll the badge again afterward (that redundant second wait was most of a
-  // 25s+ worst-case chain for a step that should be quick).
-  if (navigated && session) { session.cartAddConfirmed = true; session.cartEverNonzero = true; }
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
+  // Reaching /basket is NOT proof that the add worked: John Lewis serves the same basket
+  // route for an empty basket. The old code promoted any successful navigation to
+  // cartAddConfirmed, which made the model treat "Basket 0 Items" as a real cart and then
+  // spin for minutes. Only trust the rendered basket count/empty-state after hydration.
+  const basketText = navigated && await page.waitForFunction(() => {
+    const text = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
+    return /your basket is empty|\bbasket\s+\d+\s+items?\b/i.test(text) ? text : null;
+  }, { timeout: 3500, polling: 150 }).then((handle) => handle.jsonValue()).catch(() => '');
+  const populated = classifyJohnLewisBasketText(basketText) === 'populated';
+  if (!populated) {
+    session.history.push(`Step ${steps}: [recipe] John Lewis basket was empty; add was not confirmed`);
+    return false;
+  }
+  if (session) { session.cartAddConfirmed = true; session.cartEverNonzero = true; }
   const checkout = page.getByRole('button', { name: /checkout|secure checkout/i }).first()
     .or(page.getByRole('link', { name: /checkout|secure checkout/i }).first());
   const clickedCheckout = await checkout.click({ timeout: 2000 }).then(() => true).catch(() => false);
@@ -4678,6 +4714,10 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         if (!session.cartAddConfirmed) {
           recipeHealth.recordMiss(session.site, 'add');
           session.cartAddGiveUp = true;
+          return recoverableBrowserError(
+            'John Lewis did not confirm the item in the basket, so I stopped before checkout. I can retry the add from this product.',
+            { code: 'basket_add_not_confirmed', label: 'Retry add', reason: 'empty_basket' }
+          );
         }
         recipeMove = await nextRecipeMove(session.page, session, recipe, recipeHealth).catch(() => null);
       }
@@ -4757,11 +4797,28 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         recipeMove = null;
       }
       // John Lewis ship-from-store: bail before vision spins on express checkout.
-      if (!recipeMove && !searchPick && session.isOrder && session.site === 'johnlewis.com' && !session.jlExpressOnlyNoted) {
+      if (!recipeMove && !searchPick && session.isOrder && session.site === 'johnlewis.com') {
         try {
           const u = new URL(session.page.url());
           if (/\/p\d+(?:\b|\/|$)/i.test(u.pathname) && await isJohnLewisExpressOnlyPdp(session.page)) {
-            session.jlExpressOnlyNoted = true;
+            // A direct HTTP fast-path can land on a relevant product that only supports
+            // Express checkout. That is a product-selection miss, not proof the retailer
+            // cannot fulfil the request. Return to the search results, exclude this PDP,
+            // and try the next matching product. Bound retries so an all-Express search
+            // still ends with an honest boundary.
+            const skipped = session.jlExpressOnlySkips || 0;
+            if (session.searchUrl && skipped < 3) {
+              session.jlExpressOnlySkips = skipped + 1;
+              session.jlExcludedProductPaths = session.jlExcludedProductPaths || [];
+              if (!session.jlExcludedProductPaths.includes(u.pathname)) session.jlExcludedProductPaths.push(u.pathname);
+              session.searchPickDone = false;
+              session.proactiveSearchDone = true;
+              session.history.push(`Step ${steps}: skipped Express-only John Lewis product ${u.pathname}`);
+              onProgress('Looking for another matching product…');
+              await session.page.goto(session.searchUrl, { waitUntil: 'domcontentloaded', timeout: 10000 }).catch(() => {});
+              await settle(session.page, RECIPE_SETTLE_MS);
+              continue;
+            }
             return {
               type: 'error',
               error: 'This John Lewis item is ship-from-store only (Express checkout) — I can\'t add it to a standard basket here. Want me to find it at another retailer, or pick a similar item with normal delivery?',
@@ -6407,6 +6464,7 @@ module.exports = {
   isSignupGoal,
   shouldUseOrderingAutomation,
   assessProgress,
+  classifyJohnLewisBasketText,
   shouldAttemptTextOnlyDecision,
   isTextOnlyDeclined,
   buildDecisionPrompt,
