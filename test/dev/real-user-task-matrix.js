@@ -167,6 +167,7 @@ function classify(task, reply) {
   if (task.mode === 'approval') {
     if (result.outcome === 'awaiting_user' || /approval|confirm|review|permission/i.test(`${result.text} ${result.error}`)) return { status: 'approval_boundary', receipts };
     if (result.outcome === 'unavailable') return { status: 'setup_blocked', receipts };
+    if (/not connected|connection is disabled|need .* (?:phone|email) address|does not have .* (?:phone|email)/i.test(`${result.text} ${result.error}`)) return { status: 'setup_blocked', receipts };
     return { status: result.success === false ? 'failed' : 'effect_risk', receipts };
   }
   if (task.mode === 'browser') {

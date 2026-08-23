@@ -184,10 +184,16 @@ function inferOutboundCommunicationAction(message) {
 
   const messageMatch = text.match(/^(?:please\s+)?(?:text|message)\s+(.+?)\s+(?:that|saying|and\s+ask)\s+(.+)$/i);
   if (messageMatch) {
+    const contact = trimTrailingPunctuation(messageMatch[1]);
+    const type = /\b(restaurant|courier|company|vendor|support|hotel|airline|delivery|shop|store)\b/i.test(contact)
+      ? 'send_millie_sms'
+      : 'send_message';
     return {
-      reason: 'send_message',
+      reason: type,
       spoken: 'I’ll prepare that message for review.',
-      actions: [{ type: 'send_message', input: { contact: trimTrailingPunctuation(messageMatch[1]), message: messageMatch[2].trim() } }]
+      actions: [{ type, input: type === 'send_message'
+        ? { contact, message: messageMatch[2].trim() }
+        : { to: contact, body: messageMatch[2].trim() } }]
     };
   }
 

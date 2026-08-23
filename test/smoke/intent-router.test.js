@@ -34,6 +34,11 @@ test('clear outbound requests reach the review-gated action with bounded inputs'
     spoken: 'I’ll prepare that message for review.',
     actions: [{ type: 'send_message', input: { contact: 'Alex', message: 'I am running ten minutes late.' } }]
   });
+  assert.deepEqual(inferOutboundCommunicationAction('Text the courier company and ask where my delivery is.'), {
+    reason: 'send_millie_sms',
+    spoken: 'I’ll prepare that message for review.',
+    actions: [{ type: 'send_millie_sms', input: { to: 'the courier company', body: 'where my delivery is.' } }]
+  });
   assert.deepEqual(inferOutboundCommunicationAction('Email the restaurant and ask whether they can move our booking to 8pm.'), {
     reason: 'send_millie_email',
     spoken: 'I’ll prepare that message for review.',
