@@ -89,11 +89,12 @@ const envInt = (name, fallback) => {
 // run_browser_task call), typically costing seconds of pure overhead per turn for zero
 // browser-automation progress. The client watchdog no longer works that way (it now
 // extends on every live status event instead of hard-cutting at 45s — see
-// ChatViewModel.startSendWatchdog), so the real ceiling is platform.s own request
-// timeout (300s as configured) minus headroom for the agent loop's own wrap-up. Raised
-// so a normal order can complete in one `run_browser_task` call instead of 2-4.
+// ChatViewModel.startSendWatchdog), but cold Chromium launch and a slow retailer still
+// need to leave room for the phone request and response cleanup. Keep the default below
+// the platform request ceiling; the persisted browser state makes a later "keep going"
+// cheap and safe.
 // MAX_STEPS above remains the real backstop against a runaway loop, independent of time.
-const MAX_DURATION_MS = envInt('OXY_BROWSER_MAX_DURATION_MS', 180 * 1000);
+const MAX_DURATION_MS = envInt('OXY_BROWSER_MAX_DURATION_MS', 120 * 1000);
 // The loop's deadline is checked between browser steps, but an individual Playwright/model
 // phase can still be in flight when that check becomes true. Keep the public action bounded
 // as well, so a bad retailer page cannot hold the phone request open for several minutes.
