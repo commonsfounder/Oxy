@@ -1335,9 +1335,19 @@ function buildTextOnlyDecisionPrompt(goal, history, elements, correction = '', g
     if (goalContext.dealHints && goalContext.dealHints.length) parts.push(`deal prefs: ${goalContext.dealHints.join(', ')}`);
     if (parts.length) contextBlock = `\nEXTRACTED CONTEXT FROM USER GOAL: ${parts.join(' | ')}\n`;
   }
+  const signupBlock = isSignupGoal(goal)
+    ? `
+For this signup/account/newsletter goal, ignore product search controls. Choose only a clearly
+labelled Sign up, Register, Create account, Newsletter, or Subscribe control. If the needed
+control is not identifiable from these labels, reply {"action":"insufficient_info"} so the
+visual browser pass can inspect it. Once an email, phone, password, or consent field appears,
+use "ask" and stop; never invent or autofill user data.
+`
+    : '';
 
   return `You are controlling a real web browser to help with this goal: "${goal}"
 ${contextBlock}
+${signupBlock}
 You do NOT have an image of the page — only this text list of its clickable elements,
 each with its accessible name (label, button text, or aria-label). Elements marked [input]
 are real typeable fields; anything else — including a promo banner or link whose text reads

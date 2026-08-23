@@ -38,6 +38,12 @@ test('text-only prompt offers the insufficient_info escape hatch', () => {
   assert.match(prompt, /insufficient_info/);
 });
 
+test('text-only signup prompt refuses to guess form controls or user data', () => {
+  const prompt = buildTextOnlyDecisionPrompt('Sign me up for the newsletter on John Lewis.', [], [{ id: 0, text: 'Search' }], '', null);
+  assert.match(prompt, /ignore product search controls/i);
+  assert.match(prompt, /never invent or autofill user data/i);
+});
+
 test('text-only prompt tags real input fields as [input] and leaves links/buttons untagged', () => {
   const prompt = buildTextOnlyDecisionPrompt(
     'buy a blue jumper',
