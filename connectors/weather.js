@@ -1,26 +1,45 @@
-const axios = require('axios');
+const brainProvider = require('../api/services/brain-provider');
+const { defaultModelForProvider } = require('../api/services/model-routing');
+
+function searchModel() {
+  return defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER || 'openai', 'fast');
+}
+
+async function groundedWeather(city, forecast = false) {
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = forecast
+    ? `Today's date is ${today}. Search the web for the current weather forecast for ${city}. Return the next useful forecast periods, temperatures, precipitation and wind where available, with the relevant update time. Only report facts supported by the search results; say plainly if a detail is unavailable. Plain concise text.`
+    : `Today's date is ${today}. Search the web for the current weather in ${city}. Return the current temperature, conditions, feels-like temperature and precipitation or wind where available, with the relevant observation or update time. Only report facts supported by the search results; say plainly if current data is unavailable. Plain concise text.`;
+  const text = await brainProvider.webSearchBrain({ model: searchModel(), prompt });
+  if (!text) {
+    return {
+      success: false,
+      outcome: 'unavailable',
+      unavailable: true,
+      error: `No grounded weather result was available for ${city}.`
+    };
+  }
+  return {
+    success: true,
+    outcome: 'completed',
+    text,
+    city,
+    source: 'grounded_web_search'
+  };
+}
 
 async function execute(userId, action, params) {
-  const key = process.env.OPENWEATHER_API_KEY;
   const city = params.city || params.location || 'London';
-  if (!key) {
-    return { success: false, outcome: 'unavailable', unavailable: true, error: `Weather is unavailable because no provider is configured for ${city}.` };
-  }
-
   try {
     if (action === 'get_weather') {
-      const res = await axios.get(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${key}&units=metric`);
-      const w = res.data;
-      return { success: true, text: `${w.name}: ${w.weather[0].description}, ${w.main.temp}°C, feels like ${w.main.feels_like}°C`, temp: w.main.temp, condition: w.weather[0].description };
+      return groundedWeather(city);
     }
     if (action === 'get_forecast') {
-      const res = await axios.get(`https://api.openweathermap.org/data/2.5/forecast?q=${encodeURIComponent(city)}&appid=${key}&units=metric`);
-      const forecast = res.data.list.slice(0, 5).map(f => `${new Date(f.dt * 1000).toLocaleString()}: ${f.weather[0].description} ${f.main.temp}°C`).join(' | ');
-      return { success: true, text: `Forecast for ${city}: ${forecast}` };
+      return groundedWeather(city, true);
     }
-    return { success: false, error: 'Unknown weather action' };
+    return { success: false, outcome: 'failed', error: 'Unknown weather action' };
   } catch (e) {
-    return { success: false, error: `Weather error: ${e.response?.data?.message || e.message}` };
+    return { success: false, outcome: 'failed', error: `Weather search failed: ${e.message}` };
   }
 }
 

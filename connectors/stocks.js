@@ -1,28 +1,45 @@
-const axios = require('axios');
+const brainProvider = require('../api/services/brain-provider');
+const { defaultModelForProvider } = require('../api/services/model-routing');
+
+function searchModel() {
+  return defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER || 'openai', 'fast');
+}
+
+async function groundedStockSearch(symbol, search = false) {
+  const today = new Date().toISOString().slice(0, 10);
+  const prompt = search
+    ? `Today's date is ${today}. Search the web for the publicly traded company or stock symbol ${symbol}. Return the best-supported current listing details and exchange, and distinguish an identity result from a live quote. Do not invent a price. Plain concise text.`
+    : `Today's date is ${today}. Search the web for the current stock quote for ${symbol}. Return the current price, currency, daily change or percentage where available, whether the quote is delayed or the market is closed, and the quote time. Do not invent a price; say plainly if no current quote is supported. Plain concise text.`;
+  const text = await brainProvider.webSearchBrain({ model: searchModel(), prompt });
+  if (!text) {
+    return {
+      success: false,
+      outcome: 'unavailable',
+      unavailable: true,
+      error: `No grounded stock result was available for ${symbol}.`
+    };
+  }
+  return {
+    success: true,
+    outcome: 'completed',
+    text,
+    symbol,
+    source: 'grounded_web_search'
+  };
+}
 
 async function execute(userId, action, params) {
-  const key = process.env.ALPHA_VANTAGE_KEY;
   const symbol = params.symbol || params.query || 'AAPL';
-  if (!key) {
-    return { success: false, outcome: 'unavailable', unavailable: true, error: `Stock data is unavailable because no provider is configured for ${symbol}.` };
-  }
-
   try {
     if (action === 'get_stock_price') {
-      const res = await axios.get(`https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${key}`);
-      const q = res.data['Global Quote'] || {};
-      const price = q['05. price'] || 'N/A';
-      const change = q['09. change'] || 'N/A';
-      return { success: true, text: `${symbol}: $${price} (${change})`, price: parseFloat(price) };
+      return groundedStockSearch(symbol);
     }
     if (action === 'search_stocks') {
-      const res = await axios.get(`https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(symbol)}&apikey=${key}`);
-      const matches = res.data.bestMatches?.slice(0,3).map(m => `${m['1. symbol']}: ${m['2. name']}`).join(', ') || 'none';
-      return { success: true, text: `Stock matches for ${symbol}: ${matches}` };
+      return groundedStockSearch(symbol, true);
     }
-    return { success: false, error: 'Unknown stocks action' };
+    return { success: false, outcome: 'failed', error: 'Unknown stocks action' };
   } catch (e) {
-    return { success: false, error: `Stocks error: ${e.message}` };
+    return { success: false, outcome: 'failed', error: `Stock search failed: ${e.message}` };
   }
 }
 

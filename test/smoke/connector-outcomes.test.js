@@ -4,34 +4,62 @@ const test = require('node:test');
 const weather = require('../../connectors/weather');
 const stocks = require('../../connectors/stocks');
 const amazon = require('../../connectors/amazon');
+const brainProvider = require('../../api/services/brain-provider');
 
-test('weather without a provider key is unavailable, not a weather result', async () => {
-  const saved = process.env.OPENWEATHER_API_KEY;
-  delete process.env.OPENWEATHER_API_KEY;
+test('weather works through grounded search without an OpenWeather key', async () => {
+  const saved = brainProvider.webSearchBrain;
+  let prompt = '';
+  brainProvider.webSearchBrain = async input => {
+    prompt = input.prompt;
+    return 'London: 18°C, light rain, feels like 17°C. Updated 10 minutes ago.';
+  };
   try {
     const result = await weather.execute('user-1', 'get_weather', { city: 'London' });
-    assert.equal(result.success, false);
-    assert.equal(result.outcome, 'unavailable');
-    assert.equal(result.webLink, undefined);
-    assert.match(result.error, /weather.*unavailable|not configured/i);
+    assert.equal(result.success, true);
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.source, 'grounded_web_search');
+    assert.match(prompt, /current weather in London/i);
+    assert.match(result.text, /18°C/);
   } finally {
-    if (saved === undefined) delete process.env.OPENWEATHER_API_KEY;
-    else process.env.OPENWEATHER_API_KEY = saved;
+    brainProvider.webSearchBrain = saved;
   }
 });
 
-test('stocks without a provider key are unavailable, not a quote', async () => {
-  const saved = process.env.ALPHA_VANTAGE_KEY;
-  delete process.env.ALPHA_VANTAGE_KEY;
+test('stocks work through grounded search without an Alpha Vantage key', async () => {
+  const saved = brainProvider.webSearchBrain;
+  let prompt = '';
+  brainProvider.webSearchBrain = async input => {
+    prompt = input.prompt;
+    return 'AAPL: $200.00, down 1.2%, quote delayed. Updated 5 minutes ago.';
+  };
   try {
     const result = await stocks.execute('user-1', 'get_stock_price', { symbol: 'AAPL' });
-    assert.equal(result.success, false);
-    assert.equal(result.outcome, 'unavailable');
-    assert.equal(result.webLink, undefined);
-    assert.match(result.error, /stock.*unavailable|not configured/i);
+    assert.equal(result.success, true);
+    assert.equal(result.outcome, 'completed');
+    assert.equal(result.source, 'grounded_web_search');
+    assert.match(prompt, /current stock quote for AAPL/i);
+    assert.match(result.text, /\$200\.00/);
   } finally {
-    if (saved === undefined) delete process.env.ALPHA_VANTAGE_KEY;
-    else process.env.ALPHA_VANTAGE_KEY = saved;
+    brainProvider.webSearchBrain = saved;
+  }
+});
+
+test('public-data searches stay unavailable when grounded search returns no answer', async () => {
+  const saved = brainProvider.webSearchBrain;
+  brainProvider.webSearchBrain = async () => '';
+  try {
+    const [weatherResult, stockResult] = await Promise.all([
+      weather.execute('user-1', 'get_weather', { city: 'London' }),
+      stocks.execute('user-1', 'get_stock_price', { symbol: 'AAPL' })
+    ]);
+    for (const result of [weatherResult, stockResult]) {
+      assert.equal(result.success, false);
+      assert.equal(result.outcome, 'unavailable');
+      assert.equal(result.unavailable, true);
+      assert.match(result.error, /No grounded .* result/i);
+    }
+  } finally {
+    brainProvider.webSearchBrain = saved;
   }
 });
 
