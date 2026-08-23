@@ -5,9 +5,39 @@ const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|
 const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
 const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
 const FUTURE_TIME_TERMS = /\b(tomorrow|later|around|about|by|at|after|before|\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i;
+const CAPABILITY_SWEEP_TRIGGER = /\b(?:run|use)\s+(?:the\s+)?capability[_\s-]?sweep\b|\b(?:run|do)\s+(?:the\s+)?(?:whole|full|safe)\s+(?:capability\s+)?sweep\b|\bdo\s+all(?:\s+of)?\s+that\b|\bcheck\s+everything\b|\bfull\s+capability\s+batch\b/i;
+const CAPABILITY_SWEEP_INPUT_KEYS = [
+  'weather_city', 'place_query', 'directions_destination', 'directions_origin',
+  'train_origin', 'train_destination', 'train_date', 'flight_from', 'flight_to',
+  'flight_depart_date', 'flight_return_date', 'hotel_location', 'hotel_check_in',
+  'hotel_check_out', 'stock_symbol', 'amazon_query', 'itinerary_destination',
+  'itinerary_start_date', 'itinerary_duration_days', 'google_docs_query', 'github_repo'
+];
 
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
+}
+
+function parseCapabilitySweepInputs(message) {
+  const text = String(message || '');
+  const inputs = {};
+  for (const key of CAPABILITY_SWEEP_INPUT_KEYS) {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = text.match(new RegExp(`\\b${escapedKey}\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^;\\n]+?))\\s*(?=;|$)`, 'i'));
+    const value = match?.[1] || match?.[2] || match?.[3];
+    if (value?.trim()) inputs[key] = value.trim();
+  }
+  return inputs;
+}
+
+function inferCapabilitySweepAction(message) {
+  const text = normalizeText(message);
+  if (!CAPABILITY_SWEEP_TRIGGER.test(text)) return null;
+  return {
+    reason: 'capability_sweep',
+    spoken: "I'll run the read-only capability sweep.",
+    actions: [{ type: 'capability_sweep', input: parseCapabilitySweepInputs(text) }]
+  };
 }
 
 function isQuestionOnly(text) {
@@ -420,6 +450,7 @@ function inferDeterministicAction(message, options = {}) {
 
 module.exports = {
   inferDeterministicAction,
+  inferCapabilitySweepAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,
   cleanDestinationPhrase,

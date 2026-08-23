@@ -27,7 +27,7 @@ const { extractIncoming } = require('./services/incoming');
 const { isNonEmptyString, isValidCalendarDate } = require('./services/request-validation');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
-const { inferDeterministicAction } = require('./intent-router');
+const { inferDeterministicAction, inferCapabilitySweepAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const browserTask = require('./services/browser-task');
 const { runCapabilitySweep } = require('./services/capability-sweep');
@@ -2039,6 +2039,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   const text = String(message || '').trim();
   const normalized = text.toLowerCase();
   const historyOptions = { since: options.since };
+
+  const capabilitySweep = inferCapabilitySweepAction(text);
+  if (capabilitySweep) return capabilitySweep;
 
   const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
   if (appointmentTurn) return appointmentTurn;

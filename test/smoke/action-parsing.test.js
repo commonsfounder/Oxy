@@ -27,6 +27,7 @@ const {
   isEmailDraftRequest,
   findRecentEmailTarget
 } = require('../../api/index.js');
+const { inferCapabilitySweepAction } = require('../../api/intent-router');
 
 // Build a fake model that returns scripted replies in order, and an executor that returns
 // scripted result batches — so we can drive runAgentLoop's control flow deterministically.
@@ -151,6 +152,23 @@ test('compound read-only routing preserves email then calendar order', () => {
   assert.equal(turn.reason, 'compound_read_only');
   assert.deepEqual(turn.actions.map(action => action.type), ['search_emails', 'get_calendar_events']);
   assert.equal(turn.actions[1].input.when, 'tomorrow');
+});
+
+test('the full capability batch has a deterministic chat route and preserves explicit targets', () => {
+  const turn = inferCapabilitySweepAction(
+    'Run the capability_sweep action: weather_city=London; amazon_query="noise-cancelling headphones"; github_repo=commonsfounder/Oxy;'
+  );
+  assert.equal(turn.reason, 'capability_sweep');
+  assert.equal(turn.actions[0].type, 'capability_sweep');
+  assert.deepEqual(turn.actions[0].input, {
+    weather_city: 'London',
+    amazon_query: 'noise-cancelling headphones',
+    github_repo: 'commonsfounder/Oxy'
+  });
+});
+
+test('ordinary capability questions do not execute the sweep', () => {
+  assert.equal(inferCapabilitySweepAction('What capabilities can it do?'), null);
 });
 
 test('compound read-only routing preserves calendar then email order', () => {
