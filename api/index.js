@@ -2796,7 +2796,7 @@ function looksLikeMessageAddress(value) {
 
 // DB-backed daily send cap for Millie's own identity — not the existing in-memory
 // createRateLimiter, whose Map doesn't survive a restart and isn't shared across
-// Cloud Run instances if the service scales beyond one. This counts real rows
+// Fly machines if the service scales beyond one. This counts real rows
 // instead. Millie's identity has no human tap-to-send safety net the way
 // send_message's device-level deep link does, so this is a real abuse guard, not
 // a formality.
@@ -6382,7 +6382,7 @@ async function clearPendingAction(userId, pendingAction = null) {
 // Atomically deletes the pending action only if it still matches exactly what
 // the caller read, and reports whether it won the claim. The in-memory
 // pendingActionConfirmLocks Set only protects against a double-tap landing on
-// the same Cloud Run instance; this DB-level compare-and-delete is what
+// the same Fly machine; this DB-level compare-and-delete is what
 // actually prevents two requests (on two different instances) from both
 // executing the same review-gated action after the user says "yes".
 async function claimPendingAction(userId, pendingAction) {
@@ -9865,7 +9865,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       pendingActionConfirmLocks.add(pendingKey);
       try {
         // The in-memory Set above only catches a double-tap landing on this
-        // same process. Cloud Run can run several instances concurrently, so
+        // same process. Fly.io can run several instances concurrently, so
         // the real guard against double-executing a confirmed action is this
         // atomic compare-and-delete: only the request that actually removes
         // the stored pending action gets to run it.
@@ -11278,7 +11278,7 @@ app.get('/robots.txt', (req, res) => {
 
 app.get('/humans.txt', (req, res) => {
   res.setHeader('Content-Type', 'text/plain');
-  res.send('/* TEAM */\nChizi Gamonye-Wuchi — Founder & Builder\nLocation: Solihull, UK\n\n/* THANKS */\nGemini · Supabase · Cloud Run · Node.js\n\n/* SITE */\nLast update: 2026\nLanguage: English\nDoctype: HTML5\nIDE: Various');
+  res.send('/* TEAM */\nChizi Gamonye-Wuchi — Founder & Builder\nLocation: Solihull, UK\n\n/* THANKS */\nGemini · Supabase · Fly.io · Node.js\n\n/* SITE */\nLast update: 2026\nLanguage: English\nDoctype: HTML5\nIDE: Various');
 });
 
 app.post('/admin/cleanup-conversations', async (req, res) => {

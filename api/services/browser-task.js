@@ -89,7 +89,7 @@ const envInt = (name, fallback) => {
 // run_browser_task call), typically costing seconds of pure overhead per turn for zero
 // browser-automation progress. The client watchdog no longer works that way (it now
 // extends on every live status event instead of hard-cutting at 45s — see
-// ChatViewModel.startSendWatchdog), so the real ceiling is Cloud Run's own request
+// ChatViewModel.startSendWatchdog), so the real ceiling is platform.s own request
 // timeout (300s as configured) minus headroom for the agent loop's own wrap-up. Raised
 // so a normal order can complete in one `run_browser_task` call instead of 2-4.
 // MAX_STEPS above remains the real backstop against a runaway loop, independent of time.
@@ -273,7 +273,7 @@ function shouldStartFreshSession(session, { url, goal } = {}) {
 // silently paying a metered proxy.
 
 // Direct child PIDs of `parentPid`. Best-effort, two strategies since this runs on both a
-// macOS dev machine and Linux (Cloud Run): pgrep first (present on macOS; `-P` exits 1 with
+// macOS dev machine and Linux (Fly.io): pgrep first (present on macOS; `-P` exits 1 with
 // no output when nothing matches, which execFileSync surfaces as a throw — that's the normal
 // "no children yet" case, not a real error), then a pure-fs /proc scan as the Linux fallback
 // for containers that don't ship pgrep (this image's base, node:20-bookworm-slim, doesn't
@@ -302,11 +302,11 @@ function directChildPids(parentPid) {
   }
 }
 
-// Container-hardened Chromium launch args. On Cloud Run the process runs as root inside a
+// Container-hardened Chromium launch args. In the Fly.io image the process runs as root inside a
 // slim container, where the two classic headless-Chromium failure modes are:
 //   --no-sandbox           : the setuid sandbox can't initialise as root in this container,
 //                            so without this the launch hangs/aborts.
-//   --disable-dev-shm-usage: Cloud Run gives /dev/shm only ~64MB; Chromium defaults to it for
+//   --disable-dev-shm-usage: the container gives /dev/shm only ~64MB; Chromium defaults to it for
 //                            shared memory and stalls or crashes when it fills. Point it at
 //                            /tmp instead. This was the likeliest cause of the 180s launch
 //                            timeouts seen in prod (browserType.launch: Timeout 180000ms).
@@ -629,7 +629,7 @@ function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
   return false;
 }
 
-// Anti-automation interstitials: a datacenter IP (Cloud Run) trips these on many sites.
+// Anti-automation interstitials: a datacenter IP (Fly.io) trips these on many sites.
 // The page LOADS with real bytes — so the empty-shell size guard misses it — but every real
 // control is replaced by an "Access Denied" / Cloudflare / "verify you're human" challenge.
 // Left undetected, the loop clicks around the dead page for its whole step budget, returns
@@ -1706,7 +1706,7 @@ function withTimeout(promise, ms, label) {
 
 // Default provider. Luna beat Gemini on the live price-lookup A/B (2026-08-01) at a lower
 // price per step, so it's the primary loop model; OXY_BROWSER_PROVIDER still overrides for
-// an A/B. Kept in code rather than living only in the Cloud Run env, because an env-only
+// an A/B. Kept in code rather than living only in the Fly.io env, because an env-only
 // switch silently breaks the moment someone unsets the var (see BROWSER_MODEL above).
 const BROWSER_PROVIDER = (process.env.OXY_BROWSER_PROVIDER || 'openai').toLowerCase();
 

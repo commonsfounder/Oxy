@@ -13,7 +13,7 @@ const { writeWorkspaceFiles } = require('../../api/services/agent-workspace');
 
 // Minimal supabase double that records every call, so "how many round-trips did this take"
 // is assertable. A per-message await inside a loop is the difference between an import that
-// finishes and one that dies on the Cloud Run request timeout half-written.
+// finishes and one that dies on the Fly.io request timeout half-written.
 function recordingSupabase({ failOn = null, existingFiles = [] } = {}) {
   const log = { trips: 0, inserts: [], updates: [], rows: 0 };
   const from = (table) => {

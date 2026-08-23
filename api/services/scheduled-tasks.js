@@ -456,7 +456,7 @@ async function getDueScheduledTasks(userId, now = new Date()) {
   return data || [];
 }
 
-// A sweep can run on more than one Cloud Run instance. Move the due timestamp forward
+// A sweep can run on more than one Fly machine. Move the due timestamp forward
 // with a compare-and-set so only one instance owns a scheduled run. If that instance dies,
 // the lease expires and the next sweep can retry it; the durable agent task remains the
 // user-visible record of what happened.

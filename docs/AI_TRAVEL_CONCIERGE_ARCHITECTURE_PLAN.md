@@ -9,7 +9,7 @@
 - **Existing AI functionality:** Gemini chat/voice generation is orchestrated in `api/index.js`; context assembly pulls memory, conversation history, native hints, connector availability, search grounding intent, recent action logs, and context-brain resolution.
 - **API integrations:** Google/Gmail/Calendar/Maps, Telegram, GitHub, Microsoft, Spotify, Linear, Notion, Trainline/transport, Uber deep links, YouTube, Indeed, LinkedIn, Sentry, Supabase, and Gemini are present.
 - **State management:** iOS uses SwiftUI observable state/view models. Backend state is persisted through Supabase `preferences`, `conversations`, `memories`, `connectors`, `action_log`, and `native_context`.
-- **Deployment setup:** `Dockerfile`, `cloudrun.env.example.yaml`, `runtime.js`, and `README.md` indicate Cloud Run-style Node deployment with env-driven Gemini/Supabase/connector configuration.
+- **Deployment setup:** `Dockerfile`, `fly.toml`, `runtime.js`, and `README.md` indicate Fly.io Node deployment with env-driven Gemini/Supabase/connector configuration.
 - **Logging:** Structured JSON logging and optional Sentry are in `api/index.js`; chat tracing logs model calls, Supabase calls, search decisions, and now travel-concierge state.
 - **File organization:** The backend is currently centralized in `api/index.js` with extracted service modules. This change follows that pattern by adding `api/services/travel-concierge.js` and smoke tests.
 

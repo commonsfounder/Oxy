@@ -1,6 +1,6 @@
 // /health is what proves — cheaply, without a live probe of any third party — whether the
 // deployed service has the configuration it needs. It has to stay fast and independent of
-// external uptime (a Gmail outage must never turn into a Cloud Run restart signal), so this
+// external uptime (a Gmail outage must never turn into a Fly.io restart signal), so this
 // only checks configuration PRESENCE, never live reachability.
 
 const assert = require('node:assert/strict');

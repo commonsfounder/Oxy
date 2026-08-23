@@ -8,7 +8,7 @@ Tests as of this write: `npm test` → **664/664 green**. `git status`: `api/ser
 
 ## Gemini billing — resolved, not urgent anymore
 
-The 2026-08-03 dunning hold (GCP project `gen-lang-client-0469764419`, failed payment method) appears fixed: `OPENAI_API_KEY` is now present in `.env`, and Cloud Run revision `oxy-00419-cb7` (04:46 UTC) postdates the latest commit `b055f686` (04:42 UTC, the voice-provider switch), so it's deployed. `/chat` still has zero OpenAI fallback path if Gemini goes down again — that gap is real and unchanged, just not on fire right now.
+The 2026-08-03 model-provider dunning hold is historical: `OPENAI_API_KEY` is present in `.env`, and the production app is Fly.io. `/chat` still has zero OpenAI fallback path if Gemini goes down again — that gap is real and unchanged, just not on fire right now.
 
 ## Browser-task reliability — real progress, one real architectural gap found
 
@@ -53,7 +53,7 @@ Also still open, unrelated: `OXY_TOKEN_ENCRYPTION_KEY` missing from `.env` — c
 
 **Hardware** — pendant (`OxyPendantFirmware/`, BLE mic + button, Seeed XIAO nRF52840) is **dead** — not a technical failure, a desirability one; confirmed by the user directly. No replacement hardware direction is committed. A 2026-07-29 session already pressure-tested a "pivot to home-device/agentic-Alexa" idea and the recommendation was to not chase it — phone/app is the actual wedge, the shipped agent capability (transacts: basket, guest checkout, card fill, reauth walls, honest outcome reporting) is the asset regardless of shell, and hardware is an earned move once software demand is undeniable, not an opening one. Nothing has overturned that since. Don't propose new hardware without the user raising it.
 
-**Process/git** — work directly on `main`, no feature branches for routine work. Never `git add -A`/`.` (Xcode work sits uncommitted in parallel) — stage explicit paths, check `git status` before every commit. Never bare `git stash`/`pop` (shared across worktrees) — use explicit `stash@{N}` refs. Grok's 3 recurring build-break patterns: brace-mismatch cascades, UI calling never-implemented APIs, `package.json` edits without lockfile sync (kills `npm ci` → Cloud Build never produces a revision). Push to `origin/main` = deploy (Cloud Run auto-deploys from GitHub) — committing locally is not deploying.
+**Process/git** — work directly on `main`, no feature branches for routine work. Never `git add -A`/`.` (Xcode work sits uncommitted in parallel) — stage explicit paths, check `git status` before every commit. Never bare `git stash`/`pop` (shared across worktrees) — use explicit `stash@{N}` refs. Grok's 3 recurring build-break patterns: brace-mismatch cascades, UI calling never-implemented APIs, `package.json` edits without lockfile sync. Deploy the committed checkout to Fly.io with `node scripts/deploy-fly.js`; pushing to `origin/main` is source distribution, not deployment.
 
 ---
 

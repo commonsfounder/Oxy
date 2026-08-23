@@ -23,7 +23,7 @@ These exist in the repo and are working or near-working:
 - Observability primitives: Sentry, `/version`, `/health`, `X-Oxy-Commit`, structured request logging (per runbook §3).
 - Data export endpoint (`oxy-data-export.json`) and a "Delete Account" flow (completeness to verify — see #2/#10).
 - StoreKit referenced in iOS (`NativeIntegrationManager.swift`) — subscription scaffolding started.
-- Smoke + brain-eval tests; `npm run release:check`; APNs/push wired; proactive job; Cloud Run auto-deploy.
+- Smoke + brain-eval tests; `npm run release:check`; APNs/push wired; proactive job; Fly.io deploy script.
 
 ---
 
@@ -45,7 +45,7 @@ These exist in the repo and are working or near-working:
 
 ### 4. Secret & token hardening (operational) — `partial`
 - **Have:** encryption capability, but it **silently falls back to plaintext** if `OXY_TOKEN_ENCRYPTION_KEY` is unset.
-- **Missing:** **fail-closed** enforcement of the key in prod; **migrate existing plaintext connector tokens** to encrypted; move all secrets to Cloud Run **Secret Manager** (not env/repo); key-rotation plan.
+- **Missing:** **fail-closed** enforcement of the key in prod; **migrate existing plaintext connector tokens** to encrypted; move all secrets to Fly.io secrets (not env/repo); key-rotation plan.
 - **Why it blocks:** connector tokens grant access to users' Gmail/Telegram/etc.; plaintext storage is a breach waiting to happen.
 
 ---
@@ -53,7 +53,7 @@ These exist in the repo and are working or near-working:
 ## P1 — Needed for a credible launch
 
 ### 5. CI test gate before deploy — `missing`
-- **Have:** auto-deploy from GitHub → Cloud Run. **No `.github/workflows`.**
+- **Have:** a provenance-stamping Fly.io deploy script. **No `.github/workflows`.**
 - **Missing:** CI that runs `npm run release:check` (+ iOS build) on every PR and **blocks deploy on failure**.
 - **Why:** today a bad commit to `main` auto-ships straight to production with no test gate.
 
@@ -63,7 +63,7 @@ These exist in the repo and are working or near-working:
 - **Why:** without cost telemetry, a few heavy users (or an abuse loop) can blow the model budget unnoticed.
 
 ### 7. Voice latency engineering — `missing`
-- **Missing:** end-to-end latency measurement, **Cloud Run min-instances** (kill cold starts), streaming/path optimization, regional routing.
+- **Missing:** end-to-end latency measurement, Fly machine sizing/cold-start measurement, streaming/path optimization, regional routing.
 - **Why:** voice round-trip latency is the product's make-or-break UX; it must be measured and defended, not assumed.
 
 ### 8. AI safety & abuse at scale — `partial`
@@ -92,7 +92,7 @@ These exist in the repo and are working or near-working:
 
 ## P2 — Post-launch hardening
 
-13. **Push/proactive reliability** — quiet hours, opt-in granularity, delivery retries, robust Cloud Run Job scheduling.
+13. **Push/proactive reliability** — quiet hours, opt-in granularity, delivery retries, robust Fly-compatible scheduler/worker operation.
 14. **Backups & data ops** — DB backup/restore policy, migration safety, periodic RLS re-verification, PII retention policy.
 15. **Offline/degraded UX** — implement the no-network / slow-network / signed-out / stale-deploy states the runbook's device matrix tests for.
 16. **BLE / pendant phone-side** — pairing UX, reconnection, firmware-update path, audio-path decision. (Only if the pendant ships this cycle; otherwise defer — app-only launch is viable.)

@@ -6,7 +6,7 @@ These rules apply to EVERY coding agent working in this repo (Claude, Codex, Gro
 
 Browser-automation shopping agent.
 
-- Backend: Node.js on Cloud Run (`api/`)
+- Backend: Node.js on Fly.io (`api/`)
 - iOS app: `OxyApp/` — build `OxyApp/OxyApp.xcodeproj`, scheme `OxyApp`
 - Key files:
   - `api/services/browser-task.js` — main ordering loop
@@ -16,7 +16,7 @@ Browser-automation shopping agent.
 
 ## Deploy
 
-Push to `origin/main` — Cloud Run auto-deploys from GitHub. **Committing locally is not enough; pushing IS deploying.** If a deploy seems frozen, check the Cloud Run "Build History" strip for red bars before assuming anything else: a failed build produces NO new revision, so the old revision keeps serving and masks the real cause.
+Deploy the committed checkout to Fly.io with `node scripts/deploy-fly.js`. **Committing locally is not enough; a Fly deploy is the deployment.** The script passes the Git commit, branch, and build timestamp into the image so `/version` can prove what is serving. Check `fly status --app milgrain-live-2026` and `fly logs --app milgrain-live-2026` when a deploy is unhealthy.
 
 ## Verification — evidence before claims
 

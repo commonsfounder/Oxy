@@ -396,7 +396,7 @@ test('with no digest pending, everything is judged on its own merits', () => {
 test('two concurrent sweeps for one user: digest + the per-item it covers produce exactly one external send', async () => {
   // The scenario this pass was asked to stress: a digest and a per-item notification about
   // something the digest already names, both pending, delivered by two OVERLAPPING sweep
-  // calls (two Cloud Run instances, or a manual /proactive/sweep landing mid-schedule).
+  // calls (two Fly machines, or a manual /proactive/sweep landing mid-schedule).
   // collapseRelated suppresses the per-item on BOTH workers' local view before either claims
   // anything; the claim step then ensures only one of them actually sends the digest itself.
   const { runtime, calls } = runtimeWith({ env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' } });

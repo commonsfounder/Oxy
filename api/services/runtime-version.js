@@ -18,7 +18,6 @@ function safeExec(command) {
 const processStartedAt = new Date().toISOString();
 
 function getRuntimeVersion(env = process.env) {
-  const cloudRunRevision = env.K_REVISION || '';
   const flyApp = env.FLY_APP_NAME || '';
   const gitCommit =
     env.OXY_COMMIT_SHA ||
@@ -37,14 +36,13 @@ function getRuntimeVersion(env = process.env) {
     packageVersion: pkg.version || '0.0.0',
     gitCommit,
     gitBranch,
-    cloudRunRevision,
-    deployId: gitCommit !== 'unknown' ? gitCommit : (cloudRunRevision || 'unknown'),
+    deployId: gitCommit,
     buildTime,
     nodeVersion: process.version,
     environment: env.NODE_ENV || 'development',
-    platform: flyApp ? 'fly' : (cloudRunRevision ? 'cloud-run' : 'local'),
+    platform: flyApp ? 'fly' : 'local',
     flyApp,
-    region: env.FLY_REGION || env.K_REGION || env.GOOGLE_CLOUD_REGION || ''
+    region: env.FLY_REGION || ''
   };
 }
 

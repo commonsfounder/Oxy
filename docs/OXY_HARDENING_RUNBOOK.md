@@ -21,7 +21,7 @@ Acceptance:
 
 Backend proof:
 
-- `GET /version` returns `gitCommit`, `gitBranch`, `cloudRunRevision`, `deployId`, `packageVersion`, `buildTime`, `nodeVersion`, and `environment`.
+- `GET /version` returns `gitCommit`, `gitBranch`, `deployId`, `packageVersion`, `buildTime`, `nodeVersion`, `environment`, `platform`, `flyApp`, and `region`.
 - `GET /health` returns `status`, `missingEnv`, and the same version payload.
 - Every backend response includes `X-Oxy-Commit`.
 - iOS Settings shows the backend commit under Diagnostics.
@@ -34,7 +34,7 @@ curl -s https://oxy-151340634966.europe-west2.run.app/version
 
 Acceptance:
 
-- The deploy proof shown in Settings matches `gitCommit` when the deploy provides one; otherwise it matches the Cloud Run revision in `cloudRunRevision`.
+- The deploy proof shown in Settings matches `gitCommit` and reports the Fly app/platform.
 
 ## 3. Observability
 
@@ -138,7 +138,7 @@ Run on physical iPhone, not only simulator:
 - denied notifications
 - signed-out session
 - stale backend deploy
-- Cloud Run cold start
+- Fly machine cold start
 
 ## 10. Release Checklist
 
@@ -162,7 +162,7 @@ Manual prompts:
 Acceptance:
 
 - Backend commit visible in Settings.
-- Cloud Run `/version` matches Git.
+- Fly `/version` matches Git.
 - No dead-end failures.
 - No hallucinated current facts.
 - No vague follow-up gets hijacked by the wrong native tool.

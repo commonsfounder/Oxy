@@ -4,7 +4,7 @@
 // running runOrderingTurn in-process.
 //
 // Why this exists: the local benchmark measures the loop and the model. It cannot see
-// Cloud Run's Chromium launch, its memory ceiling, the 300s request timeout, or cold
+// Fly's Chromium launch, its memory ceiling, the platform request timeout, or cold
 // starts — and that is exactly where the failures have historically lived. On 2026-07-12
 // the agent turned out to have NEVER worked in prod while every local run was green, and
 // on 2026-08-01 prod was configured for a provider the deployed code couldn't serve. Both
@@ -16,7 +16,7 @@
 //   ... asos wickes            # optional site/tag filters, same semantics as the local bench
 //
 // Env:
-//   OXY_BENCH_API_URL        deployed base URL (default: the europe-west2 Cloud Run service)
+//   OXY_BENCH_API_URL        deployed base URL (default: the production Fly.io app)
 //   OXY_BENCH_USER_ID        user the chat requests run as (must match the token)
 //   OXY_BENCH_SESSION_TOKEN  Bearer token; if unset, one is signed locally from
 //                            OXY_SESSION_SECRET (only works if that matches the server's)
@@ -42,11 +42,11 @@ const { classifyOutcome, LOOP_FAILURE_BUCKETS, INFRA_BUCKETS } = require('./reli
 const { autoReplyForAsk } = require('./reliability-auto-reply');
 const FIXTURES = require('./reliability-fixtures');
 
-const API_URL = (process.env.OXY_BENCH_API_URL || 'https://oxy-151340634966.europe-west2.run.app').replace(/\/+$/, '');
+const API_URL = (process.env.OXY_BENCH_API_URL || 'https://milgrain-live-2026.fly.dev').replace(/\/+$/, '');
 const USER_ID = process.env.OXY_BENCH_USER_ID || '';
 const MAX_TURNS = Number(process.env.OXY_BENCH_TURNS || 8);
 const MAX_CASE_MS = Number(process.env.OXY_BENCH_MAX_MS || 10 * 60 * 1000);
-// Cloud Run's request timeout is 300s; give each HTTP turn a little less so a hung turn
+// The platform request timeout is finite; give each HTTP turn a little less so a hung turn
 // surfaces as our own timeout with a useful message rather than a bare socket hangup.
 const TURN_TIMEOUT_MS = Number(process.env.OXY_BENCH_TURN_TIMEOUT_MS || 290 * 1000);
 
@@ -186,7 +186,7 @@ function reasonOf(r) {
   // build/revision produced it.
   try {
     const v = await (await fetch(`${API_URL}/version`)).json();
-    console.log(`build:  ${v.cloudRunRevision || v.deployId || 'unknown'} (built ${v.buildTime || '?'})`);
+    console.log(`build:  ${v.deployId || v.deployId || 'unknown'} (built ${v.buildTime || '?'})`);
   } catch { console.log('build:  (could not read /version)'); }
   console.log('');
 

@@ -55,7 +55,7 @@ into hardware/Kickstarter once the software loop is credible.
   strings, CFBundleDisplayName, Siri/Shortcuts titles, in-chat permission errors,
   pendant BLE name/firmware, privacy/terms/support pages, emails, wallet pass,
   connector defaults. Still open: whether to also rename the Xcode project/target,
-  bundle ID (`ai.oxy.app`), Cloud Run service name, and repo — deferred because it
+  bundle ID (`ai.oxy.app`), Fly app name, and repo — deferred because it
   breaks TestFlight/App Store Connect continuity and needs a deliberate cutover.
 - Migration provenance: decide whether root-level `supabase-migration-*.sql`
   files replace the deleted `supabase/migrations/*` files before any release

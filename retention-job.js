@@ -1,7 +1,8 @@
 const { runRetentionSweep } = require('./api/index.js');
 const { getMissingRuntimeEnv, logMissingRuntimeEnvOnce } = require('./runtime');
 
-// Standalone entrypoint for the data-retention sweep. Deploy as a Cloud Run Job
+// Standalone entrypoint for the data-retention sweep. Run it through the
+// Fly-compatible scheduler/worker arrangement used by production.
 // on a daily schedule (mirrors proactive-job.js). Enforces the bounded-retention
 // promise made on /privacy.
 async function main() {

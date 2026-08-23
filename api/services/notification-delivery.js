@@ -148,7 +148,7 @@ function createDeliveryRuntime({
   // sent. The UPDATE's WHERE clause is the whole mechanism: Postgres serializes concurrent
   // writers to the same row, so only one of them can flip status out of the claimable set —
   // a second worker racing on the same event gets 0 rows back and skips it entirely. Without
-  // this, two overlapping sweeps (two Cloud Run instances, a manual call landing mid-schedule)
+  // this, two overlapping sweeps (two Fly machines, a manual call landing mid-schedule)
   // could both call a provider for the same event and produce two real external messages.
   async function claim(event, stamp) {
     // 'sending' is claimable too, but ONLY if it is stale — checked here, in the same

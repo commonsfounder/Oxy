@@ -223,10 +223,12 @@ struct BackendVersion: Decodable {
     let packageVersion: String?
     let gitCommit: String?
     let gitBranch: String?
-    let cloudRunRevision: String?
     let deployId: String?
     let buildTime: String?
     let environment: String?
+    let platform: String?
+    let flyApp: String?
+    let region: String?
 }
 
 struct ImageChatResponse: Codable {

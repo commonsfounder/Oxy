@@ -60,7 +60,7 @@ The primary client is a native SwiftUI app at `OxyApp/OxyApp.xcodeproj` (scheme 
 
 ### Backend
 
-An Express 5 server (`server.js` → `api/index.js`) deployed as a standard Node.js process on Cloud Run.
+An Express 5 server (`server.js` → `api/index.js`) deployed as a standard Node.js process on Fly.io.
 
 **Core flow for a chat message (`POST /chat`):**
 1. User sends text or audio (`POST /process-audio` transcribes via Gemini first).
@@ -142,36 +142,25 @@ See `.env.example` for the full list — at minimum: `SUPABASE_URL`, `SUPABASE_K
 
 Open `OxyApp/OxyApp.xcodeproj` in Xcode, select the `OxyApp` scheme, and build. Point it at your local or deployed backend URL in the app's settings/config.
 
-### Deploying to Cloud Run
+### Deploying to Fly.io
 
-Cloud Run is the primary deploy target. **Pushing to `origin/main` triggers an automatic deploy** — committing locally is not enough.
-
-```bash
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-gcloud run services describe oxy --region europe-west2 --format="value(status.url)"
-```
-
-Run proactive briefings and routines as a separate scheduled Cloud Run Job:
+Fly.io is the production target. Authenticate once, then deploy the committed checkout:
 
 ```bash
-gcloud run jobs create oxy-proactive \
-  --source . \
-  --region europe-west2 \
-  --command npm \
-  --args run,proactive:job \
-  --tasks 1 \
-  --max-retries 1
-
-gcloud scheduler jobs create http oxy-proactive-every-15m \
-  --location europe-west2 \
-  --schedule "*/15 * * * *" \
-  --uri "https://run.googleapis.com/apis/run.googleapis.com/v1/namespaces/YOUR_PROJECT_ID/jobs/oxy-proactive:run" \
-  --http-method POST \
-  --oauth-service-account-email YOUR_SERVICE_ACCOUNT@YOUR_PROJECT_ID.iam.gserviceaccount.com
+fly auth login
+node scripts/deploy-fly.js
+fly status --app milgrain-live-2026
+fly logs --app milgrain-live-2026
 ```
 
-A separate `retention:job` (`retention-job.js`) enforces the data retention policy and should be scheduled similarly.
+The deploy script stamps the image with `OXY_COMMIT_SHA`, `OXY_GIT_BRANCH`, and `OXY_BUILD_TIME`; verify the result with:
+
+```bash
+curl -s https://milgrain-live-2026.fly.dev/version
+curl -s https://milgrain-live-2026.fly.dev/health
+```
+
+`proactive-job.js` and `retention-job.js` remain standalone entrypoints. Schedule them through the Fly-compatible scheduler/worker arrangement used by the production app; they are not separate platform jobs.
 
 ### Smoke-test
 
@@ -193,7 +182,7 @@ npm run release:check # syntax check + smoke tests, run before every deploy
 
 ```
 Oxy/
-├── server.js                # Express entry point (Cloud Run listener)
+├── server.js                # Express entry point (Fly.io listener)
 ├── api/
 │   ├── index.js              # Main API — chat, audio, memory, connectors, auth
 │   ├── proxy.js               # Action dispatch helper
@@ -221,7 +210,7 @@ Oxy/
 
 ## Notes
 
-- `mcp-server.js` runs as a separate process/service — deploy it as its own Cloud Run service rather than bundling with the main API.
+- `mcp-server.js` runs as a separate process/service when enabled — keep it separate from the main Fly.io app rather than bundling it into the API.
 - See `AGENTS.md` for the shared engineering playbook (deploy discipline, git workflow, editing rules) followed by every agent working in this repo.
 - See `docs/` for deeper architecture plans (travel concierge, browser-task session handoffs, UI direction, ship-readiness gaps).
 

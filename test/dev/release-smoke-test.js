@@ -5,14 +5,13 @@
 //
 // Usage:
 //   node test/dev/release-smoke-test.js                         # against BASE_URL or localhost
-//   BASE_URL=https://oxy-6pkbb2zmdq-nw.a.run.app node test/dev/release-smoke-test.js
+//   BASE_URL=https://milgrain-live-2026.fly.dev node test/dev/release-smoke-test.js
 //
-// Reads secrets from .env (present locally) or the real process environment (Cloud Run) —
+// Reads secrets from .env (present locally) or the real process environment (Fly.io) —
 // never written to disk, never printed.
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
 
 const envPath = path.join(__dirname, '..', '..', '.env');
 if (fs.existsSync(envPath)) {
@@ -23,25 +22,9 @@ if (fs.existsSync(envPath)) {
 }
 
 // Steps 3+ call api.executeAction IN THIS PROCESS, not over HTTP — so they need the SAME
-// credentials the deployed service actually has (Gmail/Telegram/token-encryption), which the
-// local dev .env deliberately does NOT carry (it's a minimal dev set — see AGENTS.md). Without
-// this, "read Gmail" fails with a token-encryption error that has nothing to do with whether
-// Gmail actually works; it just means this process never had the key. Pulled from the live
-// Cloud Run service via gcloud (the same access documented in the gcloud-deploy-access memory
-// note) straight into process.env — never written to disk. Skips silently if gcloud/access
-// isn't available so the HTTP-only checks (1, 2) still run.
-if (!process.env.OXY_TOKEN_ENCRYPTION_KEY && process.env.SMOKE_SKIP_CLOUD_ENV !== '1') {
-  try {
-    const json = execFileSync('gcloud', [
-      'run', 'services', 'describe', process.env.SMOKE_CLOUD_RUN_SERVICE || 'oxy',
-      `--region=${process.env.SMOKE_CLOUD_RUN_REGION || 'europe-west2'}`, '--format=json'
-    ], { maxBuffer: 20 * 1024 * 1024, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    const env = JSON.parse(json).spec.template.spec.containers[0].env || [];
-    for (const e of env) if (e.value !== undefined && !process.env[e.name]) process.env[e.name] = e.value;
-  } catch {
-    console.warn('[smoke] could not pull Cloud Run env (no gcloud access?) — steps 3+ will report whatever this process already has locally, which may be nothing.');
-  }
-}
+// Steps 3+ need the same credentials as the deployed service. Fly secrets are not
+// pulled into a local process; provide them explicitly in the environment when running
+// provider-backed checks.
 
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const USER = process.env.SMOKE_USER || 'user123';

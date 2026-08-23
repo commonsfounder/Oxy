@@ -14,7 +14,7 @@ RUN npm ci --omit=dev
 
 # run_browser_task drives a real headless Chromium (playwright-extra). The slim base
 # ships neither the browser binary nor its shared libs, so install both here or
-# chromium.launch() fails at runtime on Cloud Run. --with-deps pulls the apt libs.
+# chromium.launch() fails at runtime in the slim Fly.io image without these libraries.
 RUN npx playwright install --with-deps chromium
 
 COPY . .
@@ -25,7 +25,7 @@ ENV OXY_COMMIT_SHA=${OXY_COMMIT_SHA}
 ENV OXY_GIT_BRANCH=${OXY_GIT_BRANCH}
 ENV OXY_BUILD_TIME=${OXY_BUILD_TIME}
 # Run the process in the app's canonical timezone so Date math (setHours/getHours
-# in parseDirectionTime etc.) matches the user's clock. Without this Cloud Run
+# in parseDirectionTime etc.) matches the user's clock. Without this Fly.io
 # runs in UTC and "arrive by 9am" is parsed an hour off during BST.
 ENV TZ=Europe/London
 

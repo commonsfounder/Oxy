@@ -14,7 +14,7 @@ const MAX_CONVERSATIONS = 200;
 const MAX_MESSAGES_PER_CONVERSATION = 300;
 const MAX_TEXT_LENGTH = 8000;
 // Rows per insert. An export at the documented ceiling is 60k messages; sending them one
-// await at a time is ~30 minutes of round-trips and blows the Cloud Run request timeout
+// await at a time is ~30 minutes of round-trips and blows the Fly.io request timeout
 // long before it finishes, leaving a partial import with no record of itself.
 const INSERT_CHUNK = 500;
 

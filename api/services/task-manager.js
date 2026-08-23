@@ -19,7 +19,7 @@ async function updateTask(...args) { return getDefaultTaskManager().updateTask(.
 
 /*
  * Atomically claim a task for one background run. The old read-then-update shape
- * let two Cloud Run instances observe the same paused task and both replay its
+ * let two Fly machines observe the same paused task and both replay its
  * checkpoint. The status (and, for stale running rows, heartbeat) is part of the
  * update predicate, so only one caller receives the claimed row.
  */

@@ -32,7 +32,7 @@ This is the same class of regression as **fe01be7** / the July 3 flash-lite-ever
 
 - Restore stream default to **PRIMARY** (or capable model), not FAST.
 - Stop ignoring actions on user-facing chat.
-- Confirm Cloud Run isn't pinning `OXY_STREAM_MODEL` to lite.
+- Confirm Fly isn't pinning `OXY_STREAM_MODEL` to lite.
 - Smoke stream turns: inbox, messaging, pure follow-up.
 
 I didn't land the backend fix this session (user asked for the note after the dig). iOS Today chrome/icons and Settings controls were polished separately — leave those unless you find issues.

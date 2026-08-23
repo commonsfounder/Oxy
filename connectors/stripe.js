@@ -101,7 +101,7 @@ async function execute(userId, action, params) {
       // two separate $10 "coffee" spends on the same day must NOT reuse a key, or
       // Stripe would silently replay the first charge's result for the second). The
       // thing that actually prevents one *approval* from executing twice — including
-      // across two Cloud Run instances racing the same confirm request — is the
+      // across two Fly machines racing the same confirm request — is the
       // atomic claimPendingAction compare-and-delete upstream (api/index.js:3021),
       // which already guarantees at most one call reaches this function per approval.
       const idempotencyKey = crypto.randomUUID();
