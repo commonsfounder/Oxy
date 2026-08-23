@@ -2522,6 +2522,9 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   return createSession(userId, {
     browser, context, page, site, goal, goalContext, history: [], pendingPaymentLabel: null,
     isOrder: isOrderGoal(goal), usedFastpath, requestedUrl: url, searchUrl,
+    // The order fast-path already opened the retailer's results URL (or a prefetched
+    // product page). Do not spend the first loop step typing the same query again.
+    proactiveSearchDone: Boolean(orderSearchUrl),
   });
 }
 
@@ -4783,7 +4786,11 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       // hand-written selector move replaces the vision call. Cheap; falls through to the
       // model whenever it can't confidently resolve (returns null). See browser-recipes.js.
       let decision, recipeStepName = null;
-      if (session.isOrder && !session.cartEverNonzero && !session.platformCommerceTried) {
+      // Curated retailers already have a host-specific recipe. Probing generic Shopify /
+      // WooCommerce endpoints there adds up to 16 seconds of failed network timeouts on a
+      // datacenter IP before the deterministic recipe can run, with no capability gain.
+      // Reserve the platform tier for hosts that do not have a curated recipe.
+      if (session.isOrder && !session.cartEverNonzero && !session.platformCommerceTried && !RECIPES[session.site]) {
         const addedViaPlatform = await tryPlatformCommerceAdd(session, steps, onProgress);
         if (addedViaPlatform) {
           consecutiveBadDecisions = 0;
