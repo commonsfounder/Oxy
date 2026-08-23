@@ -21,7 +21,10 @@ const {
   findElementByText,
   shouldStartFreshSession,
   buildChilternRailSearchUrl,
-  classifyJohnLewisBasketText
+  classifyJohnLewisBasketText,
+  packBrowserStorageState,
+  unpackBrowserStorageState,
+  resumeFromBrowserStorage
 } = require('../../api/services/browser-task');
 const { validateActionWithContract } = require('../../api/action-contracts');
 
@@ -53,6 +56,16 @@ test('browser continuation replies are narrow enough not to hijack ordinary chat
   assert.equal(isBrowserContinuationText('use my email'), true);
   assert.equal(isBrowserContinuationText('what is the delivery time?'), false);
   assert.equal(isBrowserContinuationText('show me email providers'), false);
+});
+
+test('browser resume metadata survives in the original storage_state schema', () => {
+  const state = packBrowserStorageState(
+    { cookies: [{ name: 'session', value: 'redacted', domain: 'example.test', path: '/' }], origins: [] },
+    { site: 'example.test', goal: 'order a sweatshirt', history: ['searched'], page: { url: () => 'https://example.test/cart' } }
+  );
+  assert.equal(state.__oxy_resume.last_url, 'https://example.test/cart');
+  assert.equal(resumeFromBrowserStorage(state, 'fallback.test').goal, 'order a sweatshirt');
+  assert.deepEqual(unpackBrowserStorageState(state), { cookies: state.cookies, origins: [] });
 });
 
 test('buildChilternRailSearchUrl keeps both legs and their time constraints', () => {

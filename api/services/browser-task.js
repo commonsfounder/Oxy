@@ -198,7 +198,7 @@ async function loadStorageState(userId, site) {
   // live session cookie skips login and 2FA entirely. decryptTokens transparently passes
   // through any pre-existing plaintext row (isEncryptedTokenEnvelope check), so this reads
   // both old and newly-encrypted rows with no migration needed.
-  return decryptTokens(data.storage_state);
+  return unpackBrowserStorageState(decryptTokens(data.storage_state));
 }
 
 function siteKeyFromUrl(url) {
@@ -2479,26 +2479,59 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   });
 }
 
+// The first browser_sessions migration only has storage_state. Keep the resume marker inside
+// that JSONB value so a deploy cannot silently depend on a separate migration having already
+// been applied. It is encrypted together with cookies/localStorage in production.
+const RESUME_STATE_KEY = '__oxy_resume';
+
+function packBrowserStorageState(browserState, session) {
+  return {
+    ...browserState,
+    [RESUME_STATE_KEY]: {
+      last_url: session.page.url(),
+      goal: session.goal,
+      history: Array.isArray(session.history) ? session.history : [],
+      site: session.site,
+    }
+  };
+}
+
+function unpackBrowserStorageState(storedState) {
+  if (!storedState || typeof storedState !== 'object') return storedState;
+  const { [RESUME_STATE_KEY]: _resume, ...browserState } = storedState;
+  return browserState;
+}
+
+function resumeFromBrowserStorage(storedState, fallbackSite) {
+  if (!storedState || typeof storedState !== 'object') return null;
+  const resume = storedState[RESUME_STATE_KEY];
+  if (!resume?.last_url || !resume?.goal) return null;
+  return { ...resume, site: resume.site || fallbackSite };
+}
+
 // Best-effort: save cookies/localStorage AND the resumable context (last url, goal,
 // history) so an idle-evicted or accidentally-closed session can be re-opened where it
 // left off instead of dead-ending. Failing to persist must never abort an in-progress order.
 async function persistStorage(userId, session) {
   try {
-    await getSupabase().from('browser_sessions').upsert({
+    const browserState = await session.context.storageState();
+    const { error } = await getSupabase().from('browser_sessions').upsert({
       user_id: userId,
       site: session.site,
       // Same AES-256-GCM envelope already used for connector tokens and vault_credentials
       // (token-crypto.js) — these are just as sensitive and were the one place still storing
       // plaintext. Fails closed in production if OXY_TOKEN_ENCRYPTION_KEY is unset, same as
       // the rest of the app's credential storage.
-      storage_state: encryptTokens(await session.context.storageState()),
-      last_url: session.page.url(),
-      goal: session.goal,
-      history: session.history,
+      storage_state: encryptTokens(packBrowserStorageState(browserState, session)),
       updated_at: new Date().toISOString()
     }, { onConflict: 'user_id,site' });
-  } catch {
-    // swallow — persistence is non-critical to the current turn
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    // swallow — persistence is non-critical to the current turn, but leave a bounded
+    // diagnostic so a missing live migration/schema cannot masquerade as a routing bug.
+    console.warn(`[browser-task] browser session checkpoint failed for ${session.site}: ${error.message}`);
+    return false;
   }
 }
 
@@ -2507,12 +2540,13 @@ async function persistStorage(userId, session) {
 async function loadResumeContext(userId) {
   const { data } = await getSupabase()
     .from('browser_sessions')
-    .select('last_url, goal, history, site')
+    .select('storage_state, site')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data?.last_url ? data : null;
+  if (!data?.storage_state) return null;
+  return resumeFromBrowserStorage(decryptTokens(data.storage_state), data.site);
 }
 
 async function hasResumableSession(userId) {
@@ -6556,6 +6590,9 @@ module.exports = {
   touchSession,
   closeSession,
   closeWarmPool,
+  packBrowserStorageState,
+  unpackBrowserStorageState,
+  resumeFromBrowserStorage,
   extractClickableElements,
   shouldSuppressVisionClick,
   findVariantSelectionHint,
