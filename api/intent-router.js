@@ -61,12 +61,15 @@ const { allRetailerAliases } = require('./services/retailer-sites');
 const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
 const BROWSER_SIGNUP_VERB = /\b(?:sign\s+(?:me\s+)?up|register|create\s+(?:an?\s+)?account|open\s+(?:an?\s+)?account|join|subscribe)\b/i;
 const BROWSER_SIGNUP_TARGET = /\b(?:website|site|online|newsletter|account|retailer|membership|service|subscription)\b/i;
+const LOCAL_BRANCH_QUERY = /\b(?:near(?:\s+me|by)?|nearest|closest|branch(?:es)?|store\s+location|opening\s+hours|where\s+is)\b/i;
 
 function retailerMentioned(text) {
   const norm = normalizeText(text).toLowerCase();
   for (const alias of allRetailerAliases()) {
     const re = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
-    if (re.test(norm)) return true;
+    // "Next" is a real retailer but also ordinary language. Require an explicit retailer
+    // connector for that alias so "next train" and "next week" never become shopping.
+    if (re.test(norm) && (alias !== 'next' || new RegExp(`\\b(?:on|from|at|using)\\s+${alias}\\b`, 'i').test(norm))) return true;
   }
   return false;
 }
@@ -75,11 +78,27 @@ function looksLikeShoppingRequest(message) {
   const text = normalizeText(message);
   if (!text) return false;
   if (SHOPPING_VERB.test(text)) return true;
+  // A location question mentioning a retailer is still a place lookup. Only let the
+  // generic acquire verbs below become browser work when the sentence is not asking for
+  // a nearby branch or store details.
+  if (LOCAL_BRANCH_QUERY.test(text)) return false;
   // "get/grab/find/order me <product> on/from/at <retailer>" — the acquire lead + a named
   // retailer source together mean shopping, not navigation.
   if (/\b(get|grab|find|order|want|need)\b/i.test(text) && retailerMentioned(text)) return true;
   if (/\b(?:on|from|at|using)\s+/i.test(text) && retailerMentioned(text)) return true;
   return false;
+}
+
+function inferBrowserShoppingAction(message) {
+  const text = normalizeText(message);
+  // A named retailer gives the browser a concrete target. Generic "what should I buy?"
+  // recommendations remain grounded-search questions and must stay on the model path.
+  if (!text || !looksLikeShoppingRequest(text) || !retailerMentioned(text)) return null;
+  return {
+    reason: 'browser_shopping',
+    spoken: "I'll open the retailer and take this as far as I can.",
+    actions: [{ type: 'run_browser_task', input: { goal: text } }]
+  };
 }
 
 // Account/newsletter requests are browser work, not a web search or nearby-place lookup.
@@ -554,10 +573,11 @@ function inferDeterministicAction(message, options = {}) {
     };
   }
 
-  // Buying a product from a named retailer must NOT deterministically become a place lookup —
-  // defer to the LLM/browser-task path. Placed after the ride & directions guards so
-  // "order me an uber" / "directions to john lewis" still route correctly.
-  if (looksLikeShoppingRequest(text)) return null;
+  // Buying a product from a named retailer must reach the real browser task. Keep this after
+  // ride and directions guards so "get me an Uber to John Lewis" and "directions to John
+  // Lewis" still route to transport rather than opening a shopping session.
+  const browserShopping = inferBrowserShoppingAction(text);
+  if (browserShopping) return browserShopping;
 
   // Placed after ride & directions the same way looksLikeShoppingRequest is, so
   // "get me an uber to the restaurant" is unaffected — only the final place-lookup
@@ -578,6 +598,7 @@ module.exports = {
   inferPersonalAdminAction,
   inferOutboundCommunicationAction,
   inferBrowserSignupAction,
+  inferBrowserShoppingAction,
   inferCapabilitySweepAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,
