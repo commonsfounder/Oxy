@@ -690,6 +690,24 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
+  capability_sweep: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: [],
+    optional: [
+      'weather_city', 'place_query', 'directions_destination', 'directions_origin',
+      'train_origin', 'train_destination', 'train_date', 'flight_from', 'flight_to',
+      'flight_depart_date', 'flight_return_date', 'hotel_location', 'hotel_check_in',
+      'hotel_check_out', 'stock_symbol', 'amazon_query', 'itinerary_destination',
+      'itinerary_start_date', 'itinerary_duration_days', 'google_docs_query', 'github_repo'
+    ],
+    inputExample: { weather_city: 'London', stock_symbol: 'AAPL' },
+    guidance: 'Use when the user says "do all that", "run the whole sweep", "check everything", or asks for the full capability batch. Run the bounded read-only household sweep and any optional searches whose exact targets the user supplied. Never invent a city, route, date, stock, destination, repository, or query. Never send a message, create or change a calendar/reminder item, book, spend money, use credentials, control a device, or create a project/GitHub change from this sweep; return those as notRun so the user can ask for each explicitly and pass its normal approval gate.',
+    successSummary: 'Read-only sweep complete',
+    failureSummary: 'Read-only sweep incomplete',
+    confirmation: 'none',
+    executionMode: 'direct'
+  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',

@@ -30,6 +30,7 @@ const telegram = require('../connectors/telegram');
 const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const browserTask = require('./services/browser-task');
+const { runCapabilitySweep } = require('./services/capability-sweep');
 const { createActionExecution, unavailableActionResult } = require('./services/action-execution');
 const { createDeclaredAdapterInvoker } = require('./services/declared-adapter-invoker');
 const { normalizeActionOutcome } = require('./services/action-outcome');
@@ -4290,6 +4291,14 @@ async function executeActionRaw(userId, action, params, context = {}) {
     // that is what makes a recurring morning brief a genuine current-state digest rather
     // than a stored summary replayed every day. Ranking/noise rules live in
     // api/services/daily-digest.js; this case is purely the gathering.
+    case 'capability_sweep': {
+      return runCapabilitySweep({
+        userId,
+        inputs: params,
+        execute: (type, input) => executeAction(userId, type, input, context)
+      });
+    }
+
     case 'daily_digest': {
       const focusRaw = String(params?.focus || 'all').trim().toLowerCase();
       const focus = ['urgent', 'can_wait', 'all'].includes(focusRaw) ? focusRaw : 'all';
