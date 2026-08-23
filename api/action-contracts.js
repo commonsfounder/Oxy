@@ -1127,7 +1127,7 @@ const ACTION_CONTRACTS = {
     confirmation: 'none'
   },
   log_health: { adapter: { kind: 'inline' },risk: 'low', required: ['metric'], optional: ['value'], inputExample: { metric: 'steps|heart_rate', value: 'number or note' }, paramHints: { metric: 'steps|heart_rate' }, successSummary: 'Health unavailable', failureSummary: 'Health unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
-  control_smart_home: { adapter: { kind: 'inline' },risk: 'medium', required: ['device', 'command'], inputExample: { device: 'lights|thermostat', command: 'on|off|set 22' }, paramHints: { device: 'lights|thermostat', command: 'on|off|set 22' }, successSummary: 'Smart home unavailable', failureSummary: 'Smart home unavailable', confirmation: 'none', modelVisible: false, availability: 'unavailable' },
+  control_smart_home: { adapter: { kind: 'connector', id: 'home_assistant' }, risk: 'medium', required: ['device', 'command'], inputExample: { device: 'light.living_room', command: 'on|off|toggle|set 22' }, paramHints: { device: 'Home Assistant entity id or configured alias', command: 'on|off|toggle|set 22' }, successSummary: 'Smart home updated', failureSummary: 'Smart home update failed', confirmation: 'review_required', executionMode: 'review' },
   save_to_notion: { adapter: { kind: 'connector', id: 'notion' }, risk: 'low', required: ['content'], inputExample: { content: 'note or task' }, successSummary: 'Saved to Notion', failureSummary: 'Save failed', confirmation: 'none' },
   // Google Docs — implemented in connectors/google.js but had no contract at all, so the
   // agent's tool-calling interface could never reach them. Same low-risk/no-confirmation

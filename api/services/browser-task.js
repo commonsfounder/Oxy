@@ -1252,6 +1252,7 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"fill","elementId":<number>,"value":"<text>"}
 {"action":"select","elementId":<number>,"value":"<exact option text from its options list>"}
 {"action":"back","note":"<why, e.g. UK 10 unavailable on this product>"}
+{"action":"scroll","direction":"down|up","amount":"small|medium|large"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
 {"action":"done","summary":"<short summary answering the goal>","productName":"<item name as shown on the page, if any>","price":"<price as shown on the page, if any>"}
@@ -1267,6 +1268,10 @@ Use it for an application form, a policy schedule, a returns label, a statement.
 ONLY name a documentId that appears in AVAILABLE DOCUMENTS below — never invent one, and
 never pick a document by how its filename reads. If the page needs a file you do not have,
 "ask" for it instead of uploading something that merely sounds close.
+
+Use "scroll" when the control you need is below or above the current viewport, including
+the bottom of an open dialog. Scroll only in the direction needed to reveal the next control;
+do not invent an element id for something you cannot currently see.
 
 NEVER ask the user for a URL, a link, an element id, a selector, or which website/platform
 to use — that is YOUR job. STAY ON THE GOAL. DEFAULT TO ACTING. Use "ready_for_payment" when cart is ready. "done" only for pure info or after payment confirmation. Prefer fill/click.
@@ -1343,6 +1348,7 @@ Reply with ONLY one JSON object, one of these shapes:
 {"action":"fill","elementId":<number>,"value":"<text>"}
 {"action":"select","elementId":<number>,"value":"<exact option text from its options list>"}
 {"action":"back","note":"<why>"}
+{"action":"scroll","direction":"down|up","amount":"small|medium|large"}
 {"action":"wait"}
 {"action":"ask","question":"<short question for the user>"}
 {"action":"done","summary":"<short summary answering the goal>","productName":"<item name>","price":"<price>"}
@@ -1374,11 +1380,26 @@ function parseModelDecision(rawText) {
       return { action: 'invalid', error: 'Could not parse model response as JSON.' };
     }
   }
-  const validActions = new Set(['click', 'fill', 'select', 'back', 'wait', 'ask', 'done', 'ready_for_payment', 'download', 'upload']);
+  const validActions = new Set(['click', 'fill', 'select', 'back', 'scroll', 'wait', 'ask', 'done', 'ready_for_payment', 'download', 'upload']);
   if (!parsed || typeof parsed !== 'object' || !validActions.has(parsed.action)) {
     return { action: 'invalid', error: 'Model returned an unrecognized action.' };
   }
+  if (parsed.action === 'scroll') {
+    const direction = String(parsed.direction || 'down').trim().toLowerCase();
+    const amount = String(parsed.amount || 'medium').trim().toLowerCase();
+    if (!['up', 'down'].includes(direction) || !['small', 'medium', 'large'].includes(amount)) {
+      return { action: 'invalid', error: 'Scroll direction must be up/down and amount must be small/medium/large.' };
+    }
+    return { ...parsed, direction, amount };
+  }
   return parsed;
+}
+
+const SCROLL_DELTAS = Object.freeze({ small: 350, medium: 700, large: 1100 });
+
+function scrollDelta(decision = {}) {
+  const pixels = SCROLL_DELTAS[decision.amount] || SCROLL_DELTAS.medium;
+  return decision.direction === 'up' ? -pixels : pixels;
 }
 
 // Only ever a real, model-observed list — never a fallback/default set. An item with no
@@ -4881,6 +4902,18 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         continue;
       }
 
+      if (decision.action === 'scroll') {
+        const delta = scrollDelta(decision);
+        await session.page.mouse.wheel(0, delta);
+        await settle(session.page, 350);
+        const direction = decision.direction === 'up' ? 'up' : 'down';
+        session.history.push(`Step ${steps}: scrolled ${direction} to reveal more of the page`);
+        onProgress(`Scrolling ${direction}…`);
+        consecutiveBadDecisions = 0;
+        consecutiveWaits = 0;
+        continue;
+      }
+
       if (decision.action === 'done') {
         // For an order, "done" inside the loop is always premature — a real order only
         // completes via ready_for_payment → confirmPayment. Don't throw away the cart.
@@ -6346,6 +6379,7 @@ module.exports = {
   buildTextOnlyDecisionPrompt,
   decideNextAction,
   parseModelDecision,
+  scrollDelta,
   scoreSearchResultText,
   pickBestSearchResult,
   scoreProductNameVsGoal,

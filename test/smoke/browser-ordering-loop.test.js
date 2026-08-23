@@ -10,6 +10,7 @@ const {
   parseDeliveryPreferenceFromText,
   isOrderGoal,
   buildDecisionPrompt,
+  scrollDelta,
   parseModelDecision,
   scoreSearchResultText,
   pickBestSearchResult,
@@ -105,6 +106,13 @@ test('buildDecisionPrompt tells the model it can see the page and offers a wait 
   assert.match(prompt, /NEVER ask the user for a URL/i);
 });
 
+test('buildDecisionPrompt exposes scrolling as a bounded browser primitive', () => {
+  const prompt = buildDecisionPrompt('find the return policy', [], [{ id: 0, text: 'Search' }]);
+  assert.match(prompt, /"action":"scroll"/);
+  assert.match(prompt, /direction.*down\|up/i);
+  assert.match(prompt, /do not invent an element id/i);
+});
+
 test('isTechnicalAsk flags questions a real assistant must never ask', () => {
   for (const q of [
     'Please provide the search bar element ID',
@@ -165,6 +173,19 @@ test('parseModelDecision parses a valid back decision', () => {
   // "back" exists so "this product can't fulfil the goal (size out of stock) → return to
   // results" is actionable even when the site hides its header/back affordances (Nike).
   assert.deepEqual(parseModelDecision('{"action":"back"}'), { action: 'back' });
+});
+
+test('parseModelDecision parses and normalizes a bounded scroll decision', () => {
+  const result = parseModelDecision('{"action":"scroll","direction":"DOWN","amount":"large"}');
+  assert.deepEqual(result, { action: 'scroll', direction: 'down', amount: 'large' });
+  assert.equal(scrollDelta(result), 1100);
+  assert.equal(scrollDelta({ action: 'scroll', direction: 'up', amount: 'small' }), -350);
+});
+
+test('parseModelDecision rejects unsafe scroll values', () => {
+  const result = parseModelDecision('{"action":"scroll","direction":"sideways","amount":"large"}');
+  assert.equal(result.action, 'invalid');
+  assert.match(result.error, /direction/i);
 });
 
 test('parseModelDecision rejects unparseable JSON', () => {

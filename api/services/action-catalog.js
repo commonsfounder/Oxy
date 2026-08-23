@@ -25,7 +25,11 @@ const CONNECTOR_DEFINITIONS = Object.freeze({
   strava: { id: 'strava', modulePath: path.resolve(__dirname, '../../connectors/strava.js'), requiresConnection: true },
   oura: { id: 'oura', modulePath: path.resolve(__dirname, '../../connectors/oura.js'), requiresConnection: true },
   flights: { id: 'flights', modulePath: path.resolve(__dirname, '../../connectors/flights.js'), requiresConnection: false },
-  stocks: { id: 'stocks', modulePath: path.resolve(__dirname, '../../connectors/stocks.js'), requiresConnection: false }
+  stocks: { id: 'stocks', modulePath: path.resolve(__dirname, '../../connectors/stocks.js'), requiresConnection: false },
+  // Home Assistant is configured by the server's private URL/token pair rather than a
+  // per-user OAuth row, so the adapter itself reports the honest unavailable state when
+  // those settings are absent.
+  home_assistant: { id: 'home_assistant', modulePath: path.resolve(__dirname, '../../connectors/home-assistant.js'), requiresConnection: false }
 });
 
 const CONNECTOR_IDS = Object.freeze(Object.keys(CONNECTOR_DEFINITIONS));

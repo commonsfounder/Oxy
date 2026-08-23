@@ -136,6 +136,7 @@ const notifications = require('./services/notifications');
 const commitments = require('./services/commitments');
 const scheduling = require('./services/scheduling');
 const { createDeliveryRuntime, availableChannels, describeUnavailable } = require('./services/notification-delivery');
+const { buildInboundReplyNotification } = require('./services/external-reply-notifications');
 const { sendEmail: sendEmailService } = require('./services/email');
 const agentContinuity = require('./services/agent-continuity');
 const { resolveTaskReference } = require('./services/task-context');
@@ -503,7 +504,7 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
       })).conversation;
 
     const decision = classifyReply(normalized.body);
-    await appendEvent(supabase, {
+    const event = await appendEvent(supabase, {
       conversationId: conversation.id,
       channelType: 'email',
       direction: 'inbound',
@@ -532,6 +533,18 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
     } catch (attachmentError) {
       log('warn', 'millie_email.inbound.attachments_failed', { error: attachmentError.message });
     }
+
+    await surfaceInboundExternalReply({
+      userId: identity.user_id,
+      channelType: 'email',
+      fromAddress: normalized.fromAddress,
+      body: normalized.body,
+      decision,
+      conversationId: conversation.id,
+      providerEventId: normalized.providerMessageId,
+      requestTaskId: conversation.request_task_id || null,
+      eventId: event?.id || null
+    });
 
     log('info', 'millie_email.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision, attachments: storedAttachments.length });
   } catch (err) {
@@ -590,7 +603,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
       })).conversation;
 
     const decision = classifyReply(normalized.body);
-    await appendEvent(supabase, {
+    const event = await appendEvent(supabase, {
       conversationId: conversation.id,
       channelType: 'phone_sms',
       direction: 'inbound',
@@ -600,6 +613,17 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
       body: normalized.body,
       needsDecision: decision === 'ask',
       rawProviderPayload: req.body
+    });
+    await surfaceInboundExternalReply({
+      userId: identity.user_id,
+      channelType: 'phone_sms',
+      fromAddress: normalized.fromAddress,
+      body: normalized.body,
+      decision,
+      conversationId: conversation.id,
+      providerEventId: normalized.providerMessageId,
+      requestTaskId: conversation.request_task_id || null,
+      eventId: event?.id || null
     });
     log('info', 'millie_sms.inbound.received', { userId: identity.user_id, conversationId: conversation.id, decision });
   } catch (err) {
@@ -3998,7 +4022,7 @@ async function executeActionRaw(userId, action, params, context = {}) {
     case 'control_smart_home': {
       const device = params?.device || 'lights';
       const command = params?.command || 'toggle';
-      return { success: false, outcome: 'unavailable', unavailable: true, error: `Smart-home control is not connected for ${device}.` };
+      return dispatchConnector('home_assistant', userId, 'control_smart_home', { ...params, device, command });
     }
     case 'edit_photo': {
       const brief = params?.brief || 'enhance';
@@ -5600,6 +5624,46 @@ const notificationDelivery = createDeliveryRuntime({
     return count || 0;
   }
 });
+
+// Inbound replies are already recorded in the external conversation store. This second
+// step turns the record into something the user can actually notice from the phone: the
+// normal configured notification route (Telegram/email/in-app today, push when APNs is
+// configured). It never replies or advances the external conversation on its own.
+async function surfaceInboundExternalReply({
+  userId,
+  channelType,
+  fromAddress,
+  body,
+  decision,
+  conversationId,
+  providerEventId,
+  requestTaskId,
+  eventId
+} = {}) {
+  const notification = buildInboundReplyNotification({
+    channelType,
+    fromAddress,
+    body,
+    decision,
+    conversationId,
+    providerEventId,
+    requestTaskId,
+    eventId
+  });
+  try {
+    return await notificationDelivery.raise(userId, notification);
+  } catch (error) {
+    // The inbound event is still durable even if notification infrastructure is down. Do
+    // not turn a provider webhook retry into a duplicate conversation event.
+    log('warn', 'external_reply.notification_failed', {
+      userId,
+      conversationId,
+      channelType,
+      error: error.message
+    });
+    return { ok: false, error: error.message };
+  }
+}
 
 const invokeDeclaredAdapter = createDeclaredAdapterInvoker({
   executeInline: ({ userId, type, input, context }) => executeActionRaw(userId, type, input, context),

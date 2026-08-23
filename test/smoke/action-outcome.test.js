@@ -143,7 +143,6 @@ test('simulation is explicitly simulated even when its history cannot be saved',
 test('known placeholder capabilities are unavailable rather than claimed complete', async () => {
   for (const [action, input] of [
     ['log_health', { metric: 'steps', value: 10 }],
-    ['control_smart_home', { device: 'lights', command: 'on' }],
     ['edit_photo', { brief: 'enhance' }],
     ['analyze_image', { prompt: 'describe it' }],
     ['mcp_tool', { name: 'unknown_tool', arguments: {} }]
@@ -151,6 +150,24 @@ test('known placeholder capabilities are unavailable rather than claimed complet
     const result = await executeAction('user-1', action, input);
     assert.equal(result.success, false, action);
     assert.equal(result.outcome, 'unavailable', action);
+  }
+});
+
+test('smart-home control has a real adapter but stays unavailable without Home Assistant configuration', async () => {
+  const url = process.env.HOME_ASSISTANT_URL;
+  const token = process.env.HOME_ASSISTANT_TOKEN;
+  delete process.env.HOME_ASSISTANT_URL;
+  delete process.env.HOME_ASSISTANT_TOKEN;
+  try {
+    const result = await executeAction('user-1', 'control_smart_home', { device: 'light.living_room', command: 'on' });
+    assert.equal(result.success, false);
+    assert.equal(result.outcome, 'unavailable');
+    assert.match(result.error, /HOME_ASSISTANT_URL/);
+  } finally {
+    if (url === undefined) delete process.env.HOME_ASSISTANT_URL;
+    else process.env.HOME_ASSISTANT_URL = url;
+    if (token === undefined) delete process.env.HOME_ASSISTANT_TOKEN;
+    else process.env.HOME_ASSISTANT_TOKEN = token;
   }
 });
 
