@@ -99,10 +99,11 @@ test('confirmation is never copied into a native tool description — nothing re
 // schedule_block, move_calendar_event. Plus 1 for calendar cancellation: cancel_calendar_event.
 // Plus 3 for the durable responsibility: start_responsibility, update_responsibility,
 // list_responsibilities. Plus 2 for authorised nearby displays: list_paired_displays and
-// render_to_display. Plus 1 for the full read-only capability sweep: capability_sweep.)
-test('exactly 67 contracts define guidance, and every one appears verbatim in its native description', () => {
+// render_to_display. Plus 1 for the full read-only capability sweep: capability_sweep,
+// and 2 for the current-weather versus forecast distinction.)
+test('exactly 69 contracts define guidance, and every one appears verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
-  assert.equal(withGuidance.length, 67);
+  assert.equal(withGuidance.length, 69);
   const decls = nativeDescriptions();
   for (const [type, contract] of withGuidance) {
     assert.ok(decls[type], `${type} has no native declaration at all`);

@@ -1245,11 +1245,14 @@ const ACTION_CONTRACTS = {
   // runner treated them as direct-execute. Register them high-risk + review so they can't.
   stripe_payout_to_user: { risk: 'high', required: ['amount'], inputExample: { amount: 50, description: 'payout', destination: 'acct_...' }, successSummary: 'Payout initiated', failureSummary: 'Payout failed', confirmation: 'review', executionMode: 'review', adapter: { kind: 'connector', id: 'stripe' } },
   spend_from_concierge_via_stripe: { risk: 'high', required: ['amount'], inputExample: { amount: 25, description: 'payment' }, successSummary: 'Charged through Stripe', failureSummary: 'Failed', confirmation: 'review', executionMode: 'review', adapter: { kind: 'connector', id: 'stripe' } },
-  get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' } },
+  get_weather: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, successSummary: 'Weather', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' }, guidance: 'Use for current conditions. For a future period or weekend forecast, use get_forecast.' },
+  get_forecast: { risk: 'low', required: ['city'], inputExample: { city: 'London' }, optional: ['when'], successSummary: 'Forecast', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'weather' }, guidance: 'Use for a future weather forecast, including tomorrow or a weekend. Keep the requested city and time period in the call.' },
   search_amazon: { risk: 'low', required: ['query'], inputExample: { query: 'headphones' }, successSummary: 'Amazon search', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'amazon' } },
   send_slack_message: { risk: 'medium', required: ['channel', 'message'], inputExample: { channel: '#general', message: 'hi' }, successSummary: 'Slack sent', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'slack' } },
   book_lyft: { risk: 'low', required: ['destination'], inputExample: { destination: 'airport' }, successSummary: 'Lyft opened', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'lyft' } },
   get_strava_activities: { risk: 'low', required: [], inputExample: {}, successSummary: 'Strava activities', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'strava' } },
+  get_oura_sleep: { risk: 'low', required: [], optional: ['start_date'], inputExample: { start_date: '2026-08-16' }, successSummary: 'Oura sleep', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'oura' } },
+  get_oura_readiness: { risk: 'low', required: [], inputExample: {}, successSummary: 'Oura readiness', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'oura' } },
   search_flights: {
     adapter: { kind: 'inline' },
     risk: 'low',
