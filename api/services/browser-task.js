@@ -2490,8 +2490,13 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   // available only as an explicit opt-in because its plain HTTP requests are slower than the
   // browser recipe on bot-walled retailers and can otherwise fall back to the homepage.
   const orderSearchUrl = isOrderGoal(goal) ? directSearchUrl(url, goal, retailOptions) : null;
+  // John Lewis's search page is a particularly expensive SPA on Fly's small CPU and can
+  // hand the browser a product shell that needs several model "wait" turns before its size
+  // controls appear. Its HTTP result/PDP parser is already bounded and scored, so use it by
+  // default for this curated host; the env flag remains available for other retailers.
+  const useOrderPdpPrefetch = ORDER_PDP_PREFETCH || site === 'johnlewis.com';
   let openUrl = isOrderGoal(goal)
-    ? (ORDER_PDP_PREFETCH
+    ? (useOrderPdpPrefetch
       ? await resolveOrderOpenUrl(url, goal, retailOptions)
       : (orderSearchUrl || url))
     : isSignupGoal(goal)
