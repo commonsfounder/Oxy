@@ -585,6 +585,31 @@ const DELIVERY_OPTION_PATTERN = /^delivery\b/i;
 const COLLECTION_OPTION_PATTERN = /^(collection|click\s*(?:&|and)\s*collect|store\s+collection|pickup|pick\s*up)\b/i;
 const TOGGLE_LABEL_MAX_LEN = 30;
 
+// Auth0 guest checkout redirects through a callback route before John Lewis renders the
+// delivery/collection cards. Waiting for the actual controls is cheaper and more reliable
+// than spending several vision turns looking at the callback shell.
+async function waitForDeliveryCollectionChoice(page, timeoutMs = 6000) {
+  return page.waitForFunction(({ maxLen }) => {
+    const visible = (el) => {
+      const style = window.getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none' || el.disabled) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const labels = [...document.querySelectorAll(
+      'button, a, label, [role="button"], [role="option"], [role="radio"], [role="tab"]'
+    )]
+      .filter(visible)
+      .map((el) => (el.innerText || el.getAttribute('aria-label') || el.value || '').replace(/\s+/g, ' ').trim())
+      .filter((text) => text && text.length <= maxLen);
+    const hasDelivery = labels.some((text) => /^delivery\b/i.test(text));
+    const hasCollection = labels.some((text) => /^(collection|click\s*(?:&|and)\s*collect|store\s+collection|pickup|pick\s*up)\b/i.test(text));
+    return hasDelivery && hasCollection;
+  }, { maxLen: TOGGLE_LABEL_MAX_LEN }, { timeout: timeoutMs, polling: 150 })
+    .then(() => true)
+    .catch(() => false);
+}
+
 function findDeliveryCollectionChoice(elements) {
   const isToggleLabel = (pattern) => (el) => {
     const t = String(el.text || '').trim();
@@ -4473,6 +4498,17 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
         session._userId = userId;
         const auth0handled = await tryAuth0GuestCheckout(session.page, session, steps, onProgress);
         if (auth0handled) {
+          if (session.auth0GuestDone && await waitForDeliveryCollectionChoice(session.page)) {
+            if (!session.deliveryPreference && !session.deliveryChoiceAsked) {
+              session.deliveryChoiceAsked = true;
+              touchSession(userId);
+              await persistStorage(userId, session);
+              return {
+                type: 'ask',
+                question: 'This can be delivered to your address on file, or collected from a nearby store — which would you prefer?',
+              };
+            }
+          }
           await settle(session.page, RECIPE_SETTLE_MS);
           consecutiveBadDecisions = 0;
           consecutiveWaits = 0;
