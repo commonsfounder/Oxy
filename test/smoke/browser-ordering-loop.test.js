@@ -9,6 +9,7 @@ const {
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
   isOrderGoal,
+  isSignupGoal,
   buildDecisionPrompt,
   scrollDelta,
   parseModelDecision,
@@ -33,6 +34,12 @@ test('validateActionWithContract does not require goal (the handler enforces it 
   const action = { type: 'run_browser_task', input: {} };
   const error = validateActionWithContract(action, '');
   assert.equal(error, null, 'an empty goal must reach the handler, not be rejected upstream');
+});
+
+test('signup goals bypass product search and price lookup', () => {
+  assert.equal(isSignupGoal('Sign me up for the newsletter on the John Lewis website.'), true);
+  assert.equal(isSignupGoal('Create an account on the retailer website.'), true);
+  assert.equal(isSignupGoal('Compare the current price of a sweatshirt on John Lewis.'), false);
 });
 
 test('buildChilternRailSearchUrl keeps both legs and their time constraints', () => {

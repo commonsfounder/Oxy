@@ -1014,6 +1014,15 @@ function isOrderGoal(goal) {
   return ORDER_GOAL_PATTERN.test(String(goal || ''));
 }
 
+// Account/newsletter forms must open the retailer homepage. Treating them as ordinary
+// non-order lookups sends the goal through directSearchUrl (or tier-0 price lookup), which
+// can land on a product-search page before the browser ever sees the signup controls.
+const SIGNUP_GOAL_PATTERN = /\b(?:sign\s+(?:me\s+)?up|register|create\s+(?:an?\s+)?account|open\s+(?:an?\s+)?account|join|subscribe)\b/i;
+
+function isSignupGoal(goal) {
+  return SIGNUP_GOAL_PATTERN.test(String(goal || ''));
+}
+
 // Search/add/checkout recipes are a capability for delegated purchases only. Applying
 // them to a read-only question is how a price lookup drifted into a cart: the browser had
 // enough imperative controls to act, but no authority to purchase.
@@ -2400,7 +2409,9 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   // search-results URL; else the caller's url. Info goals keep the search-page fastpath only.
   let openUrl = isOrderGoal(goal)
     ? await resolveOrderOpenUrl(url, goal, retailOptions)
-    : (directSearchUrl(url, goal, retailOptions) || url);
+    : isSignupGoal(goal)
+      ? url
+      : (directSearchUrl(url, goal, retailOptions) || url);
   if (site === 'johnlewis.com' && isOrderGoal(goal)) {
     try {
       const u = new URL(openUrl);
@@ -3981,7 +3992,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
     // return immediately with a done; no session is created. On any miss (wall, no price
     // parseable, network), we fall through to the normal browser path unchanged.
     // Orders are strictly gated out (isOrderGoal) — they always use the real browser.
-    if (!priorHistory && !isOrderGoal(goal || '')) {
+    if (!priorHistory && !isOrderGoal(goal || '') && !isSignupGoal(goal || '')) {
       const tier0 = await tryTier0PriceLookup(openUrl, goal || '');
       if (tier0) {
         return tier0;
@@ -6371,6 +6382,7 @@ module.exports = {
   detectBlockWall,
   describesBlockWall,
   isOrderGoal,
+  isSignupGoal,
   shouldUseOrderingAutomation,
   assessProgress,
   shouldAttemptTextOnlyDecision,
