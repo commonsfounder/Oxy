@@ -16,8 +16,13 @@
 // handler never builds a second database client and tests can still inject fakes.
 
 const travel = require('./travel');
+const people = require('./people');
+const project = require('./project');
+const calendar = require('./calendar');
+const scheduled = require('./scheduled');
+const display = require('./display');
 
-const MODULES = [travel];
+const MODULES = [travel, people, project, calendar, scheduled, display];
 
 const handlers = Object.create(null);
 for (const mod of MODULES) {
