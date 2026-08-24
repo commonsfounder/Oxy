@@ -4054,7 +4054,7 @@ async function navigateJohnLewisBasketAfterAdd(session, page, steps, onProgress)
     await page.waitForURL((u) => /\/basket/i.test(u.toString()), { timeout: 4000 }).then(() => { navigated = true; }).catch(() => {});
   }
   if (!navigated) {
-    navigated = await page.goto(`${origin}/basket`, { waitUntil: 'commit', timeout: 5000 }).then(() => true).catch(() => false);
+    navigated = await page.goto(`${origin}/basket`, { waitUntil: 'domcontentloaded', timeout: 5000 }).then(() => true).catch(() => false);
   }
   session.history.push(`Step ${steps}: [recipe] opened John Lewis basket after add`);
   await settle(page, RECIPE_SETTLE_MS);
