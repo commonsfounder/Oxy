@@ -21,8 +21,10 @@ const project = require('./project');
 const calendar = require('./calendar');
 const scheduled = require('./scheduled');
 const display = require('./display');
+const responsibilities = require('./responsibilities');
+const messaging = require('./messaging');
 
-const MODULES = [travel, people, project, calendar, scheduled, display];
+const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging];
 
 const handlers = Object.create(null);
 for (const mod of MODULES) {

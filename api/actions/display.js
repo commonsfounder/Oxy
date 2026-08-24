@@ -7,7 +7,7 @@
 
 async function listPairedDisplays({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, generateImage } = deps;
-  const pairedDisplays = require('./services/paired-displays');
+  const pairedDisplays = require('../services/paired-displays');
   const displays = await pairedDisplays.listDisplays(supabase, userId);
   return {
     success: true,
@@ -20,7 +20,7 @@ async function listPairedDisplays({ userId, action, params, enrichedParams, cont
 
 async function renderToDisplay({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, generateImage } = deps;
-  const pairedDisplays = require('./services/paired-displays');
+  const pairedDisplays = require('../services/paired-displays');
   const event = await pairedDisplays.queueRender(supabase, userId, {
     displayId: params?.display_id || params?.displayId,
     title: params?.title,
