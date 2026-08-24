@@ -28,6 +28,7 @@ const {
 } = require('./checkout-profile');
 const { getAgentCard } = require('./agent-card');
 const { getVaultCredential, saveVaultCredential, normalizeSite } = require('./vault-credentials');
+const { authorizeCredentialUse, recordUse } = require('./credential-grants');
 const { encryptTokens, decryptTokens } = require('./token-crypto');
 const { recordTaskStep } = require('./task-steps');
 const { recordTaskEntity } = require('./task-entities');
@@ -4578,6 +4579,33 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
             if (credential) {
               session.credentialOfferAttempted = true;
               session.pendingCredentialSite = grantedSite;
+
+              // A live grant the USER created means this sign-in was already authorised, so
+              // it proceeds without waking them -- that is what makes unattended overnight
+              // work possible. The grant is looked up per site and can only be narrowed by
+              // allowedCredentialSites, never widened by it, so a page that steers the model
+              // at some other site still finds no grant. No grant falls back to asking,
+              // exactly as before. Every outcome, including refusals, is logged.
+              const authorized = await authorizeCredentialUse(getSupabase(), userId, {
+                site: grantedSite,
+                requestedSites: session.allowedCredentialSites,
+                taskId: session.pendingCredentialTaskId || null
+              }).catch(() => ({ allowed: false, reason: 'lookup_failed' }));
+
+              if (authorized.allowed) {
+                onProgress(`Signing in to ${grantedSite} using your saved permission`);
+                const signedIn = await confirmCredentialUse(userId, onProgress);
+                if (signedIn?.type === 'error') {
+                  await recordUse(getSupabase(), userId, {
+                    site: grantedSite,
+                    grantId: authorized.grant?.id || null,
+                    taskId: session.pendingCredentialTaskId || null,
+                    outcome: 'failed',
+                    reason: signedIn.error
+                  }).catch(() => {});
+                }
+                return signedIn;
+              }
               return { type: 'ready_for_credential_use', site: grantedSite, label: credential.label };
             }
           }

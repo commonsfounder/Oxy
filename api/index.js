@@ -37,6 +37,12 @@ const { normalizeActionOutcome } = require('./services/action-outcome');
 const { createUserDataLifecycle, createUserDataRouteHandlers } = require('./services/user-data-lifecycle');
 const actionRegistry = require('./actions');
 const {
+  createGrant,
+  listGrants,
+  revokeGrant,
+  listUses
+} = require('./services/credential-grants');
+const {
   PROACTIVE_WINDOWS,
   getBriefingWindow,
   getLocalDateKey,
@@ -10520,6 +10526,60 @@ app.get('/vault/credentials', requireSessionAuth, async (req, res) => {
     const { credentials, error } = await listVaultCredentials(supabase, userId);
     if (error) return res.status(500).json({ error });
     res.json({ credentials });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Permission to use a stored credential without asking first. The grant is the authority
+// and only the user can create one: the model may narrow it (run_browser_task's
+// credentialSites) but can never widen it. See api/services/credential-grants.js.
+app.post('/vault/grants', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { site, scope, taskId, ttlMinutes, maxUses } = req.body || {};
+    const result = await createGrant(supabase, userId, { site, scope, taskId, ttlMinutes, maxUses });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ granted: true, grant: result.grant });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/vault/grants', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { grants, error } = await listGrants(supabase, userId);
+    if (error) return res.status(500).json({ error });
+    res.json({ grants });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/vault/grants/:id', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const result = await revokeGrant(supabase, userId, req.params.id);
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ revoked: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Every attempt to use a stored credential, allowed or refused. Refusals are the more
+// telling entries: they show a page trying to steer the agent at a site never granted.
+app.get('/vault/credential-uses', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { uses, error } = await listUses(supabase, userId, req.query?.limit);
+    if (error) return res.status(500).json({ error });
+    res.json({ uses });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

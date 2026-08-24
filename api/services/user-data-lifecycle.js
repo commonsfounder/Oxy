@@ -37,6 +37,11 @@ const USER_DATA_RESOURCES = Object.freeze([
   { name: 'task_steps', ownership: direct(), deletionOrder: 540 },
   { name: 'routines', ownership: direct(), deletionOrder: 530 },
   { name: 'vault_credentials', ownership: direct(), deletionOrder: 950, secretColumns: ['tokens'] },
+  // The log is deleted before the grants it points at. Both are account-owned: a record of
+  // which sites the agent signed into is exactly the kind of thing an export must include
+  // and a deletion must not leave behind.
+  { name: 'credential_use_log', ownership: direct(), deletionOrder: 952 },
+  { name: 'credential_grants', ownership: direct(), deletionOrder: 415 },
   { name: 'task_entities', ownership: direct(), deletionOrder: 535 },
   { name: 'chat_settings', ownership: direct(), deletionOrder: 510 },
   { name: 'commitments', ownership: direct(), deletionOrder: 500 },

@@ -1,0 +1,239 @@
+'use strict';
+
+// The authorisation decision for using a stored password.
+//
+// The rule that matters: the GRANT is the authority, and it comes from the user. The model
+// picks which sites to request (run_browser_task's credentialSites param), and this agent
+// reads web pages written by strangers, so a model-chosen site must never be able to widen
+// what the user allowed -- it can only narrow it. Every other check here exists so an
+// unattended grant cannot quietly become a permanent one.
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { decideCredentialUse } = require('../../api/services/credential-grants');
+
+const NOW = new Date('2026-08-25T12:00:00Z');
+
+function grant(overrides = {}) {
+  return {
+    id: 'g1',
+    site: 'johnlewis.com',
+    scope: 'standing',
+    task_id: null,
+    expires_at: '2026-08-26T12:00:00Z',
+    revoked_at: null,
+    max_uses: null,
+    use_count: 0,
+    ...overrides
+  };
+}
+
+test('a live user grant for the site allows the sign-in', () => {
+  const decision = decideCredentialUse({ grant: grant(), site: 'johnlewis.com', now: NOW });
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.reason, 'granted');
+});
+
+test('no grant means no sign-in, which is what makes this fail closed', () => {
+  const decision = decideCredentialUse({ grant: null, site: 'johnlewis.com', now: NOW });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, 'no_grant');
+});
+
+test('a model-requested site can narrow the grant but can never widen it', () => {
+  // The user granted johnlewis.com. A page the agent read tries to steer it at a bank.
+  // The grant is looked up per site, so the bank simply has no grant -- but assert the
+  // explicit case too, because this is the property the whole design rests on.
+  const widened = decideCredentialUse({
+    grant: grant({ site: 'johnlewis.com' }),
+    site: 'evil-bank-login.com',
+    now: NOW
+  });
+  assert.equal(widened.allowed, false);
+  assert.equal(widened.reason, 'site_not_granted');
+
+  // Narrowing is fine: the user granted the site, and the model asked for exactly it.
+  const narrowed = decideCredentialUse({
+    grant: grant(),
+    site: 'johnlewis.com',
+    requestedSites: ['johnlewis.com'],
+    now: NOW
+  });
+  assert.equal(narrowed.allowed, true);
+
+  // A grant the model did not ask to use in this task stays unused rather than being
+  // spent opportunistically.
+  const notRequested = decideCredentialUse({
+    grant: grant(),
+    site: 'johnlewis.com',
+    requestedSites: ['argos.co.uk'],
+    now: NOW
+  });
+  assert.equal(notRequested.allowed, false);
+  assert.equal(notRequested.reason, 'site_not_requested');
+});
+
+test('grants stop working when they expire or are revoked', () => {
+  const expired = decideCredentialUse({
+    grant: grant({ expires_at: '2026-08-25T11:59:59Z' }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(expired.allowed, false);
+  assert.equal(expired.reason, 'expired');
+
+  const revoked = decideCredentialUse({
+    grant: grant({ revoked_at: '2026-08-25T10:00:00Z' }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(revoked.allowed, false);
+  assert.equal(revoked.reason, 'revoked');
+
+  // Revocation wins even if the window is still open -- revoking is the emergency stop.
+  const revokedButUnexpired = decideCredentialUse({
+    grant: grant({ revoked_at: '2026-08-25T10:00:00Z', expires_at: '2027-01-01T00:00:00Z' }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(revokedButUnexpired.allowed, false);
+  assert.equal(revokedButUnexpired.reason, 'revoked');
+});
+
+test('a use limit is enforced, so an unattended grant cannot be spent indefinitely', () => {
+  const remaining = decideCredentialUse({
+    grant: grant({ max_uses: 3, use_count: 2 }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(remaining.allowed, true);
+
+  const exhausted = decideCredentialUse({
+    grant: grant({ max_uses: 3, use_count: 3 }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(exhausted.allowed, false);
+  assert.equal(exhausted.reason, 'use_limit_reached');
+
+  // A null limit means "no cap", not "zero".
+  const uncapped = decideCredentialUse({
+    grant: grant({ max_uses: null, use_count: 99 }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(uncapped.allowed, true);
+});
+
+test('a task-scoped grant is confined to the task it was created for', () => {
+  const sameTask = decideCredentialUse({
+    grant: grant({ scope: 'task', task_id: 't-1' }),
+    site: 'johnlewis.com',
+    taskId: 't-1',
+    now: NOW
+  });
+  assert.equal(sameTask.allowed, true);
+
+  const otherTask = decideCredentialUse({
+    grant: grant({ scope: 'task', task_id: 't-1' }),
+    site: 'johnlewis.com',
+    taskId: 't-2',
+    now: NOW
+  });
+  assert.equal(otherTask.allowed, false);
+  assert.equal(otherTask.reason, 'wrong_task');
+
+  // A task grant with no task in hand is not a free pass.
+  const noTask = decideCredentialUse({
+    grant: grant({ scope: 'task', task_id: 't-1' }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(noTask.allowed, false);
+  assert.equal(noTask.reason, 'wrong_task');
+
+  // A standing grant is deliberately not confined to a task -- that is what makes
+  // unattended overnight work possible.
+  const standing = decideCredentialUse({
+    grant: grant({ scope: 'standing' }),
+    site: 'johnlewis.com',
+    taskId: 't-9',
+    now: NOW
+  });
+  assert.equal(standing.allowed, true);
+});
+
+test('site matching ignores www and case, so a grant is not defeated by a host prefix', () => {
+  const decision = decideCredentialUse({
+    grant: grant({ site: 'johnlewis.com' }),
+    site: 'WWW.JohnLewis.com',
+    requestedSites: ['www.johnlewis.com'],
+    now: NOW
+  });
+  assert.equal(decision.allowed, true);
+});
+
+test('a grant that did not come from the user is never honoured', () => {
+  // Provenance is recorded so a grant created by anything other than a deliberate user
+  // action cannot authorise a sign-in, even if a row somehow exists.
+  const decision = decideCredentialUse({
+    grant: grant({ granted_via: 'model' }),
+    site: 'johnlewis.com',
+    now: NOW
+  });
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.reason, 'not_user_granted');
+});
+
+// Regression guard for a silent no-op.
+//
+// The use counter was originally advanced with `await query.catch?.(fn)`. The PostgREST
+// query builder has no .catch method, so that expression short-circuited to
+// `await undefined` -- and because these builders only execute when awaited, the update
+// never ran. The cap silently did nothing, and only a live run against the real database
+// exposed it. This asserts the write is actually issued.
+test('using a grant actually advances the counter, so a use cap cannot silently do nothing', async () => {
+  const { authorizeCredentialUse } = require('../../api/services/credential-grants');
+  const updates = [];
+  const inserted = [];
+
+  const stored = {
+    id: 'g1', site: 'johnlewis.com', scope: 'standing', task_id: null,
+    expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    max_uses: 2, use_count: 0, revoked_at: null, granted_via: 'user'
+  };
+
+  const db = {
+    from(table) {
+      const chain = {
+        _table: table,
+        select() { return chain; },
+        eq() { return chain; },
+        order() { return chain; },
+        limit() { return Promise.resolve({ data: [stored] }); },
+        insert(row) { inserted.push({ table, row }); return Promise.resolve({ error: null }); },
+        update(patch) {
+          updates.push({ table, patch });
+          // Mirrors the real builder: no .catch, resolves only when awaited.
+          const p = { eq() { return p; }, then(res) { return Promise.resolve({ error: null }).then(res); } };
+          return p;
+        }
+      };
+      return chain;
+    }
+  };
+
+  const result = await authorizeCredentialUse(db, 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, true);
+
+  const counterWrite = updates.find(u => u.table === 'credential_grants' && 'use_count' in u.patch);
+  assert.ok(counterWrite, 'the use counter was never written -- the cap would not hold');
+  assert.equal(counterWrite.patch.use_count, 1);
+
+  // And the use is recorded, so the log is a complete history rather than only refusals.
+  const logged = inserted.find(i => i.table === 'credential_use_log');
+  assert.ok(logged, 'the use was not written to the audit log');
+  assert.equal(logged.row.outcome, 'used');
+  assert.equal(logged.row.site, 'johnlewis.com');
+});
