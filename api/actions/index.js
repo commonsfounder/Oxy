@@ -24,8 +24,13 @@ const display = require('./display');
 const responsibilities = require('./responsibilities');
 const messaging = require('./messaging');
 const browser = require('./browser');
+const email = require('./email');
+const money = require('./money');
+const media = require('./media');
+const appointments = require('./appointments');
+const assistant = require('./assistant');
 
-const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser];
+const MODULES = [travel, people, project, calendar, scheduled, display, responsibilities, messaging, browser, email, money, media, appointments, assistant];
 
 const handlers = Object.create(null);
 for (const mod of MODULES) {

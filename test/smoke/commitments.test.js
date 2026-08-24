@@ -281,11 +281,24 @@ test('reconcileCommitmentsForSentEmail is wired to exactly one trigger', () => {
   // regression tripwire: if a future action starts calling it too, this fails loudly instead
   // of silently creating a second, uncontrolled path to "resolved from sent mail".
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
-  const callSites = source.match(/reconcileCommitmentsForSentEmail\(/g) || [];
-  // One definition + one real call site.
+  const path = require('node:path');
+
+  // send_email moved out of api/index.js into api/actions/email.js, so the sweep covers the
+  // whole action surface. The rule is unchanged: one definition, one call site, anywhere.
+  const actionsDir = path.join(__dirname, '../../api/actions');
+  const sources = [
+    fs.readFileSync(require.resolve('../../api/index.js'), 'utf8'),
+    ...fs.readdirSync(actionsDir)
+      .filter(name => name.endsWith('.js'))
+      .map(name => fs.readFileSync(path.join(actionsDir, name), 'utf8'))
+  ];
+  const combined = sources.join('\n');
+
+  // One definition (api/index.js) + one real call site (api/actions/email.js).
+  const callSites = combined.match(/reconcileCommitmentsForSentEmail\(/g) || [];
   assert.equal(callSites.length, 2, `expected exactly one call site, found ${callSites.length - 1}`);
-  const guardedCall = /if \(!result\?\.success\) return result;[\s\S]{0,400}reconcileCommitmentsForSentEmail/.test(source);
+  const guardedCall = sources.some(source =>
+    /if \(!result\?\.success\) return result;[\s\S]{0,400}reconcileCommitmentsForSentEmail/.test(source));
   assert.ok(guardedCall, 'the call site must be reachable only after a successful send');
 });
 

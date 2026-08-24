@@ -14,6 +14,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+// Same bootstrap as the other smoke tests: requiring an action module transitively loads
+// connectors that build a Supabase client at import time, which throws without these.
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase.co';
+process.env.SUPABASE_KEY = process.env.SUPABASE_KEY || 'test-key';
+process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-session-secret';
+
 const ACTIONS_DIR = path.join(__dirname, '../../api/actions');
 
 function actionFiles() {
