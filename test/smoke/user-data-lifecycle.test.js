@@ -13,6 +13,7 @@ process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-session
 
 const {
   USER_DATA_RESOURCES,
+  auditLiveSchema,
   auditMigrationCoverage,
   createUserDataLifecycle,
   createUserDataRouteHandlers,
@@ -335,4 +336,42 @@ test('injected registries use their own parent map rather than module-global res
   assert.equal(exported.resources.account_notes[0].body, 'kept');
   await lifecycle.deleteUserData('u1');
   assert.equal(db.rows.account_notes.length, 0);
+});
+
+test('the live schema auditor catches tables the database is actually missing', () => {
+  const registryNames = USER_DATA_RESOURCES.map(resource => resource.name);
+
+  // A database that really does contain every declared table is the only clean case.
+  const healthy = auditLiveSchema({ liveTables: registryNames });
+  assert.equal(healthy.absent.length, 0);
+  assert.equal(healthy.unregistered.length, 0);
+
+  // This is the exact production failure of 2026-08-24: the manifest and the migration
+  // files agreed with each other, so the file-based auditor stayed green, while the live
+  // database was missing the tables and every account deletion returned a 500.
+  assert.throws(() => auditLiveSchema({
+    liveTables: registryNames.filter(name => name !== 'travel_sessions' && name !== 'paired_displays')
+  }), /travel_sessions/);
+  assert.throws(() => auditLiveSchema({
+    liveTables: registryNames.filter(name => name !== 'paired_displays')
+  }), /paired_displays/);
+
+  // The other direction: a table nobody declared is how retired features leave user data
+  // behind, which is what ubereats_sessions did for two months after its code was reverted.
+  assert.throws(() => auditLiveSchema({
+    liveTables: [...registryNames, 'ubereats_sessions']
+  }), /ubereats_sessions/);
+
+  // An unknown table can be explicitly accepted, so a deliberate non-app table does not
+  // become a reason to start ignoring the check.
+  const ignored = auditLiveSchema({
+    liveTables: [...registryNames, 'some_external_table'],
+    ignore: ['some_external_table']
+  });
+  assert.equal(ignored.unregistered.length, 0);
+
+  // A missing table is reported even when an unknown one is also present.
+  assert.throws(() => auditLiveSchema({
+    liveTables: [...registryNames.filter(name => name !== 'purchases'), 'mystery_table']
+  }), /purchases/);
 });

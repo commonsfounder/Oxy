@@ -267,6 +267,28 @@ function auditMigrationCoverage({ migrationSql = [], resources = USER_DATA_RESOU
   return result;
 }
 
+// The auditor above only proves the manifest agrees with the SQL files sitting on disk.
+// It cannot see production.  On 2026-08-24 both agreed perfectly while the live database
+// was missing six declared tables, so every account deletion returned a 500 and the test
+// suite stayed green throughout.  This auditor closes that gap: it compares the manifest
+// against the tables that actually exist, in both directions.
+function auditLiveSchema({ liveTables = [], resources = USER_DATA_RESOURCES, ignore = [] } = {}) {
+  validateRegistry(resources);
+  const live = new Set(liveTables);
+  const ignored = new Set(ignore);
+  const registered = new Set(resources.map(resource => resource.name));
+  // Declared but not present: export and deletion fail for every real account.
+  const absent = [...registered].filter(name => !live.has(name));
+  // Present but undeclared: nothing exports or deletes it, so any user data inside is
+  // stranded indefinitely -- exactly what a retired feature's leftover table does.
+  const unregistered = [...live].filter(name => !registered.has(name) && !ignored.has(name));
+  const result = { absent, unregistered, checked: live.size };
+  if (absent.length || unregistered.length) {
+    throw new Error(`Live schema does not match the user-data manifest: ${JSON.stringify({ absent, unregistered })}`);
+  }
+  return result;
+}
+
 function redactValue(value, key = '') {
   if (SECRET_COLUMNS.has(key) || (key && SECRET_KEY.test(key))) return undefined;
   // Never leak a partial authenticated envelope from a generic JSON column.  Content-bearing
@@ -593,6 +615,7 @@ function createUserDataRouteHandlers({ lifecycle, requireMatchingUser, logger = 
 module.exports = {
   USER_DATA_RESOURCES,
   UserDataLifecycleError,
+  auditLiveSchema,
   auditMigrationCoverage,
   createUserDataLifecycle,
   createUserDataRouteHandlers,
