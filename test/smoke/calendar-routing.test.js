@@ -14,9 +14,13 @@ test('relative calendar dates understand the next weekday in the user timezone',
 });
 
 test('calendar writes preserve weekday and explicit time ranges', () => {
+  // Pinned to a known Monday. Without a fixed reference this asserted a hard-coded date
+  // against "now", so it passed only on the day it was written and failed every day after.
+  const monday = new Date('2026-08-24T12:00:00.000Z');
   const input = extractCalendarEventInput(
     'Put a dentist appointment in my calendar next Tuesday from 2pm to 3pm.',
-    ''
+    '',
+    monday
   );
   assert.deepEqual(input, {
     title: 'dentist appointment',

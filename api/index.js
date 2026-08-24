@@ -35,6 +35,25 @@ const { createActionExecution, unavailableActionResult } = require('./services/a
 const { createDeclaredAdapterInvoker } = require('./services/declared-adapter-invoker');
 const { normalizeActionOutcome } = require('./services/action-outcome');
 const { createUserDataLifecycle, createUserDataRouteHandlers } = require('./services/user-data-lifecycle');
+const actionRegistry = require('./actions');
+const {
+  PROACTIVE_WINDOWS,
+  getBriefingWindow,
+  getLocalDateKey,
+  getLocalHour,
+  getLocalMinute
+} = require('./lib/time');
+const {
+  USER_ID_RE,
+  base64UrlJson,
+  escapeHtml,
+  escapeIlikePattern,
+  isValidUserId,
+  parseJsonObject,
+  parseLooseJson,
+  safeParseJSON
+} = require('./lib/text');
+
 const { guardConciergeSpend: sharedGuardConciergeSpend } = require('./services/concierge-spend-guard');
 const { detectCurrency } = require('./services/money-guard');
 const {
@@ -342,36 +361,8 @@ function log(level, event, extra = {}) {
   }
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-function safeParseJSON(val) {
-  if (typeof val !== 'string') return val;
-  try { return JSON.parse(val); } catch { return val; }
-}
-
-function parseLooseJson(text) {
-  if (!text || typeof text !== 'string') return null;
-  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  try { return JSON.parse(cleaned); } catch { return null; }
-}
-
-function escapeIlikePattern(value) {
-  return String(value || '').replace(/[\\%_]/g, match => `\\${match}`);
-}
-
-const USER_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 const MAX_PASSWORD_LENGTH = 1024;
 const DEV_DEMO_USER_ID = process.env.OXY_DEV_AUTH_USER_ID || 'demo-test-user';
-function isValidUserId(id) {
-  return typeof id === 'string' && USER_ID_RE.test(id);
-}
 
 function isDevAuthEnabled() {
   return process.env.NODE_ENV !== 'production' && process.env.OXY_ENABLE_DEV_AUTH === 'true';
@@ -892,11 +883,6 @@ const PROMPT_CACHE_TTL = process.env.OXY_PROMPT_CACHE_TTL || '3600s';
 const promptCacheStates = new Map();
 const PROACTIVE_MORNING_PREF = 'proactive.morning_briefing.date';
 const PROACTIVE_FAILURE_PREF = 'proactive.failed_action.id';
-const PROACTIVE_WINDOWS = [
-  { id: 'wake', label: 'Wake briefing', start: 6, end: 10 },
-  { id: 'midday', label: 'Midday briefing', start: 12, end: 14 },
-  { id: 'evening', label: 'Evening briefing', start: 17, end: 20 }
-];
 const DEVICE_PLATFORM_ALLOWLIST = new Set(['ios', 'web']);
 
 setTimeout(() => {
@@ -929,43 +915,6 @@ function createRequestTrace(label) {
   };
 }
 
-function getLocalDateKey(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(date);
-}
-
-function getLocalHour(date = new Date()) {
-  return Number(new Intl.DateTimeFormat('en-GB', {
-    timeZone: TIMEZONE,
-    hour: '2-digit',
-    hour12: false
-  }).format(date));
-}
-
-function getLocalMinute(date = new Date()) {
-  return Number(new Intl.DateTimeFormat('en-GB', {
-    timeZone: TIMEZONE,
-    minute: '2-digit'
-  }).format(date));
-}
-
-function getBriefingWindow(now = new Date()) {
-  const hour = getLocalHour(now);
-  return PROACTIVE_WINDOWS.find(window => hour >= window.start && hour <= window.end) || null;
-}
-
-function parseJsonObject(value) {
-  const parsed = safeParseJSON(value);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-}
-
-function base64UrlJson(value) {
-  return Buffer.from(JSON.stringify(value)).toString('base64url');
-}
 
 function apnsAuthToken() {
   const keyId = process.env.APNS_KEY_ID;
@@ -1969,13 +1918,15 @@ function isCalendarCorrectionOnly(text) {
     /^(no|nah|actually|wait|sorry)?\s*(add|put|make)\s+(it|that|this)\s+(to|in|on)\s+(my\s+)?calendar$/.test(cleaned);
 }
 
-function extractCalendarEventInput(message, fallbackMessage = '') {
+// `now` is injectable so the resolved date is testable on any day of the week. Without it
+// a test asserting "next Tuesday" is only correct on the day it was written.
+function extractCalendarEventInput(message, fallbackMessage = '', now = new Date()) {
   const source = String(message || '');
   const fallback = String(fallbackMessage || '');
   const combined = `${source} ${fallback}`.trim();
   if (!isExplicitCalendarWrite(source) && !isCalendarCorrectionOnly(source)) return null;
 
-  const dateYMD = extractRelativeDateYMD(combined);
+  const dateYMD = extractRelativeDateYMD(combined, now);
   if (!dateYMD) return null;
 
   const allDay = /\ball\s+day\b/i.test(combined);
@@ -3068,6 +3019,24 @@ async function reconcileCommitmentsForSentEmail(userId, sent) {
   return { captured, resolved };
 }
 
+// What the extracted action modules are allowed to reach into. Passing these explicitly
+// keeps handlers from building a second Supabase client of their own and keeps every
+// dependency of a handler visible in one place.
+const actionDeps = {
+  supabase,
+  agentWorkspace,
+  travelSearch,
+  travelInventory,
+  travelRanking,
+  FAST_MODEL,
+  path,
+  // The model boundary stays bound here: the orchestration tests mock it by intercepting
+  // this file's require of brain-provider, and handlers should be handed model access
+  // rather than reaching for their own copy.
+  generateBrain,
+  webSearchBrain
+};
+
 async function executeActionRaw(userId, action, params, context = {}) {
   const enrichedParams = {
     ...(params || {}),
@@ -3096,6 +3065,12 @@ async function executeActionRaw(userId, action, params, context = {}) {
     if (!context.runtimeSessionId || !projectRef) return;
     await agentRuntime.updateSession(supabase, userId, context.runtimeSessionId, { projectRef }).catch(() => {});
   };
+  // Domain modules first; the switch below is the not-yet-migrated remainder.
+  const registered = actionRegistry.handlerFor(action);
+  if (registered) {
+    return registered({ userId, action, params, enrichedParams, context, deps: actionDeps });
+  }
+
   switch (action) {
     case 'send_message': {
       const contact = String(params?.contact || '').trim();
@@ -4458,158 +4433,6 @@ async function executeActionRaw(userId, action, params, context = {}) {
       return { success: true, ...digest };
     }
 
-    // Real trip planning. Named plan_itinerary, not plan_trip: plan_trip already exists
-    // elsewhere in this switch as a point-to-point route/train planner, an unrelated
-    // capability — do not merge or rename either without checking both. Deliberately does NOT
-    // use search_flights/search_hotels (those only build a browser deep-link, never real
-    // prices or availability) or itinerary-engine.js's dormant hotels/activities/flights
-    // fields (nothing populates them for real) — the only live-facts source here is a real
-    // grounded web search, fed into itinerary-engine.js as groundedNotes. Booking is a
-    // deliberately separate step (see run_browser_task's guidance).
-    case 'plan_itinerary': {
-      const destination = String(params?.destination || '').trim();
-      if (!destination) return { success: false, error: 'plan_itinerary requires destination' };
-
-      const requirements = {
-        destination,
-        origin: params?.origin || undefined,
-        date: params?.start_date || undefined,
-        endDate: params?.end_date || undefined,
-        duration: params?.duration_days || undefined,
-        partySize: params?.party_size || undefined,
-        budget: params?.budget ? `${params?.budget_currency || ''}${params.budget}` : undefined,
-        transportMode: params?.transport_mode || undefined,
-        interests: Array.isArray(params?.interests) ? params.interests : undefined,
-        dietary: Array.isArray(params?.dietary) ? params.dietary : undefined,
-        accessibility: params?.accessibility || undefined,
-        pace: params?.pace || undefined,
-        alreadyDone: params?.already_done || undefined,
-        notes: params?.notes || undefined
-      };
-      Object.keys(requirements).forEach(key => requirements[key] === undefined && delete requirements[key]);
-
-      let groundedNotes = '';
-      let groundedResearch = false;
-      try {
-        const searchQuery = [
-          `Practical trip-planning info for ${destination}`,
-          params?.start_date ? `around ${params.start_date}${params?.end_date ? ` to ${params.end_date}` : ''}` : '',
-          params?.interests?.length ? `for someone interested in ${[].concat(params.interests).join(', ')}` : ''
-        ].filter(Boolean).join(' ');
-        const answer = await webSearchBrain({
-          model: FAST_MODEL,
-          prompt: `Today's date is ${getLocalDateKey()}. ${searchQuery}. Cover: top attractions worth the time with realistic visit durations, current opening hours and any closures, approximate current ticket/entry prices, realistic walking/transit times between areas, and any well-known food spots. Only report what search results actually support; say plainly if something can't be verified rather than guessing. Plain prose, no markdown headings or asterisks.`
-        });
-        if (answer) { groundedNotes = answer; groundedResearch = true; }
-      } catch (e) {
-        console.warn('[plan_itinerary] grounded search failed, generating without it:', e.message);
-      }
-
-      // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
-      // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
-      // left nothing for visible output once a reasoning model spent its budget on reasoning
-      // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
-      // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
-      // maxOutputTokens unset; raising the cap fixed it.
-      const callModel = async (systemPrompt, prompt) => {
-        const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
-        return res?.text || '';
-      };
-
-      let itinerary;
-      try {
-        itinerary = await generateItinerary(requirements, { groundedNotes }, null, callModel);
-      } catch (e) {
-        return { success: false, error: `Could not build an itinerary: ${e.message}` };
-      }
-
-      const caveats = [
-        groundedResearch
-          ? null
-          : "I couldn't verify current opening hours/prices/closures for this trip, so treat times and costs as estimates, not confirmed facts.",
-        'Flights and hotels are not live-searched or booked here — say the word and I can look at real options and take you through an actual booking.'
-      ].filter(Boolean);
-
-      return {
-        success: true,
-        itinerary,
-        groundedResearch,
-        text: `${itineraryToText(itinerary)}\n\n${caveats.join(' ')}`
-      };
-    }
-
-    // Surgical edit of an existing itinerary (preserves days/sections the instruction doesn't
-    // touch) rather than a full regeneration. Accepts the itinerary inline (the model's own
-    // context from a recent plan_itinerary call) or a workspace_path to a previously saved one —
-    // whichever is fresher wins if both are given, and a workspace-loaded trip is re-saved
-    // to the same path after the edit so the saved copy stays in sync.
-    case 'modify_itinerary': {
-      const instruction = String(params?.instruction || '').trim();
-      if (!instruction) return { success: false, error: 'modify_itinerary requires instruction' };
-
-      let itinerary = null;
-      let workspacePath = params?.workspace_path ? String(params.workspace_path).trim() : '';
-
-      if (params?.itinerary) {
-        try {
-          itinerary = typeof params.itinerary === 'string' ? JSON.parse(params.itinerary) : params.itinerary;
-        } catch {
-          return { success: false, error: 'The itinerary passed to modify_itinerary was not valid JSON. Pass the exact itinerary object from plan_itinerary, or a workspace_path to a previously saved one.' };
-        }
-      } else if (workspacePath) {
-        let file;
-        try {
-          file = await agentWorkspace.readWorkspaceFile(supabase, userId, workspacePath);
-        } catch (e) {
-          return { success: false, error: e.message };
-        }
-        if (!file) return { success: false, error: `No saved itinerary at ${workspacePath}.` };
-        try {
-          itinerary = JSON.parse(file.content);
-        } catch {
-          return { success: false, error: `The saved file at ${workspacePath} isn't valid itinerary JSON, so it can't be edited directly. Generate a fresh one with plan_itinerary instead.` };
-        }
-      } else {
-        return { success: false, error: 'modify_itinerary needs either the itinerary JSON from a recent plan_itinerary call, or a workspace_path to a previously saved itinerary.' };
-      }
-
-      if (!itinerary?.days) return { success: false, error: 'That does not look like a valid itinerary (no days array).' };
-
-      // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
-      // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
-      // left nothing for visible output once a reasoning model spent its budget on reasoning
-      // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
-      // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
-      // maxOutputTokens unset; raising the cap fixed it.
-      const callModel = async (systemPrompt, prompt) => {
-        const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
-        return res?.text || '';
-      };
-
-      let updated;
-      try {
-        updated = await modifyItinerary(itinerary, instruction, {}, callModel);
-      } catch (e) {
-        return { success: false, error: `Could not apply that change: ${e.message}` };
-      }
-
-      let resaved = false;
-      if (workspacePath) {
-        try {
-          await agentWorkspace.writeWorkspaceFile(supabase, userId, workspacePath, JSON.stringify(updated, null, 2), 'file');
-          resaved = true;
-        } catch (e) {
-          console.warn('[modify_itinerary] re-save failed:', e.message);
-        }
-      }
-
-      return {
-        success: true,
-        itinerary: updated,
-        resaved,
-        text: `${updated.lastModification?.summary || 'Updated the itinerary.'}${resaved ? ` (re-saved to ${workspacePath})` : ''}\n\n${itineraryToText(updated)}`
-      };
-    }
 
     // Durable birthday/occasion capture. Deliberately its own table (occasions), not the
     // free-text memories table — "whose birthday is coming up?" needs a real date to sort on,
@@ -4730,168 +4553,6 @@ async function executeActionRaw(userId, action, params, context = {}) {
       };
     }
 
-    // ── Real travel search ────────────────────────────────────────────────────────────
-    // These two used to build a deep link and report success. They now do a real grounded
-    // web search and return what the results actually stated, with prices marked as
-    // observed-not-bookable. See api/services/travel-search.js for why this route and not
-    // an API or a browser. They are also removed from the connectors registry, so the old
-    // link-generator is unreachable rather than merely unused.
-    case 'search_flights':
-    case 'search_hotels': {
-      const kind = action === 'search_flights' ? 'flights' : 'hotels';
-      const today = getLocalDateKey();
-
-      const research = kind === 'flights'
-        ? travelSearch.buildFlightResearchPrompt({
-          from: String(params?.from || '').trim(),
-          to: String(params?.to || params?.destination || '').trim(),
-          departDate: String(params?.depart_date || params?.date || '').trim(),
-          returnDate: String(params?.return_date || '').trim(),
-          adults: Math.max(1, Math.min(Number(params?.adults) || 1, 9)),
-          notes: String(params?.notes || '').trim(),
-          maxPrice: Number(params?.max_price) || null,
-          directOnly: params?.direct_only === true || String(params?.direct_only) === 'true',
-          today
-        })
-        : travelSearch.buildHotelResearchPrompt({
-          location: String(params?.location || params?.city || '').trim(),
-          checkIn: String(params?.check_in || params?.checkin || '').trim(),
-          checkOut: String(params?.check_out || params?.checkout || '').trim(),
-          guests: Math.max(1, Math.min(Number(params?.guests) || 2, 12)),
-          maxNightly: params?.max_price ? String(params.max_price) : '',
-          area: String(params?.area || '').trim(),
-          notes: String(params?.notes || '').trim(),
-          today
-        });
-
-      if (kind === 'flights' && (!params?.from || !(params?.to || params?.destination))) {
-        return { success: false, error: 'search_flights needs both a departure and a destination.' };
-      }
-      if (kind === 'hotels' && !(params?.location || params?.city)) {
-        return { success: false, error: 'search_hotels needs a location.' };
-      }
-
-      // Real inventory first, when a provider is configured. This is the difference between
-      // "a page mentioned £133 for some nearby dates" and "here is a sellable fare for the
-      // dates you asked for". Grounded search below stays as the fallback rather than being
-      // replaced: with no provider key it is still the honest answer, and it is the only
-      // thing that works for routes or properties a single provider does not carry.
-      let inventoryOptions = [];
-      let inventoryNote = null;
-      if (travelInventory.isConfigured()) {
-        const found = kind === 'flights'
-          ? await travelInventory.searchFlights({
-            origin: String(params?.from || '').trim(),
-            destination: String(params?.to || params?.destination || '').trim(),
-            start: String(params?.depart_date || params?.date || '').trim(),
-            end: String(params?.return_date || '').trim(),
-            passengers: Math.max(1, Math.min(Number(params?.adults) || 1, 9))
-          })
-          : await travelInventory.searchStays({
-            latitude: Number(params?.latitude), longitude: Number(params?.longitude),
-            checkIn: String(params?.check_in || params?.checkin || '').trim(),
-            checkOut: String(params?.check_out || params?.checkout || '').trim(),
-            guests: Math.max(1, Math.min(Number(params?.guests) || 2, 12))
-          });
-        if (found.ok) inventoryOptions = found.options;
-        // A provider that errored is said out loud. Falling through to web search silently
-        // would turn "the travel API is down" into "these are your options".
-        else if (found.configured) inventoryNote = `Live inventory was unavailable (${found.reason}), so these are sourced from the web instead.`;
-      }
-
-      let researchText = '';
-      try {
-        researchText = await webSearchBrain({ model: FAST_MODEL, prompt: research });
-      } catch (e) {
-        return { success: false, error: `The travel search could not run: ${e.message}` };
-      }
-      if (!researchText) {
-        return { success: false, error: 'The web search returned nothing for that route — I have no real options to show you rather than made-up ones.' };
-      }
-
-      // Stage two runs WITHOUT the search tool: it may only restructure the text above, so
-      // it cannot introduce an option that was never found. The token budget is explicit —
-      // the default (768, shared with reasoning) silently returns an empty string on an
-      // input this long.
-      let options = [];
-      try {
-        const extracted = await generateBrain({
-          model: FAST_MODEL,
-          contents: [{ role: 'user', parts: [{ text: travelSearch.buildExtractionPrompt(kind, researchText, params || {}) }] }],
-          config: { maxOutputTokens: travelSearch.EXTRACTION_TOKENS }
-        });
-        options = travelSearch.parseTravelResults(kind, extracted.text || '');
-      } catch (e) {
-        return { success: false, error: `The travel search found results but could not read them: ${e.message}`, research: researchText };
-      }
-
-      // Date provenance FIRST: the exact/adjacent/unknown grade is recomputed from what the
-      // source actually quoted, so nothing downstream can present an adjacent-date fare as
-      // satisfying the request.
-      const requestedDates = kind === 'flights'
-        ? { start: params?.depart_date || params?.date, end: params?.return_date }
-        : { start: params?.check_in || params?.checkin, end: params?.check_out || params?.checkout };
-      // Inventory options go through exactly the same grading as web-sourced ones. They will
-      // almost always come out 'exact' — that is the point of asking a booking system — but
-      // the verdict is still computed from their observed dates rather than asserted.
-      const dated = travelSearch.applyDateProvenance([...inventoryOptions, ...options], requestedDates);
-
-      const { kept, dropped } = travelSearch.applyConstraints(dated, {
-        maxPrice: Number(params?.max_price) || null,
-        maxPriceCurrency: String(params?.currency || 'GBP').toUpperCase(),
-        directOnly: params?.direct_only === true || String(params?.direct_only) === 'true',
-        maxStops: Number.isFinite(Number(params?.max_stops)) && params?.max_stops !== undefined ? Number(params.max_stops) : undefined,
-        minRating: Number(params?.min_rating) || null
-      });
-
-      // travel-ranking.js finally has real structured results to rank. It was written for an
-      // Amadeus connector that never existed here, which is why it sat orphaned; the mapping
-      // in toRankingShape is what makes it live rather than rewriting it.
-      const requirements = {
-        budget: params?.max_price ? String(params.max_price) : '',
-        constraints: (params?.direct_only === true || String(params?.direct_only) === 'true') ? ['direct_or_fewest_changes'] : [],
-        partySize: String(params?.adults || params?.guests || 1),
-        accommodationPreference: String(params?.style || '').trim()
-      };
-      const shaped = kept.map(travelSearch.toRankingShape);
-      const ranked = kind === 'flights'
-        ? travelRanking.rankFlights(shaped, {}, requirements)
-        : travelRanking.rankHotels(shaped, {}, requirements);
-      // Date-matched options always outrank indicative ones, whatever the score: a cheaper
-      // price for the wrong week is not a better option, it is a different question.
-      // Exact beats unknown beats adjacent, whatever the score. A cheaper price for the wrong
-      // week is not a better option, it is an answer to a different question.
-      const dateRank = (o) => (o.dateMatch === 'exact' ? 0 : o.dateMatch === 'unknown' ? 1 : 2);
-      ranked.sort((a, b) => dateRank(a) - dateRank(b) || (b.score - a.score));
-
-      const searched = kind === 'flights'
-        ? `${params.from} to ${params.to || params.destination}${params?.depart_date ? ` ${params.depart_date}` : ''}${params?.return_date ? `–${params.return_date}` : ''}`
-        : `${params.location || params.city}${params?.check_in ? ` ${params.check_in}` : ''}${params?.check_out ? `–${params.check_out}` : ''}`;
-
-      return {
-        success: true,
-        kind,
-        options: ranked,
-        datesMatched: ranked.filter(o => o.dateMatch === 'exact').length,
-        adjacentDates: ranked.filter(o => o.dateMatch === 'adjacent').length,
-        datesUnknown: ranked.filter(o => o.dateMatch === 'unknown').length,
-        indicative: ranked.filter(o => o.dateMatch !== 'exact').length,
-        currencies: [...new Set(ranked.map(o => o.currency).filter(Boolean))],
-        droppedByConstraints: dropped.map(d => ({ why: d.why, option: d.option.airline || d.option.name })),
-        research: researchText,
-        // How many of these came from a booking system rather than from reading a page —
-        // the one distinction that decides whether a price can be acted on.
-        fromInventory: ranked.filter(o => o.inventory === true).length,
-        inventoryProvider: travelInventory.isConfigured() ? travelInventory.providerMode() : null,
-        // Search and booking stay separate: finding a sellable fare is not the same as
-        // holding one, and purchase still goes through the existing review path.
-        bookable: false,
-        text: [
-          travelSearch.formatTravelResults(kind, ranked, { dropped, searched, researchFound: Boolean(researchText) }),
-          inventoryNote
-        ].filter(Boolean).join(' ')
-      };
-    }
 
     // ── Calendar as something you can actually act on ─────────────────────────────────
     // Availability is computed by subtracting REAL events from the working window. If the
