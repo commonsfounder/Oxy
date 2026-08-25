@@ -173,6 +173,7 @@ const { getRuntimeVersion } = require('./services/runtime-version');
 const { shouldClarifyPreviousPlace } = require('./services/contextual-routing');
 const { clearCheckoutProfile, saveCheckoutProfile, loadCheckoutProfile } = require('./services/checkout-profile');
 const { encryptTokens, decryptTokens } = require('./services/token-crypto');
+const { isAllowedOrigin } = require('./lib/cors');
 const { createSetupIntentForUser, getLinkedCard, saveLinkedCard, unlinkCard, readStripeTokens, chargeLinkedCard, setPaymentActionRequired, getPaymentActionRequired } = require('./services/stripe-cards');
 const { saveAgentCard, getAgentCardSummary, deleteAgentCard } = require('./services/agent-card');
 const { saveVaultCredential, listVaultCredentials, deleteVaultCredential } = require('./services/vault-credentials');
@@ -413,10 +414,18 @@ function verifyOAuthState(state) {
   return isValidUserId(payload.userId) ? payload.userId : null;
 }
 
+// Optional pinning for the Chrome extension. Unset means any extension origin may call,
+// which is safe while auth is header-only -- see api/lib/cors.js for why, and for what
+// changes if cookie auth is ever introduced.
+const ALLOWED_EXTENSION_IDS = (process.env.OXY_ALLOWED_EXTENSION_IDS || '')
+  .split(',').map(id => id.trim()).filter(Boolean);
+
 app.use(cors({
   origin(origin, cb) {
-    if (!origin) return cb(null, true);
-    if (!ALLOWED_ORIGINS.length || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    if (isAllowedOrigin(origin, {
+      allowedOrigins: ALLOWED_ORIGINS,
+      allowedExtensionIds: ALLOWED_EXTENSION_IDS
+    })) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
   credentials: true
