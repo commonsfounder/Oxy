@@ -9284,7 +9284,12 @@ app.get('/agent/browser', requireSessionAuth, async (req, res) => {
           const state = decryptTokens(session.storage_state || {});
           resume = state?.[RESUME_STATE_KEY] || null;
           imported = state?.[IMPORT_STATE_KEY] || null;
-        } catch { /* an unreadable row still lists, just without detail */ }
+        } catch (e) {
+          // An unreadable row still lists, just without detail -- but say so, because
+          // swallowing this silently makes a decrypt failure look identical to a session
+          // that simply has no resume or import marker.
+          log('warn', 'browser_session.detail_unreadable', { site: session.site, error: e.message });
+        }
         return {
           site: session.site,
           lastUrl: resume?.last_url || null,
