@@ -29,6 +29,7 @@ const {
 const { getAgentCard } = require('./agent-card');
 const { getVaultCredential, saveVaultCredential, normalizeSite } = require('./vault-credentials');
 const { authorizeCredentialUse, recordUse } = require('./credential-grants');
+const { readOrderTotal } = require('./order-total');
 const { encryptTokens, decryptTokens } = require('./token-crypto');
 const { recordTaskStep } = require('./task-steps');
 const { recordTaskEntity } = require('./task-entities');
@@ -4052,8 +4053,31 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
         question: `I need your ${labels.join(', ')} to finish this checkout.`,
       };
     }
+    // Read the amount BEFORE offering to spend it. This function is the one place every
+    // ready_for_payment path funnels through, and it used to ship `total: ''` — so a real
+    // John Lewis payment step produced "I'll pay with your visa ending 4464, say the word"
+    // with the figure appearing nowhere: not in the reply, not in the task steps, not in the
+    // events. A yes to an unknown sum is not consent, and a hard budget cannot be honoured
+    // by something that never learns the price.
+    const pageText = await page.evaluate(() => (document.body?.innerText || '').slice(0, 6000)).catch(() => '');
+    const orderTotal = readOrderTotal(pageText);
+
     session.pendingPaymentLabel = payEl ? payEl.text : 'Pay';
-    return { type: 'ready_for_payment', summary: 'Checkout — payment step', total: '' };
+
+    // Fail closed. Refusing to ask is recoverable — the user can read the page and say the
+    // figure — whereas approving an amount nobody established is not.
+    if (!orderTotal) {
+      return {
+        type: 'ask',
+        question: "I'm at the payment step but I can't read the order total on this page, so I won't ask you to approve an amount I can't see. Check the total and tell me what it says if you want me to go ahead.",
+      };
+    }
+
+    return {
+      type: 'ready_for_payment',
+      summary: `Checkout — payment step, total ${orderTotal}`,
+      total: orderTotal
+    };
   }
   return null;
 }
@@ -5725,9 +5749,20 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       }
 
       if (matchesPaymentKeyword(target.text) && !(await isPaymentHandoffBlockedByLoading(session.page))) {
+        // A SECOND path to payment, despite tryPaymentReady's comment claiming to be the
+        // only funnel. It shipped an empty total too, so fixing the other one alone would
+        // have left this route still offering to charge a card for an unknown amount.
+        const payText = await session.page.evaluate(() => (document.body?.innerText || '').slice(0, 6000)).catch(() => '');
+        const payTotal = readOrderTotal(payText);
         session.pendingPaymentLabel = target.text;
-        session.pendingPaymentTotal = '';
-        return { type: 'ready_for_payment', summary: `Ready to ${target.text}`, total: '' };
+        session.pendingPaymentTotal = payTotal || '';
+        if (!payTotal) {
+          return {
+            type: 'ask',
+            question: "I'm at the payment step but I can't read the order total on this page, so I won't ask you to approve an amount I can't see. Check the total and tell me what it says if you want me to go ahead.",
+          };
+        }
+        return { type: 'ready_for_payment', summary: `Ready to ${target.text} — total ${payTotal}`, total: payTotal };
       }
 
       if (!recipeStepName && decision.action === 'click' && shouldSuppressVisionClick(session, target.text)) {
