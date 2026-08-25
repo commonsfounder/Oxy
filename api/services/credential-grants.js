@@ -229,13 +229,25 @@ async function authorizeCredentialUse(supabase, userId, { site, requestedSites =
   // builder has no .catch method, so `await query.catch?.(fn)` short-circuits to
   // `await undefined` and the statement never executes at all. That silently defeated the
   // use cap until a live run caught it.
+  //
+  // The RETURNED error matters as much as a thrown one, and is the case that actually
+  // happens. supabase-js resolves with `{ error }` instead of rejecting -- for an RLS
+  // refusal, a constraint, and even a dead network ("TypeError: fetch failed" arrives as a
+  // value, not an exception) -- so a try/catch alone caught nothing and the cap was handed
+  // out uncounted exactly when the database was least able to enforce it. Both paths are
+  // checked, because a mocked client in a test may well throw.
+  let countError = null;
   try {
-    await supabase
+    const { error } = await supabase
       .from('credential_grants')
       .update({ use_count: Number(grant.use_count || 0) + 1 })
       .eq('id', grant.id)
       .eq('user_id', userId);
-  } catch {
+    countError = error || null;
+  } catch (err) {
+    countError = err;
+  }
+  if (countError) {
     // A counter that failed to advance must not hand out an uncounted credential.
     await recordUse(supabase, userId, {
       site, grantId: grant.id, taskId, outcome: 'denied', reason: 'use_count_failed'

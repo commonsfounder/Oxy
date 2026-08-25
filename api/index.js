@@ -8458,7 +8458,10 @@ app.get('/preferences/:userId', async (req, res) => {
 app.delete('/preferences/:userId', async (req, res) => {
   if (!requireMatchingUser(req, res, req.params.userId)) return;
   try {
-    await supabase.from('preferences').delete().eq('user_id', req.params.userId);
+    // Same reason as /health: a returned `error` is the normal failure shape here, and
+    // reporting success for a delete that never happened is the worst answer available.
+    const { error } = await supabase.from('preferences').delete().eq('user_id', req.params.userId);
+    if (error) return res.status(500).json({ error: error.message });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -8718,8 +8721,12 @@ app.get('/health', async (_req, res) => {
   let dbLatencyMs = 0;
   try {
     const dbStart = Date.now();
-    await supabase.from('users').select('id').limit(1);
+    // supabase-js resolves with `{ error }` rather than rejecting -- a dead host arrives as
+    // "TypeError: fetch failed" in that field, not as an exception. Checking only the catch
+    // made this probe report `db: ok` for every failure it exists to detect.
+    const { error } = await supabase.from('users').select('id').limit(1);
     dbLatencyMs = Date.now() - dbStart;
+    if (error) dbStatus = 'error';
   } catch (e) {
     dbStatus = 'error';
   }

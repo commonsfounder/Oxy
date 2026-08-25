@@ -11,7 +11,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { decideCredentialUse } = require('../../api/services/credential-grants');
+const { authorizeCredentialUse, decideCredentialUse } = require('../../api/services/credential-grants');
 
 const NOW = new Date('2026-08-25T12:00:00Z');
 
@@ -261,4 +261,90 @@ test('reusing a stored browser session is recorded as a credential use', () => {
   );
   assert.match(source, /reason: 'stored_session'/,
     "session reuse must be distinguishable in the log from a password sign-in");
+});
+
+
+// The use cap is only a cap if a failed counter stops the sign-in.
+//
+// authorizeCredentialUse increments use_count BEFORE handing the credential over, and
+// guarded that write with a try/catch. supabase-js does not reject -- it RESOLVES with
+// `{ error }`, for an RLS refusal, a constraint, and even a dead host ("TypeError: fetch
+// failed" arrives in that field, not as an exception). So the catch never ran, and a grant
+// capped at one use was handed out uncounted precisely when the database was least able to
+// enforce the cap. Both failure shapes are asserted, because a returned error is the one
+// that actually happens in production.
+// A chainable stand-in for the PostgREST builder: every filter returns the builder and the
+// builder itself is the thenable, which is what makes `.update().eq().eq()` await correctly.
+// A stub that returned a bare Promise from update() would blow up on the first `.eq` and
+// make these tests pass for entirely the wrong reason.
+function query(settle) {
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    is: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    single: () => builder,
+    maybeSingle: () => builder,
+    then: (resolve, reject) => settle().then(resolve, reject)
+  };
+  return builder;
+}
+
+function supabaseStub({ grants, onUpdate }) {
+  return {
+    from(table) {
+      return {
+        select: () => query(() => Promise.resolve({ data: grants, error: null })),
+        insert: () => query(() => Promise.resolve({ data: null, error: null })),
+        update: () => query(table === 'credential_grants'
+          ? onUpdate
+          : () => Promise.resolve({ data: null, error: null }))
+      };
+    }
+  };
+}
+
+const liveGrant = {
+  id: 'g1',
+  site: 'johnlewis.com',
+  scope: 'standing',
+  task_id: null,
+  expires_at: '2099-01-01T00:00:00Z',
+  revoked_at: null,
+  max_uses: 1,
+  use_count: 0,
+  granted_via: 'user'
+};
+
+test('a use-count write that RETURNS an error refuses the sign-in', async () => {
+  const supabase = supabaseStub({
+    grants: [liveGrant],
+    onUpdate: () => Promise.resolve({ data: null, error: { message: 'TypeError: fetch failed' } })
+  });
+  const result = await authorizeCredentialUse(supabase, 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, false, 'an uncounted use must not be authorised');
+  assert.equal(result.reason, 'use_count_failed');
+  assert.equal(result.grant, null);
+});
+
+test('a use-count write that THROWS refuses the sign-in too', async () => {
+  const supabase = supabaseStub({
+    grants: [liveGrant],
+    onUpdate: () => Promise.reject(new Error('connection reset'))
+  });
+  const result = await authorizeCredentialUse(supabase, 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'use_count_failed');
+});
+
+test('a counted use is still authorised, so the guard has not simply broken sign-in', async () => {
+  const supabase = supabaseStub({
+    grants: [liveGrant],
+    onUpdate: () => Promise.resolve({ data: null, error: null })
+  });
+  const result = await authorizeCredentialUse(supabase, 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, true);
+  assert.equal(result.reason, 'granted');
+  assert.equal(result.grant.id, 'g1');
 });
