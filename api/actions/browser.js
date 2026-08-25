@@ -70,7 +70,9 @@ async function runBrowserTask({ userId, action, params, enrichedParams, context,
       // through — a UK £-checkout must be converted before it hits the (USD) spend cap, not
       // compared naked. No symbol on a UK-first app → assume GBP, the stricter side.
       const currency = detectCurrency(outcome.total || '') || 'GBP';
-      const guard = await guardConciergeSpend(userId, total, currency);
+      // Check only: reaching the payment step is not spending. Budget is consumed when
+      // the charge actually goes through, in confirmBrowserPayment.
+      const guard = await guardConciergeSpend(userId, total, currency, { record: false });
       if (!guard.ok) return { success: false, error: guard.error };
     }
     // Tell the user up front which card the checkout will be paid with — or that
@@ -142,6 +144,11 @@ async function confirmBrowserPayment({ userId, action, params, enrichedParams, c
   try {
     const result = await browserTask.confirmPayment(userId);
     if (result.type === 'error') return { success: false, error: result.error };
+    // Only a completed charge consumes the daily cap.
+    const charged = browserTask.getPendingPaymentTotal?.(userId);
+    if (charged?.total) {
+      await guardConciergeSpend(userId, charged.total, charged.currency || null).catch(() => {});
+    }
     return { success: true, text: result.text };
   } catch (e) {
     return { success: false, error: `Payment confirmation failed: ${e.message}` };

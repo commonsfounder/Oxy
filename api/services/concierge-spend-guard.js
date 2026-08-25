@@ -14,7 +14,10 @@ const SPEND_DAY_KEY = 'concierge_account.spend_day';
 // so the daily total is always single-currency and repeated foreign spends accumulate correctly.
 // Omitting it preserves the old behaviour: the amount is treated as already in the cap currency
 // (the concierge account itself is USD-denominated).
-async function guardConciergeSpend(supabase, userId, amount, currency = null) {
+// `record: false` checks the cap without consuming budget. Reaching a payment step is not
+// spending: every failed attempt used to permanently eat its own amount, and ten aborted
+// tries could exhaust a daily cap without a penny leaving the account.
+async function guardConciergeSpend(supabase, userId, amount, currency = null, { record = true } = {}) {
   const capCur = capCurrency();
   const normalized = convertAmount(amount, currency || capCur, capCur);
   if (normalized === null) {
@@ -31,6 +34,7 @@ async function guardConciergeSpend(supabase, userId, amount, currency = null) {
   const spentToday = tally.date === today ? Number(tally.total) || 0 : 0;
   const verdict = checkSpendLimit({ amount: normalized, spentToday });
   if (!verdict.ok) return verdict;
+  if (!record) return { ok: true };
   await supabase
     .from('preferences')
     .upsert({

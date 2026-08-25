@@ -3746,8 +3746,8 @@ async function getPreferenceMap(userId) {
 // balance or any real payment API. Shared with connectors/stripe.js (spend_from_concierge_via_stripe,
 // stripe_payout_to_user) via concierge-spend-guard.js so every money-out path gets the same
 // per-txn + rolling-daily cap, not just the ones originally written with it in mind.
-async function guardConciergeSpend(userId, amount, currency = null) {
-  return sharedGuardConciergeSpend(supabase, userId, amount, currency);
+async function guardConciergeSpend(userId, amount, currency = null, options = {}) {
+  return sharedGuardConciergeSpend(supabase, userId, amount, currency, options);
 }
 
 async function setPreferenceValue(userId, key, value) {

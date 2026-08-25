@@ -2657,6 +2657,17 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
  *
  * Read-only: it navigates and reads. It never clicks, fills, or submits anything.
  */
+function getPendingPaymentTotal(userId) {
+  const session = getSession(userId);
+  const raw = session?.pendingPaymentTotal;
+  if (!raw) return null;
+  const amount = Number(String(raw).replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const symbol = String(raw).trim()[0];
+  const currency = symbol === '£' ? 'GBP' : symbol === '$' ? 'USD' : symbol === '€' ? 'EUR' : null;
+  return { total: amount, currency };
+}
+
 async function inspectStoredSession(userId, site, path = '/', { useStoredSession = true } = {}) {
   const storageState = await loadStorageState(userId, site);
   if (useStoredSession && !storageState) return { ok: false, error: `No stored session for ${site}.` };
@@ -4108,6 +4119,7 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
       };
     }
 
+    session.pendingPaymentTotal = orderTotal;
     return {
       type: 'ready_for_payment',
       summary: `Checkout — payment step, total ${orderTotal}`,
@@ -6912,6 +6924,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 
 module.exports = {
   IMPORT_STATE_KEY,
+  getPendingPaymentTotal,
   inspectStoredSession,
   RESUME_STATE_KEY,
   recordConfirmedPurchase,
