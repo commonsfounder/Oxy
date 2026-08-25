@@ -54,7 +54,13 @@ async function runBrowserTask({ userId, action, params, enrichedParams, context,
       confirmation: 'review_required',
       text: `I found a sign-in for ${outcome.site} — use your saved "${outcome.label}" credential to sign in?`,
       actionSummary: 'Sign-in ready',
-      taskId: outcome.taskId
+      taskId: outcome.taskId,
+      // The site and the run identity the user would be permitting, so a client can offer
+      // "allow this for this task" (POST /vault/grants with scope 'task' and this id) and
+      // not only the standing permission. taskId above is the TURN's id and changes every
+      // turn; binding a grant to it would authorise nothing.
+      site: outcome.site,
+      credentialTaskId: outcome.credentialTaskId
     };
   }
   if (outcome.type === 'ready_for_payment') {

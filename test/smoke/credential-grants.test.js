@@ -348,3 +348,60 @@ test('a counted use is still authorised, so the guard has not simply broken sign
   assert.equal(result.reason, 'granted');
   assert.equal(result.grant.id, 'g1');
 });
+
+
+// A task-scoped grant is the BOUNDED permission -- "sign in for this one job" -- and it is
+// the DEFAULT scope in validateGrantInput. It authorised nothing at all.
+//
+// authorizeCredentialUse was called with `session.pendingCredentialTaskId`, which is only
+// assigned AFTER an offer has already been made, so at the moment of the decision it was
+// always null and decideCredentialUse always answered 'wrong_task'. Worse, the only id
+// available to bind a grant to was runOrderingTurnImpl's taskId -- a fresh randomUUID() on
+// every turn -- so even a correctly-created task grant could never match a later turn. The
+// net effect was that the only grant that worked was `standing`, the broader one: the
+// bounded option silently failed and pushed the user to the permanent permission.
+test('a task-scoped grant authorises the run it was bound to', () => {
+  const runId = 'run-abc';
+  const decision = decideCredentialUse({
+    grant: grant({ scope: 'task', task_id: runId }),
+    site: 'johnlewis.com',
+    taskId: runId,
+    now: NOW
+  });
+  assert.equal(decision.allowed, true, 'the bounded grant must actually work');
+  assert.equal(decision.reason, 'granted');
+});
+
+test('a task-scoped grant is still refused for a different run, and for no run at all', () => {
+  const bound = grant({ scope: 'task', task_id: 'run-abc' });
+  assert.equal(decideCredentialUse({ grant: bound, site: 'johnlewis.com', taskId: 'run-xyz', now: NOW }).reason, 'wrong_task');
+  assert.equal(decideCredentialUse({ grant: bound, site: 'johnlewis.com', taskId: null, now: NOW }).reason, 'wrong_task');
+});
+
+// Source-level tripwire, because the bug was not in the decision function -- that was always
+// correct -- but in which id the caller handed it.
+test('the browser loop authorises against the run id, not the per-turn one', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+
+  // The session-lifetime id must exist and be created once per run.
+  assert.match(source, /credentialTaskId: randomUUID\(\)/,
+    'a session needs a run-lifetime credential identity');
+
+  const call = source.slice(source.indexOf('const authorized = await authorizeCredentialUse'));
+  const body = call.slice(0, call.indexOf('.catch('));
+  assert.match(body, /taskId: session\.credentialTaskId/,
+    'the grant decision must use the run id');
+  assert.doesNotMatch(body, /pendingCredentialTaskId/,
+    'pendingCredentialTaskId is only set after an offer, so it is always null here');
+
+  // The audit log has to agree with the decision: one run's 'used' and 'failed' rows must
+  // sit under the same task, not under a run id and a null.
+  assert.doesNotMatch(source, /outcome: 'failed',[\s\S]{0,120}pendingCredentialTaskId/,
+    'the failure log must use the same run id the authorisation used');
+
+  // And the ask has to tell the caller which id a task grant would bind to, or there is no
+  // way to create a working one.
+  assert.match(source, /type: 'ready_for_credential_use',[\s\S]{0,200}credentialTaskId: session\.credentialTaskId/,
+    'the ask must surface the run id');
+});
