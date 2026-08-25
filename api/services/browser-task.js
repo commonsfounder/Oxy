@@ -6594,7 +6594,14 @@ async function findAndClickPayButton(page, wantedLabel) {
     { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
   ).then((h) => h.asElement());
   if (!handle) return null;
-  await handle.click({ timeout: 10000 });
+  const disabled = await handle.evaluate((el) => el.disabled === true || el.getAttribute('aria-disabled') === 'true').catch(() => false);
+  if (disabled) {
+    console.warn('[browser-task] pay button disabled', JSON.stringify({
+      label: target.text, blockedBy: await describeBlockedPayment(page)
+    }));
+    return null;
+  }
+  await handle.click({ timeout: 10000 }).catch(() => null);
   return target.text;
 }
 
