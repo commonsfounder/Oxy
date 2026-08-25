@@ -6454,7 +6454,9 @@ function selectCandidatesFor(field, card) {
 async function paymentCardFieldsPresent(page) {
   for (const frame of page.frames()) {
     const inputs = await enumeratePaymentInputs(frame);
-    if (inputs.some((inp) => inp.empty && classifyPaymentInput(inp.hint) === 'number')) return true;
+    // A saved card re-verification shows only a CVV box, no number field — that still
+    // needs filling, and requiring a number field meant it never was.
+    if (inputs.some((inp) => inp.empty && ['number', 'cvc'].includes(classifyPaymentInput(inp.hint)))) return true;
   }
   return false;
 }
@@ -6682,8 +6684,17 @@ async function confirmPayment(userId, onProgress = () => {}) {
         // No pay button yet: John Lewis shows only payment-method choices until one is
         // picked. Prefer a saved card over the generic "new card" form.
         if (!session.pickedCardOption) {
-          const saved = controls.find((el) => /ending\s+in\s+\d{3,4}|card\s+ending/i.test(String(el.text || '')) && !isWalletPayment(el.text));
-          const option = saved || controls.find((el) => isCardPaymentOption(el.text));
+          // Prefer the card actually being used. A page listing several saved cards would
+          // otherwise take whichever appeared first.
+          const last4 = String(card?.number || '').slice(-4);
+          const savedCards = controls.filter((el) => /ending\s+(in\s+)?\d{3,4}|card\s+ending/i.test(String(el.text || '')) && !isWalletPayment(el.text));
+          const match = last4 ? savedCards.find((el) => String(el.text).includes(last4)) : null;
+          // If the intended card is not among the saved ones, enter it on the new-card form
+          // rather than charging whichever other card the site happens to list first.
+          const option = match
+            || (last4 ? controls.find((el) => isCardPaymentOption(el.text) && !/ending/i.test(el.text)) : null)
+            || savedCards[0]
+            || controls.find((el) => isCardPaymentOption(el.text));
           if (option) {
             session.pickedCardOption = true;
             onProgress(`Selecting payment method — ${option.text}`);

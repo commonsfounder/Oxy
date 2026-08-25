@@ -51,3 +51,12 @@ test('a saved card or card option is recognised, wallets are not', () => {
     assert.equal(isCardPaymentOption(label), false, `${label} is not a card option`);
   }
 });
+
+test('a saved-card CVV box counts as a card field needing filling', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+  const fn = source.slice(source.indexOf('async function paymentCardFieldsPresent'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  // Requiring a number field meant a saved card, which shows only a CVV, was never filled.
+  assert.match(body, /\['number', 'cvc'\]/, 'cvc-only forms must count');
+});
