@@ -548,6 +548,15 @@ function isPaymentAdvance(text) {
 // Controls that actually charge, as opposed to navigating one step closer.
 const PAYMENT_COMMIT_PATTERN = /\bpay\s*(now|£|\$|€)|\bpay$|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|confirm\s+and\s+pay|submit\s+(order|payment)|\bbuy\s*(now)?$|pay\s+securely|slide\s+to\s+pay/i;
 
+// A saved card or the card option. Checkouts often show no pay button until one is chosen.
+const CARD_OPTION_PATTERN = /(credit\s*\/?\s*(or\s+)?debit\s+card|debit\s*\/?\s*credit\s+card|\bcard\s+ending\b|ending\s+in\s+\d{3,4}|use\s+(this|saved)\s+card|new\s+card)/i;
+
+function isCardPaymentOption(text) {
+  const label = String(text || '').trim();
+  if (isWalletPayment(label)) return false;
+  return CARD_OPTION_PATTERN.test(label);
+}
+
 function isPaymentCommit(text) {
   const label = String(text || '').trim();
   if (isWalletPayment(label) || isPaymentAdvance(label)) return false;
@@ -6649,12 +6658,26 @@ async function confirmPayment(userId, onProgress = () => {}) {
       // payment"). With a card already saved there are no empty fields to fill, so the
       // branch above never fires and this waited for a confirmation nobody had triggered.
       if (payClicks < MAX_PAY_CLICKS) {
-        const commit = (await extractClickableElements(session.page).catch(() => []))
-          .find((el) => isPaymentCommit(el.text));
+        const controls = await extractClickableElements(session.page).catch(() => []);
+        const commit = controls.find((el) => isPaymentCommit(el.text));
         if (commit) {
           onProgress(`Confirming payment — ${commit.text}`);
           const clicked = await findAndClickPayButton(session.page, commit.text);
           if (clicked) { payClicks += 1; session.pendingPaymentLabel = commit.text; }
+          continue;
+        }
+
+        // No pay button yet: John Lewis shows only payment-method choices until one is
+        // picked. Prefer a saved card over the generic "new card" form.
+        if (!session.pickedCardOption) {
+          const saved = controls.find((el) => /ending\s+in\s+\d{3,4}|card\s+ending/i.test(String(el.text || '')) && !isWalletPayment(el.text));
+          const option = saved || controls.find((el) => isCardPaymentOption(el.text));
+          if (option) {
+            session.pickedCardOption = true;
+            onProgress(`Selecting payment method — ${option.text}`);
+            await findAndClickPayButton(session.page, option.text).catch(() => {});
+            await settle(session.page, 1200);
+          }
         }
       }
     }
@@ -6907,6 +6930,7 @@ module.exports = {
   isWalletPayment,
   isPaymentAdvance,
   isPaymentCommit,
+  isCardPaymentOption,
   isPaymentHandoffBlockedByLoading,
   isCheckoutishUrl,
   isTechnicalAsk,

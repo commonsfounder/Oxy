@@ -40,3 +40,14 @@ test('the confirm loop presses a commit button after only advancing', () => {
   const body = fn.slice(0, fn.indexOf('\n    touchSession(userId);'));
   assert.match(body, /isPaymentCommit\(/, 'the watch loop must look for a real commit control');
 });
+
+test('a saved card or card option is recognised, wallets are not', () => {
+  const { isCardPaymentOption } = require('../../api/services/browser-task');
+  // From the real John Lewis payment page, which shows no pay button until one is chosen.
+  for (const label of ['Mastercard ending in 2073', 'Credit / Debit card', 'Visa card ending 4464', 'Use saved card']) {
+    assert.equal(isCardPaymentOption(label), true, `${label} should be a card option`);
+  }
+  for (const label of ['Apple Pay', 'PayPal Pay now with PayPal', 'Klarna', 'Add a promo code', 'Pay now']) {
+    assert.equal(isCardPaymentOption(label), false, `${label} is not a card option`);
+  }
+});
