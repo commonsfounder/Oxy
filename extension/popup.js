@@ -18,6 +18,10 @@ const shareEl = document.getElementById('share');
 const statusEl = document.getElementById('status');
 
 let site = null;
+let hasPermission = false;
+
+/** Chrome match pattern for the site. `*.host` also matches the bare host. */
+function sitePattern() { return `*://*.${site}/*`; }
 
 function say(message, kind = '') {
   statusEl.textContent = message;
@@ -42,6 +46,12 @@ async function init() {
 
   const stored = await chrome.storage.local.get('token');
   if (stored.token) tokenEl.value = stored.token;
+
+  // Chrome tears down this popup while it shows its permission prompt, which kills the
+  // script mid-run. So the permission state is checked on open: once granted, sharing goes
+  // straight through with no prompt and nothing to interrupt it.
+  hasPermission = await chrome.permissions.contains({ origins: [sitePattern()] }).catch(() => false);
+  shareEl.textContent = hasPermission ? 'Share session' : 'Allow access to this site';
   shareEl.disabled = false;
 }
 
@@ -50,16 +60,19 @@ async function share() {
   if (!token) { say('Paste your Oxy token first.', 'err'); return; }
 
   shareEl.disabled = true;
-  say('Asking Chrome for permission…');
 
   // Requested per site, at the moment of sharing, rather than held permanently for every
-  // site. Chrome shows its own prompt here, so the grant is the user's, not the page's.
-  const pattern = `*://*.${site}/*`;
-  const granted = await chrome.permissions.request({ origins: [pattern] }).catch(() => false);
-  if (!granted) {
-    say('Chrome permission was declined, so nothing was read.', 'err');
-    shareEl.disabled = false;
-    return;
+  // site. Chrome shows its own prompt, so the grant is the user's, not the page's -- and
+  // showing it closes this popup, so the share happens on the next click instead.
+  if (!hasPermission) {
+    say('Chrome will ask permission for this site.\nIf this panel closes, click the extension again to finish.');
+    const granted = await chrome.permissions.request({ origins: [sitePattern()] }).catch(() => false);
+    if (!granted) {
+      say('Chrome permission was declined, so nothing was read.', 'err');
+      shareEl.disabled = false;
+      return;
+    }
+    hasPermission = true;
   }
 
   say('Reading this site’s cookies…');
