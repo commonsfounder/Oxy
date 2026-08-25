@@ -6726,6 +6726,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 
 module.exports = {
   IMPORT_STATE_KEY,
+  RESUME_STATE_KEY,
   recordConfirmedPurchase,
   primeWarmBrowser,
   primeFastpaths,

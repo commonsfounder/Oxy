@@ -139,3 +139,27 @@ test('the stored shape is what Playwright expects, so it can be replayed directl
   // sameSite must be one of Playwright's accepted values or the whole import throws on use.
   assert.ok(['Strict', 'Lax', 'None'].includes(only.sameSite));
 });
+
+// Tripwire for a route that queried columns the live table does not have.
+//
+// /agent/browser selected `last_url` and `goal` from browser_sessions. Commit 97742f7a had
+// already moved that data inside the encrypted storage_state value precisely because those
+// columns do not exist, but this route was not updated, so it returned 500 in production
+// from then until a live import test happened to call it. Nothing in the suite noticed,
+// because no test exercised the route against a real schema.
+test('the browser-sessions route reads the resume state from the blob, not phantom columns', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
+
+  const route = source.slice(source.indexOf("app.get('/agent/browser'"));
+  const body = route.slice(0, route.indexOf('\n});'));
+
+  assert.doesNotMatch(body, /\.select\([^)]*last_url/,
+    'last_url is not a column on browser_sessions');
+  assert.doesNotMatch(body, /\.select\([^)]*\bgoal\b/,
+    'goal is not a column on browser_sessions');
+  assert.match(body, /\.select\('site, storage_state, updated_at'\)/,
+    'the route must select only columns that exist');
+  assert.match(body, /RESUME_STATE_KEY/,
+    'the resume detail comes out of the encrypted blob');
+});

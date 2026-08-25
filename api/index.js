@@ -44,7 +44,7 @@ const {
   recordUse
 } = require('./services/credential-grants');
 const { prepareImportedSession } = require('./services/session-import');
-const { IMPORT_STATE_KEY } = require('./services/browser-task');
+const { IMPORT_STATE_KEY, RESUME_STATE_KEY } = require('./services/browser-task');
 const {
   PROACTIVE_WINDOWS,
   getBriefingWindow,
@@ -9265,19 +9265,35 @@ app.get('/agent/browser', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
+    // last_url and goal are NOT columns. Commit 97742f7a moved the resume state inside the
+    // encrypted storage_state value because the live table only has user_id/site/
+    // storage_state/updated_at, but this route kept selecting the old columns and so had
+    // been returning 500 ever since. Read them back out of the blob instead.
     const { data, error } = await supabase.from('browser_sessions')
-      .select('site, last_url, goal, updated_at')
+      .select('site, storage_state, updated_at')
       .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(20);
     if (error) throw error;
     res.json({
-      sessions: (data || []).map(session => ({
-        site: session.site,
-        lastUrl: session.last_url,
-        goal: session.goal,
-        updatedAt: session.updated_at
-      })),
+      sessions: (data || []).map(session => {
+        // Cookie values never leave the server; only what the session IS gets reported.
+        let resume = null;
+        let imported = null;
+        try {
+          const state = decryptTokens(session.storage_state || {});
+          resume = state?.[RESUME_STATE_KEY] || null;
+          imported = state?.[IMPORT_STATE_KEY] || null;
+        } catch { /* an unreadable row still lists, just without detail */ }
+        return {
+          site: session.site,
+          lastUrl: resume?.last_url || null,
+          goal: resume?.goal || null,
+          updatedAt: session.updated_at,
+          source: imported ? 'imported_from_browser' : 'signed_in_by_agent',
+          expiresAt: imported?.expires_at || null
+        };
+      }),
       capabilities: ['persistent_sessions', 'login_state', 'website_understanding', 'form_filling', 'checkout_review']
     });
   } catch (e) {
