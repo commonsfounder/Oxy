@@ -7,26 +7,35 @@
 // shop". Chrome's own cookies API has no such problem, and asking for host access one site
 // at a time is the least privilege that does the job.
 //
+// Signing in happens here rather than by fetching a token from a terminal. A feature that
+// needs a command line before it works is a feature nobody uses.
+//
 // The site is always the tab you are looking at. It is never typed, so there is no way to
 // mistype a domain and share the wrong site's cookies.
 
 const API = 'https://milgrain-live-2026.fly.dev';
 
+const signinEl = document.getElementById('signin');
+const shareSectionEl = document.getElementById('share');
+const userIdEl = document.getElementById('userId');
+const passwordEl = document.getElementById('password');
+const signInBtn = document.getElementById('signInBtn');
+const signOutBtn = document.getElementById('signOutBtn');
 const siteEl = document.getElementById('site');
-const tokenEl = document.getElementById('token');
-const shareEl = document.getElementById('share');
+const shareBtn = document.getElementById('shareBtn');
 const statusEl = document.getElementById('status');
 
 let site = null;
+let token = null;
 let hasPermission = false;
-
-/** Chrome match pattern for the site. `*.host` also matches the bare host. */
-function sitePattern() { return `*://*.${site}/*`; }
 
 function say(message, kind = '') {
   statusEl.textContent = message;
   statusEl.className = kind;
 }
+
+/** Chrome match pattern for the site. `*.host` also matches the bare host. */
+function sitePattern() { return `*://*.${site}/*`; }
 
 /** Registrable-ish site for the tab: strip the leading www, keep the rest. */
 function siteFromUrl(url) {
@@ -34,32 +43,83 @@ function siteFromUrl(url) {
   catch { return null; }
 }
 
-async function init() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  site = siteFromUrl(tab?.url);
+function showSignIn() {
+  signinEl.classList.remove('hidden');
+  shareSectionEl.classList.add('hidden');
+  (userIdEl.value ? passwordEl : userIdEl).focus();
+}
+
+async function showShare() {
+  signinEl.classList.add('hidden');
+  shareSectionEl.classList.remove('hidden');
+  siteEl.textContent = site || 'No site';
+
   if (!site) {
-    siteEl.textContent = 'No site';
     say('Open the site you want to share, then click the extension again.');
     return;
   }
-  siteEl.textContent = site;
-
-  const stored = await chrome.storage.local.get('token');
-  if (stored.token) tokenEl.value = stored.token;
 
   // Chrome tears down this popup while it shows its permission prompt, which kills the
   // script mid-run. So the permission state is checked on open: once granted, sharing goes
   // straight through with no prompt and nothing to interrupt it.
   hasPermission = await chrome.permissions.contains({ origins: [sitePattern()] }).catch(() => false);
-  shareEl.textContent = hasPermission ? 'Share session' : 'Allow access to this site';
-  shareEl.disabled = false;
+  shareBtn.textContent = hasPermission ? 'Share session' : 'Allow access to this site';
+  shareBtn.disabled = false;
+}
+
+async function init() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  site = siteFromUrl(tab?.url);
+
+  const stored = await chrome.storage.local.get(['token', 'userId']);
+  token = stored.token || null;
+  if (stored.userId) userIdEl.value = stored.userId;
+
+  if (token) await showShare(); else showSignIn();
+}
+
+async function signIn() {
+  const userId = userIdEl.value.trim();
+  const password = passwordEl.value;
+  if (!userId || !password) { say('Enter your user ID and password.', 'err'); return; }
+
+  signInBtn.disabled = true;
+  say('Signing in…');
+  try {
+    const response = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, password })
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.token) {
+      say(body.error || `Sign-in failed (HTTP ${response.status}).`, 'err');
+      signInBtn.disabled = false;
+      return;
+    }
+    token = body.token;
+    // The user id is remembered for convenience; the password is not kept anywhere.
+    await chrome.storage.local.set({ token, userId });
+    passwordEl.value = '';
+    say('');
+    await showShare();
+  } catch (error) {
+    say(`Could not reach Oxy: ${error.message}`, 'err');
+    signInBtn.disabled = false;
+  } finally {
+    signInBtn.disabled = false;
+  }
+}
+
+async function signOut() {
+  await chrome.storage.local.remove('token');
+  token = null;
+  say('');
+  showSignIn();
 }
 
 async function share() {
-  const token = tokenEl.value.trim();
-  if (!token) { say('Paste your Oxy token first.', 'err'); return; }
-
-  shareEl.disabled = true;
+  shareBtn.disabled = true;
 
   // Requested per site, at the moment of sharing, rather than held permanently for every
   // site. Chrome shows its own prompt, so the grant is the user's, not the page's -- and
@@ -69,7 +129,7 @@ async function share() {
     const granted = await chrome.permissions.request({ origins: [sitePattern()] }).catch(() => false);
     if (!granted) {
       say('Chrome permission was declined, so nothing was read.', 'err');
-      shareEl.disabled = false;
+      shareBtn.disabled = false;
       return;
     }
     hasPermission = true;
@@ -81,13 +141,13 @@ async function share() {
     cookies = await chrome.cookies.getAll({ domain: site });
   } catch (error) {
     say(`Could not read cookies: ${error.message}`, 'err');
-    shareEl.disabled = false;
+    shareBtn.disabled = false;
     return;
   }
 
   if (!cookies.length) {
     say(`Chrome has no cookies for ${site}. Sign in there first.`, 'err');
-    shareEl.disabled = false;
+    shareBtn.disabled = false;
     return;
   }
 
@@ -115,20 +175,32 @@ async function share() {
       body: JSON.stringify({ site, cookies: payload })
     });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      say(body.error || `Failed (HTTP ${response.status}).`, 'err');
-      shareEl.disabled = false;
+
+    // An expired or rejected token should send the user back to signing in, not leave them
+    // clicking a button that will never work.
+    if (response.status === 401) {
+      await chrome.storage.local.remove('token');
+      token = null;
+      showSignIn();
+      say('That sign-in expired. Sign in again.', 'err');
       return;
     }
-    // Only remember the token once a request has actually succeeded with it.
-    await chrome.storage.local.set({ token });
+    if (!response.ok) {
+      say(body.error || `Failed (HTTP ${response.status}).`, 'err');
+      shareBtn.disabled = false;
+      return;
+    }
+
     const dropped = body.cookiesDropped ? `, ${body.cookiesDropped} not for this site dropped` : '';
     say(`Shared ${body.cookiesStored} cookies for ${body.site}${dropped}.\nExpires ${new Date(body.expiresAt).toLocaleDateString()}.`, 'ok');
   } catch (error) {
     say(`Could not reach Oxy: ${error.message}`, 'err');
-    shareEl.disabled = false;
+    shareBtn.disabled = false;
   }
 }
 
-shareEl.addEventListener('click', share);
+signInBtn.addEventListener('click', signIn);
+signOutBtn.addEventListener('click', signOut);
+shareBtn.addEventListener('click', share);
+passwordEl.addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
 init();

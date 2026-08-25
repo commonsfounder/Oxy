@@ -19,25 +19,22 @@ such restriction, so the extension needs no system-level permission at all.
 
 No store listing, no review, no Apple developer account.
 
-## Get a token
-
-The extension needs an Oxy session token once. This reads the password without echoing it,
-so it never lands in shell history or `ps` output, and prints only the token:
-
-```
-node scripts/oxy-token.js <your-user-id> | pbcopy
-```
-
 ## Use
 
 1. Sign in to the site in Chrome as normal
 2. Click the extension while on that site
-3. Paste your Oxy token once (it is remembered only after a request succeeds with it)
+3. First time only: sign in to Oxy with your user ID and password
 4. **Share session**
 
-Chrome asks for permission for that one site, at that moment. The site is taken from the tab
-you are on and is never typed, so there is no way to mistype a domain and share the wrong
-site's cookies.
+Chrome asks for permission for that one site, at that moment. Granting it closes the popup
+(Chrome's behaviour, not ours) — click the extension again and the share goes straight
+through.
+
+The site is taken from the tab you are on and is never typed, so there is no way to mistype
+a domain and share the wrong site's cookies.
+
+`scripts/oxy-token.js` can mint a token from the command line for scripted use, but nothing
+about normal use needs a terminal.
 
 ## What it does not do
 

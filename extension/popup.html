@@ -12,7 +12,10 @@
     color: #ececed;
     font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   }
-  h1 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b8b93; margin: 0 0 4px; }
+  h1 {
+    font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: #8b8b93; margin: 0 0 4px;
+  }
   .site { font-size: 20px; font-weight: 600; line-height: 1.2; margin: 0 0 16px; color: #c9a227; word-break: break-all; }
   label { display: block; font-size: 11px; color: #8b8b93; margin: 0 0 4px; }
   input {
@@ -26,22 +29,44 @@
     background: #c9a227; color: #17171a; font: inherit; font-weight: 600; cursor: pointer;
   }
   button:disabled { opacity: .5; cursor: default; }
+  .linkish {
+    background: none; color: #8b8b93; font-size: 11px; font-weight: 400;
+    padding: 8px 0 0; text-decoration: underline; width: auto;
+  }
   #status { margin: 12px 0 0; white-space: pre-wrap; }
   .ok { color: #4ea765; }
   .err { color: #d9534f; }
   .note { margin: 12px 0 0; font-size: 11px; color: #6f6f77; }
+  .hidden { display: none; }
 </style>
 </head>
 <body>
-  <h1>Share this site with Oxy</h1>
-  <p class="site" id="site">…</p>
 
-  <label for="token">Oxy token</label>
-  <input id="token" type="password" placeholder="Paste once, remembered after" autocomplete="off">
+  <!-- Shown until signed in. -->
+  <section id="signin" class="hidden">
+    <h1>Sign in to Oxy</h1>
+    <p class="site">Connect</p>
 
-  <button id="share" disabled>Share session</button>
+    <label for="userId">User ID</label>
+    <input id="userId" type="text" autocomplete="username" autocapitalize="off" spellcheck="false">
+
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password">
+
+    <button id="signInBtn">Sign in</button>
+    <p class="note">Signed in once. Your password goes straight to your own Oxy server and is not stored.</p>
+  </section>
+
+  <!-- Shown once signed in. -->
+  <section id="share" class="hidden">
+    <h1>Share this site with Oxy</h1>
+    <p class="site" id="site">…</p>
+    <button id="shareBtn" disabled>Share session</button>
+    <button id="signOutBtn" class="linkish">Sign out</button>
+    <p class="note">Only this site's cookies are sent. Oxy checks again on its side and drops anything else.</p>
+  </section>
+
   <p id="status"></p>
-  <p class="note">Only this site's cookies are sent. Oxy checks again on its side and drops anything else.</p>
 
   <script src="popup.js"></script>
 </body>
