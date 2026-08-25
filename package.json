@@ -9,6 +9,7 @@
     "test": "node --test test/smoke/*.test.js",
     "smoke": "node --test test/smoke/*.test.js",
     "check:schema": "node scripts/check-live-schema.js",
+    "check:undef": "npx --yes eslint@10 --config eslint.undef.config.mjs api scripts server.js auth.js runtime.js",
     "brain:evals": "node --test test/smoke/brain-evals.test.js",
     "latency": "node test/bench/latency.js",
     "release:check": "node --check api/index.js && node --check api/services/context-brain.js && node --test test/smoke/*.test.js",
