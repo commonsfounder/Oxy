@@ -9821,12 +9821,15 @@ app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, re
   try {
     const site = String(req.params.site || '').trim().toLowerCase();
     const path = typeof req.query?.path === 'string' && req.query.path.startsWith('/') ? req.query.path : '/';
-    const looked = await inspectStoredSession(userId, site, path);
+    // ?control=1 opens the same page with no session, so the two can be compared.
+    const useStoredSession = req.query?.control !== '1';
+    const looked = await inspectStoredSession(userId, site, path, { useStoredSession });
     if (!looked.ok) return res.status(404).json({ error: looked.error });
 
     const verdict = readSignedInSignals(looked);
     res.json({
       site,
+      usedStoredSession: looked.usedStoredSession,
       signedIn: verdict.signedIn,
       because: verdict.because,
       landedOn: looked.landedOn,
