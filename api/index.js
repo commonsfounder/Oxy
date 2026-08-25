@@ -9837,7 +9837,7 @@ app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, re
       cookieCount: looked.cookieCount,
       // A short excerpt so a "not clear" verdict can still be judged by a human instead of
       // being a dead end. Bounded, because this is the user's own account page.
-      textPreview: String(looked.text || '').replace(/\s+/g, ' ').trim().slice(0, 400)
+      textPreview: String(looked.text || '').replace(/\s+/g, ' ').trim().slice(0, 2500)
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
