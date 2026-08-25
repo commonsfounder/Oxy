@@ -2611,6 +2611,49 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
   });
 }
 
+/**
+ * Open a site with the user's stored session and report what the page shows.
+ *
+ * A shared session stops working silently — it expires, the site invalidates it, or the site
+ * refuses it because it arrives from a server rather than the browser that minted it. In
+ * every case the agent just starts behaving like a logged-out visitor. This is the only way
+ * to find out which, short of watching a task fail.
+ *
+ * Read-only: it navigates and reads. It never clicks, fills, or submits anything.
+ */
+async function inspectStoredSession(userId, site, path = '/') {
+  const storageState = await loadStorageState(userId, site);
+  if (!storageState) return { ok: false, error: `No stored session for ${site}.` };
+
+  const { browser } = await acquireBrowser();
+  const context = await browser.newContext({ viewport: VIEWPORT, ...{ storageState } });
+  const page = await context.newPage();
+  try {
+    const target = `https://www.${site}${path.startsWith('/') ? path : `/${path}`}`;
+    await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await settle(page, 1500);
+    await dismissConsent(page).catch(() => {});
+
+    const [title, text, hasPasswordField] = await Promise.all([
+      page.title().catch(() => ''),
+      page.evaluate(() => (document.body?.innerText || '').slice(0, 4000)).catch(() => ''),
+      page.locator(PASSWORD_FIELD_SELECTOR).first().isVisible().catch(() => false)
+    ]);
+
+    return {
+      ok: true,
+      requested: target,
+      landedOn: page.url(),
+      title,
+      text,
+      hasPasswordField,
+      cookieCount: Array.isArray(storageState.cookies) ? storageState.cookies.length : 0
+    };
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
 // The first browser_sessions migration only has storage_state. Keep the resume marker inside
 // that JSONB value so a deploy cannot silently depend on a separate migration having already
 // been applied. It is encrypted together with cookies/localStorage in production.
@@ -6753,6 +6796,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 
 module.exports = {
   IMPORT_STATE_KEY,
+  inspectStoredSession,
   RESUME_STATE_KEY,
   recordConfirmedPurchase,
   primeWarmBrowser,

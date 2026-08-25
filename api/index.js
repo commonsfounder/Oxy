@@ -44,7 +44,8 @@ const {
   recordUse
 } = require('./services/credential-grants');
 const { prepareImportedSession } = require('./services/session-import');
-const { IMPORT_STATE_KEY, RESUME_STATE_KEY } = require('./services/browser-task');
+const { IMPORT_STATE_KEY, RESUME_STATE_KEY, inspectStoredSession } = require('./services/browser-task');
+const { readSignedInSignals } = require('./services/session-health');
 const {
   PROACTIVE_WINDOWS,
   getBriefingWindow,
@@ -9808,6 +9809,35 @@ app.delete('/vault/grants/:id', requireSessionAuth, async (req, res) => {
 
 // Every attempt to use a stored credential, allowed or refused. Refusals are the more
 // telling entries: they show a page trying to steer the agent at a site never granted.
+// Is a shared session still signed in?
+//
+// A session shared from the user's browser stops working silently: it expires, the site
+// invalidates it, or the site refuses it arriving from a server rather than the browser that
+// minted it. The agent then behaves like a logged-out visitor and the user sees only worse
+// results, with nothing saying why. This opens the site read-only and reports what it finds.
+app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const site = String(req.params.site || '').trim().toLowerCase();
+    const path = typeof req.query?.path === 'string' && req.query.path.startsWith('/') ? req.query.path : '/';
+    const looked = await inspectStoredSession(userId, site, path);
+    if (!looked.ok) return res.status(404).json({ error: looked.error });
+
+    const verdict = readSignedInSignals(looked);
+    res.json({
+      site,
+      signedIn: verdict.signedIn,
+      because: verdict.because,
+      landedOn: looked.landedOn,
+      title: looked.title,
+      cookieCount: looked.cookieCount
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/vault/credential-uses', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
