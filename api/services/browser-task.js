@@ -6574,6 +6574,30 @@ async function readPageText(page) {
   return texts.join('\n');
 }
 
+// What is still blocking a disabled pay button: empty required inputs and unticked boxes.
+async function describeBlockedPayment(page) {
+  const notes = [];
+  for (const frame of page.frames()) {
+    const found = await frame.evaluate(() => {
+      const out = { empty: [], unchecked: [] };
+      for (const el of document.querySelectorAll('input, select, textarea')) {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const label = (el.getAttribute('aria-label') || el.getAttribute('name') || el.getAttribute('placeholder') || el.id || '').slice(0, 40);
+        if (el.type === 'checkbox' || el.type === 'radio') {
+          if (!el.checked) out.unchecked.push(label || el.type);
+        } else if (!el.value) {
+          out.empty.push(label || el.type);
+        }
+      }
+      return out;
+    }).catch(() => null);
+    if (found?.empty?.length) notes.push(`empty: ${found.empty.slice(0, 8).join(', ')}`);
+    if (found?.unchecked?.length) notes.push(`unticked: ${found.unchecked.slice(0, 8).join(', ')}`);
+  }
+  return notes.join(' | ') || 'nothing obviously incomplete';
+}
+
 const CONFIRM_WATCH_BUDGET_MS = envInt('OXY_BROWSER_CONFIRM_WATCH_MS', 45000);
 const MAX_PAY_CLICKS = 3;
 
