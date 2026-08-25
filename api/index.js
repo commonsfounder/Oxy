@@ -40,8 +40,11 @@ const {
   createGrant,
   listGrants,
   revokeGrant,
-  listUses
+  listUses,
+  recordUse
 } = require('./services/credential-grants');
+const { prepareImportedSession } = require('./services/session-import');
+const { IMPORT_STATE_KEY } = require('./services/browser-task');
 const {
   PROACTIVE_WINDOWS,
   getBriefingWindow,
@@ -9672,6 +9675,55 @@ app.get('/vault/credentials', requireSessionAuth, async (req, res) => {
     const { credentials, error } = await listVaultCredentials(supabase, userId);
     if (error) return res.status(500).json({ error });
     res.json({ credentials });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Hand Oxy a login that already exists in the user's own browser, so the agent arrives at
+// a site already signed in instead of facing a login wall and 2FA as a brand-new visitor.
+// Oxy never learns the password, because it never signs in.
+//
+// The payload comes from a browser extension that can see every cookie the browser holds,
+// so session-import.js filters it down to the one site being imported and refuses finance
+// and identity sites outright. See that file for why both rules exist.
+app.post('/vault/browser-session', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { site, cookies, origins } = req.body || {};
+    const prepared = prepareImportedSession({ site, cookies, origins });
+    if (!prepared.ok) {
+      await recordUse(supabase, userId, {
+        site: String(site || 'unknown'), taskId: null, outcome: 'denied', reason: 'import_refused'
+      }).catch(() => {});
+      return res.status(400).json({ error: prepared.error });
+    }
+
+    const { error } = await supabase.from('browser_sessions').upsert({
+      user_id: userId,
+      site: prepared.site,
+      storage_state: encryptTokens({
+        ...prepared.state,
+        [IMPORT_STATE_KEY]: { expires_at: new Date(prepared.expiresAt).toISOString(), source: 'browser_extension' }
+      }),
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,site' });
+    if (error) return res.status(500).json({ error: error.message });
+
+    await recordUse(supabase, userId, {
+      site: prepared.site, taskId: null, outcome: 'used', reason: 'imported_session'
+    }).catch(() => {});
+
+    // The cookie values are never echoed back; the counts are what makes the result
+    // checkable without putting the credential on the wire a second time.
+    res.json({
+      imported: true,
+      site: prepared.site,
+      cookiesStored: prepared.state.cookies.length,
+      cookiesDropped: prepared.dropped,
+      expiresAt: new Date(prepared.expiresAt).toISOString()
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

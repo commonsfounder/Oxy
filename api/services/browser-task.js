@@ -213,7 +213,20 @@ async function loadStorageState(userId, site) {
     // live session cookie skips login and 2FA entirely. decryptTokens transparently passes
     // through any pre-existing plaintext row (isEncryptedTokenEnvelope check), so this reads
     // both old and newly-encrypted rows with no migration needed.
-    return unpackBrowserStorageState(decryptTokens(data.storage_state));
+    const decrypted = decryptTokens(data.storage_state);
+
+    // A session the user handed over from their own browser expires on its own. Past that
+    // point it is ignored rather than deleted, so the row stays visible in their session
+    // list as something that lapsed instead of vanishing without explanation.
+    const imported = decrypted?.[IMPORT_STATE_KEY];
+    if (imported?.expires_at && Date.parse(imported.expires_at) <= Date.now()) {
+      await recordUse(getSupabase(), userId, {
+        site, taskId: null, outcome: 'denied', reason: 'imported_session_expired'
+      }).catch(() => {});
+      return undefined;
+    }
+
+    return unpackBrowserStorageState(decrypted);
   } catch {
     return undefined;
   }
@@ -2591,6 +2604,12 @@ async function openNewSession(userId, url, goal, retailOptions = {}) {
 // been applied. It is encrypted together with cookies/localStorage in production.
 const RESUME_STATE_KEY = '__oxy_resume';
 
+// An imported session came from the user's own browser rather than from a sign-in Oxy
+// performed. It carries its own expiry so the one credential Oxy never earned cannot also
+// be the one that never ages out. Stored in the same JSONB value for the same reason as
+// the resume marker: no separate migration to depend on.
+const IMPORT_STATE_KEY = '__oxy_import';
+
 function packBrowserStorageState(browserState, session) {
   return {
     ...browserState,
@@ -2605,7 +2624,7 @@ function packBrowserStorageState(browserState, session) {
 
 function unpackBrowserStorageState(storedState) {
   if (!storedState || typeof storedState !== 'object') return storedState;
-  const { [RESUME_STATE_KEY]: _resume, ...browserState } = storedState;
+  const { [RESUME_STATE_KEY]: _resume, [IMPORT_STATE_KEY]: _import, ...browserState } = storedState;
   return browserState;
 }
 
@@ -6706,6 +6725,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 }
 
 module.exports = {
+  IMPORT_STATE_KEY,
   recordConfirmedPurchase,
   primeWarmBrowser,
   primeFastpaths,
