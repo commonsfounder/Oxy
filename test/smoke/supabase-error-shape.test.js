@@ -45,16 +45,19 @@ test('deleting preferences reports a failed delete instead of success', () => {
 
 test('the credential use-count guard checks both failure shapes', () => {
   const grants = fs.readFileSync(require.resolve('../../api/services/credential-grants.js'), 'utf8');
-  const start = grants.indexOf('async function authorizeCredentialUse');
+  const start = grants.indexOf('async function claimGrantUse');
   assert.notEqual(start, -1);
-  const body = grants.slice(start);
+  const body = grants.slice(start, grants.indexOf('\n}', start));
 
   // The returned-error path is the one that actually fires in production; the try/catch is
   // kept for a mocked client that throws. Losing either one reopens the cap.
-  assert.match(body, /countError = error \|\| null/,
+  assert.match(body, /if \(error\) return \{ ok: false, error \}/,
     'a returned error must be captured');
-  assert.match(body, /catch \(err\) \{\s*countError = err;/,
+  assert.match(body, /catch \(err\) \{\s*return \{ ok: false, error: err \}/,
     'a thrown error must be captured too');
-  assert.match(body, /if \(countError\)[\s\S]{0,400}reason: 'use_count_failed', grant: null/,
+
+  // And the caller must turn either one into a refusal rather than a sign-in.
+  const caller = grants.slice(grants.indexOf('async function authorizeCredentialUse'));
+  assert.match(caller, /if \(!claim\.raced\)[\s\S]{0,400}reason: 'use_count_failed', grant: null/,
     'either failure must refuse the sign-in');
 });

@@ -604,6 +604,7 @@ struct VaultCredentialUse: Codable, Equatable, Identifiable {
         case "site_not_granted", "site_not_requested": return "site not permitted"
         case "not_user_granted": return "permission was not set by you"
         case "use_count_failed": return "could not record the use"
+        case "use_count_raced": return "another task was signing in at the same time"
         case "import_refused": return "session import refused"
         case "lookup_failed": return "permission could not be read"
         default: return reason.replacingOccurrences(of: "_", with: " ")

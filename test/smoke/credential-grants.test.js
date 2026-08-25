@@ -215,8 +215,19 @@ test('using a grant actually advances the counter, so a use cap cannot silently 
         insert(row) { inserted.push({ table, row }); return Promise.resolve({ error: null }); },
         update(patch) {
           updates.push({ table, patch });
-          // Mirrors the real builder: no .catch, resolves only when awaited.
-          const p = { eq() { return p; }, then(res) { return Promise.resolve({ error: null }).then(res); } };
+          // Mirrors the real builder: no .catch, resolves only when awaited, and honours
+          // the compare-and-set by returning the row it matched (or no row at all).
+          const filters = {};
+          const p = {
+            eq(column, value) { filters[column] = value; return p; },
+            select() { return p; },
+            maybeSingle() { return p; },
+            then(res) {
+              const matched = !('use_count' in filters) || filters.use_count === stored.use_count;
+              if (matched && 'use_count' in patch) stored.use_count = patch.use_count;
+              return Promise.resolve({ data: matched ? { id: stored.id } : null, error: null }).then(res);
+            }
+          };
           return p;
         }
       };
@@ -230,6 +241,7 @@ test('using a grant actually advances the counter, so a use cap cannot silently 
   const counterWrite = updates.find(u => u.table === 'credential_grants' && 'use_count' in u.patch);
   assert.ok(counterWrite, 'the use counter was never written -- the cap would not hold');
   assert.equal(counterWrite.patch.use_count, 1);
+  assert.equal(stored.use_count, 1, 'the stored row must actually carry the new count');
 
   // And the use is recorded, so the log is a complete history rather than only refusals.
   const logged = inserted.find(i => i.table === 'credential_use_log');
@@ -299,7 +311,8 @@ function supabaseStub({ grants, onUpdate }) {
         insert: () => query(() => Promise.resolve({ data: null, error: null })),
         update: () => query(table === 'credential_grants'
           ? onUpdate
-          : () => Promise.resolve({ data: null, error: null }))
+          : () => Promise.resolve({ data: null, error: null })),
+        _table: table
       };
     }
   };
@@ -341,7 +354,8 @@ test('a use-count write that THROWS refuses the sign-in too', async () => {
 test('a counted use is still authorised, so the guard has not simply broken sign-in', async () => {
   const supabase = supabaseStub({
     grants: [liveGrant],
-    onUpdate: () => Promise.resolve({ data: null, error: null })
+    // A matched row is what a successful compare-and-set returns.
+    onUpdate: () => Promise.resolve({ data: { id: 'g1' }, error: null })
   });
   const result = await authorizeCredentialUse(supabase, 'u1', { site: 'johnlewis.com' });
   assert.equal(result.allowed, true);
@@ -404,4 +418,96 @@ test('the browser loop authorises against the run id, not the per-turn one', () 
   // way to create a working one.
   assert.match(source, /type: 'ready_for_credential_use',[\s\S]{0,200}credentialTaskId: session\.credentialTaskId/,
     'the ask must surface the run id');
+});
+
+
+// The use cap is a cap only if two concurrent runs cannot both spend the same use.
+//
+// The increment was a read-modify-write: both runs read use_count 0, both wrote 1, and a
+// grant capped at one sign-in paid for two. It is now a compare-and-set on the count that
+// was read, so the second writer matches no row and is told, instead of silently
+// overwriting the first.
+
+/** A stub whose credential_grants row behaves like a real one under concurrency. */
+function racyStub(stored, { stealBefore = 0 } = {}) {
+  let claims = 0;
+  return {
+    from(table) {
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        order: () => chain,
+        limit: () => Promise.resolve({ data: [{ ...stored }], error: null }),
+        insert: () => Promise.resolve({ data: null, error: null }),
+        update(patch) {
+          const filters = {};
+          const p = {
+            eq(column, value) { filters[column] = value; return p; },
+            select: () => p,
+            maybeSingle: () => p,
+            then(resolve) {
+              if (table !== 'credential_grants') return Promise.resolve({ data: null, error: null }).then(resolve);
+              claims += 1;
+              // Simulate another run winning the race for the first N attempts by moving
+              // the count out from under this one.
+              if (claims <= stealBefore) stored.use_count += 1;
+              const matched = filters.use_count === stored.use_count;
+              if (matched) stored.use_count = patch.use_count;
+              return Promise.resolve({ data: matched ? { id: stored.id } : null, error: null }).then(resolve);
+            }
+          };
+          return p;
+        }
+      };
+      return chain;
+    }
+  };
+}
+
+function uncapped() {
+  return {
+    id: 'g1', site: 'johnlewis.com', scope: 'standing', task_id: null,
+    expires_at: '2099-01-01T00:00:00Z', revoked_at: null,
+    max_uses: null, use_count: 0, granted_via: 'user'
+  };
+}
+
+test('a sign-in that loses the race retries against the fresh count and still succeeds', async () => {
+  // An uncapped permission has no reason to refuse just because another run went first.
+  const stored = uncapped();
+  const result = await authorizeCredentialUse(racyStub(stored, { stealBefore: 1 }), 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, true);
+  // One use stolen by the other run, one claimed by this one.
+  assert.equal(stored.use_count, 2);
+});
+
+test('the retry re-checks the cap, so a race cannot push a capped grant past its limit', async () => {
+  // The whole point of re-reading: the competing run consumed the last permitted use, so
+  // retrying must refuse rather than claim a use that is no longer available.
+  const stored = { ...uncapped(), max_uses: 1 };
+  const result = await authorizeCredentialUse(racyStub(stored, { stealBefore: 1 }), 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'use_limit_reached');
+  assert.equal(stored.use_count, 1, 'the cap must not be exceeded');
+});
+
+test('a counter that never settles gives up rather than spinning', async () => {
+  const { MAX_CLAIM_ATTEMPTS } = require('../../api/services/credential-grants');
+  const stored = uncapped();
+  const result = await authorizeCredentialUse(racyStub(stored, { stealBefore: 99 }), 'u1', { site: 'johnlewis.com' });
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'use_count_raced');
+  assert.equal(stored.use_count, MAX_CLAIM_ATTEMPTS, 'it must stop after a bounded number of attempts');
+});
+
+test('the increment is a compare-and-set, not a blind write of the value just read', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/services/credential-grants.js'), 'utf8');
+  const claim = source.slice(source.indexOf('async function claimGrantUse'));
+  const body = claim.slice(0, claim.indexOf('\n}'));
+
+  assert.match(body, /\.eq\('use_count', current\)/,
+    'without the compare-and-set both writers overwrite the same count');
+  assert.match(body, /if \(!data\) return \{ ok: false, raced: true \}/,
+    'a write that matched no row must be reported, not treated as success');
 });
