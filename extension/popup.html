@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: dark; }
+  body {
+    width: 300px;
+    margin: 0;
+    padding: 16px;
+    background: #17171a;
+    color: #ececed;
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+  h1 { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #8b8b93; margin: 0 0 4px; }
+  .site { font-size: 20px; font-weight: 600; line-height: 1.2; margin: 0 0 16px; color: #c9a227; word-break: break-all; }
+  label { display: block; font-size: 11px; color: #8b8b93; margin: 0 0 4px; }
+  input {
+    width: 100%; box-sizing: border-box; padding: 7px 8px; margin: 0 0 12px;
+    background: #0f0f11; border: 1px solid #313136; border-radius: 6px;
+    color: #ececed; font: inherit;
+  }
+  input:focus { outline: none; border-color: #c9a227; }
+  button {
+    width: 100%; padding: 9px; border: 0; border-radius: 6px;
+    background: #c9a227; color: #17171a; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { margin: 12px 0 0; white-space: pre-wrap; }
+  .ok { color: #4ea765; }
+  .err { color: #d9534f; }
+  .note { margin: 12px 0 0; font-size: 11px; color: #6f6f77; }
+</style>
+</head>
+<body>
+  <h1>Share this site with Oxy</h1>
+  <p class="site" id="site">…</p>
+
+  <label for="token">Oxy token</label>
+  <input id="token" type="password" placeholder="Paste once, remembered after" autocomplete="off">
+
+  <button id="share" disabled>Share session</button>
+  <p id="status"></p>
+  <p class="note">Only this site's cookies are sent. Oxy checks again on its side and drops anything else.</p>
+
+  <script src="popup.js"></script>
+</body>
+</html>
