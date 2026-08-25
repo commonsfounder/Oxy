@@ -537,6 +537,23 @@ async function closeWarmPool() {
 // "pay £9.50 now", "slide to pay", "confirm and pay", "buy now", etc.
 const PAYMENT_KEYWORD_PATTERN = /\bpay\b|\bbuy\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)|checkout\s*(and|&)?\s*pay|proceed\s+to\s+payment|continue\s+to\s+payment|go\s+to\s+payment|payment\s+method|pay\s+with\s+card|pay\s+securely|slide\s+to\s+pay/i;
 
+// Navigation towards payment, not payment itself. Clicking one of these and then watching
+// for an order confirmation waits forever, and it quotes the total before delivery is added.
+const PAYMENT_ADVANCE_PATTERN = /(continue|proceed|go)\s+to\s+(payment|checkout)|payment\s+method|choose\s+payment/i;
+
+function isPaymentAdvance(text) {
+  return PAYMENT_ADVANCE_PATTERN.test(String(text || ''));
+}
+
+// Controls that actually charge, as opposed to navigating one step closer.
+const PAYMENT_COMMIT_PATTERN = /\bpay\s*(now|£|\$|€)|\bpay$|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|confirm\s+and\s+pay|submit\s+(order|payment)|\bbuy\s*(now)?$|pay\s+securely|slide\s+to\s+pay/i;
+
+function isPaymentCommit(text) {
+  const label = String(text || '').trim();
+  if (isWalletPayment(label) || isPaymentAdvance(label)) return false;
+  return PAYMENT_COMMIT_PATTERN.test(label);
+}
+
 // Wallets need device biometrics or a redirect a headless browser cannot complete, and they
 // render above the card form -- so a first-match search always picked them.
 const WALLET_PAYMENT_PATTERN = /\b(apple\s*pay|g\s*pay|google\s*pay|paypal|amazon\s*pay|shop\s*pay|klarna|clearpay|afterpay|venmo)\b/i;
@@ -6625,6 +6642,20 @@ async function confirmPayment(userId, onProgress = () => {}) {
           const next = await findAndClickPayButton(session.page, session.pendingPaymentLabel);
           if (next) payClicks += 1;
         }
+        continue;
+      }
+
+      // The clicked control may only have advanced to the payment page ("Continue to
+      // payment"). With a card already saved there are no empty fields to fill, so the
+      // branch above never fires and this waited for a confirmation nobody had triggered.
+      if (payClicks < MAX_PAY_CLICKS) {
+        const commit = (await extractClickableElements(session.page).catch(() => []))
+          .find((el) => isPaymentCommit(el.text));
+        if (commit) {
+          onProgress(`Confirming payment — ${commit.text}`);
+          const clicked = await findAndClickPayButton(session.page, commit.text);
+          if (clicked) { payClicks += 1; session.pendingPaymentLabel = commit.text; }
+        }
       }
     }
 
@@ -6867,6 +6898,8 @@ module.exports = {
   tier0NameMatchesGoal,
   matchesPaymentKeyword,
   isWalletPayment,
+  isPaymentAdvance,
+  isPaymentCommit,
   isPaymentHandoffBlockedByLoading,
   isCheckoutishUrl,
   isTechnicalAsk,

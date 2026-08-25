@@ -21,7 +21,7 @@ test('wallet buttons are not treated as payment controls', () => {
 test('real card payment controls still match', () => {
   for (const label of [
     'Pay now', 'Place order', 'Confirm order', 'Pay securely',
-    'Pay with card', 'Complete purchase', 'Continue to payment', 'Submit order'
+    'Pay with card', 'Complete purchase', 'Submit order'
   ]) {
     assert.equal(isWalletPayment(label), false, `${label} is not a wallet`);
     assert.equal(matchesPaymentKeyword(label), true, `${label} must match as payment`);
