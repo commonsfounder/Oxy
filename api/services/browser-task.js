@@ -2516,6 +2516,23 @@ async function gotoBrowserPage(page, openUrl) {
 async function openNewSession(userId, url, goal, retailOptions = {}) {
   const site = siteKeyFromUrl(url);
   const storageState = await loadStorageState(userId, site);
+
+  // Reusing a stored session IS a credential use, and by this file's own reckoning a
+  // stronger one than a password: a live session cookie skips both the login form and 2FA.
+  // The credential log would otherwise record only password sign-ins and quietly omit every
+  // occasion the agent walked in on an existing session, which is most of them.
+  //
+  // Deliberately recorded, not gated: session reuse is how ordering works at all today, and
+  // putting a grant in front of it is a behaviour change for the user to choose. Logging is
+  // what makes that choice an informed one.
+  if (storageState) {
+    await recordUse(getSupabase(), userId, {
+      site,
+      taskId: null,
+      outcome: 'used',
+      reason: 'stored_session'
+    }).catch(() => {});
+  }
   const { browser } = await acquireBrowser();
   // A smaller viewport means a smaller screenshot — fewer bytes and fewer pixels for the
   // model to read each step (the dominant per-step cost). 1024×768 still shows enough of a

@@ -237,3 +237,28 @@ test('using a grant actually advances the counter, so a use cap cannot silently 
   assert.equal(logged.row.outcome, 'used');
   assert.equal(logged.row.site, 'johnlewis.com');
 });
+
+// Source-level tripwire, same style as the commitments one.
+//
+// The credential log is only honest if it covers BOTH ways the agent gets into an account.
+// It shipped covering password sign-ins only, while browser-task.js quietly reused stored
+// session cookies -- which that file itself notes are "often stronger than a password, since
+// a live session cookie skips login and 2FA entirely". Reusing a session is the common case,
+// so omitting it made the log misleading rather than merely incomplete.
+test('reusing a stored browser session is recorded as a credential use', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+
+  assert.match(source, /require\('\.\/credential-grants'\)/,
+    'browser-task must import the credential log');
+
+  // The load and the log must sit together: a stored session that is loaded but never
+  // recorded is exactly the gap this closes.
+  assert.match(
+    source,
+    /const storageState = await loadStorageState\([^)]*\);[\s\S]{0,900}if \(storageState\)[\s\S]{0,400}recordUse\(/,
+    'loading a stored session must be followed by a recordUse call'
+  );
+  assert.match(source, /reason: 'stored_session'/,
+    "session reuse must be distinguishable in the log from a password sign-in");
+});
