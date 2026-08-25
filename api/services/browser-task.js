@@ -6663,7 +6663,13 @@ async function confirmPayment(userId, onProgress = () => {}) {
     if (sawChallenge) {
       return { type: 'error', error: 'The bank is asking for verification (3-D Secure). Approve the payment in your banking app, then ask me to confirm again — the checkout is still open.' };
     }
-    return { type: 'error', error: `Couldn't confirm the order after selecting "${clickedLabel}". Check the site or try again.` };
+    // Name what was actually on the page: "couldn't confirm" alone gives nothing to act on.
+    const leftover = (await extractClickableElements(session.page).catch(() => []))
+      .map((el) => String(el.text || '').trim()).filter(Boolean).slice(0, 12);
+    return {
+      type: 'error',
+      error: `Couldn't confirm the order after selecting "${clickedLabel}". Page is at ${session.page.url()} showing: ${leftover.join(' | ') || 'no clickable controls'}`
+    };
   } catch (error) {
     return { type: 'error', error: error.message };
   }
