@@ -78,3 +78,35 @@ test('nothing to read is reported as nothing, not as a guess', () => {
   const result = readSignedInSignals({ url: '', title: '', text: '', hasPasswordField: false });
   assert.equal(result.signedIn, null);
 });
+
+// Calibrated against the real thing.
+//
+// This is the verbatim opening of a genuinely signed-in John Lewis account page, reached by
+// replaying a session shared from the user's own Chrome. The first version of the reading
+// called it inconclusive — while correctly detecting the logged-out control — which is the
+// worst way to be wrong: confident about failure, silent about success.
+test('a real signed-in account page is recognised, not shrugged at', () => {
+  const result = readSignedInSignals({
+    url: 'https://account.johnlewis.com/',
+    title: 'My account | My Account | John Lewis & Partners',
+    text: 'My account Knowing shopping for it is the fun part Shop gift cards Check balance '
+        + 'Online orders View all orders View products to buy again View order View order '
+        + 'My John Lewis Enjoy members-only offers, vouchers and exclusive invitations. '
+        + 'View your rewards View your My John Lewis details My details Update your personal '
+        + 'details, password',
+    hasPasswordField: false
+  });
+  assert.equal(result.signedIn, true);
+});
+
+// And the verbatim control: the same URL with no session, which John Lewis bounces to Auth0.
+test('the logged-out control is still read as signed out', () => {
+  const result = readSignedInSignals({
+    url: 'https://auth.johnlewis.com/login?state=abc&client=xyz',
+    title: 'Sign in | My Account | John Lewis & Partners',
+    text: 'Continue shopping Skip to main content John Lewis is secure Sign in Email Password '
+        + 'Show password Sign in Need help signing in? Reset your password',
+    hasPasswordField: true
+  });
+  assert.equal(result.signedIn, false);
+});

@@ -17,7 +17,19 @@ const LOGIN_URL_RE = /\/(login|signin|sign-in|auth|authorize)\b/i;
 
 // Present only when signed in. "Sign out" is the strongest: a logged-out page has nothing
 // to sign out of.
-const SIGNED_IN_RE = /\b(sign out|log out|logout|your orders|my orders|your account details|order history)\b/i;
+// Calibrated against a real signed-in John Lewis account page, which said none of "sign
+// out", "your orders" or "my orders" — it said "View all orders" and "Update your personal
+// details". The first version read that page as inconclusive while the control was cleanly
+// detected, which is the worst way to be wrong: confident about failure, silent about
+// success. These are phrases a logged-out page has no reason to render.
+const SIGNED_IN_RE = new RegExp([
+  'sign out', 'log ?out',
+  'view all orders', 'order history', '\\b(your|my) orders\\b',
+  'buy (it )?again',
+  'update your (personal )?details', 'your (account )?details',
+  'saved (addresses|cards|payment)',
+  'view your rewards'
+].join('|'), 'i');
 
 // Present when signed out — but also present in the header of nearly every shop page, so
 // on its own this settles nothing.
