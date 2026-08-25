@@ -202,56 +202,106 @@ async function listUses(supabase, userId, limit = 100) {
  * and count the use. Recording happens on both paths so the log is a complete history
  * rather than only a record of successes.
  */
-async function authorizeCredentialUse(supabase, userId, { site, requestedSites = null, taskId = null, now = new Date() } = {}) {
-  const grants = await findGrantsForSite(supabase, userId, site).catch(() => []);
-
-  let grant = null;
-  let decision = { allowed: false, reason: 'no_grant' };
-  for (const candidate of grants) {
-    const outcome = decideCredentialUse({ grant: candidate, site, requestedSites, taskId, now });
-    if (outcome.allowed) { grant = candidate; decision = outcome; break; }
-    // Keep the newest real explanation ('revoked', 'expired', 'use_limit_reached') rather
-    // than reporting 'no_grant' for a permission the user did create.
-    if (decision.reason === 'no_grant') decision = outcome;
-  }
-
-  if (!decision.allowed) {
-    await recordUse(supabase, userId, {
-      site, grantId: grants[0]?.id || null, taskId, outcome: 'denied', reason: decision.reason
-    }).catch(() => {});
-    return { allowed: false, reason: decision.reason, grant: null };
-  }
-
-  // Count the use BEFORE handing the credential over. Over-counting a sign-in that then
-  // fails is the safe direction; under-counting would let a capped grant overrun.
-  //
-  // This is awaited plainly rather than with an optional .catch(): the PostgREST query
-  // builder has no .catch method, so `await query.catch?.(fn)` short-circuits to
-  // `await undefined` and the statement never executes at all. That silently defeated the
-  // use cap until a live run caught it.
+/**
+ * Claim ONE use of a grant, atomically.
+ *
+ * The increment is a compare-and-set on the use_count that was just read, not a blind
+ * write of read+1: two runs signing in at once both read 0, both wrote 1, and a grant
+ * capped at one use paid for two sign-ins. `.eq('use_count', current)` means the second
+ * writer matches no row and is told so instead of silently overwriting the first.
+ *
+ * @returns {{ok: true} | {ok: false, raced: true} | {ok: false, error: unknown}}
+ */
+async function claimGrantUse(supabase, userId, grant) {
+  const current = Number(grant.use_count || 0);
   try {
-    await supabase
+    const { data, error } = await supabase
       .from('credential_grants')
-      .update({ use_count: Number(grant.use_count || 0) + 1 })
+      .update({ use_count: current + 1 })
       .eq('id', grant.id)
-      .eq('user_id', userId);
-  } catch {
-    // A counter that failed to advance must not hand out an uncounted credential.
-    await recordUse(supabase, userId, {
-      site, grantId: grant.id, taskId, outcome: 'denied', reason: 'use_count_failed'
-    }).catch(() => {});
-    return { allowed: false, reason: 'use_count_failed', grant: null };
+      .eq('user_id', userId)
+      .eq('use_count', current)
+      .select('id')
+      .maybeSingle();
+    // The RETURNED error matters as much as a thrown one, and is the case that actually
+    // happens. supabase-js resolves with `{ error }` instead of rejecting -- for an RLS
+    // refusal, a constraint, and even a dead network ("TypeError: fetch failed" arrives as
+    // a value, not an exception) -- so a try/catch alone caught nothing and the cap was
+    // handed out uncounted exactly when the database was least able to enforce it. The
+    // catch stays because a mocked client in a test may well throw.
+    if (error) return { ok: false, error };
+    // No row matched: the count moved under us. Not an error -- a lost race, which the
+    // caller retries against the fresh count rather than refusing outright.
+    if (!data) return { ok: false, raced: true };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
+// Enough attempts to survive genuine contention, few enough that a permanently stuck
+// counter fails fast instead of spinning.
+const MAX_CLAIM_ATTEMPTS = 3;
+
+/**
+ * The one call the browser loop should use: look up the grant, decide, record the outcome,
+ * and count the use. Recording happens on both paths so the log is a complete history
+ * rather than only a record of successes.
+ */
+async function authorizeCredentialUse(supabase, userId, { site, requestedSites = null, taskId = null, now = new Date() } = {}) {
+  let lastGrants = [];
+  let decision = { allowed: false, reason: 'no_grant' };
+  let grant = null;
+
+  // Re-read on every attempt. A lost race means some other run just consumed a use, so the
+  // cap has to be re-checked against the NEW count -- retrying the same stale row would be
+  // the overrun this loop exists to prevent.
+  for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
+    const grants = await findGrantsForSite(supabase, userId, site).catch(() => []);
+    lastGrants = grants;
+
+    grant = null;
+    decision = { allowed: false, reason: 'no_grant' };
+    for (const candidate of grants) {
+      const outcome = decideCredentialUse({ grant: candidate, site, requestedSites, taskId, now });
+      if (outcome.allowed) { grant = candidate; decision = outcome; break; }
+      // Keep the newest real explanation ('revoked', 'expired', 'use_limit_reached') rather
+      // than reporting 'no_grant' for a permission the user did create.
+      if (decision.reason === 'no_grant') decision = outcome;
+    }
+
+    if (!decision.allowed) break;
+
+    // Count the use BEFORE handing the credential over. Over-counting a sign-in that then
+    // fails is the safe direction; under-counting would let a capped grant overrun.
+    const claim = await claimGrantUse(supabase, userId, grant);
+    if (claim.ok) {
+      await recordUse(supabase, userId, {
+        site, grantId: grant.id, taskId, outcome: 'used', reason: null
+      }).catch(() => {});
+      return { allowed: true, reason: decision.reason, grant };
+    }
+
+    if (!claim.raced) {
+      // A counter that failed to advance must not hand out an uncounted credential.
+      await recordUse(supabase, userId, {
+        site, grantId: grant.id, taskId, outcome: 'denied', reason: 'use_count_failed'
+      }).catch(() => {});
+      return { allowed: false, reason: 'use_count_failed', grant: null };
+    }
+    decision = { allowed: false, reason: 'use_count_raced' };
   }
 
   await recordUse(supabase, userId, {
-    site, grantId: grant.id, taskId, outcome: 'used', reason: null
+    site, grantId: lastGrants[0]?.id || null, taskId, outcome: 'denied', reason: decision.reason
   }).catch(() => {});
-
-  return { allowed: true, reason: decision.reason, grant };
+  return { allowed: false, reason: decision.reason, grant: null };
 }
+
 
 module.exports = {
   DEFAULT_TASK_TTL_MINUTES,
+  MAX_CLAIM_ATTEMPTS,
   GRANT_SCOPES,
   MAX_TTL_MINUTES,
   USE_OUTCOMES,

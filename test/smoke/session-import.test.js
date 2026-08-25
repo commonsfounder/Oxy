@@ -12,7 +12,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  SENSITIVE_HOSTS,
   SENSITIVE_SITE_PATTERNS,
+  isSensitiveSite,
   prepareImportedSession
 } = require('../../api/services/session-import');
 
@@ -162,4 +164,55 @@ test('the browser-sessions route reads the resume state from the blob, not phant
     'the route must select only columns that exist');
   assert.match(body, /RESUME_STATE_KEY/,
     'the resume detail comes out of the encrypted blob');
+});
+
+
+// The sensitive-site gate was matched against the site being asked for, while cookie
+// filtering deliberately keeps subdomains. Those two rules disagreed, and the gap between
+// them was the whole feature's worst case: `accounts.google.com` was refused, but asking
+// for the PARENT, `google.com`, matched no pattern and was accepted -- and Google's SSO
+// cookies (SID/HSID/SSID) live on `.google.com` itself, so what got stored was the entire
+// Google account, the exact thing the refusal list exists to prevent.
+test('asking for the parent of an identity host does not sneak past the refusal list', () => {
+  for (const parent of ['google.com', 'microsoftonline.com', 'apple.com']) {
+    assert.equal(isSensitiveSite(parent), true, `${parent} must be refused`);
+    const result = prepareImportedSession({
+      site: parent,
+      cookies: [cookie({ domain: `.${parent}`, name: 'SID' })],
+      now: NOW
+    });
+    assert.equal(result.ok, false, `importing ${parent} should be refused`);
+    assert.match(result.error, /cannot be imported/i);
+  }
+});
+
+test('containment is checked in both directions, so a subdomain of an identity host is refused too', () => {
+  assert.equal(isSensitiveSite('mail.accounts.google.com'), true);
+  assert.equal(SENSITIVE_HOSTS.length > 0, true);
+});
+
+test('ordinary shops are still importable, because refusing everything is not the goal', () => {
+  // The gate is broad on purpose, but it has to stay narrow enough to leave the product
+  // working. amazon.com in particular is deliberately allowed despite signin.aws.amazon.com.
+  for (const site of ['johnlewis.com', 'delta.com', 'amazon.com', 'asos.com', 'argos.co.uk']) {
+    assert.equal(isSensitiveSite(site), false, `${site} must remain importable`);
+  }
+});
+
+test('a sensitive cookie that survives the site filter refuses the whole import', () => {
+  // Second gate, on what actually came through rather than on what was asked for. The site
+  // here is perfectly ordinary; the cookie riding along under it is not.
+  const result = prepareImportedSession({
+    site: 'example.com',
+    cookies: [
+      cookie({ domain: '.example.com', name: 'cart' }),
+      cookie({ domain: 'hsbc.example.com', name: 'stowaway' })
+    ],
+    now: NOW
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /cannot be imported/i);
+  // Refused outright, not silently trimmed: a partial session is a logged-out browser
+  // wearing a success message.
+  assert.equal(result.state, undefined);
 });

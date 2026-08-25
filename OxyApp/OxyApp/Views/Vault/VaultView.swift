@@ -5,10 +5,13 @@ struct VaultView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var credentials: [VaultCredentialSummary] = []
+    @State private var grants: [VaultGrantSummary] = []
+    @State private var uses: [VaultCredentialUse] = []
     @State private var isLoading = true
     @State private var isUnlocked = false
     @State private var errorMessage: String?
     @State private var showEntrySheet = false
+    @State private var showGrantSheet = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +37,8 @@ struct VaultView: View {
                                     ErrorBanner(message: errorMessage)
                                 }
                                 credentialsSection
+                                grantsSection
+                                activitySection
                             }
                             .padding(.horizontal, AppSpacing.margin)
                             .padding(.vertical, 16)
@@ -43,11 +48,16 @@ struct VaultView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .task { await authenticateAndLoad() }
-            .refreshable { await loadCredentials() }
+            .refreshable { await loadAll() }
             .sheet(isPresented: $showEntrySheet) {
                 VaultCredentialEntrySheet { saved in
                     credentials.removeAll { $0.site == saved.site }
                     credentials.insert(saved, at: 0)
+                }
+            }
+            .sheet(isPresented: $showGrantSheet) {
+                VaultGrantEntrySheet { granted in
+                    grants.insert(granted, at: 0)
                 }
             }
         }
@@ -108,6 +118,81 @@ struct VaultView: View {
         }
     }
 
+    // A saved password is only half the picture: the other half is when Millie may use it
+    // without asking first. Those permissions existed as API only, so the one thing a person
+    // most needs to be able to undo was the one thing they could not see.
+    private var grantsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                AppSectionHeader(title: "Sign-in permissions")
+                Spacer()
+                Button("Add") { showGrantSheet = true }
+                    .font(.rowSecondary)
+            }
+            .padding(.bottom, 12)
+
+            if grants.isEmpty {
+                Text("Every sign-in is asked for.")
+                    .font(.rowSecondary)
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.vertical, 14)
+            } else {
+                ForEach(grants) { grant in
+                    HStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(grant.site)
+                                .font(.rowTitle)
+                                .foregroundStyle(Color.appInk)
+                            Text(grant.detailLine)
+                                .font(.rowSecondary)
+                                .foregroundStyle(Color.appMuted)
+                        }
+                        Spacer(minLength: 8)
+                        if grant.isLive {
+                            Button("Revoke", role: .destructive) {
+                                Task { await revokeGrant(grant) }
+                            }
+                            .font(.rowSecondary)
+                        }
+                    }
+                    .padding(.vertical, 14)
+                    .frame(minHeight: 44)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+
+    // Refusals are listed alongside successes on purpose. A denied row is what shows a page
+    // trying to steer Millie at a site you never permitted, and it is only visible if it is
+    // shown even when nothing went wrong.
+    private var activitySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            AppSectionHeader(title: "Recent sign-in activity")
+                .padding(.bottom, 12)
+
+            if uses.isEmpty {
+                Text("Nothing yet.")
+                    .font(.rowSecondary)
+                    .foregroundStyle(Color.appMuted)
+                    .padding(.vertical, 14)
+            } else {
+                ForEach(uses) { use in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(use.site)
+                            .font(.rowTitle)
+                            .foregroundStyle(Color.appInk)
+                        Text(use.detailLine)
+                            .font(.rowSecondary)
+                            .foregroundStyle(Color.appMuted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                }
+            }
+        }
+    }
+
     // MARK: - Face ID gate
 
     private func authenticateAndLoad() async {
@@ -127,7 +212,7 @@ struct VaultView: View {
                 localizedReason: "Unlock saved sign-ins"
             )
             await MainActor.run { isUnlocked = success }
-            if success { await loadCredentials() }
+            if success { await loadAll() }
         } catch {
             await MainActor.run {
                 errorMessage = "Face ID unlock failed."
@@ -154,6 +239,49 @@ struct VaultView: View {
                 errorMessage = error.localizedDescription
                 isLoading = false
             }
+        }
+    }
+
+    // The permissions and the log are read alongside the credentials rather than lazily on
+    // tap: a permission you have to go looking for is not one you will notice is still live.
+    private func loadAll() async {
+        await loadCredentials()
+        await loadGrants()
+        await loadUses()
+    }
+
+    private func loadGrants() async {
+        do {
+            let data = try await APIClient.shared.request(path: "/vault/grants")
+            let response = try JSONDecoder().decode(VaultGrantsResponse.self, from: data)
+            await MainActor.run { grants = response.grants }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func loadUses() async {
+        do {
+            let data = try await APIClient.shared.request(
+                path: "/vault/credential-uses",
+                queryItems: [URLQueryItem(name: "limit", value: "25")]
+            )
+            let response = try JSONDecoder().decode(VaultCredentialUsesResponse.self, from: data)
+            await MainActor.run { uses = response.uses }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func revokeGrant(_ grant: VaultGrantSummary) async {
+        do {
+            _ = try await APIClient.shared.request(path: "/vault/grants/\(grant.id)", method: "DELETE")
+            // Refetched rather than removed locally: a revoked permission stays in the list
+            // as revoked, which is the record. Dropping the row would read as "there was
+            // never a permission here".
+            await loadGrants()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
 
@@ -252,6 +380,108 @@ private struct VaultCredentialEntrySheet: View {
     }
 }
 
+// MARK: - Permission entry
+
+// Only standing permissions are created here. A task-scoped one binds to a single browsing
+// run and can only be granted in response to Millie asking during that run, so offering it
+// on this screen would produce a permission with nothing to attach to.
+private struct VaultGrantEntrySheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onGranted: (VaultGrantSummary) -> Void
+
+    @State private var site = ""
+    @State private var lifetime: Lifetime = .week
+    @State private var limitUses = false
+    @State private var maxUses = 5
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    enum Lifetime: String, CaseIterable, Identifiable {
+        case day, week, month
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .day: return "1 day"
+            case .week: return "7 days"
+            case .month: return "30 days"
+            }
+        }
+        // The server caps a permission at 30 days (MAX_TTL_MINUTES); nothing here may exceed it.
+        var minutes: Int {
+            switch self {
+            case .day: return 1440
+            case .week: return 10080
+            case .month: return 43200
+            }
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Site (e.g. delta.com)", text: $site)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                    Picker("Expires after", selection: $lifetime) {
+                        ForEach(Lifetime.allCases) { option in
+                            Text(option.label).tag(option)
+                        }
+                    }
+                    Toggle("Limit number of sign-ins", isOn: $limitUses)
+                    if limitUses {
+                        Stepper("At most \(maxUses)", value: $maxUses, in: 1...50)
+                    }
+                } footer: {
+                    Text("Millie signs in to this site without asking, until it expires or you revoke it.")
+                }
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Allow sign-in")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Button("Allow") { Task { await save() } }
+                            .disabled(site.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        errorMessage = nil
+        var body: [String: Any] = [
+            "site": site.trimmingCharacters(in: .whitespaces),
+            "scope": "standing",
+            "ttlMinutes": lifetime.minutes
+        ]
+        if limitUses { body["maxUses"] = maxUses }
+        do {
+            let data = try await APIClient.shared.request(path: "/vault/grants", method: "POST", body: body)
+            let response = try JSONDecoder().decode(VaultGrantSaveResponse.self, from: data)
+            if let grant = response.grant {
+                onGranted(grant)
+                dismiss()
+            } else {
+                errorMessage = "The permission couldn't be saved."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSaving = false
+    }
+}
+
 // MARK: - Models
 
 struct VaultCredentialSummary: Codable, Equatable, Identifiable {
@@ -274,6 +504,132 @@ private struct VaultCredentialsResponse: Codable {
 private struct VaultCredentialSaveResponse: Codable {
     let saved: Bool
     let credential: VaultCredentialSummary?
+}
+
+struct VaultGrantSummary: Codable, Equatable, Identifiable {
+    let id: String
+    let site: String
+    let scope: String
+    let taskId: String?
+    let expiresAt: String?
+    let maxUses: Int?
+    let useCount: Int?
+    let revokedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, site, scope
+        case taskId = "task_id"
+        case expiresAt = "expires_at"
+        case maxUses = "max_uses"
+        case useCount = "use_count"
+        case revokedAt = "revoked_at"
+    }
+
+    var isRevoked: Bool { revokedAt != nil }
+
+    var isExpired: Bool {
+        guard let expiry = Date.oxyParse(expiresAt) else { return true }
+        return expiry <= Date()
+    }
+
+    var isExhausted: Bool {
+        guard let maxUses else { return false }
+        return (useCount ?? 0) >= maxUses
+    }
+
+    /// Only a permission that would actually authorise a sign-in right now is worth
+    /// offering a Revoke button for; the rest are history.
+    var isLive: Bool { !isRevoked && !isExpired && !isExhausted }
+
+    var detailLine: String {
+        if isRevoked { return "Revoked" }
+        if isExpired { return "Expired" }
+
+        var parts: [String] = [scope == "task" ? "This task only" : "Until \(Self.expiryText(expiresAt))"]
+        if let maxUses {
+            parts.append("\(useCount ?? 0) of \(maxUses) used")
+        } else if let useCount, useCount > 0 {
+            parts.append(useCount == 1 ? "1 sign-in" : "\(useCount) sign-ins")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func expiryText(_ value: String?) -> String {
+        guard let date = Date.oxyParse(value) else { return "—" }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+}
+
+struct VaultCredentialUse: Codable, Equatable, Identifiable {
+    let id: String
+    let site: String
+    let outcome: String
+    let reason: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, site, outcome, reason
+        case createdAt = "created_at"
+    }
+
+    var detailLine: String {
+        var parts: [String] = [Self.outcomeText(outcome, reason: reason)]
+        if let when = Self.timeText(createdAt) { parts.append(when) }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func outcomeText(_ outcome: String, reason: String?) -> String {
+        switch outcome {
+        case "used": return reason == "stored_session" ? "Reused a saved session" : "Signed in"
+        case "failed": return "Sign-in failed"
+        case "denied":
+            guard let reason, !reason.isEmpty else { return "Refused" }
+            return "Refused — " + readable(reason)
+        default: return outcome
+        }
+    }
+
+    // The server's refusal reasons are machine names. Left as-is they would read as a bug
+    // report rather than as an answer to "why didn't it sign in?".
+    private static func readable(_ reason: String) -> String {
+        switch reason {
+        case "no_grant": return "no permission set"
+        case "revoked": return "permission revoked"
+        case "expired": return "permission expired"
+        case "use_limit_reached": return "use limit reached"
+        case "wrong_task": return "permission was for another task"
+        case "site_not_granted", "site_not_requested": return "site not permitted"
+        case "not_user_granted": return "permission was not set by you"
+        case "use_count_failed": return "could not record the use"
+        case "use_count_raced": return "another task was signing in at the same time"
+        case "import_refused": return "session import refused"
+        case "lookup_failed": return "permission could not be read"
+        default: return reason.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+
+    private static func timeText(_ value: String?) -> String? {
+        guard let date = Date.oxyParse(value) else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+private struct VaultGrantsResponse: Codable {
+    let grants: [VaultGrantSummary]
+}
+
+private struct VaultCredentialUsesResponse: Codable {
+    let uses: [VaultCredentialUse]
+}
+
+private struct VaultGrantSaveResponse: Codable {
+    let granted: Bool
+    let grant: VaultGrantSummary?
 }
 
 #Preview {

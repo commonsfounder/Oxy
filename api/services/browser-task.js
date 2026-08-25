@@ -430,7 +430,19 @@ function createSession(userId, session) {
   // workflowId is the responsibility this browsing is in service of. It is what makes files
   // fetched here belong to the work that caused them, and what lets the work survive this
   // session dying — the durable state lives on the workflow, never on this record.
-  const record = { userId, ...session, lastActivityAt: Date.now() };
+  //
+  // credentialTaskId is the identity a task-scoped credential grant binds to. It has to be
+  // created HERE, once per browsing run, because the only other id in play -- the taskId in
+  // runOrderingTurnImpl -- is a fresh randomUUID() on every single turn. A grant bound to
+  // one turn's id could never match the next turn's, so `scope: 'task'` (the DEFAULT scope
+  // in credential-grants.js) authorised nothing, ever, and the only grant that worked in
+  // practice was the broader `standing` one. A run-lifetime id is what a task grant is for.
+  const record = {
+    userId,
+    credentialTaskId: randomUUID(),
+    ...session,
+    lastActivityAt: Date.now()
+  };
   liveSessions.set(userId, record);
   return record;
 }
@@ -4622,27 +4634,42 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
               // allowedCredentialSites, never widened by it, so a page that steers the model
               // at some other site still finds no grant. No grant falls back to asking,
               // exactly as before. Every outcome, including refusals, is logged.
+              // The RUN's id, not the turn's. pendingCredentialTaskId is only set after an
+              // offer has already been made (below, in the outer wrapper), so reading it
+              // here meant a task-scoped grant was always evaluated against null and always
+              // refused with 'wrong_task'.
               const authorized = await authorizeCredentialUse(getSupabase(), userId, {
                 site: grantedSite,
                 requestedSites: session.allowedCredentialSites,
-                taskId: session.pendingCredentialTaskId || null
+                taskId: session.credentialTaskId || null
               }).catch(() => ({ allowed: false, reason: 'lookup_failed' }));
 
               if (authorized.allowed) {
                 onProgress(`Signing in to ${grantedSite} using your saved permission`);
                 const signedIn = await confirmCredentialUse(userId, onProgress);
                 if (signedIn?.type === 'error') {
+                  // Same id the authorisation was granted against, so one run's 'used' and
+                  // 'failed' rows sit under one task in the log rather than under a run id
+                  // and a null.
                   await recordUse(getSupabase(), userId, {
                     site: grantedSite,
                     grantId: authorized.grant?.id || null,
-                    taskId: session.pendingCredentialTaskId || null,
+                    taskId: session.credentialTaskId || null,
                     outcome: 'failed',
                     reason: signedIn.error
                   }).catch(() => {});
                 }
                 return signedIn;
               }
-              return { type: 'ready_for_credential_use', site: grantedSite, label: credential.label };
+              // credentialTaskId travels with the ask so the caller can bind a grant to
+              // THIS run ("just for this task") rather than being pushed to a standing one.
+              return {
+                type: 'ready_for_credential_use',
+                site: grantedSite,
+                label: credential.label,
+                credentialTaskId: session.credentialTaskId || null,
+                deniedReason: authorized.reason
+              };
             }
           }
         }

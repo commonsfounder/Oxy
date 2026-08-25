@@ -47,15 +47,48 @@ const SENSITIVE_SITE_PATTERNS = Object.freeze([
   /(^|\.)gov\.uk$/i,
   /(^|\.)hmrc\./i,
   /bank/i,
-  /banking/i
+  /banking/i,
+  /(^|\.)okta\.com$/i,
+  /(^|\.)auth0\.com$/i,
+  /(^|\.)onelogin\.com$/i,
+  /(^|\.)duosecurity\.com$/i
+]);
+
+// Identity logins that sit UNDER an otherwise-ordinary parent domain. These need a list of
+// their own rather than another pattern, because the patterns above are matched against the
+// site being imported while cookie filtering deliberately keeps subdomains. Importing the
+// parent (`google.com`) matched nothing here and then swept in the identity session on the
+// child (`accounts.google.com`) -- and Google's own SSO cookies sit on `.google.com`
+// itself, so that import was the whole account. Containment is therefore checked in BOTH
+// directions: a sensitive host under the requested site is as disqualifying as the
+// requested site sitting under a sensitive host.
+//
+// amazon.com is deliberately absent even though signin.aws.amazon.com is an identity host:
+// shopping sites are the entire point of this feature, and refusing the biggest one to
+// protect an AWS console nobody is importing would trade the product for nothing.
+const SENSITIVE_HOSTS = Object.freeze([
+  'accounts.google.com',
+  'login.microsoftonline.com',
+  'login.live.com',
+  'account.microsoft.com',
+  'appleid.apple.com'
 ]);
 
 function normalizeSite(site) {
   return String(site || '').trim().toLowerCase().replace(/^www\./, '');
 }
 
+/** True when either host contains the other, so `google.com` and `accounts.google.com`
+ *  disqualify each other regardless of which one was asked for. */
+function hostsOverlap(a, b) {
+  return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
+}
+
 function isSensitiveSite(site) {
-  return SENSITIVE_SITE_PATTERNS.some(pattern => pattern.test(site));
+  const normalized = normalizeSite(site);
+  if (!normalized) return false;
+  if (SENSITIVE_SITE_PATTERNS.some(pattern => pattern.test(normalized))) return true;
+  return SENSITIVE_HOSTS.some(host => hostsOverlap(normalized, host));
 }
 
 /**
@@ -128,6 +161,19 @@ function prepareImportedSession({ site, cookies, origins = [], now = new Date() 
     return { ok: false, error: `No cookies for ${normalizedSite} were found in what was sent.` };
   }
 
+  // Second gate, on what actually survived the filter rather than on what was asked for.
+  // The site cleared the door, but cookie filtering keeps subdomains, so a sensitive host
+  // beneath a perfectly ordinary parent can still be sitting in `kept`. Refuse the whole
+  // import rather than quietly dropping the offending cookie: a partial session is a
+  // logged-out browser wearing a success message.
+  const smuggled = kept.find(cookie => isSensitiveSite(cookie.domain.replace(/^\./, '')));
+  if (smuggled) {
+    return {
+      ok: false,
+      error: `That payload carries a ${smuggled.domain.replace(/^\./, '')} session, which cannot be imported. Sign in there yourself.`
+    };
+  }
+
   const keptOrigins = (Array.isArray(origins) ? origins : []).filter(origin => {
     try { return cookieBelongsToSite(new URL(origin?.origin).hostname, normalizedSite); }
     catch { return false; }
@@ -145,6 +191,7 @@ function prepareImportedSession({ site, cookies, origins = [], now = new Date() 
 module.exports = {
   IMPORT_TTL_MS,
   MAX_COOKIES,
+  SENSITIVE_HOSTS,
   SENSITIVE_SITE_PATTERNS,
   cookieBelongsToSite,
   isSensitiveSite,
