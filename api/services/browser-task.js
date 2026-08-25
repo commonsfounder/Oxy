@@ -537,8 +537,17 @@ async function closeWarmPool() {
 // "pay £9.50 now", "slide to pay", "confirm and pay", "buy now", etc.
 const PAYMENT_KEYWORD_PATTERN = /\bpay\b|\bbuy\b|place\s+(your\s+)?order|order\s+now|complete\s+(your\s+)?(order|purchase|payment)|confirm\s+(your\s+)?(purchase|order|payment)|submit\s+(order|payment)|checkout\s*(and|&)?\s*pay|proceed\s+to\s+payment|continue\s+to\s+payment|go\s+to\s+payment|payment\s+method|pay\s+with\s+card|pay\s+securely|slide\s+to\s+pay/i;
 
+// Wallets need device biometrics or a redirect a headless browser cannot complete, and they
+// render above the card form -- so a first-match search always picked them.
+const WALLET_PAYMENT_PATTERN = /\b(apple\s*pay|g\s*pay|google\s*pay|paypal|amazon\s*pay|shop\s*pay|klarna|clearpay|afterpay|venmo)\b/i;
+
+function isWalletPayment(text) {
+  return WALLET_PAYMENT_PATTERN.test(String(text || ''));
+}
+
 function matchesPaymentKeyword(text) {
   const label = String(text || '').trim();
+  if (isWalletPayment(label)) return false;
   // Chiltern's ticket-results shell exposes "Quick buy" before it has found a fare or
   // added a ticket. It is a shopping shortcut, not a payment commitment; treating it as
   // a pay control produced a false ready-for-payment handoff on an empty £0.00 basket.
@@ -6857,6 +6866,7 @@ module.exports = {
   tryTier0PriceLookup,
   tier0NameMatchesGoal,
   matchesPaymentKeyword,
+  isWalletPayment,
   isPaymentHandoffBlockedByLoading,
   isCheckoutishUrl,
   isTechnicalAsk,
