@@ -19,6 +19,15 @@ such restriction, so the extension needs no system-level permission at all.
 
 No store listing, no review, no Apple developer account.
 
+## Get a token
+
+The extension needs an Oxy session token once. This reads the password without echoing it,
+so it never lands in shell history or `ps` output, and prints only the token:
+
+```
+node scripts/oxy-token.js <your-user-id> | pbcopy
+```
+
 ## Use
 
 1. Sign in to the site in Chrome as normal
