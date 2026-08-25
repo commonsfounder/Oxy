@@ -18,6 +18,8 @@
 //      or identity-provider session is account takeover, and a permission granted in a hurry
 //      is not a good enough gate for that.
 
+const { registrableSite } = require('../lib/site');
+
 const MAX_COOKIES = 500;
 const IMPORT_TTL_MS = 1000 * 60 * 60 * 24 * 14; // two weeks, then it must be re-shared
 const VALID_SAME_SITE = new Set(['Strict', 'Lax', 'None']);
@@ -74,8 +76,12 @@ const SENSITIVE_HOSTS = Object.freeze([
   'appleid.apple.com'
 ]);
 
+// Collapse to the registrable domain, not just strip www. The ordering loop looks a session
+// up by the site it derives from the shopping URL, so a share made from `account.<site>` --
+// the page where people check they are signed in -- would otherwise be filed where nothing
+// looks for it. Normalising here means it holds whatever the client sends.
 function normalizeSite(site) {
-  return String(site || '').trim().toLowerCase().replace(/^www\./, '');
+  return registrableSite(site);
 }
 
 /** True when either host contains the other, so `google.com` and `accounts.google.com`
@@ -84,11 +90,30 @@ function hostsOverlap(a, b) {
   return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 }
 
+/** Lowercase host with leading/trailing dots and www removed -- and nothing else removed. */
+function bareHost(value) {
+  return String(value || '').trim().toLowerCase()
+    .replace(/^\./, '').replace(/\.$/, '').replace(/^www\./, '');
+}
+
+/**
+ * Screening deliberately does NOT collapse to the registrable domain.
+ *
+ * Filing a session collapses `account.johnlewis.com` to `johnlewis.com` so the ordering loop
+ * can find it. Screening must not: collapsing `hsbc.example.com` to `example.com` throws away
+ * the very label that identifies it as a bank, and a stowaway bank cookie riding under an
+ * ordinary site would pass. So the full host is checked, and the registrable form as well so
+ * that a parent like `google.com` is still caught by its identity child.
+ */
 function isSensitiveSite(site) {
-  const normalized = normalizeSite(site);
-  if (!normalized) return false;
-  if (SENSITIVE_SITE_PATTERNS.some(pattern => pattern.test(normalized))) return true;
-  return SENSITIVE_HOSTS.some(host => hostsOverlap(normalized, host));
+  const host = bareHost(site);
+  if (!host) return false;
+  const candidates = new Set([host, registrableSite(host)].filter(Boolean));
+  for (const candidate of candidates) {
+    if (SENSITIVE_SITE_PATTERNS.some(pattern => pattern.test(candidate))) return true;
+    if (SENSITIVE_HOSTS.some(sensitive => hostsOverlap(candidate, sensitive))) return true;
+  }
+  return false;
 }
 
 /**

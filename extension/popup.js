@@ -37,10 +37,33 @@ function say(message, kind = '') {
 /** Chrome match pattern for the site. `*.host` also matches the bare host. */
 function sitePattern() { return `*://*.${site}/*`; }
 
-/** Registrable-ish site for the tab: strip the leading www, keep the rest. */
+// Kept in step with api/lib/site.js -- an extension cannot require server modules, so this
+// is the one deliberate duplicate. Change both together.
+const MULTI_PART_SUFFIXES = new Set([
+  'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'ac.uk', 'gov.uk',
+  'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au',
+  'co.nz', 'net.nz', 'org.nz', 'co.za', 'org.za',
+  'co.jp', 'or.jp', 'ne.jp', 'ac.jp', 'go.jp',
+  'com.br', 'net.br', 'org.br',
+  'com.sg', 'com.my', 'com.hk', 'com.tw', 'com.mx', 'com.tr', 'com.ar',
+  'co.in', 'net.in', 'org.in', 'co.kr', 'or.kr'
+]);
+
+/**
+ * The site a session should be filed under, not the exact page host.
+ *
+ * Sharing from account.johnlewis.com must file under johnlewis.com: that is what the
+ * ordering loop looks up, and Chrome's cookie filter matches a domain and its SUBdomains,
+ * so asking for the account host would skip the .johnlewis.com cookies holding the session.
+ */
 function siteFromUrl(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  let host;
+  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ''); }
   catch { return null; }
+  const labels = host.split('.').filter(Boolean);
+  if (labels.length <= 2) return labels.join('.') || null;
+  const keep = MULTI_PART_SUFFIXES.has(labels.slice(-2).join('.')) ? 3 : 2;
+  return labels.slice(-keep).join('.');
 }
 
 function showSignIn() {
