@@ -702,6 +702,24 @@ function isBrowserContinuationText(text) {
     || /^(?:address|postcode|post\s*code|phone|name|email|delivery|collection)\s*[.!?]*$/i.test(value);
 }
 
+// Different from isBrowserContinuationText above, which only matches a SHORT bare reply
+// ("keep going") standing alone. This instead looks anywhere inside a longer sentence for
+// "I mean the session/basket/cart that's already there" — e.g. "resume the existing John
+// Lewis session" or "pick that session back up and tell me what's in the basket".
+//
+// Real bug, live 2026-08-26: a goal like that names the retailer specifically BECAUSE it's
+// continuing that retailer's session — but resolveRetailerFromGoal (retailer-sites.js)
+// matches a retailer name anywhere in the text with no regard for intent, so it always won
+// the race in runOrderingTurnImplInner and reopened the homepage from scratch, discarding
+// the real persisted session (last page, history, basket) before the browser even opened.
+const SESSION_CONTINUITY_TARGET = /\b(?:session|basket|cart)\b/i;
+const SESSION_RESUME_INTENT = /\b(?:resum(?:e|ing)|continu(?:e|ing)|carry\s+on|pick.*up|reopen|existing)\b/i;
+
+function wantsExistingSession(goal) {
+  const text = String(goal || '');
+  return SESSION_CONTINUITY_TARGET.test(text) && SESSION_RESUME_INTENT.test(text);
+}
+
 // Click whichever side of the choice matches the stored preference. Same click idiom as
 // tryGuestCheckoutClick: resolve the element by locatorIndex, scroll, force-click.
 async function tryApplyDeliveryPreference(page, session, steps, onProgress) {
@@ -4393,6 +4411,24 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
     let openUrl = url;
     let priorHistory = null;
     const continuationReply = goal;
+
+    // Checked before retailer-name resolution below: a goal that explicitly asks to pick
+    // up an existing session must win even though it also names the retailer (that's WHY
+    // it names it). If there's genuinely nothing to resume, this falls through to the
+    // normal retailer/resume logic below unchanged.
+    let usedEarlyResume = false;
+    if (!openUrl && wantsExistingSession(goal)) {
+      const earlyResume = await loadResumeContext(userId);
+      if (earlyResume) {
+        openUrl = earlyResume.last_url;
+        priorHistory = Array.isArray(earlyResume.history) ? earlyResume.history : [];
+        goal = goal || earlyResume.goal || '';
+        if (isBrowserContinuationText(continuationReply) && earlyResume.goal) goal = earlyResume.goal;
+        onProgress('Picking up where we left off…');
+        usedEarlyResume = true;
+      }
+    }
+
     if (!openUrl && goal) {
       const retailer = resolveRailTicketProvider(goal) || resolveRetailerFromGoal(goal, retailOptions);
       if (retailer) {
@@ -4412,7 +4448,7 @@ async function runOrderingTurnImplInner(userId, { url, goal, location = null, on
       goal = goal || resume.goal || '';
       if (isBrowserContinuationText(continuationReply) && resume.goal) goal = resume.goal;
       onProgress('Picking up where we left off…');
-    } else {
+    } else if (!usedEarlyResume) {
       onProgress('Opening browser…');
     }
 
@@ -7036,6 +7072,7 @@ module.exports = {
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
   isBrowserContinuationText,
+  wantsExistingSession,
   looksLikeLoginWall,
   findGuestCheckoutElement,
   classifyCheckoutAsk,

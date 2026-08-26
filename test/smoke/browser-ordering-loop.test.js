@@ -9,6 +9,7 @@ const {
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
   isBrowserContinuationText,
+  wantsExistingSession,
   isOrderGoal,
   isSignupGoal,
   buildDecisionPrompt,
@@ -57,6 +58,28 @@ test('browser continuation replies are narrow enough not to hijack ordinary chat
   assert.equal(isBrowserContinuationText('use my email'), true);
   assert.equal(isBrowserContinuationText('what is the delivery time?'), false);
   assert.equal(isBrowserContinuationText('show me email providers'), false);
+});
+
+// Regression, live 2026-08-26 (found via the Telegram bridge): a goal like "resume the
+// existing John Lewis session" or "pick that session back up... what's in the basket" names
+// the retailer specifically BECAUSE it's continuing that retailer's session — but
+// resolveRetailerFromGoal (retailer-sites.js) matches a bare retailer name anywhere in the
+// text with no regard for intent, so runOrderingTurnImplInner always took the "open the
+// retailer's homepage fresh" branch and discarded the real persisted session (last page,
+// history, basket) before the browser even opened. wantsExistingSession is checked first, so
+// this phrasing wins even though it also names the retailer.
+test('a goal that names a retailer while asking to resume its session is recognized as a resume, not a fresh start', () => {
+  assert.equal(wantsExistingSession('recently we were shopping at john lewis can you pick that session back up tell me what\'s in the basket and what details i have on file'), true);
+  assert.equal(wantsExistingSession('Resume the existing John Lewis shopping session, inspect the current basket, re-check the total against the user\'s £60 limit, and proceed as far as checkout.'), true);
+  assert.equal(wantsExistingSession('reopen the basket and carry on from where I left off'), true);
+});
+
+test('an ordinary new shopping request is not mistaken for a resume, even mentioning basket/session words', () => {
+  assert.equal(wantsExistingSession('buy me a jumper from john lewis'), false);
+  assert.equal(wantsExistingSession('add a cordless drill to my basket on screwfix'), false);
+  assert.equal(wantsExistingSession('start a new shopping session at john lewis'), false);
+  assert.equal(wantsExistingSession(''), false);
+  assert.equal(wantsExistingSession(undefined), false);
 });
 
 test('browser resume metadata survives in the original storage_state schema', () => {
