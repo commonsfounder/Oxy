@@ -23,7 +23,7 @@ const browserTask = require('../services/browser-task');
 // money action honours (see action-contracts.js's run_browser_task entry for why this
 // one is executionMode: 'direct' rather than 'review').
 async function runBrowserTask({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
+  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain, setPendingAction } = deps;
   const goal = String(params?.goal || '').trim();
   const url = String(params?.url || '').trim();
   // No upfront "goal required" guard — an empty goal is a valid continuation call for
@@ -81,6 +81,12 @@ async function runBrowserTask({ userId, action, params, enrichedParams, context,
     const cardNote = agentCard
       ? ` I'll pay with your ${agentCard.brand} ending ${agentCard.last4}.`
       : ' (No payment card is saved — if this checkout asks for card details, add one on the Payments screen first.)';
+    // A bare "yes" to this must not depend on the model remembering, on its own, to call
+    // confirm_browser_payment — that's exactly what failed live on 2026-08-26 (the model
+    // replied as if no progress had been made at all). Registering the same durable
+    // approval every other review-gated action gets means the next "yes" is resolved by
+    // /chat's existing deterministic matching (getPendingAction), not by model judgment.
+    await setPendingAction(userId, { type: 'confirm_browser_payment', input: {} }, context).catch(() => null);
     return {
       success: false,
       outcome: 'awaiting_user',

@@ -7592,6 +7592,16 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       } catch (error) {
         trace.log('pending_action.cancel_failed', error.message);
       }
+      // Unlike an ordinary drafted-but-never-executed action, a pending
+      // confirm_browser_payment holds a real, live browser session open — cancelling it
+      // must actually release that resource (cancel_browser_payment closes the session),
+      // not just discard the approval row and leave a Chromium instance running.
+      if (pendingAction.action?.type === 'confirm_browser_payment') {
+        await executeActions(userId, [{ type: 'cancel_browser_payment', input: {} }], {
+          userMessage: pendingAction.userMessage || message,
+          trace
+        }, trace).catch(() => {});
+      }
       if (cancelled || !pendingAction.taskId) {
         await settlePendingAction(userId, pendingAction, 'cancelled');
       }
@@ -10302,6 +10312,10 @@ const actionDeps = {
   getPreferenceMap,
   setPreferenceValue,
   forgetMemory,
+  // Lets run_browser_task register its own ready_for_payment pause as a real, durable
+  // approval — the same deterministic yes/no matching every other review-gated action
+  // already gets — instead of leaving "the user said yes" to the model's own judgment.
+  setPendingAction,
   // The model boundary stays bound here: the orchestration tests mock it by intercepting
   // this file's require of brain-provider, and handlers should be handed model access
   // rather than reaching for their own copy.
