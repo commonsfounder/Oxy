@@ -135,6 +135,18 @@ function looksLikeCommunicationRequest(message) {
   return EMAIL_ADDRESS_RE.test(text) || COMMUNICATION_TERMS.test(text);
 }
 
+// Same collision, different shape: a named retailer ("john lewis") sits in LOCAL_PLACE_TERMS,
+// so a message about resuming an existing browser shopping session and checking the basket —
+// live regression via the Telegram bridge, 2026-08-26 — fell through to find_local_place and
+// got routed as a nearby-place search, with the whole sentence echoed back as a broken query.
+// Narrow and high-precision on purpose, same shape as looksLikeCommunicationRequest above:
+// only an explicit session/basket/cart phrase defers, so "nearest john lewis" is unaffected.
+const BROWSER_SESSION_TERMS = /\b(?:that|this|the) session\b|\bsession back\b|\bwhat'?s in (?:the|my) (?:basket|cart|bag)\b/i;
+
+function looksLikeBrowserSessionRequest(message) {
+  return BROWSER_SESSION_TERMS.test(normalizeText(message));
+}
+
 function trimTrailingPunctuation(value) {
   return normalizeText(value).replace(/[?.!]+$/, '').trim();
 }
@@ -583,6 +595,8 @@ function inferDeterministicAction(message, options = {}) {
   // "get me an uber to the restaurant" is unaffected — only the final place-lookup
   // fallback is guarded.
   if (looksLikeCommunicationRequest(text)) return null;
+
+  if (looksLikeBrowserSessionRequest(text)) return null;
 
   if (!looksLikeLocalPlaceRequest(text)) return null;
 

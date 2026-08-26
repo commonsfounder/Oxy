@@ -122,6 +122,28 @@ test('"nearest restaurant" (no email/text/contact wording) is unaffected by the 
   assert.equal(routed.reason, 'find_local_place');
 });
 
+// ── A place-keyword collision must not eat a browser-session-resume request ────────────────
+// Live regression via the Telegram bridge, 2026-08-26: "john lewis" sits in LOCAL_PLACE_TERMS
+// (as a retailer name), so a message about resuming a browser shopping session and checking
+// the basket fell through to the find_local_place fallback and was routed as a nearby-place
+// search, echoing the whole message back as a broken "query". Narrow fix, same shape as the
+// communication-request guard above.
+test('resuming a browser shopping session and asking about the basket does not become a nearby-place search', () => {
+  assert.equal(
+    inferDeterministicAction("okay anyways , recently we were shopping in john lewis can you pick that session back up as well as tell me what's in the basket"),
+    null
+  );
+});
+
+test('"what\'s in the basket" alone defers, regardless of a place-keyword collision', () => {
+  assert.equal(inferDeterministicAction("we were shopping in john lewis, what's in the basket?"), null);
+});
+
+test('"nearest john lewis" and "buy from john lewis" are unaffected by the session-resume fix', () => {
+  assert.equal(inferDeterministicAction('nearest john lewis').actions[0].type, 'find_place');
+  assert.equal(inferDeterministicAction('is there a john lewis near me').actions[0].type, 'find_place');
+});
+
 test('clear flight price watches become bounded daily background checks', () => {
   const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
   assert.equal(routed.reason, 'durable_price_watch');
