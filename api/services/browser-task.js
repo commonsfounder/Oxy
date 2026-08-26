@@ -6520,7 +6520,14 @@ async function classifyPaymentOutcome(page) {
   // Challenge before declined: a pending 3DS page routinely carries decline-ish wording,
   // and calling it a decline abandons a payment the user is about to approve on their phone.
   if (THREEDS_CHALLENGE_PATTERN.test(combined)) return 'challenge';
-  if (PAYMENT_DECLINED_PATTERN.test(combined)) return 'declined';
+  const declined = PAYMENT_DECLINED_PATTERN.exec(combined);
+  if (declined) {
+    console.warn('[browser-task] payment declined', JSON.stringify({
+      matched: declined[0].slice(0, 80), url: page.url(),
+      context: combined.slice(Math.max(0, declined.index - 120), declined.index + 160).replace(/\s+/g, ' ')
+    }));
+    return 'declined';
+  }
   return 'unknown';
 }
 
