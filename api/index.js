@@ -671,12 +671,15 @@ app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
 // Mints a real session token for the linked user and calls this very instance's own /chat
 // route over loopback HTTP. This reuses 100% of the existing chat brain, memory, and
 // review-gated action handling untouched, instead of re-implementing any of it for a second
-// channel. req.socket.localPort is used (not a fixed env var) so this works unchanged whether
-// the server is bound to its real PORT in production or an ephemeral port in tests.
+// channel. Prefers process.env.PORT (what server.js itself binds to — Fly injects this to
+// match internal_port, so it's guaranteed correct in production) and falls back to
+// req.socket.localPort for tests, which listen on an OS-assigned ephemeral port with no PORT
+// env var set. req.socket.localPort alone is NOT reliable in production — behind Fly's proxy
+// it came back undefined, which is what silently broke every bridged message at first.
 async function bridgeToChatPipeline(userId, message, req) {
   const { data: userRow } = await supabase.from('users').select('token_version').eq('user_id', userId).maybeSingle();
   const sessionToken = createSessionToken(userId, userRow?.token_version || 1);
-  const baseUrl = `http://127.0.0.1:${req.socket.localPort}`;
+  const baseUrl = `http://127.0.0.1:${process.env.PORT || req.socket.localPort || 3000}`;
   const chatRes = await fetch(`${baseUrl}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
@@ -724,7 +727,7 @@ async function handleTelegramBotMessage(message, req) {
       await telegramBot.saveLink(userId, {
         chatId, telegramUserId: message.from?.id, username: message.from?.username
       });
-      await telegramBot.sendMessage(chatId, "You're connected — message me anytime. I'm the same Millie as in the app.");
+      await telegramBot.sendMessage(chatId, "You're connected — message me anytime. Same conversation as the app.");
     } catch (err) {
       await telegramBot.sendMessage(chatId, "Couldn't complete that connection — this Telegram account may already be linked to a different Oxy account.");
       log('warn', 'telegram_bot.link.failed', { error: err.message });
