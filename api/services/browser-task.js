@@ -6507,7 +6507,7 @@ async function fillPaymentCard(session, card, onProgress = () => {}) {
 // the re-confirm guard).
 const ORDER_CONFIRMED_PATTERN = /order\s+(?:number|reference)\s*[:#]|thank you for your (?:order|purchase|booking)|booking (?:confirmed|reference:|complete)|payment (?:successful|was successful|complete)|your (?:order|booking) (?:is|has been) (?:confirmed|placed|received)|we(?:'|’)?ve (?:got|received) your order|order (?:is )?confirmed/i;
 const PAYMENT_DECLINED_PATTERN = /\bdeclined\b|payment (?:failed|unsuccessful|was not successful|error)|invalid (?:card|security code|cv[cv])|check your card|could ?n(?:o|’|')t (?:be )?process|there was a problem (?:processing|with) your payment|card details (?:are|were) (?:incorrect|invalid)/i;
-const THREEDS_CHALLENGE_PATTERN = /3-?d\s*secure|verify (?:your )?(?:payment|identity)|authentication (?:required|needed)|approve (?:this|the) (?:payment|purchase)|one[- ]?time (?:pass)?code|confirm (?:it(?:'|’)?s|this is) you/i;
+const THREEDS_CHALLENGE_PATTERN = /3-?d\s*secure|verify (?:your |a )?(?:payment|identity|purchase)|authentication (?:required|needed|in progress)|approve (?:this|the) (?:payment|purchase)|one[- ]?time (?:pass)?code|confirm (?:it(?:'|’)?s|this is) you|check your (?:phone|banking app)|open your banking app|waiting for (?:you|approval)|tap to verify/i;
 
 async function classifyPaymentOutcome(page) {
   const texts = [];
@@ -6517,8 +6517,10 @@ async function classifyPaymentOutcome(page) {
   }
   const combined = `${page.url()}\n${texts.join('\n')}`;
   if (/order-?confirm(?:ed|ation)|booking-?confirm|thank-?you/i.test(page.url()) || ORDER_CONFIRMED_PATTERN.test(combined)) return 'confirmed';
-  if (PAYMENT_DECLINED_PATTERN.test(combined)) return 'declined';
+  // Challenge before declined: a pending 3DS page routinely carries decline-ish wording,
+  // and calling it a decline abandons a payment the user is about to approve on their phone.
   if (THREEDS_CHALLENGE_PATTERN.test(combined)) return 'challenge';
+  if (PAYMENT_DECLINED_PATTERN.test(combined)) return 'declined';
   return 'unknown';
 }
 
