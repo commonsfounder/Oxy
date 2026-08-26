@@ -14,6 +14,10 @@ const USER_DATA_RESOURCES = Object.freeze([
   { name: 'memories', ownership: direct(), deletionOrder: 690 },
   { name: 'action_log', ownership: direct(), deletionOrder: 680, structuredColumns: ['action', 'result'], redactionColumns: ['action (nested secrets)', 'result (nested secrets)'] },
   { name: 'connectors', ownership: direct(), deletionOrder: 670, secretColumns: ['tokens'] },
+  { name: 'telegram_bot_links', ownership: direct(), deletionOrder: 668 },
+  // Short-lived, single-use linking tokens. Excluded from export (nothing a user would ever
+  // want back — it's a spent or expiring secret, not a record of anything), but still deleted.
+  { name: 'telegram_bot_link_tokens', ownership: direct(), deletionOrder: 667, export: 'exclude', excludeReason: 'one-time linking secret', secretColumns: ['token'] },
   { name: 'preferences', ownership: direct(), deletionOrder: 660, jsonColumns: ['value'], redactionColumns: ['value (structured secrets)'] },
   { name: 'devices', ownership: direct(), deletionOrder: 650, secretColumns: ['push_token'] },
   { name: 'paired_displays', ownership: direct(), deletionOrder: 648, secretColumns: ['token_hash'] },

@@ -27,6 +27,7 @@ const { extractIncoming } = require('./services/incoming');
 const { isNonEmptyString, isValidCalendarDate } = require('./services/request-validation');
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
+const telegramBot = require('../connectors/telegram-bot');
 const { inferDeterministicAction, inferCapabilitySweepAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
 const browserTask = require('./services/browser-task');
@@ -641,6 +642,124 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
     log('error', 'millie_sms.inbound.error', { error: err.message });
   }
 });
+
+// A real Telegram Bot (BotFather/Bot API) — Millie's own identity, so messaging it is a real
+// two-way conversation with Millie, unlike connectors/telegram.js which sends as the user's
+// own account. Every text message is bridged into the SAME /chat pipeline the iOS app uses
+// (loopback HTTP call on this instance, see bridgeToChatPipeline below) so it is one unified
+// conversation, memory, and action set — not a second brain to keep in sync.
+app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
+  const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
+  if (expectedSecret && req.get('X-Telegram-Bot-Api-Secret-Token') !== expectedSecret) {
+    return res.status(401).end();
+  }
+  // Ack immediately — Telegram retries the same update on anything but a 2xx, and this work
+  // can take longer than Telegram's own retry patience.
+  res.status(200).end();
+  try {
+    const update = req.body || {};
+    if (update.callback_query) {
+      await handleTelegramBotCallback(update.callback_query, req);
+    } else if (update.message?.text != null) {
+      await handleTelegramBotMessage(update.message, req);
+    }
+  } catch (err) {
+    log('error', 'telegram_bot.webhook.error', { error: err.message });
+  }
+});
+
+// Mints a real session token for the linked user and calls this very instance's own /chat
+// route over loopback HTTP. This reuses 100% of the existing chat brain, memory, and
+// review-gated action handling untouched, instead of re-implementing any of it for a second
+// channel. req.socket.localPort is used (not a fixed env var) so this works unchanged whether
+// the server is bound to its real PORT in production or an ephemeral port in tests.
+async function bridgeToChatPipeline(userId, message, req) {
+  const { data: userRow } = await supabase.from('users').select('token_version').eq('user_id', userId).maybeSingle();
+  const sessionToken = createSessionToken(userId, userRow?.token_version || 1);
+  const baseUrl = `http://127.0.0.1:${req.socket.localPort}`;
+  const chatRes = await fetch(`${baseUrl}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionToken}` },
+    body: JSON.stringify({ userId, message })
+  });
+  if (!chatRes.ok) throw new Error(`chat bridge returned ${chatRes.status}`);
+  return chatRes.json();
+}
+
+// A pending review-gated action (buildPendingReviewResult in pending-review.js) is exactly
+// what the iOS ConfirmCard renders as tap-to-approve — here it becomes Telegram's native
+// inline-keyboard equivalent. Tapping either button synthesizes the same "yes"/"cancel" text
+// the app sends when a user taps Confirm/Cancel, reusing the existing natural-language
+// approval parser (getPendingAction/isPendingConfirmMessage) instead of a second resolution
+// path keyed on an approval id.
+async function sendChatResultToTelegram(chatId, result) {
+  const replyText = String(result?.text || 'Done.').slice(0, 4096);
+  if (telegramBot.needsConfirmationButtons(result?.actions || [])) {
+    await telegramBot.sendMessage(chatId, replyText, {
+      replyMarkup: {
+        inline_keyboard: [[
+          { text: 'Confirm ✅', callback_data: 'confirm' },
+          { text: 'Cancel ✖️', callback_data: 'cancel' }
+        ]]
+      }
+    });
+  } else {
+    await telegramBot.sendMessage(chatId, replyText);
+  }
+}
+
+async function handleTelegramBotMessage(message, req) {
+  const chatId = message.chat?.id;
+  if (chatId == null) return;
+  const text = String(message.text || '').trim();
+
+  const startCommand = telegramBot.parseStartCommand(text);
+  if (startCommand) {
+    const userId = startCommand.token ? await telegramBot.redeemLinkToken(startCommand.token) : null;
+    if (!userId) {
+      await telegramBot.sendMessage(chatId, 'That connection link has expired. Open the Oxy app and tap Connect Telegram again.');
+      return;
+    }
+    try {
+      await telegramBot.saveLink(userId, {
+        chatId, telegramUserId: message.from?.id, username: message.from?.username
+      });
+      await telegramBot.sendMessage(chatId, "You're connected — message me anytime. I'm the same Millie as in the app.");
+    } catch (err) {
+      await telegramBot.sendMessage(chatId, "Couldn't complete that connection — this Telegram account may already be linked to a different Oxy account.");
+      log('warn', 'telegram_bot.link.failed', { error: err.message });
+    }
+    return;
+  }
+
+  const userId = await telegramBot.findUserIdByChatId(chatId);
+  if (!userId) {
+    await telegramBot.sendMessage(chatId, 'I don\'t recognize this chat yet. Open the Oxy app and tap Connect Telegram to link your account.');
+    return;
+  }
+  if (!text) return;
+
+  const result = await bridgeToChatPipeline(userId, text, req);
+  await sendChatResultToTelegram(chatId, result);
+}
+
+async function handleTelegramBotCallback(callbackQuery, req) {
+  const chatId = callbackQuery.message?.chat?.id;
+  const messageId = callbackQuery.message?.message_id;
+  if (chatId == null) return;
+
+  const userId = await telegramBot.findUserIdByChatId(chatId);
+  if (!userId) {
+    await telegramBot.answerCallbackQuery(callbackQuery.id, { text: 'Not connected.' });
+    return;
+  }
+  await telegramBot.answerCallbackQuery(callbackQuery.id);
+  if (messageId != null) await telegramBot.clearInlineKeyboard(chatId, messageId);
+
+  const synthesized = callbackQuery.data === 'cancel' ? 'cancel' : 'yes';
+  const result = await bridgeToChatPipeline(userId, synthesized, req);
+  await sendChatResultToTelegram(chatId, result);
+}
 
 // Only the continuity endpoints take a whole vendor export. Raising the limit globally to
 // suit them would hand every other route — /chat included — a 40x larger body to absorb.
@@ -5108,6 +5227,20 @@ app.get('/connectors/agent-card', requireSessionAuth, async (req, res) => {
     res.json({ card });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/connectors/telegram-bot/link', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  if (!process.env.TELEGRAM_BOT_USERNAME) {
+    return res.status(503).json({ error: 'Telegram bot is not configured.' });
+  }
+  try {
+    const token = await telegramBot.createLinkToken(userId);
+    res.json({ deepLink: `https://t.me/${process.env.TELEGRAM_BOT_USERNAME}?start=${token}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
