@@ -13,6 +13,12 @@ primary_region = 'lhr'
   APP_URL = 'https://milgrain-live-2026.fly.dev'
   NODE_ENV = 'production'
   TZ = 'Europe/London'
+  # Per-phase browser-task timing (goto/settle/extract/screenshot/model-decide/action) to
+  # stderr, gated by connectors/browser-task.js's own `timed()` helper — normally off, turned
+  # on here specifically to get real evidence on a real stall (2026-08-26: 8 steps completed
+  # in 45s, then one single step froze for 86s before the hard timeout fired) instead of
+  # guessing at VM sizing with no data. Safe to leave on; it only adds console.warn lines.
+  OXY_BROWSER_TIMING = '1'
 
 [http_service]
   internal_port = 8080
