@@ -6574,6 +6574,32 @@ async function readPageText(page) {
   return texts.join('\n');
 }
 
+// Tick a payment-method radio directly. Clicking the visible label left the radio
+// unticked, so the pay button stayed "(unavailable)".
+async function selectPaymentOptionRadio(page, last4) {
+  for (const frame of page.frames()) {
+    const picked = await frame.evaluate((wanted) => {
+      const radios = [...document.querySelectorAll('input[type="radio"]')]
+        .filter((el) => { const r = el.getBoundingClientRect(); return r.width && r.height; });
+      if (!radios.length) return null;
+      const textFor = (el) => {
+        const box = el.closest('label, li, [class*="option"], [class*="method"], div') || el.parentElement;
+        return ((box && box.innerText) || '').replace(/\s+/g, ' ').trim();
+      };
+      const wallet = /apple pay|google pay|paypal|klarna|clearpay/i;
+      const usable = radios.filter((el) => !wallet.test(textFor(el)));
+      const byLast4 = wanted ? usable.find((el) => textFor(el).includes(wanted)) : null;
+      const byCard = usable.find((el) => /credit|debit|card/i.test(textFor(el)));
+      const target = byLast4 || byCard || usable[0];
+      if (!target) return null;
+      target.click();
+      return textFor(target).slice(0, 60);
+    }, last4 || '').catch(() => null);
+    if (picked) return picked;
+  }
+  return null;
+}
+
 // What is still blocking a disabled pay button: empty required inputs and unticked boxes.
 async function describeBlockedPayment(page) {
   const notes = [];
@@ -6719,18 +6745,19 @@ async function confirmPayment(userId, onProgress = () => {}) {
           // otherwise take whichever appeared first.
           const last4 = String(card?.number || '').slice(-4);
           const savedCards = controls.filter((el) => /ending\s+(in\s+)?\d{3,4}|card\s+ending/i.test(String(el.text || '')) && !isWalletPayment(el.text));
-          const match = last4 ? savedCards.find((el) => String(el.text).includes(last4)) : null;
-          // If the intended card is not among the saved ones, enter it on the new-card form
-          // rather than charging whichever other card the site happens to list first.
-          const option = match
-            || (last4 ? controls.find((el) => isCardPaymentOption(el.text) && !/ending/i.test(el.text)) : null)
-            || savedCards[0]
-            || controls.find((el) => isCardPaymentOption(el.text));
-          if (option) {
+          const picked = await selectPaymentOptionRadio(session.page, last4);
+          if (picked) {
             session.pickedCardOption = true;
-            onProgress(`Selecting payment method — ${option.text}`);
-            await findAndClickPayButton(session.page, option.text).catch(() => {});
-            await settle(session.page, 1200);
+            onProgress(`Selecting payment method — ${picked}`);
+            await settle(session.page, 1500);
+          } else {
+            const option = savedCards[0] || controls.find((el) => isCardPaymentOption(el.text));
+            if (option) {
+              session.pickedCardOption = true;
+              onProgress(`Selecting payment method — ${option.text}`);
+              await findAndClickPayButton(session.page, option.text).catch(() => {});
+              await settle(session.page, 1500);
+            }
           }
         }
       }
