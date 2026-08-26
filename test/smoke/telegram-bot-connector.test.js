@@ -14,7 +14,7 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://example.supabase
 process.env.SUPABASE_KEY = process.env.SUPABASE_KEY || 'test-key';
 
 const telegramBot = require('../../connectors/telegram-bot');
-const { parseStartCommand, needsConfirmationButtons, _private } = telegramBot;
+const { parseStartCommand, needsConfirmationButtons, findPendingAction, describePendingAction, _private } = telegramBot;
 
 test('an organic /start with no payload carries no link token', () => {
   assert.deepEqual(parseStartCommand('/start'), { token: null });
@@ -43,6 +43,33 @@ test('a completed action needs no buttons', () => {
 test('no actions at all needs no buttons', () => {
   assert.equal(needsConfirmationButtons([]), false);
   assert.equal(needsConfirmationButtons(undefined), false);
+});
+
+// ── describePendingAction: this is the fix for a real bug found live — when the model calls
+// a tool with no accompanying prose, /chat's aggregate `text` falls back to a raw JSON dump
+// of tool results (agent-orchestrator.js's spoken || lastToolResultsText). The iOS app never
+// shows that because ConfirmCard renders the per-action cardText/text fields instead; Telegram
+// has no separate card UI, so it must read those same clean fields directly. ──────────────────
+test('a pending action with card detail shows both the detail and the prompt', () => {
+  const entry = { action: 'send_telegram', result: { pending: true, text: 'Check the details, then tap Confirm or Cancel.', cardText: 'Arina · Hey' } };
+  assert.equal(describePendingAction(entry), 'Arina · Hey\n\nCheck the details, then tap Confirm or Cancel.');
+});
+
+test('a pending action with no card detail falls back to the prompt alone', () => {
+  const entry = { action: 'book_uber', result: { pending: true, text: 'Check the ride, then tap Book.' } };
+  assert.equal(describePendingAction(entry), 'Check the ride, then tap Book.');
+});
+
+test('a pending action missing even its own text still gets a sane default, never the raw fallback', () => {
+  assert.equal(describePendingAction({ result: {} }), 'Ready for review.');
+  assert.equal(describePendingAction(null), 'Ready for review.');
+});
+
+test('findPendingAction returns the actual entry, not just a boolean', () => {
+  const pending = { action: 'send_telegram', result: { pending: true, text: 'hi' } };
+  const done = { action: 'get_calendar_events', result: { success: true } };
+  assert.equal(findPendingAction([done, pending]), pending);
+  assert.equal(findPendingAction([done]), null);
 });
 
 // ── callBotApi: the thin wrapper other exports build on ─────────────────────────────────

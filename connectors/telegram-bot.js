@@ -129,10 +129,27 @@ function parseStartCommand(text) {
 
 // Mirrors what the iOS ConfirmCard is reacting to: an action result marked pending review
 // (buildPendingReviewResult in pending-review.js sets both of these).
-function needsConfirmationButtons(actionResults = []) {
-  return actionResults.some(entry => (
+function findPendingAction(actionResults = []) {
+  return actionResults.find(entry => (
     entry?.result?.pending === true || entry?.result?.outcome === 'awaiting_user'
-  ));
+  )) || null;
+}
+
+function needsConfirmationButtons(actionResults = []) {
+  return findPendingAction(actionResults) !== null;
+}
+
+// The top-level /chat reply text can fall back to a raw JSON dump of tool results when the
+// model calls a tool with no accompanying prose (agent-orchestrator.js's
+// `spoken || lastToolResultsText` fallback) — the iOS ConfirmCard never shows this because it
+// renders the per-action cardText/actionSummary fields instead of the aggregate text. Telegram
+// has no separate card UI, so it must read those same clean per-action fields directly rather
+// than trust the aggregate text, which is exactly what buildPendingReviewResult in
+// pending-review.js always populates on the pending entry itself.
+function describePendingAction(pendingEntry) {
+  const prompt = pendingEntry?.result?.text || 'Ready for review.';
+  const detail = pendingEntry?.result?.cardText;
+  return detail ? `${detail}\n\n${prompt}` : prompt;
 }
 
 module.exports = {
@@ -147,6 +164,8 @@ module.exports = {
   findUserIdByChatId,
   saveLink,
   parseStartCommand,
+  findPendingAction,
   needsConfirmationButtons,
+  describePendingAction,
   _private: { callBotApi }
 };

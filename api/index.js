@@ -696,8 +696,9 @@ async function bridgeToChatPipeline(userId, message, req) {
 // approval parser (getPendingAction/isPendingConfirmMessage) instead of a second resolution
 // path keyed on an approval id.
 async function sendChatResultToTelegram(chatId, result) {
-  const replyText = String(result?.text || 'Done.').slice(0, 4096);
-  if (telegramBot.needsConfirmationButtons(result?.actions || [])) {
+  const pendingEntry = telegramBot.findPendingAction(result?.actions || []);
+  if (pendingEntry) {
+    const replyText = telegramBot.describePendingAction(pendingEntry).slice(0, 4096);
     await telegramBot.sendMessage(chatId, replyText, {
       replyMarkup: {
         inline_keyboard: [[
@@ -706,9 +707,10 @@ async function sendChatResultToTelegram(chatId, result) {
         ]]
       }
     });
-  } else {
-    await telegramBot.sendMessage(chatId, replyText);
+    return;
   }
+  const replyText = String(result?.text || 'Done.').slice(0, 4096);
+  await telegramBot.sendMessage(chatId, replyText);
 }
 
 async function handleTelegramBotMessage(message, req) {
