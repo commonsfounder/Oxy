@@ -6399,13 +6399,29 @@ function formatCardValue(field, card, profile) {
   }
 }
 
+// frame.evaluate() has no timeout parameter of its own — if a frame is stuck mid-navigation
+// (a slow-loading 3DS/bank-verification iframe is the realistic case on a real checkout,
+// but any third-party iframe can do this), it waits forever. A .catch() is no protection at
+// all against that: a promise that never settles never rejects either. Real bug, live
+// 2026-08-26: this hung confirmPayment for minutes with zero visibility, well past its own
+// explicit CONFIRM_WATCH_BUDGET_MS — because that budget is only checked BETWEEN loop
+// iterations, and one frame.evaluate() call inside a single iteration never returned at all.
+// Every per-frame evaluate on the payment-confirmation path goes through this instead, so one
+// bad frame degrades to "couldn't read that frame" rather than hanging the whole action.
+const FRAME_EVALUATE_TIMEOUT_MS = envInt('OXY_BROWSER_FRAME_EVALUATE_TIMEOUT_MS', 4000);
+
+function safeFrameEvaluate(frame, pageFunction, arg, fallback) {
+  return withTimeout(frame.evaluate(pageFunction, arg), FRAME_EVALUATE_TIMEOUT_MS, 'frame evaluate')
+    .catch(() => fallback);
+}
+
 // Enumerate fillable inputs/selects in ONE frame with enough surrounding text to
 // classify them. Runs per-frame because PSP card fields (Stripe Elements, Adyen,
 // Braintree, Checkout.com Frames) each live in their own cross-origin iframe — the
 // generic hint sources below (name/id/placeholder/aria-label/autocomplete/label) cover
 // all of them without any PSP-specific branches.
 async function enumeratePaymentInputs(frame) {
-  return frame.evaluate(() => {
+  return safeFrameEvaluate(frame, () => {
     const out = [];
     document.querySelectorAll('input, select').forEach((el, idx) => {
       const type = (el.getAttribute('type') || '').toLowerCase();
@@ -6432,7 +6448,7 @@ async function enumeratePaymentInputs(frame) {
       });
     });
     return out;
-  }).catch(() => []);
+  }, undefined, []);
 }
 
 async function fillFrameTextInput(frame, idx, value) {
@@ -6454,7 +6470,7 @@ async function fillFrameTextInput(frame, idx, value) {
 }
 
 async function fillFrameSelect(frame, idx, candidates) {
-  return frame.evaluate(({ i, wants }) => {
+  return safeFrameEvaluate(frame, ({ i, wants }) => {
     const el = document.querySelectorAll('input, select')[i];
     if (!el || el.tagName !== 'SELECT') return false;
     for (const want of wants) {
@@ -6469,7 +6485,7 @@ async function fillFrameSelect(frame, idx, candidates) {
       }
     }
     return false;
-  }, { i: idx, wants: candidates }).catch(() => false);
+  }, { i: idx, wants: candidates }, false);
 }
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -6548,7 +6564,7 @@ const THREEDS_CHALLENGE_PATTERN = /3-?d\s*secure|verify (?:your |a )?(?:payment|
 async function classifyPaymentOutcome(page) {
   const texts = [];
   for (const frame of page.frames()) {
-    const body = await frame.evaluate(() => (document.body ? document.body.innerText : '') || '').catch(() => '');
+    const body = await safeFrameEvaluate(frame, () => (document.body ? document.body.innerText : '') || '', undefined, '');
     if (body) texts.push(body.slice(0, 20000));
   }
   const combined = `${page.url()}\n${texts.join('\n')}`;
@@ -6613,7 +6629,7 @@ async function recordConfirmedPurchase(userId, session, confirmationText = '') {
 async function readPageText(page) {
   const texts = [];
   for (const frame of page.frames()) {
-    const body = await frame.evaluate(() => (document.body ? document.body.innerText : '') || '').catch(() => '');
+    const body = await safeFrameEvaluate(frame, () => (document.body ? document.body.innerText : '') || '', undefined, '');
     if (body) texts.push(body.slice(0, 20000));
   }
   return texts.join('\n');
@@ -6623,7 +6639,7 @@ async function readPageText(page) {
 // unticked, so the pay button stayed "(unavailable)".
 async function selectPaymentOptionRadio(page, last4) {
   for (const frame of page.frames()) {
-    const picked = await frame.evaluate((wanted) => {
+    const picked = await safeFrameEvaluate(frame, (wanted) => {
       const radios = [...document.querySelectorAll('input[type="radio"]')]
         .filter((el) => { const r = el.getBoundingClientRect(); return r.width && r.height; });
       if (!radios.length) return null;
@@ -6639,7 +6655,7 @@ async function selectPaymentOptionRadio(page, last4) {
       if (!target) return null;
       target.click();
       return textFor(target).slice(0, 60);
-    }, last4 || '').catch(() => null);
+    }, last4 || '', null);
     if (picked) return picked;
   }
   return null;
@@ -6649,7 +6665,7 @@ async function selectPaymentOptionRadio(page, last4) {
 async function describeBlockedPayment(page) {
   const notes = [];
   for (const frame of page.frames()) {
-    const found = await frame.evaluate(() => {
+    const found = await safeFrameEvaluate(frame, () => {
       const out = { empty: [], unchecked: [] };
       for (const el of document.querySelectorAll('input, select, textarea')) {
         const r = el.getBoundingClientRect();
@@ -6662,7 +6678,7 @@ async function describeBlockedPayment(page) {
         }
       }
       return out;
-    }).catch(() => null);
+    }, undefined, null);
     if (found?.empty?.length) notes.push(`empty: ${found.empty.slice(0, 8).join(', ')}`);
     if (found?.unchecked?.length) notes.push(`unticked: ${found.unchecked.slice(0, 8).join(', ')}`);
   }
@@ -7045,6 +7061,7 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 
 module.exports = {
   IMPORT_STATE_KEY,
+  safeFrameEvaluate,
   getPendingPaymentTotal,
   inspectStoredSession,
   RESUME_STATE_KEY,
