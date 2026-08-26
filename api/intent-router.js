@@ -51,6 +51,26 @@ function looksLikeLocalPlaceRequest(message) {
   return LOCAL_PLACE_TERMS.test(text);
 }
 
+// LOCAL_PLACE_TERMS mixes two different things: genuine locating language ("nearest",
+// "near", "where is") and bare category/brand nouns ("restaurant", "john lewis") that show
+// up in plenty of sentences that have nothing to do with location — "we were shopping in
+// john lewis", "email the restaurant", "text me when you're at the gym". Every collision
+// found so far (restaurant/communication 2026-08-07, john lewis/browser-session 2026-08-26)
+// has had this exact shape: a bare noun with no real locating signal alongside it.
+//
+// looksLikeLocalPlaceRequest alone stays as-is (used with an explicit ride verb at the
+// ride_to_local_place branch above, where a bare noun is already safe — "uber to that john
+// lewis" needs no separate "nearest"). This stricter variant is only for the bare fallback
+// at the bottom of inferDeterministicAction, which has no other verb narrowing it — it must
+// see real locating language, not just a noun, before assuming "find me a place" over
+// whatever else the sentence might actually be asking for.
+const LOCAL_PLACE_INTENT_TERMS = /\b(nearest|closest|near|nearby|around me|where'?s|where is|opening hours|store location|branch(?:es)?)\b/i;
+
+function looksLikeExplicitPlaceLookup(message) {
+  const text = normalizeText(message);
+  return looksLikeLocalPlaceRequest(text) && LOCAL_PLACE_INTENT_TERMS.test(text);
+}
+
 // Retailer names double as LOCAL_PLACE_TERMS ("john lewis"), so "get me pyjamas ON john
 // lewis" wrongly matched a place lookup. A request to BUY/GET a product — especially
 // "<product> on/from/at <retailer>" — is an online-shopping task (→ browser task), never a
@@ -598,7 +618,7 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeBrowserSessionRequest(text)) return null;
 
-  if (!looksLikeLocalPlaceRequest(text)) return null;
+  if (!looksLikeExplicitPlaceLookup(text)) return null;
 
   return {
     reason: 'find_local_place',

@@ -144,6 +144,19 @@ test('"nearest john lewis" and "buy from john lewis" are unaffected by the sessi
   assert.equal(inferDeterministicAction('is there a john lewis near me').actions[0].type, 'find_place');
 });
 
+// ── The structural fix: a bare category/brand noun is never enough on its own for the final
+// find_place fallback — it needs real locating language ("nearest", "near", "where is") too.
+// This is what makes the restaurant/communication and john lewis/browser-session collisions
+// above just two examples of ONE bug, not two separate ones — and proves it: none of these
+// three sentences match any of the specific exclusion lists above (no email/text/session/
+// basket wording at all), yet they still defer correctly, because they never say where they
+// want something located.
+test('a bare place-category mention with no locating language defers, with no exclusion list needed', () => {
+  assert.equal(inferDeterministicAction('the gym was busy today so I went for a run instead'), null);
+  assert.equal(inferDeterministicAction('john lewis called about a delayed delivery'), null);
+  assert.equal(inferDeterministicAction('my hotel room had a great view'), null);
+});
+
 test('clear flight price watches become bounded daily background checks', () => {
   const routed = inferDeterministicAction('Millie, watch flight prices to Turkey and tell me when a cheaper option appears');
   assert.equal(routed.reason, 'durable_price_watch');
