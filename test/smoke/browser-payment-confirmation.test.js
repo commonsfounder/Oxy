@@ -145,3 +145,105 @@ test('a failed guardConciergeSpend check stops before any approval is registered
     browserTask.runOrderingTurn = originalRunOrderingTurn;
   }
 });
+
+// Regression: a 3DS wait mid-confirm used to come back as a plain error, which (a) rendered
+// as a failure even though the checkout is genuinely still open, and (b) left no pending
+// approval registered — the user's next "check now"/"yes" had nothing deterministic to
+// resolve against and depended on the model noticing on its own, the exact fragility the
+// original ready_for_payment fix (above) existed to remove.
+test('a 3DS wait re-arms the same deterministic approval instead of reporting a failure', async () => {
+  const originalConfirmPayment = browserTask.confirmPayment;
+  browserTask.confirmPayment = async () => ({
+    type: 'awaiting_bank_approval',
+    text: 'Your bank wants you to approve this one — check your phone.'
+  });
+
+  const pendingActionCalls = [];
+  const deps = fakeDeps({
+    setPendingAction: async (userId, action, context) => {
+      pendingActionCalls.push({ userId, action, context });
+      return { approvalId: 'approval-2' };
+    }
+  });
+
+  try {
+    const result = await browserActions.handlers.confirm_browser_payment({
+      userId: 'user123',
+      action: 'confirm_browser_payment',
+      params: {},
+      enrichedParams: {},
+      context: { userMessage: 'check now' },
+      deps,
+      helpers: {}
+    });
+
+    assert.equal(pendingActionCalls.length, 1, 'setPendingAction must be called exactly once');
+    assert.deepEqual(pendingActionCalls[0].action, { type: 'confirm_browser_payment', input: {} });
+    assert.equal(pendingActionCalls[0].context.userMessage, 'check now');
+    assert.equal(result.success, false);
+    assert.equal(result.outcome, 'awaiting_user');
+    assert.equal(result.pending, true);
+    assert.equal(result.confirmation, 'review_required');
+    assert.match(result.text, /bank/i);
+    assert.equal(result.error, undefined, 'this is a pause, not an error');
+  } finally {
+    browserTask.confirmPayment = originalConfirmPayment;
+  }
+});
+
+test('a 3DS wait does not touch the spend cap — only a completed charge does', async () => {
+  const originalConfirmPayment = browserTask.confirmPayment;
+  browserTask.confirmPayment = async () => ({ type: 'awaiting_bank_approval', text: 'Check your phone.' });
+
+  let guardCalls = 0;
+  const deps = fakeDeps({
+    setPendingAction: async () => ({ approvalId: 'approval-3' }),
+    guardConciergeSpend: async () => { guardCalls += 1; return { ok: true }; }
+  });
+
+  try {
+    await browserActions.handlers.confirm_browser_payment({
+      userId: 'user123',
+      action: 'confirm_browser_payment',
+      params: {},
+      enrichedParams: {},
+      context: {},
+      deps,
+      helpers: {}
+    });
+    assert.equal(guardCalls, 0);
+  } finally {
+    browserTask.confirmPayment = originalConfirmPayment;
+  }
+});
+
+test('a genuine decline is still reported as a real error, not re-armed', async () => {
+  const originalConfirmPayment = browserTask.confirmPayment;
+  browserTask.confirmPayment = async () => ({ type: 'error', error: 'The payment was declined by the card issuer.' });
+
+  const pendingActionCalls = [];
+  const deps = fakeDeps({
+    setPendingAction: async (userId, action, context) => {
+      pendingActionCalls.push({ userId, action, context });
+      return { approvalId: 'should-not-happen' };
+    }
+  });
+
+  try {
+    const result = await browserActions.handlers.confirm_browser_payment({
+      userId: 'user123',
+      action: 'confirm_browser_payment',
+      params: {},
+      enrichedParams: {},
+      context: {},
+      deps,
+      helpers: {}
+    });
+    assert.equal(pendingActionCalls.length, 0);
+    assert.equal(result.success, false);
+    assert.match(result.error, /declined/i);
+    assert.equal(result.outcome, undefined);
+  } finally {
+    browserTask.confirmPayment = originalConfirmPayment;
+  }
+});

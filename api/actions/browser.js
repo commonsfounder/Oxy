@@ -146,9 +146,16 @@ async function runBrowserTask({ userId, action, params, enrichedParams, context,
 }
 
 async function confirmBrowserPayment({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
+  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain, setPendingAction } = deps;
   try {
     const result = await browserTask.confirmPayment(userId);
+    if (result.type === 'awaiting_bank_approval') {
+      // A 3DS wait is a pause, not a failure — and the user's next "check now"/"yes" must
+      // resolve deterministically the same way the original ready_for_payment approval
+      // does (see runBrowserTask above), not depend on the model noticing on its own.
+      await setPendingAction(userId, { type: 'confirm_browser_payment', input: {} }, context).catch(() => null);
+      return { success: false, outcome: 'awaiting_user', pending: true, confirmation: 'review_required', text: result.text };
+    }
     if (result.type === 'error') return { success: false, error: result.error };
     // Only a completed charge consumes the daily cap.
     const charged = browserTask.getPendingPaymentTotal?.(userId);

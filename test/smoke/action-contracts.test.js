@@ -177,6 +177,33 @@ test('Places server setup failure is explicit and not retryable', () => {
   assert.equal(recovery.retryable, false);
 });
 
+// Regression: a paused-for-you state (ready_for_payment, a 3DS wait mid-confirm) sets
+// success:false — only 'completed' is ever true — but is not a failure. Before this guard,
+// buildActionRecovery fell through to the action's generic contract.failureSummary and
+// labelled a live, still-open checkout waiting on the user's own "yes" as "Order task
+// failed" / "Payment confirmation failed".
+test('an awaiting_user pause does not inherit the contract\'s generic failure cardText', () => {
+  const readyForPayment = buildActionRecovery(
+    { type: 'run_browser_task', input: { goal: 'order a kettle' } },
+    { success: false, outcome: 'awaiting_user', pending: true, text: 'Ready to pay: £48.75.' }
+  );
+  assert.deepEqual(readyForPayment, {});
+
+  const bankApproval = buildActionRecovery(
+    { type: 'confirm_browser_payment', input: {} },
+    { success: false, pending: true, text: 'Your bank wants you to approve this one.' }
+  );
+  assert.deepEqual(bankApproval, {});
+});
+
+test('a genuine failure still gets the contract\'s failureSummary cardText', () => {
+  const recovery = buildActionRecovery(
+    { type: 'confirm_browser_payment', input: {} },
+    { success: false, error: 'The payment was declined by the card issuer.' }
+  );
+  assert.equal(recovery.cardText, 'Payment confirmation failed');
+});
+
 test('connector fallback summaries are not overwritten by generic contract text', () => {
   const result = applyActionContractResultMetadata(
     { type: 'find_place', input: { query: "the nearest mcdonald's" } },

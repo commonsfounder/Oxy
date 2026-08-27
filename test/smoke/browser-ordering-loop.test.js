@@ -8,6 +8,8 @@ const {
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
+  findCheapestDeliveryOption,
+  wantsExpeditedDelivery,
   isBrowserContinuationText,
   wantsExistingSession,
   isOrderGoal,
@@ -621,6 +623,49 @@ test('parseDeliveryPreferenceFromText reads a clear collection reply', () => {
 test('parseDeliveryPreferenceFromText returns null for an unrelated or ambiguous reply', () => {
   assert.equal(parseDeliveryPreferenceFromText('sure, sounds good'), null);
   assert.equal(parseDeliveryPreferenceFromText(''), null);
+});
+
+// Regression: a real purchase attempt (2026-08-26) silently paid an extra £4.50 for
+// next-day shipping because nothing ever looked at these radios — the checkout loop only
+// ever clicked "Continue" and inherited whatever the site had pre-selected. Distinct from
+// findDeliveryCollectionChoice above, which is the delivery-vs-COLLECTION toggle.
+test('findCheapestDeliveryOption picks the free tier over paid ones', () => {
+  const elements = [
+    { id: 0, text: 'Standard Delivery — FREE', locatorIndex: 0 },
+    { id: 1, text: 'Next Day Delivery — £4.50', locatorIndex: 1 },
+    { id: 2, text: 'Nominated Day — £6.99', locatorIndex: 2 },
+    { id: 3, text: 'Continue to payment', locatorIndex: 3 },
+  ];
+  const picked = findCheapestDeliveryOption(elements);
+  assert.ok(picked);
+  assert.equal(picked.text, 'Standard Delivery — FREE');
+});
+
+test('findCheapestDeliveryOption picks the lowest price when nothing is free', () => {
+  const elements = [
+    { id: 0, text: 'Economy — £2.99', locatorIndex: 0 },
+    { id: 1, text: 'Express — £5.99', locatorIndex: 1 },
+  ];
+  const picked = findCheapestDeliveryOption(elements);
+  assert.equal(picked.text, 'Economy — £2.99');
+});
+
+test('findCheapestDeliveryOption returns null when there is no real choice to make', () => {
+  // A single line is page copy, not a choice — nothing to default here.
+  assert.equal(findCheapestDeliveryOption([{ id: 0, text: 'Free delivery over £50', locatorIndex: 0 }]), null);
+  // Neither candidate names a price, so there's nothing to compare.
+  assert.equal(findCheapestDeliveryOption([
+    { id: 0, text: 'Standard delivery details', locatorIndex: 0 },
+    { id: 1, text: 'Express delivery details', locatorIndex: 1 },
+  ]), null);
+  assert.equal(findCheapestDeliveryOption([]), null);
+});
+
+test('wantsExpeditedDelivery only fires when the goal actually asks for speed', () => {
+  assert.equal(wantsExpeditedDelivery('order a kettle, I need it next day delivery'), true);
+  assert.equal(wantsExpeditedDelivery('get this to me by Friday'), true);
+  assert.equal(wantsExpeditedDelivery('order a kettle and go to checkout'), false);
+  assert.equal(wantsExpeditedDelivery(''), false);
 });
 
 test('closeSession closes the browser and removes the session', async () => {

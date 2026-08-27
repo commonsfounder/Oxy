@@ -740,6 +740,64 @@ async function tryApplyDeliveryPreference(page, session, steps, onProgress) {
   return true;
 }
 
+// Delivery/shipping SPEED options (Standard/Next day/Nominated day), each paired with a
+// price or "FREE" — distinct from findDeliveryCollectionChoice above, which is the
+// delivery-vs-COLLECTION toggle. Real purchase attempt (2026-08-26) silently paid an extra
+// £4.50 for next-day shipping because nothing ever looked at these radios; the checkout
+// loop only ever clicked "Continue" and inherited whatever the page had pre-selected.
+// Needs at least two real candidates: a single line mentioning delivery speed is page
+// copy ("Free delivery over £50"), not an actual choice to make.
+const DELIVERY_SPEED_LABEL_PATTERN = /\b(standard|economy|saver|next\s*day|nominated|named\s*day|express|premium|priority)\b.*(?:\bfree\b|[£$€]\s?\d)/i;
+const DELIVERY_SPEED_FREE_PATTERN = /\bfree\b/i;
+const DELIVERY_SPEED_PRICE_PATTERN = /[£$€]\s?(\d+(?:[.,]\d{2})?)/;
+const DELIVERY_SPEED_LABEL_MAX_LEN = 120;
+
+function findCheapestDeliveryOption(elements) {
+  const candidates = (elements || []).filter((el) => {
+    const t = String(el.text || '').trim();
+    return t.length <= DELIVERY_SPEED_LABEL_MAX_LEN && DELIVERY_SPEED_LABEL_PATTERN.test(t);
+  });
+  if (candidates.length < 2) return null;
+  const priced = candidates
+    .map((el) => {
+      const t = String(el.text || '');
+      if (DELIVERY_SPEED_FREE_PATTERN.test(t)) return { el, price: 0 };
+      const match = t.match(DELIVERY_SPEED_PRICE_PATTERN);
+      return { el, price: match ? Number(match[1].replace(',', '.')) : null };
+    })
+    .filter((c) => c.price !== null);
+  if (!priced.length) return null;
+  priced.sort((a, b) => a.price - b.price);
+  return priced[0].el;
+}
+
+// A goal that explicitly asks for speed or a date must not be silently downgraded to the
+// free/slow default below — the cheapest-by-default rule only covers what the user never
+// specified.
+function wantsExpeditedDelivery(goal) {
+  return /\b(next[\s-]?day|express|expedited|priority|asap|urgent|fastest|by\s+(?:tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(String(goal || ''));
+}
+
+// Click idiom mirrors tryApplyDeliveryPreference above: resolve by locatorIndex, scroll,
+// force-click. Guarded by session.deliverySpeedPicked at the call site so a live radio
+// isn't re-clicked on every pass.
+async function tryPickCheapestDeliveryOption(page, session, steps, onProgress) {
+  const elements = await extractClickableElements(page).catch(() => []);
+  const target = findCheapestDeliveryOption(elements);
+  if (!target) return false;
+  const locator = await page.evaluateHandle(
+    ({ selector, idx }) => document.querySelectorAll(selector)[idx] || null,
+    { selector: CLICKABLE_SELECTOR, idx: target.locatorIndex }
+  ).then((h) => h.asElement()).catch(() => null);
+  if (!locator) return false;
+  onProgress(`Selecting delivery — ${target.text}…`);
+  await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await locator.click({ timeout: 10000, force: true }).catch(() => false);
+  session.history.push(`Step ${steps}: [delivery-speed] selected "${target.text}"`);
+  session.lastWasRecipe = true;
+  return true;
+}
+
 // Re-auth detection. A stored login (storageState) eventually expires — the merchant
 // invalidates the cookie (days/weeks, or on a new IP / 2FA challenge). When that happens
 // the agent lands on a sign-in wall and, blind to it, burns its whole step budget trying
@@ -1369,6 +1427,12 @@ If the last two steps were similar navigation without adding an item, your next 
 After add, go straight to basket then checkout. "ready_for_payment" is the win condition.
 A decent item in the basket now is infinitely better than perfect research that never adds.
 
+If checkout asks you to choose a delivery/shipping SPEED (e.g. "Standard delivery — FREE" vs
+"Next day — £4.50" vs "Nominated day"), pick the free or cheapest option by default — never
+the fastest or most expensive one just because it's listed first or pre-selected. Only pick a
+paid/expedited tier if the goal explicitly asked for it (e.g. "next day delivery", "needs it
+by Friday"). This is separate from delivery-vs-collection, which is asked about elsewhere.
+
 If an item dialog/modal is open (size, options, quantity), FINISH it: choose the required
 options, then press its Add/confirm button — usually at the bottom of the dialog; scroll
 inside the dialog if you can't see it. NEVER press Close/X on a dialog for an item you
@@ -1507,6 +1571,10 @@ Do NOT guess an elementId when you are not confident — decline instead.
 For shopping/ordering goals (anything with "order", "basket", "cart", "buy", "checkout", "add to"):
 COMMIT IMMEDIATELY to the first reasonable match when the label is clear. After add, go
 straight to basket then checkout. "ready_for_payment" is the win condition.
+
+If a delivery/shipping SPEED choice is offered ("Standard — FREE" vs "Next day — £4.50" vs
+similar), pick the free or cheapest option by default unless the goal explicitly asked for a
+faster or named delivery date.
 
 CRITICAL: elementId MUST be one of the ids listed below (0 to ${lastId}). Do NOT invent a number.
 
@@ -4093,6 +4161,18 @@ async function tryPaymentReady(session, page, steps = 0, onProgress = () => {}) 
             await settle(page, RECIPE_SETTLE_MS);
             return null; // page may have changed shape (e.g. a delivery form appeared) — re-evaluate fresh
           }
+        }
+      }
+      // Delivery/shipping SPEED (Standard/Next-day/Nominated) is a separate choice from the
+      // toggle above, and defaults to the cheapest option rather than asking — unlike
+      // delivery-vs-collection, there's nothing genuinely ambiguous to resolve with the user
+      // here, only a default the site shouldn't get to pick for them.
+      if (!session.deliverySpeedPicked && !wantsExpeditedDelivery(session.goal)) {
+        const pickedSpeed = await tryPickCheapestDeliveryOption(page, session, steps, onProgress);
+        if (pickedSpeed) {
+          session.deliverySpeedPicked = true;
+          await settle(page, RECIPE_SETTLE_MS);
+          return null; // re-evaluate fresh, same as the delivery-preference branch above
         }
       }
     }
@@ -6826,7 +6906,14 @@ async function confirmPayment(userId, onProgress = () => {}) {
 
     touchSession(userId);
     if (sawChallenge) {
-      return { type: 'error', error: 'The bank is asking for verification (3-D Secure). Approve the payment in your banking app, then ask me to confirm again — the checkout is still open.' };
+      // Not a failure: this is the expected shape of a 3DS-protected card. Only the
+      // cardholder can approve it, so the checkout stays open and waits — the caller
+      // (confirmBrowserPayment) re-arms the same pending approval so the user's next
+      // "check now"/"yes" resolves this deterministically instead of the model guessing.
+      return {
+        type: 'awaiting_bank_approval',
+        text: 'Your bank wants you to approve this one — check your phone for a prompt or open your banking app, then say "check now". The checkout is still open and nothing else has been charged.'
+      };
     }
     // Name what was actually on the page: "couldn't confirm" alone gives nothing to act on.
     const leftover = (await extractClickableElements(session.page).catch(() => []))
@@ -7088,6 +7175,8 @@ module.exports = {
   isCheckoutLoginWallUrl,
   findDeliveryCollectionChoice,
   parseDeliveryPreferenceFromText,
+  findCheapestDeliveryOption,
+  wantsExpeditedDelivery,
   isBrowserContinuationText,
   wantsExistingSession,
   looksLikeLoginWall,
