@@ -1487,12 +1487,14 @@ function buildActionRecovery(action, result) {
   const contract = getActionContract(type);
   const error = String(result?.error || '').trim();
   if (result?.success !== false) return {};
-  // A review pause — ready_for_payment, a 3DS wait, any other awaiting_user handoff — sets
+  // A review pause — ready_for_payment, a 3DS wait, any other awaiting_user handoff, or a
+  // browser task that timed out mid-step and can be resumed with "keep going" — sets
   // success:false (only 'completed' is ever true) but is not a failure. It must not inherit
   // the action's generic failureSummary cardText, or a paused-for-you state renders
   // identically to a genuinely broken one ("Order task failed" for a live checkout waiting
-  // on the user's own "yes").
+  // on the user's own "yes", or for a slow site the loop is still able to pick back up).
   if (result?.outcome === 'awaiting_user' || result?.pending === true) return {};
+  if (result?.outcome === 'incomplete' || result?.incomplete === true || result?.continuesBrowsing === true) return {};
 
   if ((type === 'find_place' || type === 'book_uber') && /need your current location|enable location/i.test(error)) {
     return {

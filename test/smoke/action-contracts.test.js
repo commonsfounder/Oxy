@@ -204,6 +204,27 @@ test('a genuine failure still gets the contract\'s failureSummary cardText', () 
   assert.equal(recovery.cardText, 'Payment confirmation failed');
 });
 
+// Regression, found live 2026-08-27: a browser task that timed out mid-step but is still
+// resumable ("Say 'keep going' and I'll resume from here") sets outcome:'incomplete' — not a
+// failure — but the guard above only checked for 'awaiting_user'/pending, so this state still
+// fell through to the generic failureSummary and rendered "Order task failed" on a checkout
+// that was, per its own text, still open and picking back up.
+test('an incomplete/resumable browser pause does not inherit the failure cardText either', () => {
+  const timedOutButResumable = buildActionRecovery(
+    { type: 'run_browser_task', input: { goal: 'order a coat' } },
+    { success: false, outcome: 'incomplete', incomplete: true, continuesBrowsing: true, text: "The site took too long to respond, so I paused safely before checkout. Say “keep going” and I'll resume from here." }
+  );
+  assert.deepEqual(timedOutButResumable, {});
+
+  // Also guard on the boolean flags alone, in case a future caller sets one without the
+  // outcome string — inferActionOutcome treats either as sufficient.
+  const flagOnly = buildActionRecovery(
+    { type: 'run_browser_task', input: {} },
+    { success: false, continuesBrowsing: true, text: 'Still working on it.' }
+  );
+  assert.deepEqual(flagOnly, {});
+});
+
 test('connector fallback summaries are not overwritten by generic contract text', () => {
   const result = applyActionContractResultMetadata(
     { type: 'find_place', input: { query: "the nearest mcdonald's" } },
