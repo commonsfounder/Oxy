@@ -24,6 +24,8 @@ const signOutBtn = document.getElementById('signOutBtn');
 const siteEl = document.getElementById('site');
 const shareBtn = document.getElementById('shareBtn');
 const statusEl = document.getElementById('status');
+const sharedListEl = document.getElementById('sharedList');
+const sharedListRowsEl = document.getElementById('sharedListRows');
 
 let site = null;
 let token = null;
@@ -72,13 +74,63 @@ function showSignIn() {
   (userIdEl.value ? passwordEl : userIdEl).focus();
 }
 
+function timeAgo(iso) {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+/** GET /agent/browser once; both the current-site status and the shared list read from it. */
+async function fetchSessions() {
+  const response = await fetch(`${API}/agent/browser`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = await response.json();
+  return Array.isArray(body.sessions) ? body.sessions : [];
+}
+
+async function unshare(targetSite, rowEl) {
+  rowEl.querySelector('button').disabled = true;
+  try {
+    const response = await fetch(`${API}/vault/browser-session/${encodeURIComponent(targetSite)}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    rowEl.remove();
+    if (targetSite === site) await showShare();
+  } catch (error) {
+    say(`Could not unshare ${targetSite}: ${error.message}`, 'err');
+    rowEl.querySelector('button').disabled = false;
+  }
+}
+
+function renderSessionRow(entry, currentSite) {
+  const row = document.createElement('div');
+  row.className = 'session-row';
+  const label = document.createElement('span');
+  label.textContent = entry.site === currentSite ? `${entry.site} (this site)` : entry.site;
+  const btn = document.createElement('button');
+  btn.className = 'linkish';
+  btn.textContent = 'Unshare';
+  btn.addEventListener('click', () => unshare(entry.site, row));
+  row.append(label, btn);
+  return row;
+}
+
 async function showShare() {
   signinEl.classList.add('hidden');
   shareSectionEl.classList.remove('hidden');
   siteEl.textContent = site || 'No site';
+  sharedListRowsEl.replaceChildren();
+  sharedListEl.classList.add('hidden');
 
   if (!site) {
     say('Open the site you want to share, then click the extension again.');
+    shareBtn.disabled = true;
     return;
   }
 
@@ -86,8 +138,28 @@ async function showShare() {
   // script mid-run. So the permission state is checked on open: once granted, sharing goes
   // straight through with no prompt and nothing to interrupt it.
   hasPermission = await chrome.permissions.contains({ origins: [sitePattern()] }).catch(() => false);
-  shareBtn.textContent = hasPermission ? 'Share session' : 'Allow access to this site';
   shareBtn.disabled = false;
+
+  let sessions = [];
+  try { sessions = await fetchSessions(); } catch { /* status list is a courtesy, not required to share */ }
+
+  const current = sessions.find(s => s.site === site);
+  if (current) {
+    const age = timeAgo(current.updatedAt);
+    const expiry = current.expiresAt ? `, expires ${new Date(current.expiresAt).toLocaleDateString()}` : '';
+    say(`Already shared ${age}${expiry}. Sharing again refreshes it.`, 'ok');
+    shareBtn.textContent = hasPermission ? 'Refresh session' : 'Allow access to this site';
+  } else {
+    say('');
+    shareBtn.textContent = hasPermission ? 'Share session' : 'Allow access to this site';
+  }
+
+  const others = sessions.filter(s => s.site !== site);
+  const rows = current ? [current, ...others] : others;
+  if (rows.length) {
+    sharedListEl.classList.remove('hidden');
+    for (const entry of rows) sharedListRowsEl.appendChild(renderSessionRow(entry, site));
+  }
 }
 
 async function init() {
@@ -215,7 +287,9 @@ async function share() {
     }
 
     const dropped = body.cookiesDropped ? `, ${body.cookiesDropped} not for this site dropped` : '';
-    say(`Shared ${body.cookiesStored} cookies for ${body.site}${dropped}.\nExpires ${new Date(body.expiresAt).toLocaleDateString()}.`, 'ok');
+    const message = `Shared ${body.cookiesStored} cookies for ${body.site}${dropped}.\nExpires ${new Date(body.expiresAt).toLocaleDateString()}.`;
+    await showShare();
+    say(message, 'ok');
   } catch (error) {
     say(`Could not reach Oxy: ${error.message}`, 'err');
     shareBtn.disabled = false;

@@ -167,6 +167,22 @@ test('the browser-sessions route reads the resume state from the blob, not phant
 });
 
 
+// The popup's "unshare" button hits this route. It must scope the delete to BOTH the
+// authenticated user and the requested site -- dropping either `.eq` would let one user's
+// request delete another user's session, or delete every site that user has shared at once.
+test('the unshare route deletes exactly one user\'s one site, nothing broader', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
+
+  const route = source.slice(source.indexOf("app.delete('/vault/browser-session/:site'"));
+  const body = route.slice(0, route.indexOf('\n});'));
+
+  assert.match(body, /\.eq\('user_id',\s*userId\)/, 'must scope the delete to the authenticated user');
+  assert.match(body, /\.eq\('site',\s*site\)/, 'must scope the delete to the requested site');
+  assert.match(body, /normalizeSite\(req\.params\.site\)/,
+    'the site must be normalized the same way the GET list and the import route store it');
+});
+
 // The sensitive-site gate was matched against the site being asked for, while cookie
 // filtering deliberately keeps subdomains. Those two rules disagreed, and the gap between
 // them was the whole feature's worst case: `accounts.google.com` was refused, but asking

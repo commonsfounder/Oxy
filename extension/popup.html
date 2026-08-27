@@ -38,6 +38,21 @@
   .err { color: #d9534f; }
   .note { margin: 12px 0 0; font-size: 11px; color: #6f6f77; }
   .hidden { display: none; }
+  #sharedList { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #2a2a2e; }
+  #sharedList h2 {
+    font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: #6f6f77; margin: 0 0 8px;
+  }
+  .session-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 5px 0; font-size: 12px; color: #c7c7cc;
+  }
+  .session-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-row button {
+    width: auto; padding: 3px 8px; margin: 0; background: none; border: 1px solid #3a3a3f;
+    color: #8b8b93; font-size: 11px; font-weight: 400; flex: none;
+  }
+  .session-row button:hover:not(:disabled) { color: #d9534f; border-color: #d9534f; }
 </style>
 </head>
 <body>
@@ -64,6 +79,11 @@
     <button id="shareBtn" disabled>Share session</button>
     <button id="signOutBtn" class="linkish">Sign out</button>
     <p class="note">Only this site's cookies are sent. Oxy checks again on its side and drops anything else.</p>
+
+    <div id="sharedList" class="hidden">
+      <h2>Shared sites</h2>
+      <div id="sharedListRows"></div>
+    </div>
   </section>
 
   <p id="status"></p>

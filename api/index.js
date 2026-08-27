@@ -44,7 +44,7 @@ const {
   listUses,
   recordUse
 } = require('./services/credential-grants');
-const { prepareImportedSession } = require('./services/session-import');
+const { prepareImportedSession, normalizeSite } = require('./services/session-import');
 const { IMPORT_STATE_KEY, RESUME_STATE_KEY, inspectStoredSession } = require('./services/browser-task');
 const { readSignedInSignals } = require('./services/session-health');
 const {
@@ -9989,6 +9989,25 @@ app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, re
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Forget a shared or agent-established site session. The extension's popup needs this so
+// sharing is not a one-way door -- the same list it shows must be a list it can undo from.
+app.delete('/vault/browser-session/:site', requireSessionAuth, async (req, res) => {
+  const userId = getAuthenticatedUserId(req);
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+  const site = normalizeSite(req.params.site);
+  if (!site) return res.status(400).json({ error: 'A site is required.' });
+  try {
+    const { error, count } = await supabase.from('browser_sessions')
+      .delete({ count: 'exact' })
+      .eq('user_id', userId)
+      .eq('site', site);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ removed: (count || 0) > 0, site });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not remove that session.' });
   }
 });
 
