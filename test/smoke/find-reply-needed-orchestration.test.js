@@ -1,11 +1,7 @@
-// Full find_reply_needed orchestration: search inbox -> group to latest-message-per-thread ->
-// cheap pre-filter -> fetch real thread context -> LLM batch judgment -> truthful prioritized
-// summary (api/index.js's find_reply_needed case). Mocks only the outermost I/O boundary:
-// connectors/index.js's dispatch registry (for search_emails), connectors/google.js's
-// getThreadContext (a property access at call time, so a direct monkey-patch works), and the
-// generateBrain call that api/index.js destructures at require time (needs a Module._load
-// intercept, same convention as gmail-cleanup-mutations.test.js's axios/runtime mock) — so the
-// REAL orchestration code in api/index.js and the REAL logic in reply-needed.js both run.
+// Full find_reply_needed orchestration: search, group to the latest message per thread,
+// pre-filter, fetch thread context, batch judgment, prioritised summary. Only the outermost I/O
+// is mocked — the dispatch registry, getThreadContext, and generateBrain via a Module._load
+// intercept, since api/index.js destructures it at require time — so the real logic runs.
 
 require('dotenv').config();
 

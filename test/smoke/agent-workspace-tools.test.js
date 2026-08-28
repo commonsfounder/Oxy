@@ -7,13 +7,9 @@ process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'test-key';
 process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-secret';
 
 /*
- * The workspace existed as storage the user could browse and the agent could never touch.
- * These tests cover the seam that changed that: a declared tool the model can call, routed
- * through executeAction to the workspace service.
- *
- * index.js resolves `agentWorkspace.<fn>` at call time against the shared module object, so
- * replacing the exports here swaps the storage layer under the real executeAction — the
- * production code path runs, only the database is a double.
+ * The seam that lets the model reach the workspace: a declared tool routed through executeAction
+ * to the workspace service. index.js resolves `agentWorkspace.<fn>` at call time, so replacing
+ * the exports here swaps the storage under the real code path — only the database is a double.
  */
 const agentWorkspace = require('../../api/services/agent-workspace');
 const agentRuntime = require('../../api/services/agent-runtime');

@@ -1,15 +1,9 @@
 'use strict';
 
-// Reading whether a shared session is still signed in.
-//
-// A session shared from the user's browser expires, gets invalidated by the site, or is
-// simply refused when replayed from a server. None of that announces itself: the agent just
-// starts behaving like a logged-out visitor, and the user has no way to tell that is what
-// happened. This reads a page's own signals and says which it is.
-//
-// The judgement is deliberately conservative. A page carrying BOTH a sign-in link and an
-// account menu is normal (many retailers show both), so a bare keyword count is not enough:
-// what settles it is which signals are present that the other state cannot explain.
+// Reading whether a shared session is still signed in, from the page's own signals — expiry,
+// invalidation and refusal all announce themselves only as the agent quietly behaving like a
+// logged-out visitor. Conservative: a page carrying both a sign-in link and an account menu is
+// normal, so what settles it is which signals the other state cannot explain.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

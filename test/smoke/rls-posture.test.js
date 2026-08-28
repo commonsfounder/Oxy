@@ -1,13 +1,7 @@
-// Guards the RLS posture of the six tables that shipped with row-level security never
-// enabled. Before the fix, the PUBLIC anon key could read millie_identities,
-// millie_identity_handles and participants across users, and could successfully INSERT into
-// participants (verified live, HTTP 201, against the real PostgREST endpoint).
-//
-// Two layers, deliberately:
-//   1. A static check that always runs — the migration must keep covering all six tables.
-//   2. A live client-context check that runs only when a SUPABASE_ANON_KEY is present. The
-//      anon key is not committed to this repo, so this is opt-in rather than skipped
-//      silently in a way nobody would notice.
+// Guards the RLS posture of the six tables that once shipped without row-level security, where
+// the public anon key could read across users and insert. Two layers: a static check that the
+// migration keeps covering all six, and a live client-context check that runs only when a
+// SUPABASE_ANON_KEY is present — opt-in, since the key isn't in this repo.
 
 require('dotenv').config();
 

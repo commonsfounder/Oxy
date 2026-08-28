@@ -1,11 +1,6 @@
-// Phase 5: MILLIE_VOICE_PROMPT was rewritten wholesale, so this file tests the new prompt's
-// actual properties rather than forcing old phrasing to survive a genuine rewrite. It replaces
-// the previous version, which asserted specific sentences from the prior draft (e.g. "personal
-// presence in the person's home") that this rewrite intentionally does not reuse verbatim.
-//
-// The prompt is a template literal wrapped at ~100 columns for readability, so any multi-word
-// assertion uses \s+ between words rather than a literal space — a phrase that happens to land
-// on a line break must still match.
+// Tests MILLIE_VOICE_PROMPT's properties rather than pinning exact sentences, which would force
+// old phrasing to survive a genuine rewrite. The prompt is a template literal wrapped at ~100
+// columns, so multi-word assertions use \s+ rather than a literal space.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

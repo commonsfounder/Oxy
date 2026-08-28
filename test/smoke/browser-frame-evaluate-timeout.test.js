@@ -1,12 +1,8 @@
-// Real bug, live 2026-08-26: confirmPayment hung for minutes with zero visibility, well
-// past its own explicit CONFIRM_WATCH_BUDGET_MS (45s). Root cause: frame.evaluate() has no
-// timeout parameter of its own, and a .catch() is no protection at all against a promise
-// that never settles — a stuck/slow-loading iframe (a 3DS/bank-verification frame is the
-// realistic case on a real checkout) makes the whole payment-confirmation loop hang forever,
-// because the loop's own deadline is only checked BETWEEN iterations, never inside one.
+// frame.evaluate() takes no timeout of its own, and a .catch() is no protection against a promise
+// that never settles — a stuck 3DS iframe hangs the payment-confirmation loop past its own
+// budget, which is only checked between iterations.
 //
-// Set before requiring the module — OXY_BROWSER_FRAME_EVALUATE_TIMEOUT_MS is read once at
-// module load into a top-level const, so it must be in the environment first.
+// Set before requiring the module: the timeout env var is read once into a top-level const.
 process.env.OXY_BROWSER_FRAME_EVALUATE_TIMEOUT_MS = '50';
 
 const assert = require('node:assert/strict');

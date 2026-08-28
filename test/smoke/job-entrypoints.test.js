@@ -1,11 +1,6 @@
-// Every standalone entrypoint must be able to reach the function it claims to run.
-//
-// This exists because retention-job.js destructured `runRetentionSweep` from api/index.js,
-// which never exported it. `npm run retention:job` threw a TypeError on every invocation and
-// nothing noticed: data-retention.js was fully implemented and unit-tested, and the suite
-// stayed green, while the bounded-retention promise on /privacy was enforced by nothing.
-//
-// A unit test on the service could never have caught that. This checks the wiring instead.
+// Every standalone entrypoint must be able to reach the function it claims to run. A job that
+// destructures a name its module never exported throws on every invocation while the service
+// behind it stays fully implemented, unit-tested and green. This checks the wiring instead.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

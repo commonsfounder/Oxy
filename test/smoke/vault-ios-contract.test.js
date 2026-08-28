@@ -1,14 +1,9 @@
 'use strict';
 
-// The iOS Vault screen decodes these responses with non-optional Swift properties, and a
-// missing key there is not a blank row — Codable throws and the WHOLE list fails to load.
-// The screen and the endpoint live in different languages and different build systems, so
-// nothing else in either toolchain notices when one side drops a column.
-//
-// This checks the two directions that actually break: every key the Swift decoder requires
-// must be selected by the query behind the endpoint, and the not-null columns must really
-// be not-null in the migration (a null decodes into a non-optional String just as fatally
-// as a missing key does).
+// The iOS Vault screen decodes these with non-optional properties, so a missing key is not a
+// blank row — Codable throws and the whole list fails to load, and neither toolchain notices
+// when one side drops a column. Two directions checked: every key the decoder requires is
+// selected by the query, and the not-null columns really are not-null in the migration.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

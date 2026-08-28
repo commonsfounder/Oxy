@@ -7,13 +7,8 @@ const { createDelegatedRunLifecycle } = require('../../api/services/delegated-ru
 const brainProvider = require('../../api/services/brain-provider');
 
 /*
- * A review-gated action inside an agent run used to be terminal: the loop kept spending
- * iterations against a result that said "waiting for approval", the run ended, the user
- * confirmed, the action executed on its own — and the goal that asked for it was never
- * picked back up.
- *
- * These cover the park-and-continue behaviour: stop at the approval, keep the checkpoint,
- * and resume from it once the approval lands.
+ * Park-and-continue around a review-gated action inside an agent run: stop at the approval, keep
+ * the checkpoint, and resume the goal from it once the approval lands.
  */
 
 const realCallTools = brainProvider.callToolsBrain;

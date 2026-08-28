@@ -1,12 +1,7 @@
-// Full plan_itinerary / modify_itinerary orchestration (api/index.js's cases): real grounded web
-// search -> itinerary-engine.js generation/modification -> honest text, and workspace
-// save/reload/re-save for cross-session editing. Mocks only the outermost I/O boundary: the
-// generateBrain call api/index.js destructures at require time (needs a Module._load
-// intercept, same convention as find-reply-needed-orchestration.test.js), webSearchBrain
-// (same technique), and agent-workspace.js's read/write (direct property monkey-patch, since
-// api/index.js requires it as `const agentWorkspace = require('./services/agent-workspace')`
-// and calls its methods as properties at call time) — so the REAL orchestration code in
-// api/index.js and the REAL logic in itinerary-engine.js both run.
+// Full plan_itinerary / modify_itinerary orchestration: grounded search, generation, honest text,
+// and workspace save/reload/re-save for cross-session editing. Only the outermost I/O is mocked —
+// generateBrain and webSearchBrain via a Module._load intercept, agent-workspace by property
+// patch — so the real orchestration and itinerary-engine.js both run.
 
 require('dotenv').config();
 

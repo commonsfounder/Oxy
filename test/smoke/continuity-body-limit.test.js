@@ -10,13 +10,9 @@ process.env.OXY_SESSION_SECRET = process.env.OXY_SESSION_SECRET || 'test-secret'
 const app = require('../../api');
 
 /*
- * The continuity endpoints take a whole vendor export, so they carry a much larger body
- * limit than the rest of the API. body-parser marks a request as read once it runs, which
- * means a default-limit parser mounted in front would 413 the upload before the larger one
- * ever saw it — the global parser has to SKIP these paths, not run first.
- *
- * These assertions go through the real app over a real socket, because the failure being
- * guarded against is entirely a middleware-ordering effect.
+ * The continuity endpoints take a whole vendor export and carry a larger body limit. body-parser
+ * marks a request read once it runs, so the global parser has to skip these paths rather than
+ * 413 the upload first. Asserted over a real socket, the failure being one of ordering.
  */
 function post(server, path, body) {
   const payload = Buffer.from(JSON.stringify(body));

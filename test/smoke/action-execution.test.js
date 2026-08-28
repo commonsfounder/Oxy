@@ -279,14 +279,9 @@ test('action runner does not look up a linked card for non-money review actions'
   assert.deepEqual(lookups, []);
 });
 
-// ── Regression: a logging failure must never fail the action it's logging, or crash the
-// batch. `logAction` in production is wired to `supabase.from('action_log').insert(...)`,
-// whose return value is a THENABLE (has `.then`) but does NOT implement `.catch` as an own
-// method — chaining `.catch` on it (the old code) threw a synchronous TypeError, which
-// escaped every background/scheduled/routine/resume call site (none of them pass a trace),
-// mapping the whole batch for that iteration to a false failure even when actions upstream
-// had already succeeded. Fixed in api/services/action-execution.js via safeLogAction, which
-// always goes through a real try/await/catch instead of assuming `.catch` exists.
+// ── A logging failure must never fail the action it is logging, or the batch. A PostgREST
+// insert is thenable but has no `.catch`, so chaining one throws synchronously and turns a
+// whole iteration into a false failure. safeLogAction uses a real try/await/catch instead.
 function fakeSupabaseBuilder() {
   // Mimics supabase-js's PostgrestFilterBuilder: thenable, but `.catch` is not an own method.
   return { then(resolve) { resolve(); } };

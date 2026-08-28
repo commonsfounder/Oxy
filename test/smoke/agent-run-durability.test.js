@@ -27,13 +27,8 @@ const { createDelegatedRunLifecycle } = require('../../api/services/delegated-ru
 const brainProvider = require('../../api/services/brain-provider');
 
 /*
- * A run used to live entirely in one instance's memory: `runAgenticLoop(...)` was
- * fire-and-forget, so a recycle mid-run left the task at 'running' forever with no progress
- * saved and no error. Re-running restarted the goal and re-executed everything it had
- * already done.
- *
- * These cover the three parts of the fix: a checkpoint written every iteration, a resume
- * that continues rather than restarts, and a sweep that hands back abandoned runs.
+ * A run must survive its instance: a checkpoint written every iteration, a resume that continues
+ * rather than restarting and re-doing completed work, and a sweep that reclaims abandoned runs.
  */
 
 const realCallTools = brainProvider.callToolsBrain;

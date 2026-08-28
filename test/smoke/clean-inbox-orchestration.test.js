@@ -1,11 +1,7 @@
-// Full clean_inbox orchestration: search -> classify (real emailTriageSignals) -> bulk
-// archive -> per-sender unsubscribe -> truthful summary (api/index.js's clean_inbox case).
-// Mocks only the outermost I/O boundary — connectors/index.js's dispatch registry — so the
-// REAL orchestration code in api/index.js and the REAL classification logic in
-// gmail-cleanup.js/emailTriageSignals both run for real. The Gmail HTTP layer itself
-// (archive_emails/label_emails/unsubscribe_email against real API semantics) is covered
-// separately in gmail-cleanup-mutations.test.js — this file proves the pieces are wired
-// together correctly, not the HTTP calls a second time.
+// Full clean_inbox orchestration: search, classify, bulk archive, per-sender unsubscribe,
+// truthful summary. Only the dispatch registry is mocked, so the real orchestration and the real
+// classification both run. The Gmail HTTP layer is covered in gmail-cleanup-mutations.test.js;
+// this proves the pieces are wired together.
 
 require('dotenv').config();
 

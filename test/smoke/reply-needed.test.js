@@ -1,11 +1,6 @@
-// Pure logic for "who's waiting on me?" (api/services/reply-needed.js). Thread-level judgment
-// of whether the CURRENT state of a thread needs something from the user — deliberately a
-// different question from message-level email triage (is this message urgent/promotional),
-// which already has its own classifier (emailTriageSignals). The actual LLM judgment call and
-// real Gmail thread-fetching are covered by the orchestration test
-// (find-reply-needed-orchestration.test.js) and live verification; these tests cover the
-// deterministic parts: the cheap pre-filter, thread grouping, response parsing, and the
-// prioritized summary.
+// The deterministic parts of "who's waiting on me?" — the pre-filter, thread grouping, response
+// parsing and prioritised summary. The judgment call and real thread-fetching are covered in
+// find-reply-needed-orchestration.test.js.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

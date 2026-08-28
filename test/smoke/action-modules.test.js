@@ -1,13 +1,8 @@
 'use strict';
 
-// Guards the api/actions extraction.
-//
-// Handler bodies were moved down a directory out of api/index.js, and several of them call
-// require() lazily *inside* the function rather than at the top of the file. A lazy require
-// with a now-wrong relative path resolves fine at import time and only throws when that one
-// action runs, so loading the module proves nothing. Three modules shipped exactly that way
-// during the extraction and the suite stayed green, because no test happened to invoke those
-// particular branches. This resolves every require path statically instead.
+// Resolves every require path in api/actions statically. Several handlers require lazily inside
+// the function, so a wrong relative path loads fine and only throws when that one action runs —
+// importing the module proves nothing.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

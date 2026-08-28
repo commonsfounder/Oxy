@@ -113,16 +113,10 @@ test('redelivered succeeded events settle at most one pending checkpoint and nev
     data: { object: { id: 'pi_4', amount: 3000, description: 'concierge spend', metadata: { oxy_user_id: 'user-1' } } }
   };
 
-  // Simulate Stripe redelivering the same event (or two near-simultaneous
-  // deliveries) by firing both handler calls without awaiting the first
-  // before starting the second. Because handleStripeWebhookEvent has real
-  // await points between its read and its write, Promise.all here actually
-  // interleaves the two calls at the microtask level — both can complete
-  // their "read" step before either completes its "write" step, which is
-  // exactly the contention window a real concurrent claim must survive.
-  // A sequential await-then-await version would NOT exercise this: see the
-  // report for how this was verified against the pre-fix read-then-clear
-  // logic.
+  // Both handler calls fire without awaiting the first, so the real await points between read
+  // and write let Promise.all interleave them at the microtask level — both read before either
+  // writes, which is the contention window a concurrent claim must survive. Awaiting them in
+  // sequence would not exercise it at all.
   const [first, second] = await Promise.all([
     handleStripeWebhookEvent(supabase, event),
     handleStripeWebhookEvent(supabase, event)

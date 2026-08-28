@@ -1,13 +1,7 @@
-// Phase 4: what the raw `preferences` table is allowed to put in front of the model.
-//
-// Before this, getPreferences() joined every row in the table — verified live against a real
-// user record, ~90 `_stitle_<uuid>` chat-title rows, ~40 `proactive.*` dedup markers, a
-// concierge balance, pending-action JSON, a travel-workflow blob, and three rows written by a
-// regex-triggered style-cue matcher as `User said "<raw message>" — adapt accordingly`, which
-// turned one-off phrasing into a permanent instruction. See the Millie voice audit
-// (2026-08-06) for the full render. These tests pin the two halves of the fix: nothing but an
-// explicit allowlist can reach the prompt, and the writer that used to populate junk rows is
-// gone.
+// What the general-purpose `preferences` table is allowed to put in front of the model. It holds
+// chat titles, dedup markers, balances and pending-action JSON alongside anything about style,
+// so these pin both halves: only an explicit allowlist reaches the prompt, and the writer that
+// turned one-off phrasing into a permanent instruction is gone.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

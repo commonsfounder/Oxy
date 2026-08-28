@@ -1,14 +1,7 @@
 'use strict';
 
-// Reading the amount before asking to spend it.
-//
-// tryPaymentReady is, by its own comment, "the one place every ready_for_payment path
-// funnels through" -- and it returned `total: ''`. So the agent reached a real John Lewis
-// payment step and offered "I'll pay with your visa ending 4464, say the word" without the
-// amount appearing anywhere: not in the reply, not in its task steps, not in its events.
-//
-// A yes to an unknown sum is not consent. This reads the total off the page so the amount
-// can be shown, and reports nothing rather than guessing when it cannot find one.
+// Reading the amount before asking to spend it: a yes to an unknown sum is not consent. Reads
+// the total off the page so it can be shown, and reports nothing rather than guessing.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

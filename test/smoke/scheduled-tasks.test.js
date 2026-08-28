@@ -85,15 +85,9 @@ test('isScheduledRunNoteworthy tolerates a missing/malformed task without throwi
   assert.equal(isScheduledRunNoteworthy({}, {}), true);
 });
 
-// ── isRecurringCadence: regression for createScheduledTask silently downgrading a real
-// recurring request. "starting today, check my calendar every morning" legitimately combines
-// recurrence:'daily' with a due_date pinning the first run — createScheduledTask used to
-// unconditionally overwrite resolvedRecurrence to 'once' whenever due_date was present,
-// discarding the requested cadence entirely. advanceScheduledTask branches on task.recurrence,
-// so a downgraded task would deactivate after its first run instead of rescheduling — a
-// "daily" watch fired exactly once and never again. Live-verified against real Supabase: after
-// the fix, recurrence:'daily' with a due_date survives creation and advances to the next real
-// occurrence (~23-24h out) after its first run, instead of the row going inactive. ───────────
+// ── isRecurringCadence: a due_date pins the first run and must not downgrade the cadence to
+// 'once'. "starting today, check my calendar every morning" legitimately carries both, and
+// advanceScheduledTask branches on recurrence — a downgraded task fires once and never again. ─
 test('isRecurringCadence recognises daily and weekly as real repeating cadences', () => {
   assert.equal(isRecurringCadence('daily'), true);
   assert.equal(isRecurringCadence('weekly'), true);

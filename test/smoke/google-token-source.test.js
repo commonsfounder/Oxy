@@ -1,14 +1,7 @@
-// Where the Google connector gets its credentials, and — more importantly — what it is
-// allowed to WRITE BACK.
-//
-// Both rules here come from real incidents on this deployment:
-//   1. The connectors row for user123 held a perfectly good refresh token while a separate
-//      audit concluded Google was "not configured", because it read .env instead. The DB is
-//      the source of truth and must win.
-//   2. The deployed GMAIL_REFRESH_TOKEN is truncated (39 chars; Google answers
-//      invalid_grant). The old env fallback saved whatever it found AND set enabled: true,
-//      so a broken env value manufactured a connector row that claimed to be connected and
-//      could never work — including for a user who had just disconnected on purpose.
+// Where the Google connector gets its credentials, and what it may write back. Two rules: the
+// connectors row is the source of truth and wins over .env; and an env value is never saved as
+// an enabled connector on sight, since a broken one then claims to be connected forever —
+// including for a user who just disconnected on purpose.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
