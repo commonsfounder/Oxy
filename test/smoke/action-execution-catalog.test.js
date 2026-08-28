@@ -322,7 +322,7 @@ test('representative inline, connector, handoff, browser, Stripe and reminder se
   const result = await execute('u', [
     { type: 'find_place', input: { query: 'coffee' } },
     { type: 'book_uber', input: { destination: 'home' } },
-    { type: 'run_browser_task', input: {} },
+    { type: 'browser_open', input: { url: 'https://shop.example' } },
     { type: 'stripe_charge', input: { amount: 500, description: 'test' } },
     { type: 'create_reminder', input: { title: 'Call Mum', due_date: '2026-09-01' } }
   ], { bypassReview: true, sequential: true });
@@ -330,7 +330,7 @@ test('representative inline, connector, handoff, browser, Stripe and reminder se
   assert.deepEqual(seen.map(item => [item.type, item.adapter.kind, item.adapter.id || null]), [
     ['find_place', 'connector', 'maps'],
     ['book_uber', 'connector', 'uber'],
-    ['run_browser_task', 'inline', null],
+    ['browser_open', 'inline', null],
     ['stripe_charge', 'inline', null],
     ['create_reminder', 'inline', null]
   ]);
@@ -341,7 +341,7 @@ test('Action Execution reaches production adapter routing and preserves real out
   const effects = [];
   const inline = async ({ type }) => {
     effects.push(type);
-    if (type === 'run_browser_task') return { success: false, outcome: 'handoff_required', handoffRequired: true, text: 'Browser is ready.' };
+    if (type === 'browser_open') return { success: false, outcome: 'handoff_required', handoffRequired: true, text: 'Browser is ready.' };
     if (type === 'stripe_charge') return { success: true, receipt: { id: 'pi_fake_once', amount: 1200 } };
     if (type === 'create_reminder') return { success: false, outcome: 'handoff_required', handoffRequired: true, nativeExecution: 'reminder', text: 'Reminder ready.' };
     throw new Error(`unexpected inline action: ${type}`);
@@ -370,7 +370,7 @@ test('Action Execution reaches production adapter routing and preserves real out
     { type: 'save_to_notion', input: { content: 'Remember this.' } },
     { type: 'find_place', input: { query: 'coffee' } },
     { type: 'book_uber', input: { destination: 'home' } },
-    { type: 'run_browser_task', input: { goal: 'find shoes' } },
+    { type: 'browser_open', input: { url: 'https://shop.example' } },
     { type: 'create_reminder', input: { title: 'Call Mum', due_date: '2026-09-01' } }
   ], { sequential: true });
   assert.deepEqual(completed.map(item => item.result.outcome), [

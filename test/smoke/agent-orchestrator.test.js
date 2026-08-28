@@ -9,13 +9,13 @@ test('extractToolCalls does not double-count a call present in both parts and re
   // Shape seen live: @google/genai's resp.functionCalls is a derived view over the same
   // candidates[0].content.parts array, not an independent second call.
   const resp = {
-    candidates: [{ content: { parts: [{ functionCall: { name: 'run_browser_task', args: { goal: 'buy shoes' } } }] } }],
-    functionCalls: [{ name: 'run_browser_task', args: { goal: 'buy shoes' } }]
+    candidates: [{ content: { parts: [{ functionCall: { name: 'browser_open', args: { url: 'https://shop.example' } } }] } }],
+    functionCalls: [{ name: 'browser_open', args: { url: 'https://shop.example' } }]
   };
   const calls = extractToolCalls(resp);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].name, 'run_browser_task');
-  assert.deepEqual(calls[0].args, { goal: 'buy shoes' });
+  assert.equal(calls[0].name, 'browser_open');
+  assert.deepEqual(calls[0].args, { url: 'https://shop.example' });
 });
 
 test('extractToolCalls falls back to parts when resp.functionCalls is absent', () => {

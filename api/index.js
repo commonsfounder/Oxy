@@ -28,14 +28,14 @@ const { isNonEmptyString, isValidCalendarDate } = require('./services/request-va
 const googleConnector = require('../connectors/google');
 const telegram = require('../connectors/telegram');
 const telegramBot = require('../connectors/telegram-bot');
-const { inferDeterministicAction, inferCapabilitySweepAction } = require('./intent-router');
+const { inferDeterministicAction } = require('./intent-router');
 const { resolveRetailerFromGoal, allRetailerAliases } = require('./services/retailer-sites');
-const browserTask = require('./services/browser-task');
-const { runCapabilitySweep } = require('./services/capability-sweep');
 const { createActionExecution, unavailableActionResult } = require('./services/action-execution');
 const { createDeclaredAdapterInvoker } = require('./services/declared-adapter-invoker');
 const { normalizeActionOutcome } = require('./services/action-outcome');
 const { createUserDataLifecycle, createUserDataRouteHandlers } = require('./services/user-data-lifecycle');
+const dataRetention = require('./services/data-retention');
+const { playbookGuidanceFor } = require('./services/playbooks');
 const actionRegistry = require('./actions');
 const {
   createGrant,
@@ -45,7 +45,8 @@ const {
   recordUse
 } = require('./services/credential-grants');
 const { prepareImportedSession, normalizeSite } = require('./services/session-import');
-const { IMPORT_STATE_KEY, RESUME_STATE_KEY, inspectStoredSession } = require('./services/browser-task');
+const { IMPORT_STATE_KEY, RESUME_STATE_KEY } = require('./services/browser-session');
+const { inspectStoredSession, fillReauthLogin } = require('./services/browser-access');
 const { readSignedInSignals } = require('./services/session-health');
 const {
   PROACTIVE_WINDOWS,
@@ -1228,41 +1229,6 @@ function parsePrice(text = '') {
   return Number.isFinite(amount) ? amount : null;
 }
 
-function decidePaymentByCap(totalText, budgetCap) {
-  const total = parsePrice(totalText);
-  const cap = Number(budgetCap);
-  if (!total || !cap || cap <= 0) return { decision: 'approve', total, cap: Number.isFinite(cap) ? cap : null };
-  return { decision: total <= cap ? 'pay' : 'approve', total, cap };
-}
-
-async function runLegacyActionLoop({ generate, execute, confirm, maxSteps = 6, budgetCap = null }) {
-  const actions = [];
-  let spoken = '';
-  for (let step = 1; step <= maxSteps; step += 1) {
-    const response = await generate();
-    const text = typeof response === 'string' ? response : (response?.text || '');
-    const parsed = parseActions(text);
-    spoken = parsed.spoken || spoken;
-    if (!parsed.actions.length) return { status: 'done', spoken, actions, steps: step };
-
-    const batch = await execute(parsed.actions);
-    actions.push(...batch);
-    const pending = batch.find(entry => entry?.result?.confirmation === 'review_required' || entry?.result?.pending);
-    if (pending) {
-      if (pending.action === 'run_browser_task') {
-        const decision = decidePaymentByCap(pending.result?.total, budgetCap);
-        if (decision.decision === 'pay') {
-          const confirmed = await confirm(pending);
-          actions.push({ action: pending.action, result: confirmed });
-          continue;
-        }
-      }
-      return { status: 'paused', spoken, actions, steps: step };
-    }
-  }
-  return { status: 'maxSteps', spoken, actions, steps: maxSteps };
-}
-
 function guardCalendarActionsForUserMessage(actions = [], userMessage = '') {
   const intent = calendarIntentKind(userMessage);
   if (!Array.isArray(actions) || !actions.length) return [];
@@ -1685,6 +1651,15 @@ function buildDynamicSystemPrompt(memory, preferences, availableActions, userCon
   });
 }
 
+// Optional domain guidance for THIS request, from api/services/playbooks.js. Loaded on
+// relevance rather than shipped on every turn, and absent for most requests — a goal no
+// playbook covers gets the general prompt and every capability, which is the normal case.
+function buildPlaybookContext(message = '') {
+  const guidance = playbookGuidanceFor(message);
+  if (!guidance) return '';
+  return `HOW THIS KIND OF TASK USUALLY GOES (guidance, not instructions — the capabilities are the same either way):\n${guidance}`;
+}
+
 function isEmailReplyDraftRequest(message = '') {
   return /\b(reply|respond|email back|write back|get back to|send (him|her|them) back)\b/i.test(String(message || ''));
 }
@@ -1954,19 +1929,37 @@ function isPureContentGenerationTurn(message = '') {
   return !actionOrGoal;
 }
 
+// A plain question about the world — answerable by talking (with search grounding if needed)
+// rather than by doing something. No possessive reference to the user's own accounts/data,
+// and no imperative asking for an outcome.
+const QUESTION_OPENER = /^(?:what|whats|what's|why|how|when|who|whose|where|which|is|are|was|were|does|do|did|can|could|should|would|will)\b/i;
+const OWN_THINGS = /\b(?:my|mine|our|i'?ve|i have)\b/i;
+const IMPERATIVE_REQUEST = /\b(?:please|can you|could you|would you|i need you to|i want you to)\b/i;
+
+function isPlainWorldQuestion(message = '') {
+  const text = String(message || '').trim().toLowerCase();
+  if (!text) return false;
+  if (!QUESTION_OPENER.test(text)) return false;
+  if (OWN_THINGS.test(text)) return false;          // "what's on my calendar" needs real data
+  if (IMPERATIVE_REQUEST.test(text)) return false;  // "can you book..." is a request, not a question
+  return true;
+}
+
+// Which turns get the full think/act/observe loop.
+//
+// This used to be an ALLOWLIST of English verbs (book|order|buy|send|call|email|...), which
+// meant an ordinary request whose verb was not on the list — "cancel my subscription",
+// "renew my passport", "dispute this fine", "turn off my morning briefing" — never reached a
+// loop that could act at all, and got a single-shot chat reply instead. Whether Adam is
+// allowed to reason is not something a verb list should decide.
+//
+// It is now an exclusion: everything gets the loop except the few kinds of turn that
+// genuinely do not want one.
 function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, autonomyLevel = 'Active', pendingAction = null } = {}) {
   if (quickTurn || pendingAction || autonomyLevel === 'Quiet') return false;
-  if (isPureContentGenerationTurn(message)) return false;
-  const text = String(message || '').toLowerCase();
-  const explicitAutonomousGoal =
-    /\b(make money|earn cash|side hustle|moneti[sz]e|profit|financial freedom)\b/.test(text) ||
-    /\b(handle|monitor|track|arrange|organize|coordinate|keep working|work on this|take care of|sort this out)\b/.test(text) ||
-    /\b(research|find|compare)\b.+\b(and|then)\b.+\b(book|buy|order|send|schedule|create|open|message|email)\b/.test(text);
-  const directToolIntent =
-    /\b(book|order|buy|purchase|send|call|email|create|add|schedule|remind|reserve|open|navigate|directions)\b/.test(text) ||
-    /^(please\s+|can you\s+|could you\s+)?(text|message)\s+(me|him|her|them|[a-z][a-z'-]{1,})\b/.test(text);
-  const personalDataIntent = /\b(my|in my|from my|on my)\b.+\b(email|calendar|inbox|messages|reminders|contacts|playlist|music)\b/.test(text);
-  return explicitAutonomousGoal || directToolIntent || personalDataIntent;
+  if (isPureContentGenerationTurn(message)) return false;  // long prose streams better
+  if (isPlainWorldQuestion(message)) return false;         // answerable by talking
+  return Boolean(String(message || '').trim());
 }
 
 // Actions authored by the cheap streaming model were unreliable enough to discard while
@@ -2196,25 +2189,9 @@ async function inferContextualDeterministicTurn(userId, message, settings, trace
   const normalized = text.toLowerCase();
   const historyOptions = { since: options.since };
 
-  const capabilitySweep = inferCapabilitySweepAction(text);
-  if (capabilitySweep) return capabilitySweep;
-
-  // A browser checkout can pause on a real user choice (delivery vs collection, email,
-  // address, or a generic "keep going" handoff). Route that next turn back to the live
-  // Playwright session before the general model sees it; otherwise the model can merely
-  // acknowledge the choice while the retailer page remains untouched.
-  const browserSession = browserTask.getSession(userId);
-  const browserContinuationText = browserTask.isBrowserContinuationText(text);
-  const browserContinuation = browserContinuationText && (
-    browserSession?.page || await browserTask.hasResumableSession(userId)
-  );
-  if (browserContinuation) {
-    return {
-      reason: 'browser_task_continuation',
-      spoken: "I'll continue the browser task.",
-      actions: [{ type: 'run_browser_task', input: { goal: text } }]
-    };
-  }
+  // A paused browser task used to be routed back into the ordering loop from here. It no
+  // longer needs a branch: the session persists, and the agent loop simply calls
+  // browser_observe to see where it left off, exactly as it would on any other page.
 
   const appointmentTurn = await inferAppointmentBookingTurn(userId, text);
   if (appointmentTurn) return appointmentTurn;
@@ -2629,7 +2606,7 @@ const ACTION_STATUS_LABELS = {
   generate_visual: 'Generating visual',
   create_diagram: 'Creating diagram',
   create_presentation: 'Building presentation',
-  run_browser_task: 'Browsing the web'
+  browser_open: 'Opening page'
 };
 
 function getActionStatusLabel(actionType, phase = 'start') {
@@ -5442,7 +5419,7 @@ app.post('/briefings/:id/read', async (req, res) => {
 
 // Dashboard "go handle it" path for an inbox card — deliberately a plain REST call, not
 // a chat/agent-loop turn. Routing this through the general model's tool-calling would let
-// it decide for itself whether to try run_browser_task on a bank site; calling
+// it decide for itself whether to try browser primitives on a bank site; calling
 // buildEmailActionPlan directly means that's never even on the table. See its own comment
 // for what it actually does (mines the real email for real links, never attempts a login).
 app.post('/emails/action-plan', async (req, res) => {
@@ -5720,7 +5697,7 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
     quickTurn ? Promise.resolve(null) : getLatestNativeContext(userId)
   ]);
   // Real autonomy/guardMode for the AUTONOMY & APPROVAL prompt block — this only explains the
-  // setting to the model; the server-side review gate in action-runner.js is unaffected by it.
+  // setting to the model; the server-side review gate in action-execution.js is unaffected by it.
   const autonomyContext = {
     autonomy: parseJsonObject(nativeContext?.settings)?.autonomy,
     guardMode: chatSettings?.guardMode === true
@@ -5763,7 +5740,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
         buildPendingActionContext(requestContext.pendingAction),
         emailReplyContext,
         emailDraftContext,
-        buildResolvedContextBlock(resolvedContext)
+        buildResolvedContextBlock(resolvedContext),
+        buildPlaybookContext(message)
       ].filter(Boolean).join('\n\n'),
       statedContext,
       autonomyContext
@@ -6042,7 +6020,7 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
 // Deliberately never routed through the general agent/tool-calling loop, and
 // get_email_action_links is deliberately not registered in action-contracts.js — a bank
 // or card-issuer site can't be safely logged into by a bot (2FA, aggressive anti-automation),
-// so the model is never even given the option to try run_browser_task on one of these. This
+// so the model is never even given the option to try browser actions on one of these. This
 // mines the ORIGINAL email for real links the provider already sent (e.g. Revolut's own
 // "Add money" link) and asks the model only to write short manual steps and pick which of
 // those real links matter — it selects and labels existing links, it never gets to invent a
@@ -6728,6 +6706,12 @@ function mergeProactiveSummary(target, source) {
   for (const key of Object.keys(emptyProactiveSummary())) {
     target[key] = (target[key] || 0) + (source[key] || 0);
   }
+}
+
+// retention-job.js's entrypoint. The service takes an explicit supabase client so it stays
+// testable; this supplies the server's own client and matches runProactiveSweep's shape.
+async function runRetentionSweep(logger = console) {
+  return dataRetention.runRetentionSweep(supabase, { logger });
 }
 
 async function runProactiveSweep(logger = console) {
@@ -7592,16 +7576,6 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       } catch (error) {
         trace.log('pending_action.cancel_failed', error.message);
       }
-      // Unlike an ordinary drafted-but-never-executed action, a pending
-      // confirm_browser_payment holds a real, live browser session open — cancelling it
-      // must actually release that resource (cancel_browser_payment closes the session),
-      // not just discard the approval row and leave a Chromium instance running.
-      if (pendingAction.action?.type === 'confirm_browser_payment') {
-        await executeActions(userId, [{ type: 'cancel_browser_payment', input: {} }], {
-          userMessage: pendingAction.userMessage || message,
-          trace
-        }, trace).catch(() => {});
-      }
       if (cancelled || !pendingAction.taskId) {
         await settlePendingAction(userId, pendingAction, 'cancelled');
       }
@@ -8119,7 +8093,7 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
               useSearch: isBroadMoneyGoal || useSearch,
               runtimeSessionId,
               onBrowserProgress: agenticSendStatus
-                ? (label) => agenticSendStatus('browser_progress', label, { action: 'run_browser_task' })
+                ? (label) => agenticSendStatus('browser_progress', label, { action: 'browser_open' })
                 : null,
               ...(matchedTask ? { continuationMessage: message } : {})
             },
@@ -9916,7 +9890,7 @@ app.post('/vault/browser-session', requireSessionAuth, async (req, res) => {
 });
 
 // Permission to use a stored credential without asking first. The grant is the authority
-// and only the user can create one: the model may narrow it (run_browser_task's
+// and only the user can create one: the model may narrow it (the browser action's
 // credentialSites) but can never widen it. See api/services/credential-grants.js.
 app.post('/vault/grants', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
@@ -10044,7 +10018,7 @@ app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const { username, password, saveToVault, label } = req.body || {};
-    const result = await browserTask.fillReauthLogin(userId, { username, password, saveToVault, label });
+    const result = await fillReauthLogin(userId, { username, password, saveToVault, label });
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -10056,7 +10030,7 @@ app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
 // api/services/browser-task.js's runOrderingTurnImpl.
 // Chat settings (Phase 4 of the aside-parity roadmap) — effort is stored/exposed as a
 // preference only (no model-selection wiring). Guard mode is enforced server-side, see
-// api/services/action-runner.js's executionMode gate.
+// api/services/action-execution.js's executionMode gate.
 app.get('/chat-settings', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -10331,9 +10305,8 @@ const actionDeps = {
   getPreferenceMap,
   setPreferenceValue,
   forgetMemory,
-  // Lets run_browser_task register its own ready_for_payment pause as a real, durable
-  // approval — the same deterministic yes/no matching every other review-gated action
-  // already gets — instead of leaving "the user said yes" to the model's own judgment.
+  // Lets any review-gated action register a durable approval, rather than leaving a
+  // later "yes" to the model's own judgment.
   setPendingAction,
   // The model boundary stays bound here: the orchestration tests mock it by intercepting
   // this file's require of brain-provider, and handlers should be handed model access
@@ -10344,11 +10317,10 @@ const actionDeps = {
 
 module.exports = app;
 module.exports.runProactiveSweep = runProactiveSweep;
+module.exports.runRetentionSweep = runRetentionSweep;
 module.exports.parseActions = parseActions;
 module.exports.mentionsActionCommitment = mentionsActionCommitment;
 module.exports.parsePrice = parsePrice;
-module.exports.decidePaymentByCap = decidePaymentByCap;
-module.exports.runAgentLoop = runLegacyActionLoop;
 module.exports.inferCompoundReadOnlyTurn = inferCompoundReadOnlyTurn;
 module.exports.summarizeReadOnlyActionResults = summarizeReadOnlyActionResults;
 module.exports.getStructuredDataResults = getStructuredDataResults;

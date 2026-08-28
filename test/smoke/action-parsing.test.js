@@ -12,8 +12,6 @@ const {
   parseActions,
   mentionsActionCommitment,
   parsePrice,
-  decidePaymentByCap,
-  runAgentLoop,
   inferCompoundReadOnlyTurn,
   summarizeReadOnlyActionResults,
   getStructuredDataResults,
@@ -27,19 +25,6 @@ const {
   isEmailDraftRequest,
   findRecentEmailTarget
 } = require('../../api/index.js');
-const { inferCapabilitySweepAction } = require('../../api/intent-router');
-
-// Build a fake model that returns scripted replies in order, and an executor that returns
-// scripted result batches — so we can drive runAgentLoop's control flow deterministically.
-function scriptedLoop({ replies, batches = [] }) {
-  let r = 0; let b = 0;
-  return {
-    generate: async () => ({ text: replies[r++] ?? '' }),
-    execute: async () => batches[b++] ?? [],
-    confirm: async () => ({ success: true, text: 'Paid.' })
-  };
-}
-const ACT = '<action>{"actions":[{"type":"x"}]}</action>';
 
 test('parseActions extracts a single action block and strips it from spoken text', () => {
   const { spoken, actions, parseError } = parseActions(
@@ -152,23 +137,6 @@ test('compound read-only routing preserves email then calendar order', () => {
   assert.equal(turn.reason, 'compound_read_only');
   assert.deepEqual(turn.actions.map(action => action.type), ['search_emails', 'get_calendar_events']);
   assert.equal(turn.actions[1].input.when, 'tomorrow');
-});
-
-test('the full capability batch has a deterministic chat route and preserves explicit targets', () => {
-  const turn = inferCapabilitySweepAction(
-    'Run the capability_sweep action: weather_city=London; amazon_query="noise-cancelling headphones"; github_repo=commonsfounder/Oxy;'
-  );
-  assert.equal(turn.reason, 'capability_sweep');
-  assert.equal(turn.actions[0].type, 'capability_sweep');
-  assert.deepEqual(turn.actions[0].input, {
-    weather_city: 'London',
-    amazon_query: 'noise-cancelling headphones',
-    github_repo: 'commonsfounder/Oxy'
-  });
-});
-
-test('ordinary capability questions do not execute the sweep', () => {
-  assert.equal(inferCapabilitySweepAction('What capabilities can it do?'), null);
 });
 
 test('compound read-only routing preserves calendar then email order', () => {
@@ -378,73 +346,6 @@ test('parsePrice extracts amounts from real checkout strings', () => {
   assert.equal(parsePrice(''), null);
 });
 
-test('decidePaymentByCap auto-pays only within a set cap', () => {
-  assert.equal(decidePaymentByCap('£80', 100).decision, 'pay');
-  assert.equal(decidePaymentByCap('£100', 100).decision, 'pay'); // boundary inclusive
-  assert.equal(decidePaymentByCap('£150', 100).decision, 'approve'); // over cap
-  assert.equal(decidePaymentByCap('sold out', 100).decision, 'approve'); // unparseable → never pay
-  assert.equal(decidePaymentByCap('£10', 0).decision, 'approve'); // no cap → never auto-pay
-  assert.equal(decidePaymentByCap('£10', null).decision, 'approve');
-});
-
-test('runAgentLoop stops when the model emits no action (done)', async () => {
-  const s = scriptedLoop({ replies: ['All finished.'] });
-  const out = await runAgentLoop({ userId: 'u', contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'done');
-  assert.equal(out.spoken, 'All finished.');
-  assert.equal(out.steps, 1);
-});
-
-test('runAgentLoop chains: acts, feeds results back, then finishes', async () => {
-  const s = scriptedLoop({
-    replies: [`Looking it up. ${ACT}`, 'Here is the answer.'],
-    batches: [[{ action: 'x', result: { text: 'data' } }]]
-  });
-  const out = await runAgentLoop({ userId: 'u', contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'done');
-  assert.equal(out.spoken, 'Here is the answer.');
-  assert.equal(out.steps, 2);
-});
-
-test('runAgentLoop pauses when an action needs the user (review_required)', async () => {
-  const s = scriptedLoop({
-    replies: [`Working. ${ACT}`],
-    batches: [[{ action: 'send_email', result: { confirmation: 'review_required', text: 'Send this?' } }]]
-  });
-  const out = await runAgentLoop({ userId: 'u', contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'paused');
-});
-
-test('runAgentLoop auto-pays a browser purchase under the cap', async () => {
-  const s = scriptedLoop({
-    replies: [`Buying. ${ACT}`, 'Booked your tickets.'],
-    batches: [[{ action: 'run_browser_task', result: { confirmation: 'review_required', total: '£80' } }]]
-  });
-  const out = await runAgentLoop({ userId: 'u', budgetCap: 100, contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'done');
-  assert.equal(out.spoken, 'Booked your tickets.');
-});
-
-test('runAgentLoop pauses a browser purchase over the cap (no auto-pay)', async () => {
-  let confirmed = false;
-  const s = scriptedLoop({
-    replies: [`Buying. ${ACT}`],
-    batches: [[{ action: 'run_browser_task', result: { confirmation: 'review_required', total: '£150' } }]]
-  });
-  s.confirm = async () => { confirmed = true; return { success: true }; };
-  const out = await runAgentLoop({ userId: 'u', budgetCap: 100, contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'paused');
-  assert.equal(confirmed, false); // never paid over cap
-});
-
-test('runAgentLoop is bounded by maxSteps', async () => {
-  const s = scriptedLoop({
-    replies: Array(10).fill(`More. ${ACT}`),
-    batches: Array(10).fill([{ action: 'x', result: { text: 'ok' } }])
-  });
-  const out = await runAgentLoop({ userId: 'u', maxSteps: 3, contents: [{ role: 'user', parts: [{ text: 'go' }] }], ...s });
-  assert.equal(out.status, 'maxSteps');
-});
 
 test('pendant transcription upload validation rejects empty and accepts wav audio field payloads', () => {
   assert.deepEqual(validatePendantTranscriptionUpload(null), { ok: false, status: 400, error: 'No audio file received.' });

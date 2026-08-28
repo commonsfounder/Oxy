@@ -11,7 +11,7 @@ const {
 } = require('../../api/action-contracts');
 
 test('every money-moving action routes through human review (executionMode: review)', () => {
-  // Regression guard for the P0: the action-runner gates review on executionMode === 'review'.
+  // Regression guard for the P0: action-execution gates review on executionMode === 'review'.
   // These actions move (or purport to move) real money; if any resolves to direct-execute, the
   // agent could spend without confirmation. getActionContract must fail them safe.
   const moneyActions = [
@@ -36,24 +36,31 @@ test('getActionContract leaves non-review actions as direct execute', () => {
   assert.equal(getActionContract('nonexistent_action'), null);
 });
 
-test('run_browser_task and its payment follow-ups stay direct-execute despite risk:high', () => {
-  // These are the one deliberate exception to "high risk = review" (see the money-actions
-  // test above): run_browser_task MUST actually browse before it's known what there even is
-  // to review, so gating the whole call behind upfront review (like stripe_charge) would
-  // mean it never runs at all. The review happens INSIDE the api/index.js case handler, at
-  // the moment the loop reaches ready_for_payment — this test just locks in that none of the
-  // three accidentally fall into the fail-safe auto-review gate (getActionContract routes
-  // risk:'high' to executionMode:'review' UNLESS executionMode is already set explicitly).
-  for (const type of ['run_browser_task', 'confirm_browser_payment', 'cancel_browser_payment']) {
+test('browsing is direct, but committing a payment goes through the contract review gate', () => {
+  // Looking is not spending: the agent must be able to browse and read a price without
+  // interrupting the person, or it can never find out what there is to approve.
+  for (const type of ['browser_open', 'browser_act', 'transaction_prepare']) {
     const contract = getActionContract(type);
     assert.ok(contract, `${type} must have a contract`);
     assert.equal(contract.executionMode, 'direct', `${type} must stay direct-execute`);
   }
+
+  // Committing the charge is the money action, and it is gated exactly like every other one.
+  // It used to be 'direct', with the browser loop electing to ask for approval from inside
+  // itself — which meant authority over a purchase lived in the probabilistic loop rather
+  // than in the deterministic gate.
+  const confirm = getActionContract('transaction_authorize');
+  assert.equal(confirm.executionMode, 'review', 'paying must go through the review gate');
+  assert.equal(confirm.confirmation, 'review_required');
 });
 
-test('run_browser_task does not require goal (empty goal = continue an open order)', () => {
-  const contract = getActionContract('run_browser_task');
-  assert.deepEqual(contract.required, []);
+test('the browser primitives require only what they genuinely cannot infer', () => {
+  // browser_open needs somewhere to go; observing and closing need nothing at all.
+  // browser_open takes a url OR a known site name, so neither is unconditionally required.
+  assert.deepEqual(getActionContract('browser_open').required, []);
+  assert.ok(getActionContract('browser_open').optional.includes('url'));
+  assert.deepEqual(getActionContract('browser_observe').required, []);
+  assert.deepEqual(getActionContract('transaction_prepare').required, []);
 });
 
 test('Core actions (incl. new agentic) have contracts for reliability work', () => {
@@ -184,7 +191,7 @@ test('Places server setup failure is explicit and not retryable', () => {
 // failed" / "Payment confirmation failed".
 test('an awaiting_user pause does not inherit the contract\'s generic failure cardText', () => {
   const readyForPayment = buildActionRecovery(
-    { type: 'run_browser_task', input: { goal: 'order a kettle' } },
+    { type: 'browser_open', input: { url: 'https://shop.example' } },
     { success: false, outcome: 'awaiting_user', pending: true, text: 'Ready to pay: £48.75.' }
   );
   assert.deepEqual(readyForPayment, {});
@@ -198,10 +205,10 @@ test('an awaiting_user pause does not inherit the contract\'s generic failure ca
 
 test('a genuine failure still gets the contract\'s failureSummary cardText', () => {
   const recovery = buildActionRecovery(
-    { type: 'confirm_browser_payment', input: {} },
+    { type: 'transaction_authorize', input: {} },
     { success: false, error: 'The payment was declined by the card issuer.' }
   );
-  assert.equal(recovery.cardText, 'Payment confirmation failed');
+  assert.equal(recovery.cardText, 'Payment did not complete');
 });
 
 // Regression, found live 2026-08-27: a browser task that timed out mid-step but is still
@@ -211,7 +218,7 @@ test('a genuine failure still gets the contract\'s failureSummary cardText', () 
 // that was, per its own text, still open and picking back up.
 test('an incomplete/resumable browser pause does not inherit the failure cardText either', () => {
   const timedOutButResumable = buildActionRecovery(
-    { type: 'run_browser_task', input: { goal: 'order a coat' } },
+    { type: 'browser_open', input: { url: 'https://shop.example' } },
     { success: false, outcome: 'incomplete', incomplete: true, continuesBrowsing: true, text: "The site took too long to respond, so I paused safely before checkout. Say “keep going” and I'll resume from here." }
   );
   assert.deepEqual(timedOutButResumable, {});
@@ -219,7 +226,7 @@ test('an incomplete/resumable browser pause does not inherit the failure cardTex
   // Also guard on the boolean flags alone, in case a future caller sets one without the
   // outcome string — inferActionOutcome treats either as sufficient.
   const flagOnly = buildActionRecovery(
-    { type: 'run_browser_task', input: {} },
+    { type: 'browser_observe', input: {} },
     { success: false, continuesBrowsing: true, text: 'Still working on it.' }
   );
   assert.deepEqual(flagOnly, {});

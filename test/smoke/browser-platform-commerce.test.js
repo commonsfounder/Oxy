@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { pickVariant, normalizeOption, resolveAndAddToCart } = require('../../api/services/browser-platform-commerce');
-const { scoreProductNameVsGoal } = require('../../api/services/browser-task');
+const { scoreProductNameVsGoal } = require('../../api/services/browser-platform-commerce');
 
 test('normalizeOption strips a UK prefix and lowercases', () => {
   assert.equal(normalizeOption('UK 10'), '10');

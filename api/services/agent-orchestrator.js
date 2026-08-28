@@ -9,7 +9,6 @@ let PRIMARY_CHAT_MODEL = defaultModelForProvider(process.env.OXY_BRAIN_PROVIDER 
 // swapped, and a destructured binding freezes it at import time.
 const brainProvider = require('./brain-provider');
 const { buildToolsForGemini } = require('../action-contracts');
-const { isTravelPlanningRequest } = require('./travel-concierge');
 
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
@@ -17,7 +16,7 @@ const runTraces = new Map();
 // Extract function calls from ONE source, not both: resp.functionCalls (when the SDK
 // provides it) is a derived view over the same candidates[0].content.parts array, not an
 // independent signal. Reading both and pushing into the same list double-counted every real
-// call — confirmed live (2026-07-11): a single run_browser_task call came back as two
+// call — confirmed live (2026-07-11): a single browser action call came back as two
 // identical-args entries, which then executed twice sequentially, roughly doubling
 // wall-clock time on an already-slow action for no benefit. Pure/exported so this exact
 // regression is unit-testable without a real Gemini client.
@@ -216,31 +215,15 @@ async function runAgentLoop({
     await lifecycle.checkpoint(userId, persistedTask.id, checkpointData, persistedTask.attempt);
   }
 
-  // Cream-of-the-crop: auto plan for complex goals. Keyword-gated only — message length
-  // alone used to also trigger this (`initialMessage.length > 50`), which fired on almost
-  // every real shopping goal ("order a macbook pro 14 inch space black 512gb from
-  // johnlewis.com" is 60+ chars) for a single-action run_browser_task request that gets no
-  // benefit from a separate planning call, costing a full hidden ~4-5s Gemini round trip
-  // before the first real turn even starts. Word-boundaried (`\b`) — the un-boundaried
-  // version matched "book" inside "MacBook", so this fired on every MacBook order anyway
-  // despite the keyword gate above.
-  // Trip-planning requests are excluded: plan_itinerary already IS the single research+build step
-  // (real grounded search feeding itinerary generation in one call). Auto-planning here used to
-  // inject a generic "research each piece separately" framing ahead of the model's first real
-  // turn, which measurably steered it into free-form web_search + hand-written prose instead of
-  // the actual tool — defeating the point of a structured, savable, editable itinerary (live
-  // verified 2026-08-08: "Plan me a Saturday day trip to Bath..." never called plan_itinerary at all
-  // until this exclusion was added).
-  if (/\b(plan|book|research|find|organize|handle|arrange)\b/i.test(initialMessage) && !isTravelPlanningRequest(initialMessage)) {
-    try {
-      const plan = await generatePlan(userId, initialMessage, context.summary || '', modelName, provider);
-      if (plan?.steps?.length > 1) {
-        logAgentStep(agentTrace, { type: 'auto_plan', plan: plan.title });
-        // Inject plan into context for agent
-        resumedContents.push({ role: 'user', parts: [{ text: `Internal plan: ${JSON.stringify(plan.steps)}` }] });
-      }
-    } catch {}
-  }
+  // An auto-planning pre-pass used to run here, gated on a regex of English verbs
+  // (plan|book|research|find|organize|handle|arrange) with a hardcoded exception for trip
+  // planning, because the injected "research each piece separately" framing measurably
+  // steered the model away from the right tool for that one domain.
+  //
+  // Both halves were the same mistake: a general reasoning loop should not decide how hard a
+  // goal is by looking for verbs, and it certainly should not know that travel exists. The
+  // loop plans by iterating — think, act, observe, adapt — which is what it is for. Planning
+  // is still available as generatePlan for a caller that genuinely wants a plan up front.
 
   const baseConfig = {
     // dynamicSystemPrompt is always a fully-composed prompt now (built by the caller via
@@ -350,7 +333,7 @@ async function runAgentLoop({
     if (onStep) onStep({ phase: 'observed', results });
 
     // Cream-of-the-crop: mid-loop reflection for self-correction. Skipped when a result
-    // already tells us the goal isn't achieved yet (e.g. run_browser_task's
+    // already tells us the goal isn't achieved yet (for example a browser step's
     // continuesBrowsing: true) — asking a full extra model call "did we achieve the goal?"
     // when the action itself already answered "not yet, still working" was a real, silent
     // ~2-10s cost on every iteration for zero behavioral effect (reflection.nextAction is

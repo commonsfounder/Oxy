@@ -16,7 +16,7 @@ const {
   ORDER_CONFIRMED_PATTERN,
   PAYMENT_DECLINED_PATTERN,
   THREEDS_CHALLENGE_PATTERN
-} = require('../../api/services/browser-task');
+} = require('../../api/services/transaction');
 
 // Standard test PANs (Stripe test numbers) — Luhn-valid, never chargeable.
 const VISA_TEST = '4242424242424242';

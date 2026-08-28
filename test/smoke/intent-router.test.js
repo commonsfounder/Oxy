@@ -8,8 +8,6 @@ const {
   cleanDestinationPhrase,
   inferPersonalAdminAction,
   inferOutboundCommunicationAction,
-  inferBrowserSignupAction,
-  inferBrowserShoppingAction
 } = require('../../api/intent-router');
 
 test('ordinary personal-admin reads reach their declared actions', () => {
@@ -51,15 +49,6 @@ test('clear outbound requests reach the review-gated action with bounded inputs'
     spoken: 'I’ll prepare that call for review.',
     actions: [{ type: 'make_call', input: { contact: 'the dentist' } }]
   });
-});
-
-test('explicit newsletter and account requests reach the browser task boundary', () => {
-  assert.deepEqual(inferBrowserSignupAction('Sign me up for the newsletter on the John Lewis website.'), {
-    reason: 'browser_signup',
-    spoken: "I'll open the website and take this as far as I can.",
-    actions: [{ type: 'run_browser_task', input: { goal: 'Sign me up for the newsletter on the John Lewis website.' } }]
-  });
-  assert.equal(inferDeterministicAction('Create an account for me on the retailer website so I can save items.').actions[0].type, 'run_browser_task');
 });
 
 // ── Question-opener filler stripped from place/directions queries ─────────────────────────
@@ -382,17 +371,33 @@ test('contextual travel follow-ups defer to conversation context', () => {
   assert.equal(inferDeterministicAction('what train is it'), null);
 });
 
-test('buying a product FROM a named retailer reaches the real browser task', () => {
-  const examples = [
-    'get me some seersucker white pyjamas on john lewis',
+// ── The router no longer classifies tasks by domain ───────────────────────────────────────
+// A regex that spotted a "shopping verb" plus a retailer name used to hand the whole request
+// to the ordering loop with the canned line "I'll open the retailer and take this as far as I
+// can." It was wrong in both directions: it swallowed account-admin requests that merely
+// mention a retailer, and it existed at all only because the agent loop could not be trusted
+// to pick run_browser_task for itself. Both are now the loop's job.
+test('account admin at a retailer is not classified as shopping', () => {
+  for (const message of [
+    'Change my delivery address on my Amazon order',
+    'Add my new card to my council tax account',
+    'Cancel my Netflix subscription',
+    'Return the jeans I bought from john lewis last week'
+  ]) {
+    const routed = inferDeterministicAction(message);
+    assert.notEqual(routed?.actions?.[0]?.type, 'run_browser_task', message);
+  }
+});
+
+test('an ordinary purchase is left for the agent loop to plan, not pre-routed', () => {
+  for (const message of [
     'buy me a kettle from currys',
     'order me a pizza from dominos',
-    'add a cordless drill to my basket on screwfix',
-    'find me nike air max trainers on nike'
-  ];
-  for (const message of examples) {
-    assert.equal(inferBrowserShoppingAction(message).actions[0].type, 'run_browser_task');
-    assert.equal(inferDeterministicAction(message).actions[0].type, 'run_browser_task');
+    'get me some seersucker white pyjamas on john lewis'
+  ]) {
+    // Nothing deterministic claims it, so it reaches the model with every capability
+    // available — browser primitives, connectors, memory — instead of one hardcoded action.
+    assert.equal(inferDeterministicAction(message), null, message);
   }
 });
 

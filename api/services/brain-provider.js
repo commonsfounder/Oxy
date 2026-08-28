@@ -519,7 +519,7 @@ function toJsonSchemaTypes(node) {
 
 // [{ functionDeclarations: [...] }, { googleSearch: {} }] -> OpenAI tools.
 // googleSearch has no OpenAI chat/completions equivalent and is dropped; grounded agent
-// turns reach the web through the run_browser_task / web_search actions instead.
+// turns reach the web through browser primitives / web_search actions instead.
 function geminiToolsToOpenAI(tools = []) {
   const decls = (tools || []).flatMap((t) => t.functionDeclarations || []);
   return decls.map((d) => ({

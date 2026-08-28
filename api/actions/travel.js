@@ -20,7 +20,7 @@ const {
 // prices or availability) or itinerary-engine.js's dormant hotels/activities/flights
 // fields (nothing populates them for real) — the only live-facts source here is a real
 // grounded web search, fed into itinerary-engine.js as groundedNotes. Booking is a
-// deliberately separate step (see run_browser_task's guidance).
+// deliberately separate step (the general browser capabilities handle actual booking).
 async function planItinerary({ userId, action, params, context, deps }) {
   const { supabase, agentWorkspace, travelSearch, travelInventory, travelRanking, FAST_MODEL, path, generateBrain, webSearchBrain } = deps;
   const destination = String(params?.destination || '').trim();

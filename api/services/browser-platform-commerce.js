@@ -137,4 +137,112 @@ async function resolveAndAddToCart(requestCtx, origin, goal, goalContext, scoreF
   };
 }
 
-module.exports = { detectShopify, pickVariant, resolveAndAddToCart, normalizeOption };
+
+// ── Product matching ────────────────────────────────────────────────────────────────────
+// Scoring a catalogue result against what was actually asked for. This is DOMAIN KNOWLEDGE,
+// not execution architecture: a table of qualifier words and a scoring rule, with no control
+// flow of its own. It lives next to its only caller rather than in a shared loop, and the
+// platform-API tier takes it as a parameter so there is one scoring policy, not two.
+
+// Score a product name against the goal for candidate ranking.
+// Rewards goal words present in name; penalises differentiator words in name that aren't
+// in the goal (e.g. "Pro Max" in name but not goal → negative score).
+// wholesale/bulk added after a live WooCommerce catch (2026-07-11): "Wholesale Issue 60" and
+// "Issue 60" share every goal word for "buy issue 60 magazine" (neither was in the original
+// gadget-tier list), so they tied and the bulk/trade listing won on list order — a shopper
+// asking for one issue never means a case. Kept to single words only: this function tests
+// each NAME WORD individually after splitting on \W+, so a phrase like "case of" could never
+// actually match here (each half is tested alone) — don't add multi-word phrases without
+// accounting for that, and avoid words too generic to safely penalize alone (e.g. "case",
+// "pack" are legitimate parts of many real product names).
+const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base|wholesale|bulk)\b/i;
+
+// A bare number or number+unit (256gb, 128gb, 5g, 65in) is too generic to prove two
+// products are related — a Nintendo Switch and an iPhone can both be "256GB". Only an
+// alphabetic word match (a shared brand/product noun like "iphone") counts as proof the
+// candidate is actually the same kind of thing.
+const GENERIC_SPEC_WORD = /^\d+[a-z]*$/i;
+
+// A model number with a single-letter suffix (16e, 17e — Apple's cheaper tier, fused to
+// the digits so it never equals the plain "17" token) is a different variant, exactly like
+// "Pro"/"Max" being separate words. Regression: a live run's fastpath landed on "iPhone
+// 17e, 256GB" for a goal that said plain "iPhone 17 256GB" — since "17e" !== "17" as a
+// token, neither the match bonus nor PRODUCT_DIFFERENTIATORS caught it, so it slipped
+// through with a positive score and nothing to out-rank it.
+const SUFFIXED_MODEL_WORD = /^(\d{1,3})([a-z])$/i;
+
+// Footwear/apparel base-vs-variant model qualifiers, the PRODUCT_DIFFERENTIATORS analogue
+// for clothing. Regression (2026-07-13 allbirds trace): "order the Wool Runner shoes"
+// tied the plain "Men's Wool Runner" against "Women's Wool Runner NZ Mid Waterproof" at
+// score 4 — both share only "wool"+"runner", and the extra NZ/Mid/Waterproof qualifiers
+// were invisible to the scorer, so platform-add could silently cart the wrong shoe. A goal
+// asking for the base line never means the NZ/Mid/Mizzle/waterproof/trail variant; if the
+// goal DOES name one of these it lands in goalWords and matches (scored, not penalized)
+// before this branch is reached. Kept to distinctive model words only — "up" (Runner-up),
+// "high", "low" are deliberately excluded, too common as ordinary product words to penalize
+// blind, exactly like the "case"/"pack" caveat on PRODUCT_DIFFERENTIATORS above.
+const MODEL_QUALIFIERS = /^(nz|mid|mizzle|waterproof|weatherproof|trail)$/i;
+
+// Gender is a product axis like tier: "Men's Wool Runner" and "Women's Wool Runner" are
+// different products. Penalize a name whose gender contradicts the goal's, but ONLY when
+// the goal actually specifies one — a gender-neutral goal ("the Wool Runner shoes") must
+// not punish either gender. Note \bmen\b does not match inside "women" (no word boundary
+// before the 'm'), so the two regexes are independent; a name with both words (rare) or
+// neither yields null and never triggers a penalty.
+function detectGender(s) {
+  const t = String(s || '').toLowerCase();
+  const female = /\b(women|womens|woman|womans|female|ladies|girls?)\b/.test(t);
+  const male = /\b(men|mens|man|mans|male|boys?)\b/.test(t);
+  if (female && !male) return 'female';
+  if (male && !female) return 'male';
+  return null;
+}
+
+// Regression: John Lewis search for "plain white bath towel" picked "...Bath Mat" over the
+// actual "...Towels" listing — "towel" (goal, singular) never matched "towels" (name, plural)
+// with a bare word-set comparison, while "mat" tied on the shared generic word "bath". Cheap
+// trailing-s stemming (not a real morphological analyzer) closes that gap; "ss" endings
+// (glass/class) are left alone so they don't get mangled into "glas"/"clas".
+function stemWord(w) {
+  return w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+}
+
+function scoreProductNameVsGoal(name, goal) {
+  if (!name || !goal) return 0;
+  const words = (s) => new Set(s.toLowerCase().split(/\W+/).filter((w) => w.length > 1).map(stemWord));
+  const goalWords = words(goal);
+  const nameWords = words(name);
+  let score = 0;
+  let hasCoreMatch = false;
+  let hasUnrequestedVariant = false;
+  for (const w of nameWords) {
+    if (goalWords.has(w)) {
+      score += 2;
+      if (!GENERIC_SPEC_WORD.test(w)) hasCoreMatch = true;
+      continue;
+    }
+    const suffixed = w.match(SUFFIXED_MODEL_WORD);
+    if (suffixed && goalWords.has(suffixed[1])) {
+      hasUnrequestedVariant = true; // goal asked for plain "17", this is the "17e" tier
+    } else if (PRODUCT_DIFFERENTIATORS.test(w) || MODEL_QUALIFIERS.test(w)) {
+      hasUnrequestedVariant = true; // an unmentioned tier/model word (Pro/Max/NZ/Mid/...)
+    }
+  }
+  // Gender contradiction (goal says one gender, name says the other) is an unrequested
+  // variant just like a tier word. Only fires when the goal names a gender at all.
+  const goalGender = detectGender(goal);
+  const nameGender = detectGender(name);
+  if (goalGender && nameGender && goalGender !== nameGender) hasUnrequestedVariant = true;
+  // Regression: "Nintendo Switch 2, 256GB Console" scored positively against "iPhone 17
+  // 256GB" purely on the shared "256gb" token and got treated as a valid candidate.
+  // Without any non-generic word in common, this can't be the same product.
+  // Second regression: a candidate carrying an unrequested tier word ("Pro"/"Max"/"17e")
+  // can still rack up enough generic-word overlap (brand + capacity) to net positive even
+  // after a flat penalty, and — when it's the ONLY candidate fetched that run — nothing
+  // else was around to out-rank it. Either case must force the score below the
+  // pickFallbackCandidate/orderable relevance floor (score > 0), not just discourage it.
+  if (!hasCoreMatch || hasUnrequestedVariant) return Math.min(score, -1);
+  return score;
+}
+
+module.exports = { detectShopify, pickVariant, resolveAndAddToCart, normalizeOption, scoreProductNameVsGoal };

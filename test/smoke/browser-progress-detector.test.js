@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { assessProgress } = require('../../api/services/browser-task');
+const { assessProgress } = require('../../api/services/browser-access');
 
 const order = { isOrder: true, cartEverNonzero: false };
 

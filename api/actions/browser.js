@@ -1,194 +1,371 @@
 'use strict';
 
-// Browser and web actions, lifted out of the switch in api/index.js.
+// Browser and transaction capabilities.
 //
-// browserTask is required as an object and called as a property, never destructured: the
-// ordering tests monkey-patch browserTask.runOrderingTurn on the shared module object, and
-// that substitution only lands while the call site resolves the property at call time.
+// These are PRIMITIVES the main agent loop composes, not a task. There is no ordering loop
+// here and no notion of a product: the loop opens a page, looks at it, takes one step, sees
+// what changed, and decides again — for a purchase, a cancellation, an application, a
+// council portal or anything else a person does in a browser.
 //
 // The model boundary (generateBrain/webSearchBrain) arrives through deps because the
 // orchestration tests mock it by intercepting index.js's require of brain-provider.
 
 const axios = require('axios');
 const { getLocalDateKey } = require('../lib/time');
-const { detectCurrency } = require('../services/money-guard');
-const { getAgentCardSummary } = require('../services/agent-card');
-const browserTask = require('../services/browser-task');
+const browserEnvironment = require('../services/browser-environment');
+const browserSession = require('../services/browser-session');
+const browserAccess = require('../services/browser-access');
+const transaction = require('../services/transaction');
+const { loadCheckoutProfile } = require('../services/checkout-profile');
+const { getAgentCard } = require('../services/agent-card');
 
-// Real browser ordering (api/services/browser-task.js) — actually runs Playwright,
-// recipes, the Shopify platform-API tier, and the vision-driven fallback loop. Was
-// built across many sessions but never wired into a live action before this case
-// existed — see [[browser-task-reliability]] memory. Never auto-confirms payment:
-// stops at ready_for_payment and returns review_required, same contract every other
-// money action honours (see action-contracts.js's run_browser_task entry for why this
-// one is executionMode: 'direct' rather than 'review').
-async function runBrowserTask({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain, setPendingAction } = deps;
-  const goal = String(params?.goal || '').trim();
-  const url = String(params?.url || '').trim();
-  // No upfront "goal required" guard — an empty goal is a valid continuation call for
-  // an already-open order; runOrderingTurn resolves it from the live session or
-  // persisted resume context and returns its own honest error if there's truly
-  // nothing to continue.
-  const credentialSites = Array.isArray(params?.credentialSites) ? params.credentialSites : [];
-  let outcome;
-  try {
-    outcome = await browserTask.runOrderingTurn(userId, {
-      url,
-      goal,
-      location: context.location,
-      credentialSites,
-      // Browser work can take several real site interactions. Stream its bounded,
-      // human-readable step labels into the active chat task so the person can see
-      // the current page action rather than a generic "Browsing the web" spinner.
-      onProgress: (label) => context.onBrowserProgress?.(String(label || '').replace(/\s+/g, ' ').trim())
-    });
-  } catch (e) {
-    return { success: false, error: `Browse task failed: ${e.message}` };
-  }
-  if (outcome.type === 'ready_for_credential_use') {
-    return {
-      success: false,
-      outcome: 'awaiting_user',
-      pending: true,
-      confirmation: 'review_required',
-      text: `I found a sign-in for ${outcome.site} — use your saved "${outcome.label}" credential to sign in?`,
-      actionSummary: 'Sign-in ready',
-      taskId: outcome.taskId,
-      // The site and the run identity the user would be permitting, so a client can offer
-      // "allow this for this task" (POST /vault/grants with scope 'task' and this id) and
-      // not only the standing permission. taskId above is the TURN's id and changes every
-      // turn; binding a grant to it would authorise nothing.
-      site: outcome.site,
-      credentialTaskId: outcome.credentialTaskId
-    };
-  }
-  if (outcome.type === 'ready_for_payment') {
-    const total = parsePrice(outcome.total || '');
-    if (total) {
-      // parsePrice strips the currency symbol, so recover it from the raw total and pass it
-      // through — a UK £-checkout must be converted before it hits the (USD) spend cap, not
-      // compared naked. No symbol on a UK-first app → assume GBP, the stricter side.
-      const currency = detectCurrency(outcome.total || '') || 'GBP';
-      // Check only: reaching the payment step is not spending. Budget is consumed when
-      // the charge actually goes through, in confirmBrowserPayment.
-      const guard = await guardConciergeSpend(userId, total, currency, { record: false });
-      if (!guard.ok) return { success: false, error: guard.error };
-    }
-    // Tell the user up front which card the checkout will be paid with — or that
-    // none is saved — so confirm never surprises them at the payment form.
-    const agentCard = await getAgentCardSummary(supabase, userId).catch(() => null);
-    const cardNote = agentCard
-      ? ` I'll pay with your ${agentCard.brand} ending ${agentCard.last4}.`
-      : ' (No payment card is saved — if this checkout asks for card details, add one on the Payments screen first.)';
-    // A bare "yes" to this must not depend on the model remembering, on its own, to call
-    // confirm_browser_payment — that's exactly what failed live on 2026-08-26 (the model
-    // replied as if no progress had been made at all). Registering the same durable
-    // approval every other review-gated action gets means the next "yes" is resolved by
-    // /chat's existing deterministic matching (getPendingAction), not by model judgment.
-    await setPendingAction(userId, { type: 'confirm_browser_payment', input: {} }, context).catch(() => null);
-    return {
-      success: false,
-      outcome: 'awaiting_user',
-      pending: true,
-      confirmation: 'review_required',
-      text: `Ready to pay: ${outcome.summary}${outcome.total ? ` — ${outcome.total}` : ''}.${cardNote} Say the word and I'll place the order.`,
-      total: outcome.total,
-      summary: outcome.summary,
-      actionSummary: 'Order ready for payment',
-      taskId: outcome.taskId,
-      ...(outcome.productName ? { productName: outcome.productName } : {}),
-      ...(outcome.colorOptions?.length ? { colorOptions: outcome.colorOptions } : {}),
-      ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {})
-    };
-  }
-  if (outcome.type === 'needs_user_information') {
-    return {
-      success: false,
-      error: outcome.question || 'I need some checkout information to continue.',
-      recoverable: true,
-      recoveryAction: {
-        type: 'checkout_information',
-        label: 'Add details',
-        fields: Array.isArray(outcome.fields) ? outcome.fields : []
-      },
-      taskId: outcome.taskId
-    };
-  }
-  if (outcome.type === 'done') {
-    return {
-      success: true,
-      text: outcome.text,
-      taskId: outcome.taskId,
-      ...(outcome.imageUrls?.length ? { imageUrls: outcome.imageUrls } : {}),
-      ...(outcome.productName ? { productName: outcome.productName } : {}),
-      ...(outcome.price ? { price: outcome.price } : {})
-    };
-  }
-  if (outcome.type === 'awaiting_more') return { success: false, outcome: 'incomplete', incomplete: true, text: outcome.summary, continuesBrowsing: true, taskId: outcome.taskId };
-  if (outcome.type === 'ask') return { success: false, outcome: 'awaiting_user', pending: true, text: outcome.question, taskId: outcome.taskId };
-  if (outcome.type === 'reauth') {
-    // Regression: this outcome type had no case here at all, so it fell through to the
-    // generic "Browse task failed." error below — the actual "I need to sign in" question
-    // was silently dropped and the client had no way to actually complete a sign-in
-    // in-session (saying "keep going" just re-hits the same login wall). recoveryAction
-    // type reauth_login is a new client-side case (MessageBubble) that opens a sign-in
-    // sheet posting straight to POST /browser-task/reauth-login — see fillReauthLogin.
-    return {
-      success: false,
-      error: outcome.question,
-      recoverable: true,
-      recoveryAction: { type: 'reauth_login', label: 'Sign in', site: outcome.site },
-      taskId: outcome.taskId
-    };
-  }
-  return { success: false, error: outcome.error || 'Browse task failed.' };
+// A result's SUBJECT: the thing this step is about, whatever kind of thing it is. An order, a
+// booking, a form, a downloaded statement and a cancelled subscription all populate the same
+// four fields, so the client renders one card instead of a commerce-shaped one.
+function resultSubject({ name = null, amount = null, images = [], options = [] } = {}) {
+  const subject = {};
+  if (name) subject.name = String(name);
+  if (amount) subject.amount = String(amount);
+  if (images?.length) subject.imageUrls = images;
+  if (options?.length) subject.options = options;
+  return Object.keys(subject).length ? { subject } : {};
 }
 
-async function confirmBrowserPayment({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain, setPendingAction } = deps;
+// What the model reads back after any browser step. The element list leads, because that is
+// the actionable part; the page text follows for judgement.
+function observationResult(observation, extra = {}) {
+  const lines = (observation.elementLines || []).slice(0, 60);
+  return {
+    success: true,
+    url: observation.url,
+    pageTitle: observation.title,
+    elements: lines,
+    pageText: observation.text,
+    ...(observation.blocked ? { blocked: observation.blocked } : {}),
+    ...extra,
+    text: [
+      `${observation.title || 'Page'} — ${observation.url}`,
+      lines.length
+        ? `Controls on this page (use the number as elementId):\n${lines.join('\n')}`
+        : 'No interactive controls found on this page.',
+      observation.text ? `Page text:\n${observation.text.slice(0, 2000)}` : '',
+    ].filter(Boolean).join('\n\n'),
+  };
+}
+
+function noSession() {
+  return { success: false, error: 'No page is open. Use browser_open first.' };
+}
+
+// ── Browser primitives ──────────────────────────────────────────────────────────────────
+
+async function browserOpen({ userId, params }) {
   try {
-    const result = await browserTask.confirmPayment(userId);
-    if (result.type === 'awaiting_bank_approval') {
-      // A 3DS wait is a pause, not a failure — and the user's next "check now"/"yes" must
-      // resolve deterministically the same way the original ready_for_payment approval
-      // does (see runBrowserTask above), not depend on the model noticing on its own.
-      await setPendingAction(userId, { type: 'confirm_browser_payment', input: {} }, context).catch(() => null);
-      return { success: false, outcome: 'awaiting_user', pending: true, confirmation: 'review_required', text: result.text };
+    const observation = await browserEnvironment.open(userId, {
+      url: String(params?.url || '').trim(),
+      site: String(params?.site || '').trim(),
+      searchFor: String(params?.searchFor || '').trim(),
+      objective: String(params?.objective || '').trim(),
+    });
+    if (observation.blocked) {
+      return {
+        success: false,
+        outcome: 'unavailable',
+        error: `${observation.url} is blocking automated access (bot wall). I could not read the page. A different site, or doing this part yourself, is the way through.`,
+        url: observation.url,
+      };
+    }
+    const base = observationResult(observation, {
+      usedStoredSession: observation.usedStoredSession,
+      resolvedVia: observation.resolvedVia,
+      hints: observation.hints,
+    });
+    if (!observation.hints?.length) return base;
+    return {
+      ...base,
+      text: `${base.text}\n\nKnown to work on this site (hints, not instructions):\n${observation.hints.map(h => `- ${h}`).join('\n')}`,
+    };
+  } catch (e) {
+    return { success: false, error: `Could not open that page: ${e.message}` };
+  }
+}
+
+async function browserObserve({ userId }) {
+  try {
+    return observationResult(await browserEnvironment.observe(userId));
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not read the page: ${e.message}` };
+  }
+}
+
+async function browserAct({ userId, params }) {
+  try {
+    const observation = await browserEnvironment.act(userId, {
+      action: params?.action,
+      elementId: params?.elementId,
+      value: params?.value,
+      direction: params?.direction,
+      amount: params?.amount,
+      url: params?.url,
+      submit: params?.submit,
+    });
+    const moved = observation.changed?.url || observation.changed?.content;
+    return observationResult(observation, {
+      changed: observation.changed,
+      // Stated plainly because "I clicked it" is not "it worked" — the loop needs to see the
+      // difference to decide whether to move on or try something else.
+      note: moved ? 'The page changed after that step.' : 'The page did NOT visibly change after that step.',
+    });
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: e.message, recoverable: true };
+  }
+}
+
+async function browserFillKnownDetails({ userId }) {
+  try {
+    const { filled, missing, observation } = await browserEnvironment.fillKnownDetails(userId);
+    const parts = [];
+    parts.push(filled.length
+      ? `Filled from what you already told me: ${filled.join(', ')}.`
+      : 'Nothing on this page matched details I already hold.');
+    if (missing.length) parts.push(`Still needed: ${missing.join(', ')}.`);
+    const base = observationResult(observation);
+    return {
+      ...base,
+      filled,
+      missing,
+      text: `${parts.join(' ')}\n\n${base.text}`,
+      ...(missing.length ? {
+        recoverable: true,
+        recoveryAction: { type: 'missing_information', label: 'Add details', fields: missing },
+      } : {}),
+    };
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not fill the form: ${e.message}` };
+  }
+}
+
+async function browserClose({ userId }) {
+  try {
+    const { closed } = await browserEnvironment.close(userId);
+    return { success: true, text: closed ? 'Closed the page.' : 'No page was open.' };
+  } catch (e) {
+    return { success: false, error: `Could not close the browser: ${e.message}` };
+  }
+}
+
+// ── Files and access ────────────────────────────────────────────────────────────────────
+
+async function browserUpload({ userId, params, deps }) {
+  const { supabase } = deps;
+  try {
+    const session = browserEnvironment.requireSession(userId);
+    const { uploadDocument } = require('../services/browser-documents');
+    const fileInput = session.page.locator('input[type="file"]').first();
+    const result = await uploadDocument(fileInput, supabase, userId, {
+      documentId: String(params?.documentId || '').trim(),
+      agentTaskId: session.agentTaskId || null,
+      workflowId: session.workflowId || null,
+    });
+    const base = observationResult(await browserEnvironment.observe(userId));
+    return { ...base, text: `Attached "${result.document.filename}".\n\n${base.text}` };
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    // A refused upload is information for the loop, not a dead end.
+    return { success: false, error: `Could not attach that file: ${e.message}`, recoverable: true };
+  }
+}
+
+async function browserDownload({ userId, params, deps }) {
+  const { supabase } = deps;
+  try {
+    const session = browserEnvironment.requireSession(userId);
+    const { captureDownload } = require('../services/browser-documents');
+    const elements = await browserEnvironment.extractClickableElements(session.page).catch(() => []);
+    const index = Number(params?.elementId);
+    if (!Number.isInteger(index) || index < 0 || index >= elements.length) {
+      return { success: false, error: `elementId ${params?.elementId} is not on the current page. Observe again before acting.` };
+    }
+    const target = session.page.locator(browserEnvironment.CLICKABLE_SELECTOR).nth(elements[index].locatorIndex);
+    const result = await captureDownload(session.page, () => target.click({ timeout: 10000 }), {
+      supabase,
+      userId,
+      agentTaskId: session.agentTaskId || null,
+      workflowId: session.workflowId || null,
+      sourceUrl: session.page.url(),
+      label: String(params?.note || '').trim() || null,
+    });
+    if (!result.ok) return { success: false, error: `Could not save that file: ${result.notes}`, recoverable: true };
+    session.documents = [...(session.documents || []), result.document];
+    return {
+      success: true,
+      text: `Saved "${result.document.filename}" (${result.byteSize} bytes) to your documents.`,
+      documentId: result.document.id,
+    };
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not save that file: ${e.message}`, recoverable: true };
+  }
+}
+
+async function browserContinueWithoutAccount({ userId, context }) {
+  try {
+    const result = await browserAccess.continueWithoutAccount(userId, {
+      onProgress: (label) => context?.onBrowserProgress?.(String(label || '')),
+    });
+    if (!result.moved) return { success: false, outcome: 'incomplete', incomplete: true, text: result.error };
+    const base = observationResult(await browserEnvironment.observe(userId));
+    return { ...base, text: `Continued without an account.\n\n${base.text}` };
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not continue without an account: ${e.message}` };
+  }
+}
+
+async function browserSignIn({ userId, params, context }) {
+  try {
+    const result = await browserAccess.signInWithStoredCredential(userId, {
+      site: String(params?.site || '').trim() || null,
+      onProgress: (label) => context?.onBrowserProgress?.(String(label || '')),
+    });
+    // A refused grant is a permission answer, not a failure to route around.
+    if (result.type === 'not_authorized') {
+      return { success: false, outcome: 'unavailable', error: result.error, site: result.site };
     }
     if (result.type === 'error') return { success: false, error: result.error };
-    // Only a completed charge consumes the daily cap.
-    const charged = browserTask.getPendingPaymentTotal?.(userId);
+    const observation = await browserEnvironment.observe(userId).catch(() => null);
+    if (!observation) return { success: true, text: result.text };
+    const base = observationResult(observation);
+    return { ...base, text: `${result.text}\n\n${base.text}` };
+  } catch (e) {
+    return { success: false, error: `Could not sign in: ${e.message}` };
+  }
+}
+
+// ── Transaction ─────────────────────────────────────────────────────────────────────────
+// prepare → authorize → verify. Nothing here is retail-specific: whatever page the loop has
+// navigated to, if it is asking for money these three handle it the same way.
+
+async function transactionPrepare({ userId, deps }) {
+  const { supabase, guardConciergeSpend } = deps;
+  try {
+    const [card, profile] = await Promise.all([
+      getAgentCard(supabase, userId).catch(() => null),
+      loadCheckoutProfile(supabase, userId).catch(() => null),
+    ]);
+    const result = await transaction.prepare(userId, { card, profile });
+    if (!result.ok) return { success: false, error: result.error };
+
+    const cardSummary = card ? `${card.brand || 'card'} ending ${card.last4}` : null;
+    if (!result.ready) {
+      return {
+        success: false,
+        outcome: 'incomplete',
+        incomplete: true,
+        text: result.advanceLabel
+          ? `Not at the payment step yet — the page still shows "${result.advanceLabel}". Continue from there.`
+          : result.walletOnly
+            ? 'This page only offers a wallet (Apple Pay / PayPal and similar), which I cannot use. You would need to finish this one yourself.'
+            : 'This page is not asking for payment yet.',
+        ...(result.raw ? resultSubject({ amount: result.raw }) : {}),
+      };
+    }
+    if (!result.raw) {
+      return {
+        success: false,
+        error: 'I found the payment control but could not read a total on the page, so I have not asked you to approve anything. Nothing was charged.',
+      };
+    }
+    // Check the cap BEFORE asking the person to approve, so an out-of-policy amount is
+    // refused up front rather than after they have said yes.
+    const guard = await guardConciergeSpend(userId, result.amount, result.currency || 'GBP', { record: false });
+    if (!guard.ok) return { success: false, error: guard.error };
+
+    return {
+      success: true,
+      text: `Ready to pay ${result.raw}${cardSummary ? ` with your ${cardSummary}` : ''}. The control is "${result.commitLabel}".${cardSummary ? '' : ' (No payment card is saved — add one on the Payments screen if this page needs card details.)'}`,
+      actionSummary: 'Ready for approval',
+      commitLabel: result.commitLabel,
+      ...resultSubject({ amount: result.raw }),
+    };
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not prepare the payment: ${e.message}` };
+  }
+}
+
+async function transactionAuthorize({ userId, context, deps }) {
+  const { supabase, guardConciergeSpend } = deps;
+  try {
+    const card = await getAgentCard(supabase, userId).catch(() => null);
+    // Deterministic pre-commit authority: the amount is re-read off the live page by a
+    // parser at the moment of commit and re-checked against the cap, so approval given for
+    // one figure can never be spent against a different one.
+    const authorize = async ({ raw, amount, currency }) => {
+      if (!raw || !amount) {
+        return { ok: false, error: 'I could not read the amount on the payment page, so I did not pay. Nothing was charged.' };
+      }
+      const guard = await guardConciergeSpend(userId, amount, currency || 'GBP', { record: false });
+      if (!guard.ok) return { ok: false, error: guard.error };
+      return { ok: true };
+    };
+    const result = await transaction.commit(userId, {
+      authorize,
+      card,
+      onProgress: (label) => context?.onBrowserProgress?.(String(label || '')),
+    });
+    return finishTransaction(userId, result, deps, context);
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Payment did not complete: ${e.message}` };
+  }
+}
+
+async function transactionStatus({ userId, context, deps }) {
+  try {
+    return finishTransaction(userId, await transaction.watch(userId, {}), deps, context);
+  } catch (e) {
+    if (e.code === 'NO_SESSION') return noSession();
+    return { success: false, error: `Could not check: ${e.message}` };
+  }
+}
+
+// One place that turns a transaction outcome into a result, so all three report the same way
+// and only a genuinely confirmed charge consumes the daily cap.
+async function finishTransaction(userId, result, deps, context) {
+  const { guardConciergeSpend, setPendingAction } = deps;
+  if (result.state === 'confirmed') {
+    const session = browserSession.getSession(userId);
+    const charged = (session && transaction.chargedAmount(session))
+      || (result.amount?.amount ? { total: result.amount.amount, currency: result.amount.currency } : null);
     if (charged?.total) {
       await guardConciergeSpend(userId, charged.total, charged.currency || null).catch(() => {});
     }
-    return { success: true, text: result.text };
-  } catch (e) {
-    return { success: false, error: `Payment confirmation failed: ${e.message}` };
+    const purchaseId = session
+      ? await transaction.recordConfirmedPurchase(
+        userId, session, await browserEnvironment.readPageText(session.page).catch(() => '')
+      ).catch(() => null)
+      : null;
+    return {
+      success: true,
+      text: `Done — that went through${result.amount?.raw ? ` (${result.amount.raw})` : ''}.`,
+      ...(purchaseId ? { purchaseId } : {}),
+      ...resultSubject({ amount: result.amount?.raw || null }),
+    };
   }
-}
-
-async function cancelBrowserPayment({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
-  browserTask.cancelPayment(userId);
-  return { success: true, text: 'Order cancelled — nothing was charged.' };
-}
-
-async function confirmCredentialUse({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
-  try {
-    const result = await browserTask.confirmCredentialUse(userId);
-    if (result.type === 'error') return { success: false, error: result.error };
-    return { success: true, text: result.text };
-  } catch (e) {
-    return { success: false, error: `Sign-in confirmation failed: ${e.message}` };
+  if (result.state === 'awaiting_authorization') {
+    // A bank challenge is a pause, not a failure. Re-arm the approval so the person's next
+    // "check now" resolves deterministically instead of depending on the model noticing.
+    await setPendingAction?.(userId, { type: 'transaction_status', input: {} }, context).catch(() => null);
+    return { success: false, outcome: 'awaiting_user', pending: true, confirmation: 'review_required', text: result.text };
   }
-}
-
-async function cancelCredentialUse({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, FAST_MODEL, parsePrice, guardConciergeSpend, generateBrain, webSearchBrain } = deps;
-  browserTask.cancelCredentialUse(userId);
-  return { success: true, text: 'Okay, not signing in.' };
+  if (['refused', 'declined', 'error'].includes(result.state)) {
+    return { success: false, error: result.error };
+  }
+  return { success: false, outcome: 'incomplete', incomplete: true, text: result.error || 'I could not tell whether that went through.' };
 }
 
 // === NEW AGENTIC GENERAL TOOLS ===
@@ -239,12 +416,19 @@ async function webSearchAction({ userId, action, params, enrichedParams, context
 
 module.exports = {
   handlers: {
-    run_browser_task: runBrowserTask,
-    confirm_browser_payment: confirmBrowserPayment,
-    cancel_browser_payment: cancelBrowserPayment,
-    confirm_credential_use: confirmCredentialUse,
-    cancel_credential_use: cancelCredentialUse,
+    browser_open: browserOpen,
+    browser_observe: browserObserve,
+    browser_act: browserAct,
+    browser_fill_known_details: browserFillKnownDetails,
+    browser_close: browserClose,
+    browser_upload: browserUpload,
+    browser_download: browserDownload,
+    browser_continue_without_account: browserContinueWithoutAccount,
+    browser_sign_in: browserSignIn,
+    transaction_prepare: transactionPrepare,
+    transaction_authorize: transactionAuthorize,
+    transaction_status: transactionStatus,
     web_browse: webBrowse,
-    web_search: webSearchAction
-  }
+    web_search: webSearchAction,
+  },
 };

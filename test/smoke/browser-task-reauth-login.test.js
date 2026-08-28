@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fillReauthLogin } = require('../../api/services/browser-task');
+const { fillReauthLogin } = require('../../api/services/browser-access');
 
 // fillReauthLogin's actual fill/submit path needs a live Playwright page, exercised via the
 // e2e harness (test/dev/browser-task-e2e.js), not mocked here. These cover the fail-safe

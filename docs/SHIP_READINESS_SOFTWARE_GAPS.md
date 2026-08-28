@@ -19,7 +19,7 @@ These exist in the repo and are working or near-working:
 - Rate limiting (`createRateLimiter`, `audioRateLimit`) — basic abuse protection.
 - Connector-token encryption — AES-256-GCM (`api/services/token-crypto.js`), used by `google.js`, `telegram.js`.
 - DB migrations for auth, indexes, and **row-level security** (`supabase-migration-*.sql`).
-- Review-gated high-risk actions + connector-health recovery (`action-runner.js`, `connector-health.js`, `pending-review.js`).
+- Review-gated high-risk actions + connector-health recovery (`action-execution.js`, `connector-health.js`, `pending-review.js`).
 - Observability primitives: Sentry, `/version`, `/health`, `X-Oxy-Commit`, structured request logging (per runbook §3).
 - Data export endpoint (`oxy-data-export.json`) and a "Delete Account" flow (completeness to verify — see #2/#10).
 - StoreKit referenced in iOS (`NativeIntegrationManager.swift`) — subscription scaffolding started.

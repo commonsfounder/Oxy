@@ -10,7 +10,7 @@
 // routinely crafted to steer it.
 //
 // So the grant is the authority and the user is the only one who can create it. The model
-// can ask for a narrower set (run_browser_task's credentialSites) but can never widen one.
+// can ask for a narrower set of sites but can never widen one.
 // Grants expire on their own, can be revoked instantly, and can carry a use cap.
 //
 // The decision is a pure function so every refusal path is testable without a database.

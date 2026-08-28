@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const app = require('../../api/index');
-const browserTask = require('../../api/services/browser-task');
+const transaction = require('../../api/services/transaction');
 const { createSupabaseServiceClient } = require('../../runtime');
 
 const supabase = createSupabaseServiceClient();
@@ -147,7 +147,7 @@ test('a confirmed browser order is recorded at confirmation time, from what was 
     pendingPaymentTotal: '£24.50',
     page: { url: () => 'https://spendtest-shop.example/order-confirmation?id=9' }
   };
-  const id = await browserTask.recordConfirmedPurchase(USER_ID, session, 'Thank you for your order. Order number: SHOP-88213. Order total: £24.50');
+  const id = await transaction.recordConfirmedPurchase(USER_ID, session, 'Thank you for your order. Order number: SHOP-88213. Order total: £24.50');
   assert.ok(id, 'the purchase should have been written');
 
   const { data } = await supabase.from('purchases').select('*').eq('id', id).single();
@@ -172,7 +172,7 @@ test('a confirmed order with no readable total is still recorded, with no invent
     pendingPaymentTotal: '',
     page: { url: () => 'https://spendtest-shop.example/thank-you' }
   };
-  const id = await browserTask.recordConfirmedPurchase(USER_ID, session, 'Thanks for your order! We will email you shortly.');
+  const id = await transaction.recordConfirmedPurchase(USER_ID, session, 'Thanks for your order! We will email you shortly.');
   assert.ok(id);
   const { data } = await supabase.from('purchases').select('total_amount, currency, order_id').eq('id', id).single();
   assert.equal(data.total_amount, null);
@@ -185,8 +185,8 @@ test('recording the same confirmation twice does not create a second order', asy
     site: 'spendtest-shop.example', goal: 'buy a lamp', pendingPaymentTotal: '£10.00',
     page: { url: () => 'https://spendtest-shop.example/order-confirmation?id=dupe' }
   };
-  await browserTask.recordConfirmedPurchase(USER_ID, session, 'Order number: DUPE-1. Order total: £10.00');
-  await browserTask.recordConfirmedPurchase(USER_ID, session, 'Order number: DUPE-1. Order total: £10.00');
+  await transaction.recordConfirmedPurchase(USER_ID, session, 'Order number: DUPE-1. Order total: £10.00');
+  await transaction.recordConfirmedPurchase(USER_ID, session, 'Order number: DUPE-1. Order total: £10.00');
 
   const { data } = await supabase.from('purchases').select('id')
     .eq('user_id', USER_ID).eq('source_ref', 'https://spendtest-shop.example/order-confirmation?id=dupe');

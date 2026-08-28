@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { matchesPaymentKeyword, isWalletPayment } = require('../../api/services/browser-task');
+const { matchesPaymentKeyword, isWalletPayment } = require('../../api/services/transaction');
 
 test('wallet buttons are not treated as payment controls', () => {
   // These need device biometrics or a redirect the server browser cannot complete, and they

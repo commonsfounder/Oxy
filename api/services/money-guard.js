@@ -1,5 +1,5 @@
 // Hard server-side spend limits the model cannot talk its way past. This is defense-in-depth
-// BEHIND the human review gate (action-runner routes high-risk/confirmation actions to
+// BEHIND the human review gate (action-execution routes high-risk/confirmation actions to
 // setPendingAction): even if a spend reaches execution — an approved pending action, or any
 // future path that sets bypassReview — an out-of-policy amount is refused here, deterministically,
 // with no model in the loop. Caps are env-tunable but default conservative.

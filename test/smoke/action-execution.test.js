@@ -1,7 +1,17 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createActionRunner } = require('../../api/services/action-runner');
+const { createActionExecution } = require('../../api/services/action-execution');
+
+// Local adapter for this file's older `executeAction(userId, type, input, context)` seam.
+// The production boundary is createActionExecution; nothing else wraps it.
+function createActionRunner(options = {}) {
+  const { executeAction, ...rest } = options;
+  const invokeAdapter = rest.invokeAdapter || (typeof executeAction === 'function'
+    ? ({ userId, type, input, context }) => executeAction(userId, type, input, context)
+    : null);
+  return createActionExecution({ ...rest, invokeAdapter });
+}
 const { getActionContract } = require('../../api/action-contracts');
 const { adapterForAction } = require('../../api/services/action-catalog');
 
@@ -58,7 +68,7 @@ test('appointment booking waits for an explicit OK before it runs', async () => 
 
 test('action runner parks high-risk actions for review even inside an agent loop iteration', async () => {
   // Regression guard: agentIteration:true routes through the sequential execution
-  // path (action-runner.js), which is a separate code path from the parallel one.
+  // path (action-execution.js), which is a separate code path from the parallel one.
   // Money actions must hit the same review gate on both paths.
   const pending = [];
   const executeActions = createActionRunner({
@@ -275,7 +285,7 @@ test('action runner does not look up a linked card for non-money review actions'
 // method — chaining `.catch` on it (the old code) threw a synchronous TypeError, which
 // escaped every background/scheduled/routine/resume call site (none of them pass a trace),
 // mapping the whole batch for that iteration to a false failure even when actions upstream
-// had already succeeded. Fixed in api/services/action-runner.js via safeLogAction, which
+// had already succeeded. Fixed in api/services/action-execution.js via safeLogAction, which
 // always goes through a real try/await/catch instead of assuming `.catch` exists.
 function fakeSupabaseBuilder() {
   // Mimics supabase-js's PostgrestFilterBuilder: thenable, but `.catch` is not an own method.

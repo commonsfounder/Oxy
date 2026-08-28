@@ -28,11 +28,6 @@ const ACTION_NAMES = Object.freeze({
   play_music: 'Music',
   add_to_music_playlist: 'Music',
   web_search: 'Search',
-  run_browser_task: 'Online order',
-  confirm_browser_payment: 'Order',
-  cancel_browser_payment: 'Order',
-  confirm_credential_use: 'Sign-in',
-  cancel_credential_use: 'Sign-in',
   create_github_issue: 'GitHub issue',
   comment_github_issue: 'GitHub comment',
   create_linear_issue: 'Linear issue',
@@ -145,7 +140,6 @@ function approvalTitle(action) {
     case 'make_call': return 'Call ready to make';
     case 'create_calendar_event': return 'Calendar event ready';
     case 'book_appointment': return 'Appointment ready to book';
-    case 'run_browser_task': return 'Order ready';
     default: return `${actionDisplayName(action)} needs your OK`;
   }
 }

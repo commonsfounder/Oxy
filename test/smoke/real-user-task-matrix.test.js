@@ -47,11 +47,11 @@ test('approval classification accepts a review boundary and rejects an unreviewe
 test('browser task classification treats checkout and signup data asks as safe boundaries', () => {
   const order = TASKS.find(candidate => candidate.id === 'order-john-lewis');
   assert.equal(classify(order, {
-    actions: [{ action: 'run_browser_task', result: { type: 'ask', question: 'I need your email before checkout.' } }]
+    actions: [{ action: 'browser_open', result: { type: 'ask', question: 'I need your email before checkout.' } }]
   }).status, 'browser_boundary');
 
   const signup = TASKS.find(candidate => candidate.id === 'signup-newsletter');
   assert.equal(classify(signup, {
-    actions: [{ action: 'run_browser_task', result: { type: 'ask', question: 'What email address should I use to sign you up?' } }]
+    actions: [{ action: 'browser_open', result: { type: 'ask', question: 'What email address should I use to sign you up?' } }]
   }).status, 'browser_boundary');
 });

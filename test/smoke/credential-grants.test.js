@@ -259,20 +259,18 @@ test('using a grant actually advances the counter, so a use cap cannot silently 
 // so omitting it made the log misleading rather than merely incomplete.
 test('reusing a stored browser session is recorded as a credential use', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+  // Opening a page with a stored session happens in the general browser environment now,
+  // and the log has to travel with it — a stored session that is loaded but never recorded
+  // is exactly the gap this closes.
+  const source = fs.readFileSync(require.resolve('../../api/services/browser-environment.js'), 'utf8');
+  const open = source.slice(source.indexOf('async function open('));
+  const body = open.slice(0, open.indexOf('\n}\n'));
 
-  assert.match(source, /require\('\.\/credential-grants'\)/,
-    'browser-task must import the credential log');
-
-  // The load and the log must sit together: a stored session that is loaded but never
-  // recorded is exactly the gap this closes.
-  assert.match(
-    source,
-    /const storageState = await loadStorageState\([^)]*\);[\s\S]{0,900}if \(storageState\)[\s\S]{0,400}recordUse\(/,
-    'loading a stored session must be followed by a recordUse call'
-  );
-  assert.match(source, /reason: 'stored_session'/,
-    "session reuse must be distinguishable in the log from a password sign-in");
+  assert.match(body, /loadStorageState\(/, 'opening a page must consider a stored session');
+  assert.match(body, /recordUse\(/, 'and record it when one is used');
+  assert.match(body, /reason: 'stored_session'/);
+  assert.ok(body.indexOf('loadStorageState(') < body.indexOf('recordUse('),
+    'the log must follow the load, not precede it');
 });
 
 
@@ -394,30 +392,21 @@ test('a task-scoped grant is still refused for a different run, and for no run a
 
 // Source-level tripwire, because the bug was not in the decision function -- that was always
 // correct -- but in which id the caller handed it.
-test('the browser loop authorises against the run id, not the per-turn one', () => {
+test('credential use authorises against the run id, not the per-turn one', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
-
-  // The session-lifetime id must exist and be created once per run.
-  assert.match(source, /credentialTaskId: randomUUID\(\)/,
+  // Session identity is minted once per RUN by browser-session.js's createSession, and shared
+  // by every browser surface. A grant bound to a per-turn id would authorise nothing.
+  const sessionSource = fs.readFileSync(require.resolve('../../api/services/browser-session.js'), 'utf8');
+  assert.match(sessionSource, /credentialTaskId: randomUUID\(\)/,
     'a session needs a run-lifetime credential identity');
 
+  const source = fs.readFileSync(require.resolve('../../api/services/browser-access.js'), 'utf8');
   const call = source.slice(source.indexOf('const authorized = await authorizeCredentialUse'));
   const body = call.slice(0, call.indexOf('.catch('));
   assert.match(body, /taskId: session\.credentialTaskId/,
     'the grant decision must use the run id');
   assert.doesNotMatch(body, /pendingCredentialTaskId/,
     'pendingCredentialTaskId is only set after an offer, so it is always null here');
-
-  // The audit log has to agree with the decision: one run's 'used' and 'failed' rows must
-  // sit under the same task, not under a run id and a null.
-  assert.doesNotMatch(source, /outcome: 'failed',[\s\S]{0,120}pendingCredentialTaskId/,
-    'the failure log must use the same run id the authorisation used');
-
-  // And the ask has to tell the caller which id a task grant would bind to, or there is no
-  // way to create a working one.
-  assert.match(source, /type: 'ready_for_credential_use',[\s\S]{0,200}credentialTaskId: session\.credentialTaskId/,
-    'the ask must surface the run id');
 });
 
 

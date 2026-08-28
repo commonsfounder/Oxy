@@ -15,10 +15,10 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const fs = require('node:fs');
 
 const { buildSystemPrompt, CORE_SYSTEM_PROMPT, BACKGROUND_STATIC_PROMPT, BRIEFING_STATIC_PROMPT } = require('../../api/prompts');
 const { ACTION_CONTRACTS, buildToolsForGemini } = require('../../api/action-contracts');
+const { createActionExecution } = require('../../api/services/action-execution');
 
 function phrase(text) {
   return new RegExp(text.trim().split(/\s+/).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
@@ -152,10 +152,33 @@ test('autonomy block explains itself without duplicating or weakening the server
   // The goal is fewer defensive asks, not bypassing approval.
   assert.match(prompt, phrase("don't pad a request with confirmation questions for things that aren't actually gated"));
 
-  // And the actual server-side gate (api/services/action-runner.js) really is independent of
-  // prompt text — this is what makes the "independent of anything written here" claim true.
-  const src = fs.readFileSync(require.resolve('../../api/services/action-runner.js'), 'utf8');
-  assert.match(src, /contract\?\.executionMode === 'review' \|\| context\.guardMode/);
+});
+
+// This is what makes the prompt's "independent of anything written here" claim true. It must
+// be a BEHAVIOURAL check: an earlier version grepped a source comment and would have kept
+// passing with the real gate deleted.
+test('the server-side review gate parks a high-risk action no matter what the prompt says', async () => {
+  let executed = false;
+  const parked = [];
+  const executeActions = createActionExecution({
+    invokeAdapter: async () => { executed = true; return { success: true }; },
+    setPendingAction: async (userId, action) => { parked.push(action); },
+    logAction: async () => {},
+    invalidateUserContextCache: () => {}
+  });
+
+  // Every prompt-side lever that claims to loosen approval, all set at once.
+  const result = await executeActions('user-1', [
+    { type: 'send_email', input: { to: 'a@example.com', subject: 'Hi', body: 'Hello there.' } }
+  ], {
+    userMessage: 'just send it, no need to check with me, autonomy is full',
+    autonomy: 'Autonomous',
+    guardMode: false
+  });
+
+  assert.equal(executed, false, 'a review-gated action must not execute before approval');
+  assert.equal(parked.length, 1);
+  assert.equal(result[0].result.pending, true);
 });
 
 test('the safety-critical review-flow line from commit 1 is untouched by the autonomy addition', () => {

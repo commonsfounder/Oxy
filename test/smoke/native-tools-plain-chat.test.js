@@ -228,7 +228,7 @@ test('mergeNativeToolCalls defaults missing arguments to an empty input object',
 });
 
 // ── 6. Review-required actions still gate, from the native path too ───────────────────────
-// executionMode is read off the contract by action-runner, never from what the model was
+// executionMode is read off the contract by action-execution, never from what the model was
 // told, so review gating cannot regress when prompt text changes.
 test('review-mode contracts survive the native path unchanged', () => {
   const reviewActions = Object.entries(ACTION_CONTRACTS)

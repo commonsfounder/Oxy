@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { looksLikeLoginWall, findGuestCheckoutElement, looksLikeBlockWall, describesBlockWall } = require('../../api/services/browser-task');
+const { looksLikeLoginWall, findGuestCheckoutElement } = require('../../api/services/browser-access');
+const { looksLikeBlockWall } = require('../../api/services/browser-environment');
 
 test('findGuestCheckoutElement finds a guest option among clickable elements (M&S/Wickes shapes)', () => {
   const msElements = [
@@ -115,21 +116,4 @@ test('looksLikeBlockWall tolerates missing/garbage input', () => {
   assert.equal(looksLikeBlockWall(), false);
   // Copy present but no length info → still fires (unknown length is not > 1500).
   assert.equal(looksLikeBlockWall({ text: 'Access Denied' }), true);
-});
-
-test('describesBlockWall catches a model ask about a bot/security wall (Cloudflare iframe case)', () => {
-  // The exact shape the benchmark hit on Just Eat: model saw a Cloudflare screen (in an
-  // iframe the text-probe can't read) and tried to ask the user.
-  assert.equal(describesBlockWall("I've encountered a security verification screen (Cloudflare) on Just Eat. Would you like me to try another site?"), true);
-  assert.equal(describesBlockWall('There is a captcha I need you to solve.'), true);
-  assert.equal(describesBlockWall('The page says Access Denied — what should I do?'), true);
-  assert.equal(describesBlockWall('Please verify you are a human to continue.'), true);
-});
-
-test('describesBlockWall does NOT fire on a legitimate order question', () => {
-  assert.equal(describesBlockWall('Which pizza would you like to order?'), false);
-  assert.equal(describesBlockWall('What size would you like?'), false);
-  assert.equal(describesBlockWall('I found two branches — which one?'), false);
-  assert.equal(describesBlockWall(''), false);
-  assert.equal(describesBlockWall(null), false);
 });

@@ -104,7 +104,7 @@ const ACTION_CONTRACTS = {
     required: ['request'],
     optional: ['task_id'],
     inputExample: { request: 'dentist appointment next week after work' },
-    guidance: 'This only works when a real appointment-booking connection is configured — today that is not the normal case, so expect it to fail with a "not connected" error. Do not repeat this call after that error and do not tell the user booking is impossible. Instead use run_browser_task to book directly through the business\'s own real website: find the business first if you don\'t have it, then treat the booking as a normal multi-step order (find the slot, fill the form, confirm through the same review-before-payment flow).',
+    guidance: 'This only works when a real appointment-booking connection is configured — today that is not the normal case, so expect it to fail with a "not connected" error. Do not repeat this call after that error and do not tell the user booking is impossible. Instead use browser_open and browser_act to book directly through the business\'s own real website: find the business first if you don\'t have it, then work the booking page a step at a time (find the slot, fill the form, verify what the page says), and route anything that charges through transaction_authorize so it still passes the normal approval gate.',
     successSummary: 'Appointment options found',
     failureSummary: 'Appointment search paused',
     confirmation: 'none',
@@ -237,7 +237,7 @@ const ACTION_CONTRACTS = {
     risk: 'low',
     required: ['message_id'],
     inputExample: { message_id: '18abc123' },
-    guidance: 'Real, tiered unsubscribe for one message\'s mailing list: a genuine RFC 8058 one-click POST when the provider declares support, or a real email sent to a mailto: unsubscribe address. Only ever reports success for one of those two things actually completing — never for merely finding or opening a link. If the result has needsBrowser:true, the unsubscribe link needs a real page visit to finish: follow up with run_browser_task on the given url and confirm the page shows an actual success message before telling the user it worked. Prefer clean_inbox over calling this directly for a broad request ("unsubscribe from X", "clean my inbox") — it already finds every matching message and handles unsubscribing per distinct sender.',
+    guidance: 'Real, tiered unsubscribe for one message\'s mailing list: a genuine RFC 8058 one-click POST when the provider declares support, or a real email sent to a mailto: unsubscribe address. Only ever reports success for one of those two things actually completing — never for merely finding or opening a link. If the result has needsBrowser:true, the unsubscribe link needs a real page visit to finish: use browser_open on the given url, act through the page, and confirm it shows an actual success message before telling the user it worked. Prefer clean_inbox over calling this directly for a broad request ("unsubscribe from X", "clean my inbox") — it already finds every matching message and handles unsubscribing per distinct sender.',
     successSummary: 'Unsubscribed',
     failureSummary: 'Unsubscribe failed',
     confirmation: 'none',
@@ -303,7 +303,7 @@ const ACTION_CONTRACTS = {
       already_done: 'anything the user says they have already done/seen, so it is not repeated',
       pace: 'e.g. "relaxed, do not want to rush" or "pack in as much as possible"'
     },
-    guidance: 'Use for "plan me a trip to X", "plan Saturday in X", a weekend/day trip, or any request for a real day-by-day plan — not for a single fact lookup (use web_search for that), and not the same thing as plan_trip (that is a point-to-point route/train planner, not a day-by-day itinerary). Always call this tool for that, even if you could piece a plan together yourself from your own web_search calls first — a hand-written itinerary in chat prose cannot be saved or edited later; only the structured itinerary this action returns can. Extract every constraint the user actually stated (dates, arrival/departure times, starting location, budget, who is going, transport limits, interests, food preferences, things already booked or already done, accessibility, "keep it walkable", "do not want to rush") into the matching parameter; do not invent constraints the user never gave. The result is a real, time-aware plan grounded in an actual web search done inside this call. When the trip involves getting there or staying overnight — especially with a total budget like "3 days in Prague for £400 including travel and hotel" — call search_flights and/or search_hotels FIRST and plan around what they actually return, then say what the travel and accommodation legs really cost and how much that leaves for the rest. Those two are real searches now (they return observed prices with their sources), but they are still not bookings: carry their "observed, not held" caveat into the plan. Budget arithmetic may only use options whose dateMatch is "exact" as if they were the real cost — an adjacent-date or unknown-date price is evidence about the route, not the price of this trip, so say which of the two your total rests on. If the user then asks to save it, call workspace_write with a path like trips/<destination>-<date>.json and the CONTENT SET TO THE FULL ITINERARY JSON THIS ACTION RETURNED (not a prose summary) — that is what makes it editable later via modify_itinerary. If asked to add it to the calendar, call create_calendar_event a small number of times for the genuinely meaningful blocks (e.g. one per day or per booked/timed item), never one event per itinerary line. Planning and booking are separate: if the user asks to actually book a hotel, buy tickets, or reserve something from the plan, use run_browser_task against the real site — never say something was booked unless that flow actually confirmed it.',
+    guidance: 'Use for "plan me a trip to X", "plan Saturday in X", a weekend/day trip, or any request for a real day-by-day plan — not for a single fact lookup (use web_search for that), and not the same thing as plan_trip (that is a point-to-point route/train planner, not a day-by-day itinerary). Always call this tool for that, even if you could piece a plan together yourself from your own web_search calls first — a hand-written itinerary in chat prose cannot be saved or edited later; only the structured itinerary this action returns can. Extract every constraint the user actually stated (dates, arrival/departure times, starting location, budget, who is going, transport limits, interests, food preferences, things already booked or already done, accessibility, "keep it walkable", "do not want to rush") into the matching parameter; do not invent constraints the user never gave. The result is a real, time-aware plan grounded in an actual web search done inside this call. When the trip involves getting there or staying overnight — especially with a total budget like "3 days in Prague for £400 including travel and hotel" — call search_flights and/or search_hotels FIRST and plan around what they actually return, then say what the travel and accommodation legs really cost and how much that leaves for the rest. Those two are real searches now (they return observed prices with their sources), but they are still not bookings: carry their "observed, not held" caveat into the plan. Budget arithmetic may only use options whose dateMatch is "exact" as if they were the real cost — an adjacent-date or unknown-date price is evidence about the route, not the price of this trip, so say which of the two your total rests on. If the user then asks to save it, call workspace_write with a path like trips/<destination>-<date>.json and the CONTENT SET TO THE FULL ITINERARY JSON THIS ACTION RETURNED (not a prose summary) — that is what makes it editable later via modify_itinerary. If asked to add it to the calendar, call create_calendar_event a small number of times for the genuinely meaningful blocks (e.g. one per day or per booked/timed item), never one event per itinerary line. Planning and booking are separate: if the user asks to actually book a hotel, buy tickets, or reserve something from the plan, use browser_open/browser_act against the real site and transaction_authorize only after approval — never say something was booked unless the page actually confirmed it.',
     successSummary: 'Itinerary planned',
     failureSummary: 'Could not plan that trip',
     confirmation: 'none',
@@ -353,7 +353,7 @@ const ACTION_CONTRACTS = {
     required: [],
     optional: ['person_name'],
     inputExample: { person_name: 'Mum' },
-    guidance: 'Use for "whose birthday is coming up?", "when is X\'s birthday?", or before helping with a gift so you have the real relationship/notes on file rather than guessing. Always call this rather than answering from memory of the conversation — it is the only way to get a genuinely current, sorted answer. If a gift is then discussed ("what should I get her?", "find something under £50"), use the relationship/notes this returns plus web_search for real, current product options — never invent stock, price, or availability — and hand off to run_browser_task for an actual purchase; never say something was bought until that flow confirms it. Honest when nothing is saved rather than inventing a plausible-sounding answer.',
+    guidance: 'Use for "whose birthday is coming up?", "when is X\'s birthday?", or before helping with a gift so you have the real relationship/notes on file rather than guessing. Always call this rather than answering from memory of the conversation — it is the only way to get a genuinely current, sorted answer. If a gift is then discussed ("what should I get her?", "find something under £50"), use the relationship/notes this returns plus web_search for real, current product options — never invent stock, price, or availability — and use the general browser and transaction capabilities for an actual purchase; never say something was bought until the page confirms it. Honest when nothing is saved rather than inventing a plausible-sounding answer.',
     successSummary: 'Checked occasions',
     failureSummary: 'Could not check occasions',
     confirmation: 'none',
@@ -690,24 +690,6 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
-  capability_sweep: {
-    adapter: { kind: 'inline' },
-    risk: 'low',
-    required: [],
-    optional: [
-      'weather_city', 'place_query', 'directions_destination', 'directions_origin',
-      'train_origin', 'train_destination', 'train_date', 'flight_from', 'flight_to',
-      'flight_depart_date', 'flight_return_date', 'hotel_location', 'hotel_check_in',
-      'hotel_check_out', 'stock_symbol', 'amazon_query', 'itinerary_destination',
-      'itinerary_start_date', 'itinerary_duration_days', 'google_docs_query', 'github_repo'
-    ],
-    inputExample: { weather_city: 'London', stock_symbol: 'AAPL' },
-    guidance: 'Use when the user says "do all that", "run the whole sweep", "check everything", or asks for the full capability batch. Run the bounded read-only household sweep and any optional searches whose exact targets the user supplied. Never invent a city, route, date, stock, destination, repository, or query. Never send a message, create or change a calendar/reminder item, book, spend money, use credentials, control a device, or create a project/GitHub change from this sweep; return those as notRun so the user can ask for each explicitly and pass its normal approval gate.',
-    successSummary: 'Read-only sweep complete',
-    failureSummary: 'Read-only sweep incomplete',
-    confirmation: 'none',
-    executionMode: 'direct'
-  },
   // Outlook/Microsoft 365 — same risk shape as their Gmail/Calendar counterparts above.
   send_outlook_email: {
     risk: 'high',
@@ -779,7 +761,7 @@ const ACTION_CONTRACTS = {
     required: ['query'],
     aliases: { query: ['destination', 'place', 'address'] },
     inputExample: { query: 'natural place or address phrase' },
-    guidance: 'For plain local place requests like "nearest gym", "closest McDonald\'s", or "coffee near me", pass the user\'s natural phrase as query — do not ask for a full address or branch details. Never use this for product searches, price lookups, or online shopping, even if the request names a retailer like "John Lewis", "ASOS", or "Amazon" — this is only for physical locations to visit (buildings, stores as places, restaurants). "Find me grey jeans on John Lewis" is a shopping task for run_browser_task, not a place lookup.',
+    guidance: 'For plain local place requests like "nearest gym", "closest McDonald\'s", or "coffee near me", pass the user\'s natural phrase as query — do not ask for a full address or branch details. Never use this for product searches, price lookups, or online shopping, even if the request names a retailer like "John Lewis", "ASOS", or "Amazon" — this is only for physical locations to visit (buildings, stores as places, restaurants). "Find me grey jeans on John Lewis" is a general browser task, not a place lookup.',
     successSummary: 'Place found',
     failureSummary: 'Place search failed',
     confirmation: 'none',
@@ -1068,7 +1050,7 @@ const ACTION_CONTRACTS = {
     },
     inputExample: { title: 'Watch flight prices', instruction: 'Check every week and tell me if the price drops', recurrence: 'poll', interval_minutes: 10080 },
     guidance: 'Create durable background work only when the user explicitly asks to remind, schedule, watch, monitor, or check again. A condition such as "when the price drops" becomes a bounded poll with an expiry. Never invent a schedule or silently turn an ordinary task into recurring work. ' +
-      'For a delivery/tracking watch ("tell me when this arrives", "keep an eye on this parcel"): resolve the tracking URL/number yourself first — from what the user gave you, or by searching recent order/shipping emails (search_emails) for an unambiguous match — before asking them to find something you can already access. Each check should use run_browser_task to read the REAL current page; never invent a status. Normalize whatever the carrier\'s own wording says to one of: label created, awaiting carrier, collected, in transit, at depot, customs, delayed, delivery attempted, out for delivery, delivered, returned to sender, exception. Before comparing, workspace_read the last state you saved for this shipment (workspace_write it after every check, keyed by tracking number/order); only [WATCH_TRIGGERED] when the CURRENT normalized state differs from that saved state in a way that matches what the user actually asked for — never on every poll just because a timestamp on the page moved. Match the condition to their actual phrasing: "tell me when it arrives" only triggers on delivered; "tell me if it\'s delayed" only triggers on a delay/exception; "tell me when it\'s out for delivery" only triggers at that stage; "keep me updated" triggers on any meaningful transition. For an ongoing "keep me updated" watch, when a non-terminal transition triggers, ALSO call create_scheduled_task again in the same run before finishing (same tracking info) so the next stage still gets checked — do not do this after a terminal state (delivered, returned to sender) ends the watch on its own; never keep checking a delivered parcel forever. If the carrier\'s page can\'t be read (login wall, CAPTCHA, blocked), say exactly that — never report an invented or stale status. ' +
+      'For a delivery/tracking watch ("tell me when this arrives", "keep an eye on this parcel"): resolve the tracking URL/number yourself first — from what the user gave you, or by searching recent order/shipping emails (search_emails) for an unambiguous match — before asking them to find something you can already access. Each check should use browser_open to read the REAL current page; never invent a status. Normalize whatever the carrier\'s own wording says to one of: label created, awaiting carrier, collected, in transit, at depot, customs, delayed, delivery attempted, out for delivery, delivered, returned to sender, exception. Before comparing, workspace_read the last state you saved for this shipment (workspace_write it after every check, keyed by tracking number/order); only [WATCH_TRIGGERED] when the CURRENT normalized state differs from that saved state in a way that matches what the user actually asked for — never on every poll just because a timestamp on the page moved. Match the condition to their actual phrasing: "tell me when it arrives" only triggers on delivered; "tell me if it\'s delayed" only triggers on a delay/exception; "tell me when it\'s out for delivery" only triggers at that stage; "keep me updated" triggers on any meaningful transition. For an ongoing "keep me updated" watch, when a non-terminal transition triggers, ALSO call create_scheduled_task again in the same run before finishing (same tracking info) so the next stage still gets checked — do not do this after a terminal state (delivered, returned to sender) ends the watch on its own; never keep checking a delivered parcel forever. If the carrier\'s page can\'t be read (login wall, CAPTCHA, blocked), say exactly that — never report an invented or stale status. ' +
       'For ANY other watch ("tell me if this price drops below £500", "tell me when it\'s back in stock", "check monthly whether my broadband deal is still good", "every Friday remind me who I still owe a reply to", "tell me if this page changes"): set source_url to the real page that will be checked, and set watch_type/threshold/comparator/target_state to match what the user actually said — a stated number is a threshold watch, a stated end state ("back in stock") is target_state, an open question re-answered on a cadence is watch_type "recurring_check". Do not invent a threshold or a cadence the user did not give; ask if it matters. Each run then inspects the REAL source and calls record_watch_observation, which decides whether it is news — you do not decide that yourself. Repeating a watch the user already has adjusts the existing one instead of starting a second; to change cadence, threshold or notification rule later, use update_scheduled_task rather than creating a new watch, which would throw away the baseline that makes "has it changed?" answerable.',
     successSummary: 'Watch saved',
     failureSummary: 'Watch failed',
@@ -1266,7 +1248,7 @@ const ACTION_CONTRACTS = {
       max_stops: 'use instead of direct_only when the user allows some connections',
       notes: 'other stated constraints in the user\'s own words, e.g. "nothing before 9am", "Friday night vs Saturday morning"'
     },
-    guidance: 'This performs a REAL web search and returns the flight options that search results actually stated — airline, direct or connecting, an observed price with its currency, the site that quoted it, and the exact dates that price applies to. Use it for "find me flights from X to Y", "cheapest direct flights under £150", comparing days, and for costing the travel leg of a trip. Three things must survive into what you tell the user. Prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability. Each option carries dateMatch: "exact" means the source quoted that price FOR the requested dates, "adjacent" means it quoted different dates (offByDays says how far off), and "unknown" means the source never said — only "exact" may be presented as satisfying the request, and if there are none you must say so outright and give the closest sourced one as the closest, not as an answer. And prices in different currencies are never compared or added: no conversion is applied, so report them separately. Never claim a flight is bookable or available; this searched, it did not query an airline reservation system. If the user wants to actually book, hand off to run_browser_task against the airline or agent site. If it returns no options, say that plainly instead of filling the gap with a plausible-sounding fare.',
+    guidance: 'This performs a REAL web search and returns the flight options that search results actually stated — airline, direct or connecting, an observed price with its currency, the site that quoted it, and the exact dates that price applies to. Use it for "find me flights from X to Y", "cheapest direct flights under £150", comparing days, and for costing the travel leg of a trip. Three things must survive into what you tell the user. Prices are OBSERVED IN SEARCH RESULTS, not held quotes or confirmed availability. Each option carries dateMatch: "exact" means the source quoted that price FOR the requested dates, "adjacent" means it quoted different dates (offByDays says how far off), and "unknown" means the source never said — only "exact" may be presented as satisfying the request, and if there are none you must say so outright and give the closest sourced one as the closest, not as an answer. And prices in different currencies are never compared or added: no conversion is applied, so report them separately. Never claim a flight is bookable or available; this searched, it did not query an airline reservation system. If the user wants to actually book, use browser_open/browser_act against the airline or agent site and transaction_authorize only after approval. If it returns no options, say that plainly instead of filling the gap with a plausible-sounding fare.',
     successSummary: 'Flights found',
     failureSummary: 'Flight search failed',
     confirmation: 'none',
@@ -1284,103 +1266,179 @@ const ACTION_CONTRACTS = {
       area: 'a stated location constraint, e.g. "walking distance from the centre"',
       style: 'budget | mid | boutique | luxury, only if the user indicated one'
     },
-    guidance: 'This performs a REAL web search and returns the hotel options that search results actually stated — property, area, an observed nightly or total price with its currency, the site that quoted it, and the dates that price applies to. Use it for "find hotels in Bath under £140 a night", "somewhere walking distance from the centre", "two nights, two people", and for costing the accommodation leg of a trip. Two things must survive into what you tell the user: prices are OBSERVED IN SEARCH RESULTS, not held quotes, and availability is only claimed when availabilityStated is true — otherwise say availability was not confirmed. Each option carries dateMatch: only "exact" was quoted for the requested stay — "adjacent" was quoted for different dates and "unknown" was never pinned to any, and neither may be offered as the price for those nights. Say plainly when nothing exact was found. Never present a generic list of well-known hotels as a search result, and never claim a room can be booked; hand off to run_browser_task for an actual booking. If it returns no options, say so plainly.',
+    guidance: 'This performs a REAL web search and returns the hotel options that search results actually stated — property, area, an observed nightly or total price with its currency, the site that quoted it, and the dates that price applies to. Use it for "find hotels in Bath under £140 a night", "somewhere walking distance from the centre", "two nights, two people", and for costing the accommodation leg of a trip. Two things must survive into what you tell the user: prices are OBSERVED IN SEARCH RESULTS, not held quotes, and availability is only claimed when availabilityStated is true — otherwise say availability was not confirmed. Each option carries dateMatch: only "exact" was quoted for the requested stay — "adjacent" was quoted for different dates and "unknown" was never pinned to any, and neither may be offered as the price for those nights. Say plainly when nothing exact was found. Never present a generic list of well-known hotels as a search result, and never claim a room can be booked; use browser_open/browser_act for an actual booking and transaction_authorize only after approval. If it returns no options, say so plainly.',
     successSummary: 'Hotels found',
     failureSummary: 'Hotel search failed',
     confirmation: 'none',
     executionMode: 'direct'
   },
   get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'stocks' } },
-  // Real browser ordering (api/services/browser-task.js) — was built across many sessions
-  // but never actually registered here, so it was unreachable from live chat. High risk
-  // (it can reach a real checkout), but deliberately executionMode: 'direct' — it MUST
-  // actually browse to find out what's being bought and for how much before a review makes
-  // sense; gating the whole call behind upfront review (like stripe_charge) would mean
-  // nothing ever runs. The review gate is applied inside executeAction's 'run_browser_task'
-  // case instead, at the moment the loop reaches ready_for_payment, using the same
-  // guardConciergeSpend cap check every other money action goes through. Never place an
-  // order without this making it to a `confirmation: 'review_required'` result first.
-  run_browser_task: {
+  // ── Browser primitives ────────────────────────────────────────────────────────────────
+  // The browser is an environment the agent acts in, not a black box that decides on its own
+  // when a task is finished. These four compose into shopping, form-filling, account admin,
+  // cancelling a subscription, a government portal — anything a person does in a browser.
+  // Nothing here knows what a product or a basket is.
+  browser_open: {
     adapter: { kind: 'inline' },
-    risk: 'high',
-    // goal is OPTIONAL, not required: a continuation call for an already-open order
-    // legitimately passes an empty goal, and runOrderingTurn itself resolves that from
-    // the live session (or persisted resume context) — see the case handler in
-    // api/index.js. Putting 'goal' in `required` here would make the generic contract
-    // validator reject that empty-goal continuation before the handler ever runs,
-    // breaking auto-continue (regression test: browser-ordering-loop.test.js).
+    risk: 'low',
     required: [],
-    optional: ['goal', 'url', 'credentialSites'],
-    inputExample: { goal: 'order a medium black t-shirt from Rothys', url: 'https://www.rothys.com' },
-    // credentialSites has no entry in inputExample above (it's a rare param), so without this
-    // the native schema would only say "credentialSites (optional)" — giving no hint that it
-    // must be an ARRAY of domains. The guidance below states the same rule in prose, but a
-    // wrongly-shaped argument (a bare string instead of an array) is exactly the kind of
-    // mistake a per-parameter format hint prevents that prose elsewhere does not.
-    paramHints: { credentialSites: 'array of site domains to offer a saved credential for, e.g. ["delta.com"]' },
-    successSummary: 'Order progressed',
-    failureSummary: 'Order task failed',
+    optional: ['url', 'site', 'searchFor', 'objective'],
+    inputExample: { url: 'https://www.example.com/account', objective: 'cancel the subscription' },
+    paramHints: {
+      url: 'absolute http(s) url to open',
+      site: 'a site name or host instead of a url, when you want its known entry point (e.g. "john lewis")',
+      searchFor: 'what to look for on that site — opens its search results directly when the site is known',
+    },
+    successSummary: 'Page opened',
+    failureSummary: 'Could not open the page',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Call again with the same goal (or no goal, to continue an in-progress order) for a multi-step order. NEVER call confirm_browser_payment yourself — only after the user explicitly agrees to the price shown in a review_required result. If the user asks you to sign in to a specific site using a saved credential, pass credentialSites as an array of that site\'s domain (e.g. ["delta.com"]) — without it, no stored credential will ever be offered, even if one exists. If the user says "wrong price", "that\'s wrong", or gives any price correction, always re-check the exact same retailer/site that produced the previous price — never drift to the brand\'s own website or a different retailer. Also use this for booking a real appointment through a business\'s own website (a dentist, salon, restaurant, or anywhere with an online booking page) — treat finding and confirming a slot the same way as finding and confirming an order, including the same review-before-payment step. find_appointment_options is not a working alternative for this today. Also use this to read a REAL courier tracking page for a delivery watch (see create_scheduled_task\'s guidance for the full pattern) — read what the page actually says, never invent a shipment status.'
+    guidance: 'Open a real web page and read what is on it. Returns the page url, title, visible text and a NUMBERED list of every control on the page — those numbers are the elementIds you pass to browser_act. Use this whenever a task needs a website that has no connector: account settings, cancelling something, a form or application, a portal, a booking page, checking an order. Pass the site\'s own url; use web_search first if you do not know it. Alternatively pass `site` (a name or host) and, to go straight to results, `searchFor` — for a site already known, that opens its real search URL instead of landing on a homepage and hunting for the search box. `objective` is only recorded for context; nothing branches on it.'
   },
-  // The second half of the two-phase flow above — only ever called on a turn AFTER the user
-  // has explicitly approved a review_required result from run_browser_task. executionMode:
-  // 'direct' is correct here too: the human review already happened, this is the user's own
-  // "yes" being carried out, not a fresh unreviewed spend.
-  confirm_browser_payment: {
-    adapter: { kind: 'inline' },
-    risk: 'high',
-    required: [],
-    inputExample: {},
-    successSummary: 'Order placed',
-    failureSummary: 'Payment confirmation failed',
-    confirmation: 'none',
-    executionMode: 'direct',
-    guidance: 'Only call this after the user has explicitly said yes to the price shown by run_browser_task on a prior turn.'
-  },
-  cancel_browser_payment: {
+  browser_observe: {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
-    successSummary: 'Order cancelled',
-    failureSummary: 'Cancel failed',
+    successSummary: 'Page read',
+    failureSummary: 'Could not read the page',
     confirmation: 'none',
-    executionMode: 'direct'
+    executionMode: 'direct',
+    guidance: 'Re-read the current page without acting on it. Use it to VERIFY that something actually happened — after a submit, check the page really says it succeeded; after a change, check the new value is shown. Element numbers change whenever the page changes, so observe again before acting on a page you have not just looked at.'
   },
-  // The second half of the credential-use two-phase flow (Phase 2 of the aside-parity
-  // roadmap) — only ever called on a turn AFTER the user has explicitly approved a
-  // review_required result from run_browser_task's ready_for_credential_use branch.
-  // executionMode: 'direct' is correct here for the same reason it is on
-  // confirm_browser_payment: the human review already happened on the prior turn.
-  confirm_credential_use: {
+  browser_act: {
     adapter: { kind: 'inline' },
-    risk: 'high',
+    risk: 'medium',
+    required: ['action'],
+    optional: ['elementId', 'value', 'direction', 'amount', 'url', 'submit'],
+    inputExample: { action: 'click', elementId: 12 },
+    paramHints: {
+      action: 'one of: click, type, select, scroll, back, navigate, wait',
+      elementId: 'the number of the control from the last observation (click, type, select)',
+      value: 'text to type, or the exact option label to select',
+      direction: 'up or down (scroll)',
+      amount: 'small, medium or large (scroll)',
+      url: 'absolute http(s) url (navigate only)'
+    },
+    successSummary: 'Done',
+    failureSummary: 'That step did not work',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Take ONE step on the page that is already open, then look at what came back before choosing the next one. Every call returns a fresh observation plus a `changed` flag saying whether the url or the content actually moved — if nothing changed, a required field is probably unfilled or the control was not the right one; do not simply repeat it. `type` presses Enter by default (set submit:false for a form field you are filling among several). Never guess an elementId: it must come from the observation you are looking at. This does not pay for anything — a page that asks for money still has to go through transaction_prepare and review-gated transaction_authorize.'
+  },
+  browser_upload: {
+    adapter: { kind: 'inline' },
+    risk: 'medium',
+    required: ['documentId'],
+    inputExample: { documentId: 'doc-uuid' },
+    successSummary: 'File attached',
+    failureSummary: 'Could not attach the file',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Put one of the user\'s OWN stored documents into a file field on the page. Identify it by id from the documents list — NEVER by how a filename reads. If the page needs a file you do not have, say what is missing and ask for it rather than attaching something that merely sounds close.'
+  },
+  browser_download: {
+    adapter: { kind: 'inline' },
+    risk: 'medium',
+    required: ['elementId'],
+    optional: ['note'],
+    inputExample: { elementId: 7, note: 'the application form' },
+    successSummary: 'File saved',
+    failureSummary: 'Could not save the file',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Click something that produces a file and save it into the user\'s documents — a form, a statement, a policy schedule, a returns label, a receipt. Say in `note` what the file is, so it is findable later.'
+  },
+  browser_continue_without_account: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
     required: [],
     inputExample: {},
+    successSummary: 'Continued without signing in',
+    failureSummary: 'No way past without an account',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Get past a page that wants an account when the task does not need one — a guest checkout, a "continue without registering" fork, an identity-provider chooser. Try this before asking the user to sign in. If the page genuinely offers no way through, it says so and you should then look for a saved sign-in or ask.'
+  },
+  browser_sign_in: {
+    adapter: { kind: 'inline' },
+    risk: 'high',
+    required: ['site'],
+    inputExample: { site: 'example.com' },
     successSummary: 'Signed in',
-    failureSummary: 'Sign-in failed',
+    failureSummary: 'Could not sign in',
+    // Using someone's stored credentials is an authority decision, not a browsing one.
+    confirmation: 'review_required',
+    executionMode: 'review',
+    guidance: 'Use a credential the user has stored in their vault to sign in to the site currently open. The user is asked before any credential is used, every time. Never type a password the user gave you in chat, and never invent one.'
+  },
+  // ── Transaction ───────────────────────────────────────────────────────────────────────
+  // Authorising money is a general capability, not a shopping step. A retail checkout, a
+  // train ticket, a booking deposit, a council payment and a visa fee all go through these.
+  transaction_prepare: {
+    adapter: { kind: 'inline' },
+    risk: 'medium',
+    required: [],
+    inputExample: {},
+    successSummary: 'Ready for approval',
+    failureSummary: 'Could not prepare the payment',
     confirmation: 'none',
     executionMode: 'direct',
-    guidance: 'Only call this after the user has explicitly said yes to using their saved credential, offered by run_browser_task on a prior turn.'
+    guidance: 'Call this when the page you are on is asking for money. It fills the saved card if the form is showing, finds the control that would charge, and READS the amount off the page with a parser. It never charges anything. Use the amount it returns when you tell the person what they are approving — never a figure you inferred yourself. If it comes back not ready, the page is still a step short: keep going with browser_act and try again.'
   },
-  cancel_credential_use: {
+  transaction_authorize: {
+    adapter: { kind: 'inline' },
+    risk: 'high',
+    required: [],
+    inputExample: {},
+    successSummary: 'Payment authorised',
+    failureSummary: 'Payment did not complete',
+    // The one place money is committed, gated exactly like every other money action. The
+    // amount is re-read from the live page and re-checked against the spending limit inside
+    // the handler, so approval cannot be spent against a figure that has since changed.
+    confirmation: 'review_required',
+    executionMode: 'review',
+    guidance: 'Commit the payment that transaction_prepare found, then report what actually happened: confirmed, declined, or waiting on the bank. Only call this after the person has explicitly agreed to the amount transaction_prepare reported. If the bank asks them to approve it in their banking app, that is a pause, not a failure — say so and call transaction_status when they say they have done it.'
+  },
+  transaction_status: {
     adapter: { kind: 'inline' },
     risk: 'low',
     required: [],
     inputExample: {},
-    successSummary: 'Sign-in cancelled',
-    failureSummary: 'Cancel failed',
+    successSummary: 'Checked',
+    failureSummary: 'Could not check',
     confirmation: 'none',
-    executionMode: 'direct'
-  }
+    executionMode: 'direct',
+    guidance: 'Read the page to find out whether a payment actually went through. Use it after a bank approval, or any time you are not certain — "I pressed the button" is not the same as "it was paid".'
+  },
+  browser_fill_known_details: {
+    adapter: { kind: 'inline' },
+    risk: 'medium',
+    required: [],
+    inputExample: {},
+    successSummary: 'Filled what was already known',
+    failureSummary: 'Could not fill the form',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Fill every field on the page the user has already given you an answer for — name, email, phone, address — and get back the list of what genuinely remains unknown. Use this on ANY form: an application, a claim, a registration, a council or government page, a checkout. Then ask the person for the remaining fields ONCE, together, rather than one at a time — and never invent a value for a field this could not fill. It never touches payment card fields.'
+  },
+  browser_close: {
+    adapter: { kind: 'inline' },
+    risk: 'low',
+    required: [],
+    inputExample: {},
+    successSummary: 'Browser closed',
+    failureSummary: 'Could not close the browser',
+    confirmation: 'none',
+    executionMode: 'direct',
+    guidance: 'Close the page when the task on it is finished. Cookies and sign-in state are saved first, so a later task on the same site can pick them up.'
+  },
 };
 
 function getActionContract(type) {
   const contract = ACTION_CONTRACTS[type];
   if (!contract) return null;
-  // Fail-safe review routing. The action-runner gates human review on `executionMode === 'review'`,
+  // Fail-safe review routing. action-execution gates human review on `executionMode === 'review'`,
   // but the `confirmation`/`risk` fields are what authors actually set — and it's easy to add a new
   // spend action with `confirmation: 'review'` while forgetting `executionMode`, which silently ships
   // it as direct-execute (the concierge/Stripe money actions did exactly this). Derive the gate here

@@ -67,28 +67,21 @@ test('other currencies are read too, since the agent is not UK-only by design', 
 // charge their card.
 test('the payment gate reads a total and refuses to offer payment without one', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
-
-  // Strip comments first: the fix documents the old `total: ''` in prose, and asserting
-  // against prose makes the tripwire fire on its own explanation.
+  // The gate now lives in the general transaction layer, and is reached the same way for a
+  // retail checkout, a train ticket or a council payment.
+  const source = fs.readFileSync(require.resolve('../../api/services/transaction.js'), 'utf8');
   const stripped = source.replace(/\/\/[^\n]*/g, '');
-  const fn = stripped.slice(stripped.indexOf('async function tryPaymentReady'));
-  const body = fn.slice(0, fn.indexOf('\n}\n'));
 
-  assert.doesNotMatch(body, /total:\s*''/,
-    'the payment gate must not ship an empty total');
+  // prepare() reads the amount with the parser rather than accepting anything it was told.
+  const prepare = stripped.slice(stripped.indexOf('async function prepare('));
+  assert.match(prepare.slice(0, prepare.indexOf('\n}\n')), /const money = await readAmount\(page\)/);
+  // ...and commit() re-reads it, so approval cannot be spent against a figure that changed.
+  const commit = stripped.slice(stripped.indexOf('async function commit('));
+  assert.match(commit.slice(0, commit.indexOf('\n}\n')), /const money = await readAmount\(page\)/);
 
-  // And no OTHER path may either -- there turned out to be a second one.
-  const everyPaymentReturn = [...stripped.matchAll(/type:\s*'ready_for_payment'[^}]*}/g)].map(m => m[0]);
-  assert.ok(everyPaymentReturn.length >= 2, 'expected more than one ready_for_payment return');
-  for (const ret of everyPaymentReturn) {
-    assert.doesNotMatch(ret, /total:\s*''/, `a ready_for_payment path still ships an empty total: ${ret.slice(0,80)}`);
-  }
-  assert.match(body, /readOrderTotal\(/,
-    'the payment gate must actually read the total off the page');
-  assert.match(body, /if \(!orderTotal\)/,
-    'no readable total must be handled explicitly, not passed through');
-  // The amount has to reach the user, not just exist in the payload.
-  assert.match(body, /summary: `Checkout — payment step, total \$\{orderTotal\}`/,
-    'the amount must appear in the summary the user is shown');
+  // And nothing may offer payment without one: the handler refuses rather than asking the
+  // person to approve a blank.
+  const handler = fs.readFileSync(require.resolve('../../api/actions/browser.js'), 'utf8');
+  assert.match(handler, /if \(!result\.raw\)/);
+  assert.match(handler, /could not read a total on the page/);
 });

@@ -2,13 +2,15 @@
 
 **Note on naming:** the shipped product is called **Milgrain** — "Oxy" only survives as this repo's name and as internal identifiers (Xcode project/target, bundle ID `ai.oxy.app`, `oxy.app` email domain, code symbols like `OxySettings`). All user-facing UI, Shortcuts, and copy say Milgrain, not Oxy. The AI assistant itself is intentionally nameless — it doesn't refer to itself as "Milgrain" or "Oxy" in conversation.
 
-Milgrain is a conversational, action-taking assistant you talk to like a friend — text or voice. It listens, remembers personal context across conversations, and takes real action across the services you already use: email, calendar, messaging, rides, trains, flights, hotels, music, smart home, finance, and more. Shopping/checkout automation (via browser control) is one capability among many, not the whole product — see [PRODUCT.md](PRODUCT.md) and [docs/NORTH_STAR.md](docs/NORTH_STAR.md) for the product framing.
+Milgrain is a general-purpose agent runtime with a conversational front end — text or voice. You give it an outcome; it works out how to reach that outcome by composing general capabilities (browser, connectors, memory, communication, files, its own settings, long-running work, verification) inside deterministic safety boundaries.
+
+The architecture hardcodes **capabilities and safety boundaries, never human tasks**. Email, calendar, rides, travel, shopping, forms, account admin and subscriptions are all applications of the same runtime rather than separate features — adding a new kind of task should not mean adding a new subsystem. See [AGENTS.md](AGENTS.md) for the architecture rules and `test/smoke/general-agency.test.js` for the capability tests that hold them in place.
 
 ## What It Does
 
 - **Conversational AI** — Chat via text or voice, with persistent memory of personal facts and preferences that shapes future replies.
 - **Connector system** — 22 pluggable service integrations (see table below): real API actions (send email, check calendar, control smart home, check crypto/stocks, etc.) and handoff/deep-link connectors (Uber, Lyft, Trainline, Spotify, Amazon).
-- **Browser-automation agent** — A Playwright-driven agent (`api/services/browser-task.js`) that can complete real checkout flows (adding to cart, applying a stored delivery/payment identity, confirming an order) on retailer sites without a dedicated API.
+- **Browser as an environment** — Playwright-backed primitives (`browser_open`, `browser_observe`, `browser_act`, `browser_close`) that let the agent see a real page and choose one step at a time. The same primitives serve cancelling a subscription, filling in an application, changing an account setting, a council portal, and buying something. Payment is a separate general transaction capability with deterministic approval and verification.
 - **Proactive briefings & routines** — Scheduled/interval-based routines and unprompted, context-aware briefings pulled from real calendar/email/search grounding.
 - **Task & entity memory** — Persistent agent tasks with step-level tracing, plus recall of prior entities/tasks so the agent can refer back to "that hotel" or "the order from yesterday."
 - **Credential vault** — Securely stores and reuses login/delivery/payment identity for checkout and connector flows.
@@ -28,10 +30,12 @@ Milgrain is a conversational, action-taking assistant you talk to like a friend 
 ┌───────────────────▼───────────────────────┐
 │           API Server (Express 5)           │
 │  api/index.js — chat, audio, memory, auth  │
-│  api/services/ — ~40 domain services       │
-│    (browser-task, agent-orchestrator,      │
-│     checkout-profile, vault-credentials,   │
-│     routines, entity-recall, stripe-cards) │
+│  agent-orchestrator — the reasoning loop   │
+│  action-execution  — the one exec boundary │
+│    (validate → review gate → invoke → log) │
+│  browser-session / browser-environment     │
+│    — the browser as a general environment  │
+│  playbooks — optional domain guidance      │
 └───────┬──────────────┬────────────────────┘
         │              │
 ┌───────▼──────┐ ┌─────▼──────────────────────────────────┐

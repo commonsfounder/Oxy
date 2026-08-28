@@ -12,7 +12,7 @@ process.env.OXY_BROWSER_FRAME_EVALUATE_TIMEOUT_MS = '50';
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { safeFrameEvaluate } = require('../../api/services/browser-task');
+const { safeFrameEvaluate } = require('../../api/services/browser-environment');
 
 test('a frame stuck mid-navigation resolves to the fallback instead of hanging forever', async () => {
   const neverResolves = new Promise(() => {}); // exactly what frame.evaluate() does on a stuck frame

@@ -178,8 +178,6 @@ function buildPendingReviewResult(action, cardInfo = null) {
               ? 'Check the number, then tap Call.'
               : action?.type === 'create_calendar_event'
                 ? 'Check the details, then tap Add.'
-                : action?.type === 'run_browser_task'
-                  ? 'Check the order, then tap Place order.'
                 : `${reviewTitleForAction(action)}. Check the details, then tap Confirm or Cancel.`;
   return applyActionContractResultMetadata(action, {
     success: false,

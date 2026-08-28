@@ -5,40 +5,12 @@ const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|
 const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
 const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
 const FUTURE_TIME_TERMS = /\b(tomorrow|later|around|about|by|at|after|before|\d{1,2}(?::\d{2})?\s*(am|pm)?)\b/i;
-const CAPABILITY_SWEEP_TRIGGER = /\b(?:run|use)\s+(?:the\s+)?capability[_\s-]?sweep\b|\b(?:run|do)\s+(?:the\s+)?(?:whole|full|safe)\s+(?:capability\s+)?sweep\b|\bdo\s+all(?:\s+of)?\s+that\b|\bcheck\s+everything\b|\bfull\s+capability\s+batch\b/i;
-const CAPABILITY_SWEEP_INPUT_KEYS = [
-  'weather_city', 'place_query', 'directions_destination', 'directions_origin',
-  'train_origin', 'train_destination', 'train_date', 'flight_from', 'flight_to',
-  'flight_depart_date', 'flight_return_date', 'hotel_location', 'hotel_check_in',
-  'hotel_check_out', 'stock_symbol', 'amazon_query', 'itinerary_destination',
-  'itinerary_start_date', 'itinerary_duration_days', 'google_docs_query', 'github_repo'
-];
 
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
-function parseCapabilitySweepInputs(message) {
-  const text = String(message || '');
-  const inputs = {};
-  for (const key of CAPABILITY_SWEEP_INPUT_KEYS) {
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const match = text.match(new RegExp(`\\b${escapedKey}\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^;\\n]+?))\\s*(?=;|$)`, 'i'));
-    const value = match?.[1] || match?.[2] || match?.[3];
-    if (value?.trim()) inputs[key] = value.trim();
-  }
-  return inputs;
-}
 
-function inferCapabilitySweepAction(message) {
-  const text = normalizeText(message);
-  if (!CAPABILITY_SWEEP_TRIGGER.test(text)) return null;
-  return {
-    reason: 'capability_sweep',
-    spoken: "I'll run the read-only capability sweep.",
-    actions: [{ type: 'capability_sweep', input: parseCapabilitySweepInputs(text) }]
-  };
-}
 
 function isQuestionOnly(text) {
   return /^(what|who|when|why|explain)\b/i.test(text) &&
@@ -78,62 +50,10 @@ function looksLikeExplicitPlaceLookup(message) {
 // purchase verb and no on/from/at source, so it stays a place request.
 const { allRetailerAliases } = require('./services/retailer-sites');
 
-const SHOPPING_VERB = /\b(buy|purchase|shop for|add\s+.*\bto\s+(?:my\s+)?(?:basket|cart|bag))\b/i;
-const BROWSER_SIGNUP_VERB = /\b(?:sign\s+(?:me\s+)?up|register|create\s+(?:an?\s+)?account|open\s+(?:an?\s+)?account|join|subscribe)\b/i;
-const BROWSER_SIGNUP_TARGET = /\b(?:website|site|online|newsletter|account|retailer|membership|service|subscription)\b/i;
-const LOCAL_BRANCH_QUERY = /\b(?:near(?:\s+me|by)?|nearest|closest|branch(?:es)?|store\s+location|opening\s+hours|where\s+is)\b/i;
 
-function retailerMentioned(text) {
-  const norm = normalizeText(text).toLowerCase();
-  for (const alias of allRetailerAliases()) {
-    const re = new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i');
-    // "Next" is a real retailer but also ordinary language. Require an explicit retailer
-    // connector for that alias so "next train" and "next week" never become shopping.
-    if (re.test(norm) && (alias !== 'next' || new RegExp(`\\b(?:on|from|at|using)\\s+${alias}\\b`, 'i').test(norm))) return true;
-  }
-  return false;
-}
 
-function looksLikeShoppingRequest(message) {
-  const text = normalizeText(message);
-  if (!text) return false;
-  if (SHOPPING_VERB.test(text)) return true;
-  // A location question mentioning a retailer is still a place lookup. Only let the
-  // generic acquire verbs below become browser work when the sentence is not asking for
-  // a nearby branch or store details.
-  if (LOCAL_BRANCH_QUERY.test(text)) return false;
-  // "get/grab/find/order me <product> on/from/at <retailer>" — the acquire lead + a named
-  // retailer source together mean shopping, not navigation.
-  if (/\b(get|grab|find|order|want|need)\b/i.test(text) && retailerMentioned(text)) return true;
-  if (/\b(?:on|from|at|using)\s+/i.test(text) && retailerMentioned(text)) return true;
-  return false;
-}
 
-function inferBrowserShoppingAction(message) {
-  const text = normalizeText(message);
-  // A named retailer gives the browser a concrete target. Generic "what should I buy?"
-  // recommendations remain grounded-search questions and must stay on the model path.
-  if (!text || !looksLikeShoppingRequest(text) || !retailerMentioned(text)) return null;
-  return {
-    reason: 'browser_shopping',
-    spoken: "I'll open the retailer and take this as far as I can.",
-    actions: [{ type: 'run_browser_task', input: { goal: text } }]
-  };
-}
 
-// Account/newsletter requests are browser work, not a web search or nearby-place lookup.
-// Keep this narrow: an explicit signup verb plus a website/account target is enough to
-// start the real browser flow, which will stop for email/password/confirmation rather
-// than silently submitting user data.
-function inferBrowserSignupAction(message) {
-  const text = normalizeText(message);
-  if (!text || !BROWSER_SIGNUP_VERB.test(text) || !BROWSER_SIGNUP_TARGET.test(text)) return null;
-  return {
-    reason: 'browser_signup',
-    spoken: "I'll open the website and take this as far as I can.",
-    actions: [{ type: 'run_browser_task', input: { goal: text } }]
-  };
-}
 
 function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
@@ -510,9 +430,6 @@ function inferDeterministicAction(message, options = {}) {
   const outboundCommunication = inferOutboundCommunicationAction(text);
   if (outboundCommunication) return outboundCommunication;
 
-  const browserSignup = inferBrowserSignupAction(text);
-  if (browserSignup) return browserSignup;
-
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
   // find_appointment_options only ever talks to the sandbox provider (see
@@ -521,7 +438,7 @@ function inferDeterministicAction(message, options = {}) {
   // "book me a dentist appointment" into a scripted dead end before the model ever got a
   // turn. Only take this deterministic path when a provider is actually connected
   // (today: sandbox/test runs); otherwise fall through to the model, which has
-  // run_browser_task available for a genuine online booking.
+  // the general browser capabilities for a genuine online booking.
   if (options?.appointmentProviderConnected &&
       /\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
     return {
@@ -605,15 +522,8 @@ function inferDeterministicAction(message, options = {}) {
     };
   }
 
-  // Buying a product from a named retailer must reach the real browser task. Keep this after
-  // ride and directions guards so "get me an Uber to John Lewis" and "directions to John
-  // Lewis" still route to transport rather than opening a shopping session.
-  const browserShopping = inferBrowserShoppingAction(text);
-  if (browserShopping) return browserShopping;
-
-  // Placed after ride & directions the same way looksLikeShoppingRequest is, so
-  // "get me an uber to the restaurant" is unaffected — only the final place-lookup
-  // fallback is guarded.
+  // Placed after ride & directions so "get me an uber to the restaurant" is unaffected —
+  // only the final place-lookup fallback is guarded.
   if (looksLikeCommunicationRequest(text)) return null;
 
   if (looksLikeBrowserSessionRequest(text)) return null;
@@ -631,9 +541,6 @@ module.exports = {
   inferDeterministicAction,
   inferPersonalAdminAction,
   inferOutboundCommunicationAction,
-  inferBrowserSignupAction,
-  inferBrowserShoppingAction,
-  inferCapabilitySweepAction,
   looksLikeLocalPlaceRequest,
   looksLikeDirectionsRequest,
   cleanDestinationPhrase,

@@ -69,19 +69,19 @@ const TASKS = [
   // Browser tasks. These are never auto-confirmed by this harness. An order is
   // successful only when the browser reaches a review/payment boundary; a signup
   // is successful only when it stops for the user's email/password/confirmation.
-  { id: 'order-john-lewis', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'checkout', message: 'On John Lewis, order a plain men\'s sweatshirt in size medium and take it to checkout.' },
-  { id: 'order-groceries', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'checkout', message: 'On Sainsbury\'s, add semi-skimmed milk, bread, and bananas to a basket and take it to checkout.' },
-  { id: 'order-electronics', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'checkout', message: 'On Currys, find a wireless mouse, add it to the basket, and go to checkout.' },
-  { id: 'order-takeaway', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'checkout', message: 'Order a pizza from a nearby restaurant for delivery to Birmingham city centre.' },
-  { id: 'signup-newsletter', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'user-data', message: 'Sign me up for the newsletter on the John Lewis website.' },
-  { id: 'signup-service', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'user-data', message: 'Create an account for me on the retailer website so I can save items.' },
-  { id: 'book-dentist-site', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'review', message: 'Find and book the next available dentist appointment through the practice website.' },
-  { id: 'restaurant-booking', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'review', message: 'Book a table for two at an Italian restaurant this Saturday at 7pm.' },
-  { id: 'book-hotel', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'review', message: 'Book the hotel I choose after you show me the exact price and cancellation terms.' },
-  { id: 'book-flight', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'review', message: 'Book the flight I choose after you show me the final fare and baggage terms.' },
-  { id: 'return-order', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'user-data', message: 'Start a return for my latest online order and tell me what information you need.' },
-  { id: 'track-parcel', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'user-data', message: 'Check the courier website for my parcel and tell me its current status.' },
-  { id: 'compare-products', group: 'browser', mode: 'browser', expectedAction: 'run_browser_task', boundary: 'answer', message: 'Compare the current prices of the Dyson V15 at Amazon and John Lewis.' },
+  { id: 'order-john-lewis', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'checkout', message: 'On John Lewis, order a plain men\'s sweatshirt in size medium and take it to checkout.' },
+  { id: 'order-groceries', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'checkout', message: 'On Sainsbury\'s, add semi-skimmed milk, bread, and bananas to a basket and take it to checkout.' },
+  { id: 'order-electronics', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'checkout', message: 'On Currys, find a wireless mouse, add it to the basket, and go to checkout.' },
+  { id: 'order-takeaway', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'checkout', message: 'Order a pizza from a nearby restaurant for delivery to Birmingham city centre.' },
+  { id: 'signup-newsletter', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Sign me up for the newsletter on the John Lewis website.' },
+  { id: 'signup-service', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Create an account for me on the retailer website so I can save items.' },
+  { id: 'book-dentist-site', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'review', message: 'Find and book the next available dentist appointment through the practice website.' },
+  { id: 'restaurant-booking', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'review', message: 'Book a table for two at an Italian restaurant this Saturday at 7pm.' },
+  { id: 'book-hotel', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'review', message: 'Book the hotel I choose after you show me the exact price and cancellation terms.' },
+  { id: 'book-flight', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'review', message: 'Book the flight I choose after you show me the final fare and baggage terms.' },
+  { id: 'return-order', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Start a return for my latest online order and tell me what information you need.' },
+  { id: 'track-parcel', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'user-data', message: 'Check the courier website for my parcel and tell me its current status.' },
+  { id: 'compare-products', group: 'browser', mode: 'browser', expectedAction: 'browser_open', boundary: 'answer', message: 'Compare the current prices of the Dyson V15 at Amazon and John Lewis.' },
 
   // Work, project, and artefact tasks.
   { id: 'web-search', group: 'work-read', mode: 'safe', expectedAction: 'web_search', message: 'Search the web for the latest UK student finance repayment thresholds.' },

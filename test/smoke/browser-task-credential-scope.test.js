@@ -1,7 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { siteKeyFromUrl, siteInScope } = require('../../api/services/browser-task');
+const { siteKeyFromUrl } = require('../../api/services/browser-session');
+const { siteInScope } = require('../../api/services/browser-access');
 const { normalizeSite } = require('../../api/services/vault-credentials');
 
 test('siteKeyFromUrl and normalizeSite agree on the same domain (scoped-grant matching depends on this)', () => {

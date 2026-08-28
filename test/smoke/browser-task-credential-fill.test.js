@@ -5,7 +5,7 @@ const test = require('node:test');
 const {
   classifyLoginInput,
   formatLoginValue
-} = require('../../api/services/browser-task');
+} = require('../../api/services/browser-access');
 
 test('classifyLoginInput recognizes password fields', () => {
   assert.equal(classifyLoginInput('Password'), 'password');

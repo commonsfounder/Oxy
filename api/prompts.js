@@ -317,7 +317,7 @@ function dateTimeBlock(dateStr, timeStr) {
 // than left for the model to guess at (it never reached the prompt at all before this). The
 // explanation is deliberately generic across the app's various autonomy vocabularies (Quiet/Low/
 // Active/High/Bold and Reactive/Balanced/Proactive/Autonomous both exist in the wild) rather than
-// hardcoding one tier list. The server-side gate in action-runner.js (contract.executionMode ===
+// hardcoding one tier list. The server-side gate in action-execution.js (contract.executionMode ===
 // 'review' || context.guardMode) is untouched by this — this block explains it, never overrides
 // it, and says so explicitly so the model doesn't try to compensate by asking defensively anyway.
 function autonomyApprovalBlock(autonomy, guardMode) {

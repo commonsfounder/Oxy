@@ -15,7 +15,6 @@ const telegram = require('../../connectors/telegram');
 const notifications = require('../services/notifications');
 const taskManager = require('../services/task-manager');
 const scheduledTasks = require('../services/scheduled-tasks');
-const { runCapabilitySweep } = require('../services/capability-sweep');
 const { availableChannels, describeUnavailable } = require('../services/notification-delivery');
 const { resolveDelegatedGuardMode } = require('../services/delegated-run-starter');
 
@@ -158,19 +157,6 @@ async function createReminder({ userId, action, params, enrichedParams, context,
   };
 }
 
-// "What do I need to know today?" — composed from the capabilities that are already
-// real, never a dump of every source. Everything here is re-read live on each call:
-// that is what makes a recurring morning brief a genuine current-state digest rather
-// than a stored summary replayed every day. Ranking/noise rules live in
-// api/services/daily-digest.js; this case is purely the gathering.
-async function capabilitySweep({ userId, action, params, enrichedParams, context, deps, helpers }) {
-  const { supabase, executeAction, delegatedRunLifecycle, startDelegatedTaskExecution, getPreferenceMap, setPreferenceValue } = deps;
-  return runCapabilitySweep({
-    userId,
-    inputs: params,
-    execute: (type, input) => executeAction(userId, type, input, context)
-  });
-}
 
 // How the user controls being interrupted. Deliberately four knobs, not a settings panel:
 // which channel, which categories, urgent-only, and when to stay quiet.
@@ -261,7 +247,6 @@ module.exports = {
     control_smart_home: controlSmartHome,
     mcp_tool: mcpTool,
     create_reminder: createReminder,
-    capability_sweep: capabilitySweep,
     set_notification_preference: setNotificationPreference
   }
 };

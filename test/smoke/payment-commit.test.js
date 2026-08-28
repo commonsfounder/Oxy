@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { matchesPaymentKeyword, isPaymentAdvance, isPaymentCommit } = require('../../api/services/browser-task');
+const { matchesPaymentKeyword, isPaymentAdvance, isPaymentCommit } = require('../../api/services/transaction');
 
 test('advancing to payment pauses for approval but does not charge', () => {
   // Matching is deliberate: it stops for the user before entering the payment page.
@@ -35,14 +35,14 @@ test('wallets are never a commit, since a headless browser cannot complete them'
 
 test('the confirm loop presses a commit button after only advancing', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+  const source = fs.readFileSync(require.resolve('../../api/services/transaction.js'), 'utf8');
   const fn = source.slice(source.indexOf('const deadline = Date.now() + CONFIRM_WATCH_BUDGET_MS'));
-  const body = fn.slice(0, fn.indexOf('\n    touchSession(userId);'));
+  const body = fn.slice(0, fn.indexOf('\n  touchSession(userId);'));
   assert.match(body, /isPaymentCommit\(/, 'the watch loop must look for a real commit control');
 });
 
 test('a saved card or card option is recognised, wallets are not', () => {
-  const { isCardPaymentOption } = require('../../api/services/browser-task');
+  const { isCardPaymentOption } = require('../../api/services/transaction');
   // From the real John Lewis payment page, which shows no pay button until one is chosen.
   for (const label of ['Mastercard ending in 2073', 'Credit / Debit card', 'Visa card ending 4464', 'Use saved card']) {
     assert.equal(isCardPaymentOption(label), true, `${label} should be a card option`);
@@ -54,7 +54,7 @@ test('a saved card or card option is recognised, wallets are not', () => {
 
 test('a saved-card CVV box counts as a card field needing filling', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../api/services/browser-task.js'), 'utf8');
+  const source = fs.readFileSync(require.resolve('../../api/services/transaction.js'), 'utf8');
   const fn = source.slice(source.indexOf('async function paymentCardFieldsPresent'));
   const body = fn.slice(0, fn.indexOf('\n}\n'));
   // Requiring a number field meant a saved card, which shows only a CVV, was never filled.
