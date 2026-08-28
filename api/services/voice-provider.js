@@ -1,19 +1,8 @@
 'use strict';
 /*
- * Voice provider seam — speech out (TTS) and speech in (transcription).
- *
- * Split from the chat brain deliberately: voice is a different transport (raw audio in,
- * audio bytes out) and a different product decision (the assistant's voice identity), so
- * it gets its own switch rather than riding on OXY_BRAIN_PROVIDER.
- *
- *   OXY_VOICE_PROVIDER   = openai (default) | gemini
- *   OXY_TTS_MODEL        = gpt-4o-mini-tts (default)
- *   OXY_TTS_VOICE        = OpenAI voice id; overrides the mapping below outright
- *   OXY_TRANSCRIBE_MODEL = gpt-4o-transcribe (default)
- *
- * Callers get base64 WAV either way, so the SSE audio events and the iOS client are
- * unchanged. OpenAI can return WAV directly, so unlike the Gemini path (raw PCM needing a
- * synthesised RIFF header) there is no conversion step here.
+ * Voice provider seam for speech out and speech in, on its own OXY_VOICE_PROVIDER switch rather
+ * than the chat brain's: different transport, and the assistant's voice is its own decision.
+ * Callers get base64 WAV either way, so the SSE events and the iOS client are unchanged.
  */
 
 const OPENAI_VOICES = new Set([
@@ -98,10 +87,8 @@ async function synthesizeSpeechOpenAI(text, voiceName) {
 }
 
 /*
- * Transcribes WAV audio to text.
- *
- * Sent as multipart/form-data, which is what the endpoint takes — the JSON+inlineData
- * shape the Gemini path used has no equivalent here.
+ * Transcribes WAV audio to text, sent as multipart/form-data — the Gemini path's
+ * JSON+inlineData shape has no equivalent here.
  */
 async function transcribeSpeechOpenAI(buffer, mimeType = 'audio/wav') {
   const model = process.env.OXY_TRANSCRIBE_MODEL || 'gpt-4o-transcribe';

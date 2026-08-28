@@ -1,19 +1,11 @@
 'use strict';
 const { storeDocument, getDocument, getDocumentBytes } = require('./documents');
 
-// Documents crossing the boundary between Millie's mailbox and her document store.
-//
-// The dangerous direction is outbound. "Attach my CV" must never be resolved by matching a
-// filename, because `passport-scan.pdf` and `passport-photo-cv.pdf` are one fuzzy match away
-// from each other and the failure mode is emailing someone's passport to a stranger. So:
-//
-//   * Attachments are chosen by DOCUMENT ID only. There is deliberately no name-matching
-//     path in this module — picking which document is meant is the agent's job, done against
-//     findDocuments, in the open, before this point.
-//   * A document already bound to a different workflow is refused. If the CV is attached to
-//     the Acme application, it does not silently ride along on an unrelated insurance email.
-//   * Nothing here sends anything. Every caller is behind the existing review gate, so a
-//     human sees the filenames before they leave.
+// Documents crossing between the mailbox and the document store. Outbound is the dangerous
+// direction — a fuzzy filename match is one step from emailing someone's passport to a
+// stranger — so: attachments are chosen by document id only, with no name-matching path here;
+// a document bound to another workflow is refused; and nothing here sends anything, every
+// caller sitting behind the review gate that shows a human the filenames first.
 
 const MAX_ATTACHMENTS_PER_SEND = 10;
 // Resend's documented per-message ceiling is 40MB total; stay well under it, and under the
@@ -58,12 +50,8 @@ async function resolveAttachmentsForSend(supabase, userId, {
   return { attachments, documents };
 }
 
-// Inbound: an email arrived with files on it. Each becomes a document carrying where it came
-// from, so "the policy schedule they sent me" is answerable later.
-//
-// Deduping is inherited from storeDocument's checksum reuse rather than reimplemented here,
-// which is what makes a thread of five replies quoting the same attachment produce one
-// document instead of five.
+// Inbound: each file on an email becomes a document carrying where it came from. Deduping is
+// storeDocument's checksum reuse, so five replies quoting one attachment make one document.
 async function ingestEmailAttachments(supabase, userId, parsedAttachments = [], {
   conversationId = null, participantId = null, providerMessageId = null, agentTaskId = null
 } = {}) {

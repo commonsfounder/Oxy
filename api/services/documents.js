@@ -3,23 +3,13 @@ const crypto = require('crypto');
 const { encryptTokens, decryptTokens, isEncryptedTokenEnvelope } = require('./token-crypto');
 const { extractorFor } = require('./document-extraction');
 
-// Files, as a first-class thing Millie can hold.
-//
-// Bytes go to the private `documents` Storage bucket; this module is the index over them.
-// Two rules shape the whole file:
-//
-//   1. Storing a file must never depend on understanding it. Extraction is a separate,
-//      best-effort pass (setExtraction) that fills in later. A document is valid and
-//      usable at extraction_status 'pending' — otherwise a scanned PDF we can't parse
-//      becomes a file we refuse to keep, which is exactly backwards.
-//
-//   2. Every read is scoped by user_id, not just by document id. These are passports and
-//      payslips; a missing .eq('user_id') here is a cross-user data leak, so the scoping
-//      lives inside this module rather than being left to each call site to remember.
-//
-// Encryption is split on purpose: blobs rely on the private bucket plus Supabase's at-rest
-// encryption, while extracted text gets token-crypto's envelope, because that is the part
-// that gets read into prompts and query results. See the migration for the full reasoning.
+// The index over the bytes in the private `documents` bucket. Two rules shape it:
+//   1. Storing a file never depends on understanding it. Extraction is a separate best-effort
+//      pass, and a document is fully usable at extraction_status 'pending'.
+//   2. Every read is scoped by user_id, not just document id — these are passports and payslips,
+//      so the scoping lives here rather than in each call site.
+// Encryption is split: blobs rely on the private bucket and at-rest encryption, while extracted
+// text gets token-crypto's envelope, being the part that reaches prompts and query results.
 
 const DOCUMENTS_BUCKET = 'documents';
 

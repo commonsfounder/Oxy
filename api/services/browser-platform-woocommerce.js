@@ -1,29 +1,19 @@
 'use strict';
-// Platform-API commerce tier, WooCommerce — same idea as browser-platform-commerce.js
-// (Shopify), different platform. WooCommerce alone is likely the single largest e-commerce
-// platform by raw site count (WordPress + WooCommerce powers a huge number of small/
-// independent stores), so this is the natural second platform after Shopify for converting
-// "millions of sites" into a handful of platform integrations instead of per-site recipes.
+// Platform-API commerce tier for WooCommerce — the same idea as browser-platform-commerce.js
+// does for Shopify, on what is probably the largest platform by site count.
 //
-// Uses WooCommerce's "Store API" (/wp-json/wc/store/v1/*) — the public, unauthenticated API
-// introduced for the block-based Cart/Checkout blocks, which real customers' browsers use
-// via AJAX. NOT the classic /wp-json/wc/v3/* admin REST API, which requires merchant
-// consumer-key/secret credentials we don't have and isn't meant for anonymous shoppers.
-//
-// Verified live against a real store (kinfolk.com, 2026-07-11) before shipping — don't trust
-// the shapes below as assumed API docs, they're confirmed against real responses:
-//   - GET /wp-json/wc/store/v1/products?per_page=1 — detection probe.
-//   - GET /wp-json/wc/store/v1/products?per_page=50 (NOT ?search=<q> — WooCommerce's search
-//     is literal enough that a raw goal sentence returns zero matches; list + score locally
-//     with the same scorer the Shopify tier and vision loop already trust). Variations are
-//     embedded directly in each product's `variations` array ({id, attributes: [{name,
-//     value}]}) — no separate per-product variations call needed.
-//   - Prices are minor-unit strings ("6600" = $66.00), divide by currency_minor_unit.
-//   - GET /wp-json/wc/store/v1/cart returns a `nonce` response header (NOT a body field) —
-//     must be fetched first and echoed back as the `Nonce` request header on the add call.
-//     Shopify has no equivalent CSRF step; this is WooCommerce-specific.
-//   - POST /wp-json/wc/store/v1/cart/add-item with { id, quantity } (id is the variation id
-//     for a variable product, or the product id itself for a simple product) → 201 on success.
+// Uses the public, unauthenticated Store API (/wp-json/wc/store/v1/*) that the Cart/Checkout
+// blocks call from a customer's own browser, not the /wc/v3/* admin API, which needs merchant
+// credentials. The shapes below are confirmed against a real store, not assumed from docs:
+//   - products?per_page=1 is the detection probe.
+//   - products?per_page=50, never ?search= — Woo's search is literal enough that a goal
+//     sentence returns nothing, so list and score locally with the shared scorer. Variations
+//     are embedded in each product, so no per-product call.
+//   - Prices are minor-unit strings; divide by currency_minor_unit.
+//   - GET cart returns a `nonce` RESPONSE HEADER that must be echoed back as the `Nonce`
+//     request header on the add. Shopify has no equivalent step.
+//   - POST cart/add-item with { id, quantity } — the variation id, or the product id for a
+//     simple product — returns 201 on success.
 
 async function detectWooCommerce(requestCtx, origin) {
   try {
@@ -86,12 +76,9 @@ function pickVariation(product, goalContext) {
 }
 
 async function resolveAndAddToCart(requestCtx, origin, goal, goalContext, scoreFn) {
-  // Deliberately NOT using WooCommerce's ?search= param — verified live (kinfolk.com,
-  // 2026-07-11) that its search is literal enough that the raw goal text ("buy wholesale
-  // issue 60", with the verb) returns ZERO matches where "wholesale issue 60" alone returns
-  // one. Same fix as never applying this class of bug in the Shopify tier: list products and
-  // score them locally with scoreFn — one relevance policy, no dependency on a target site's
-  // search quality.
+  // Never ?search=: Woo's search is literal enough that a goal sentence with its verb still in
+  // it returns zero matches. List and score locally with scoreFn instead — one relevance
+  // policy, no dependency on a store's own search quality.
   let products;
   try {
     const res = await requestCtx.get(`${origin}/wp-json/wc/store/v1/products?per_page=50`, { timeout: 10000 });

@@ -1,20 +1,14 @@
 'use strict';
 
-// The durable responsibility.
+// The durable responsibility ("get this application submitted"), as distinct from a task ("upload
+// the CV") — agent_tasks still owns those and now carries a workflow_id.
 //
-// A task is an action ("upload the CV"). A workflow is the responsibility ("get this
-// application submitted"). This module owns the second thing, and deliberately does not
-// reimplement the first — agent_tasks still does tasks, and now carries a workflow_id.
+// The responsibility has to outlive its machinery: a session ending, a day passing, waiting on a
+// company, or moving from the browser to email must none of them lose the thread, which is why
+// browser state is a JSON column describing where we got to and never a live handle.
 //
-// Everything here is built so that the responsibility outlives its machinery. A browser
-// session ending, a day passing, waiting on the user, waiting on a company, or switching
-// from the browser to email entirely must none of them lose the thread. That is why
-// browser state is a JSON column describing where we got to, and never a live handle.
-//
-// There is one workflow shape for every kind of work. A job application, an insurance
-// claim, a trip and a purchase are all goal + documents + correspondence + checkpoints +
-// deadline + evidence. `type` is a label for presentation, never a branch — if a new kind
-// of work needed a new table, the abstraction would be wrong.
+// One shape for every kind of work — goal, documents, correspondence, checkpoints, deadline,
+// evidence. `type` is a presentation label, never a branch.
 
 const ACTIVE_STATUSES = ['gathering', 'working', 'waiting_for_user', 'waiting_external'];
 const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];

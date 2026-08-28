@@ -1,17 +1,9 @@
 'use strict';
 
-// Turning real emails into real purchase records — and refusing to when the evidence is not
-// there.
-//
-// The governing rule: a total is only ever taken from a LABELLED total ("Order total: £84.99",
-// "Amount paid $19", "You were charged €12.50"). Never from the largest number in the email,
-// never from a bare price, never from a promotional "£20 off". A promotional email full of
-// prices must produce nothing at all, because reporting "you spent £842.17 last month" from
-// numbers that were never charged is worse than reporting a smaller, true figure.
-//
-// Receipt DETECTION deliberately reuses the same signal shape emailTriageSignals already uses
-// for its 'receipt or confirmation' bucket (the one that stops inbox cleanup from archiving
-// real receipts) rather than inventing a second, divergent idea of what a receipt is.
+// Turning real emails into purchase records, and refusing to when the evidence isn't there: a
+// total only ever comes from a labelled total ("Amount paid $19"), never the largest number in
+// the email, so a promotional email full of prices produces nothing at all. Detection reuses
+// emailTriageSignals' 'receipt or confirmation' shape rather than inventing a second one.
 
 // Starts from the same transactional vocabulary emailTriageSignals scores as 'receipt or
 // confirmation', plus the labelled-total wording that only ever appears in a real receipt

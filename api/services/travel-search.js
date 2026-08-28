@@ -1,29 +1,18 @@
 'use strict';
 
-// Real flight and hotel search — replacing two actions that only ever built a deep link and
-// reported success.
+// Flight and hotel search grounded in real web search — the fallback for when no inventory
+// provider is configured (see travel-inventory.js), since browser automation against the big
+// travel sites is a known anti-bot ceiling here.
 //
-// Why this route. There is no flight/hotel API credential in this environment (no Amadeus,
-// Duffel, Kiwi or SerpApi key), and the partner APIs that would give bookable inventory all
-// require an account this project does not have. Browser automation against Google Flights or
-// Booking.com is the known anti-bot ceiling in this codebase. What IS available and genuinely
-// current is the real web-search grounding already used by plan_itinerary and gift research —
-// so that is the source, and the honesty of the output is calibrated to exactly what it can
-// support.
+// Two stages, because one does not work: asking a grounded search for JSON only makes it skip
+// searching and return an empty array. So stage one searches and answers in prose, and stage
+// two — no search tool attached — converts only that prose into options, and so cannot invent
+// one that was never found.
 //
-// It runs in two stages because one does not work: asking the grounded search to "return only
-// JSON" makes it skip searching and return an empty array (measured, repeatedly). So stage one
-// searches and reports in prose, and stage two — a plain call with NO search tool — converts
-// only that prose into structured options. The extractor cannot invent an option that is not
-// in the text it was given.
-//
-// What this can and cannot claim:
-//   CAN: "easyJet, direct, £133 return, quoted on Google Flights for 5–7 September" — a real
-//        price a real site really showed at search time.
-//   CANNOT: bookability, availability, or that the price still holds. Search results routinely
-//        quote a nearby date range rather than the exact one asked for, so every option
-//        carries whether it actually matches the requested dates, and the two groups are
-//        never mixed into one "cheapest" claim.
+// It can claim a real price a real site showed at search time. It cannot claim bookability,
+// availability, or that the price holds — and since results often quote a nearby date range,
+// every option records whether it matches the dates asked for, and the two groups are never
+// mixed into one "cheapest".
 
 const MAX_OPTIONS = 12;
 const EXTRACTION_TOKENS = 4000;
@@ -264,13 +253,9 @@ function applyConstraints(options = [], { maxPrice, maxPriceCurrency, directOnly
   const dropped = [];
   const kept = options.filter(option => {
     const price = option.kind === 'flight' ? option.price : (option.pricePerNight || option.totalPrice);
-    // A budget is in a currency. Comparing "under £150" against a $179 fare by number alone
-    // would silently apply a 1:1 rate; with no FX source configured, a different currency is
-    // reported as uncheckable rather than quietly passed or quietly dropped.
-    // A budget is in a currency. Dropping everything priced in another one is honest but
-    // useless — live testing lost all ten real Prague hotels that way, because they were
-    // quoted in USD/EUR against a GBP budget. They are kept and flagged instead, so the user
-    // still sees the real options and is told the budget could not be checked against them.
+    // A budget is in a currency, and with no FX source configured, comparing "under £150" to a
+    // $179 fare would silently apply a 1:1 rate. Dropping other currencies loses real options
+    // wholesale, so they are kept and flagged as unchecked against the budget instead.
     const otherCurrency = Boolean(maxPrice && price && maxPriceCurrency && option.currency && option.currency !== maxPriceCurrency);
     if (otherCurrency) {
       option.budgetCheckable = false;

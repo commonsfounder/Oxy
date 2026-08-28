@@ -1,18 +1,10 @@
 'use strict';
 
-// "What do I need to know today?" — the composed answer, not a dump of every source.
-//
-// Deliberately NOT a second copy of life-briefing.js: that module renders the iOS Home
-// card (hard cap of 3 items, `prompt` strings shaped for tappable cards) and its email
-// source is the message-level triage signal, which cannot tell you whether a THREAD is
-// still waiting on you. This is the conversational answer, which needs a different item
-// budget, real follow-up handles (thread ids, scheduled-task ids) so "draft the reply to
-// Mia" works straight after, and the thread-level judgment from reply-needed.js.
-//
-// What it DOES reuse from life-briefing.js: normalizeEvent and normalizeApproval, so a
-// calendar event or a pending approval ranks the same whether the user reads it on the
-// Home screen or asks in chat. Two ranking scales for the same object would be the actual
-// silo.
+// "What do I need to know today?" — the composed conversational answer, not a dump of every
+// source. Distinct from life-briefing.js, which renders the Home card off message-level triage:
+// this needs a larger item budget, thread-level judgment from reply-needed.js, and real
+// follow-up handles so "draft the reply to Mia" works straight after. It reuses that module's
+// normalizeEvent and normalizeApproval, so an event ranks the same on Home and in chat.
 
 const { normalizeEvent, normalizeApproval } = require('./life-briefing');
 const { daysUntil, formatMonthDay } = require('./occasions');

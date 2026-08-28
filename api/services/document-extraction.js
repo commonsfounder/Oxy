@@ -1,23 +1,14 @@
 'use strict';
 const { unzipSync, strFromU8 } = require('fflate');
 
-// Reading documents.
-//
-// Three rules run through every extractor here, and they are the reason each one returns a
-// result object instead of throwing:
-//
-//   1. **Extraction failure must leave the original document usable.** A scanned PDF we
-//      cannot read is still a file the user can send to an insurer. So failure is a value
-//      ({ ok: false, notes }), never an exception that unwinds the caller.
-//   2. **A reading is not a fact.** Every result carries a confidence and a producer. A
-//      DOCX text layer is 1; an OCR guess is capped well below it. Callers filter on this
-//      rather than treating all extracted values alike.
-//   3. **Mistakes stay visible.** `notes` records what went wrong or what was assumed —
-//      "no text layer, fell back to OCR" — so a later engineer can see why a field is odd
-//      instead of finding a confident-looking wrong answer.
-//
-// Nothing in this module writes to the database or mutates the original bytes; it turns
-// bytes into candidate readings and hands them back. Persistence is documents.js's job.
+// Reading documents into candidate readings — nothing here writes to the database or touches
+// the original bytes. Three rules, and the reason every extractor returns a result object:
+//   1. Failure is a value ({ ok: false, notes }), never an exception: an unreadable scan is
+//      still a file the user can send to an insurer.
+//   2. A reading is not a fact. Each carries a confidence and a producer, so an OCR guess and
+//      a DOCX text layer aren't treated alike.
+//   3. Mistakes stay visible. `notes` records what went wrong or was assumed, so an odd field
+//      is explicable rather than a confident-looking wrong answer.
 
 const EXTRACTION_PRODUCERS = {
   pdf: 'pdf-text-layer',

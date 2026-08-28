@@ -1,16 +1,11 @@
 'use strict';
 
-// Getting what Millie notices to the user without the user opening the app.
-//
-// The rules that matter here are all about NOT lying and NOT nagging:
-//   - "Delivered" means a provider accepted it. Entering a queue is not delivery, and a
-//     channel that is merely unconfigured must fail loudly rather than report success.
-//   - One real-world event produces one notification. A parcel moving to "out for delivery"
-//     is one thing that happened, not three ("watch triggered", "parcel changed", "out for
-//     delivery"), and the morning digest is one message, not one per item inside it.
-//   - Quiet hours defer, they do not drop — except for genuinely urgent things, and urgency
-//     is grounded in facts (overdue, starting soon, a stated threshold crossed), never in the
-//     model deciding something feels important.
+// Getting what Millie notices to the user without them opening the app. Three rules:
+//   - "Delivered" means a provider accepted it; a queue is not delivery, and an unconfigured
+//     channel fails loudly rather than reporting success.
+//   - One real-world event is one notification, and the digest is one message, not one per item.
+//   - Quiet hours defer rather than drop, except for urgency grounded in facts (overdue,
+//     starting soon, a threshold crossed) rather than the model finding something important.
 
 const CATEGORIES = ['watch', 'digest', 'delivery', 'reply_needed', 'occasion', 'commitment', 'other'];
 const URGENCIES = ['urgent', 'normal', 'low'];
@@ -185,19 +180,13 @@ function subjectsOf(event = {}) {
   return subjects;
 }
 
-// "Parcel changed", "watch triggered" and "out for delivery" are one thing that happened.
-// Collapses pending events that share a subject, keeping the most specific body.
+// Collapses pending events sharing a subject, keeping the most specific body — "parcel
+// changed" and "out for delivery" are one thing that happened.
 //
-// The digest gets a second, stronger rule: it is a single message that already names several
-// things, so anything else waiting to be sent about one of those things is folded into it.
-// Otherwise a commitment due today arrives once as its own alert and again inside the
-// morning digest — the same sentence, twice, which is exactly what makes proactive software
-// feel like nagging.
-// `alreadyCovered` carries the subjects of digests that have ALREADY been sent today. Without
-// it the fold only worked when the digest happened to still be pending in the same sweep: a
-// commitment alert raised an hour after the morning digest went out was delivered on its own,
-// repeating a line the user had already read. Which duplicate you get should not depend on
-// sweep timing.
+// The digest folds harder: it already names several things, so anything else queued about one
+// of them is folded in rather than arriving twice. `alreadyCovered` carries the subjects of
+// digests sent EARLIER today, so the fold doesn't depend on the digest happening to still be
+// pending in the same sweep.
 function collapseRelated(events = [], { alreadyCovered = [] } = {}) {
   const coveredByDigest = new Set(alreadyCovered);
   for (const event of events) {

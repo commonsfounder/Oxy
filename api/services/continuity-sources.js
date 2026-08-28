@@ -1,20 +1,13 @@
 'use strict';
 
 /*
- * Turns a real vendor export into one canonical bundle.
+ * Turns a real vendor export into one canonical bundle. Input is a FILE MAP
+ * ({ 'conversations.json': <parsed>, ... }), because a real export is a ZIP of separate files
+ * with the conversations in one and the profile material in others.
  *
- * The thing that made the first version of this feature unreal: it read conversations,
- * instructions and memory from ONE json object. A ChatGPT export is a ZIP of separate files
- * — conversations in one, the profile material in others — so the highest-signal half was
- * silently dropped on every import.
- *
- * Input here is therefore a FILE MAP ({ 'conversations.json': <parsed>, ... }), not a blob.
- *
- * On filenames: the conversation payloads are stable and verified, but vendors move the
- * instructions/memory files around between export versions. Rather than hard-code one
- * layout and fail closed, each extractor sweeps a candidate list and every adapter reports
- * `found` / `missing` so the UI can say "conversations and instructions imported, memory
- * not present in this export" instead of quietly importing three-quarters of it.
+ * Conversation payloads are stable, but vendors move the instructions and memory files between
+ * export versions, so each extractor sweeps a candidate list and reports `found`/`missing` —
+ * the UI can then say what was not in this export rather than quietly importing three-quarters.
  */
 
 const MAX_TEXT = 8000;
@@ -200,10 +193,8 @@ function stepLabel(step) {
 }
 
 /*
- * A Zap is a graph; Oxy executes a prompt. Porting the graph would mean reimplementing
- * Zapier, so the translation restates the automation's INTENT for the agent loop, which
- * supplies the branching at run time. The original graph is kept in metadata so a bad
- * translation is inspectable rather than lost.
+ * A Zap is a graph and Oxy executes a prompt, so the translation restates the automation's
+ * intent and lets the agent loop supply the branching. The original graph stays in metadata.
  */
 function zapToRoutine(zap, index) {
   const steps = asArray(zap?.nodes || zap?.steps);

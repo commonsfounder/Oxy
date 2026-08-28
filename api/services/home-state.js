@@ -1,23 +1,15 @@
 'use strict';
 
-// What the home screen is, in one shape.
-//
-// The app used to build its own feed out of `briefings` rows and cap it at eight,
-// which mixed inbox mail, deliveries and jobs into one undifferentiated list and had
-// no way at all to express "this changed since you last looked". This module answers
-// four questions instead, because those are the four a person actually has:
+// What the home screen is, in one shape — the four questions a person actually has:
 //
 //   needsYou   — stopped, waiting on a human decision
 //   handling   — running right now, nothing required of you
 //   changed    — happened since you last opened the app
 //   completed  — finished, recently enough to still matter
 //
-// It owns no rules of its own. Workflows, commitments and tasks each keep theirs; this
-// reads them and translates into one vocabulary the UI can render without branching.
-//
-// Deliberately tolerant of empty tables. A user with no workflows yet still has tasks
-// and commitments, and the board must show their real work rather than four empty
-// lanes — so every source is optional and a failure in one never blanks the others.
+// It owns no rules of its own: workflows, commitments and tasks each keep theirs, and this
+// translates them into one vocabulary the UI renders without branching. Every source is
+// optional and a failure in one never blanks the others.
 
 const workflows = require('./workflows');
 const commitments = require('./commitments');

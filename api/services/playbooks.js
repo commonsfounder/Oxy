@@ -1,16 +1,8 @@
 'use strict';
-// Optional domain guidance.
-//
-// A playbook makes Adam BETTER at a kind of task. It must never be what makes the task
-// possible. The architectural test: delete every playbook here and the agent can still open a
-// page, read it, click, type, upload, verify and ask for approval — it just does it with less
-// judgement about what usually works.
-//
-// That is the whole difference between this file and the shopping subsystem it replaced.
-// Guidance used to be welded into the browser loop's decision prompt, which meant the loop
-// could not exist without it, and every new domain would have needed its own loop.
-//
-// Adding a domain here is adding TEXT, not architecture. Nothing branches on `id`.
+// Optional domain guidance. A playbook makes the agent better at a kind of task and must never
+// be what makes it possible: delete every one of them and it can still open a page, read it,
+// click, type, upload, verify and ask for approval, just with less judgement about what usually
+// works. Adding a domain here is adding text, not architecture — nothing branches on `id`.
 
 /** @typedef {{ id: string, title: string, appliesTo: RegExp, excludes?: RegExp, guidance: string }} Playbook */
 

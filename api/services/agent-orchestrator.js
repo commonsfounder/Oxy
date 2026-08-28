@@ -13,13 +13,9 @@ const { buildToolsForGemini } = require('../action-contracts');
 // Simple in-memory for traces during a run; production should persist
 const runTraces = new Map();
 
-// Extract function calls from ONE source, not both: resp.functionCalls (when the SDK
-// provides it) is a derived view over the same candidates[0].content.parts array, not an
-// independent signal. Reading both and pushing into the same list double-counted every real
-// call — confirmed live (2026-07-11): a single browser action call came back as two
-// identical-args entries, which then executed twice sequentially, roughly doubling
-// wall-clock time on an already-slow action for no benefit. Pure/exported so this exact
-// regression is unit-testable without a real Gemini client.
+// One source, not both: resp.functionCalls is a derived view over the same content.parts array,
+// so reading both double-counts every call and executes each one twice. Pure and exported so
+// that is unit-testable without a real client.
 function extractToolCalls(resp) {
   if (resp?.functionCalls?.length) {
     return resp.functionCalls.map(fc => ({ name: fc.name, args: fc.args || {}, id: fc.id || null }));
@@ -215,15 +211,9 @@ async function runAgentLoop({
     await lifecycle.checkpoint(userId, persistedTask.id, checkpointData, persistedTask.attempt);
   }
 
-  // An auto-planning pre-pass used to run here, gated on a regex of English verbs
-  // (plan|book|research|find|organize|handle|arrange) with a hardcoded exception for trip
-  // planning, because the injected "research each piece separately" framing measurably
-  // steered the model away from the right tool for that one domain.
-  //
-  // Both halves were the same mistake: a general reasoning loop should not decide how hard a
-  // goal is by looking for verbs, and it certainly should not know that travel exists. The
-  // loop plans by iterating — think, act, observe, adapt — which is what it is for. Planning
-  // is still available as generatePlan for a caller that genuinely wants a plan up front.
+  // No auto-planning pre-pass: a general reasoning loop should not judge a goal's difficulty
+  // from its verbs, nor know that travel exists. It plans by iterating — think, act, observe,
+  // adapt. generatePlan remains for a caller that genuinely wants a plan up front.
 
   const baseConfig = {
     // dynamicSystemPrompt is always a fully-composed prompt now (built by the caller via
@@ -332,16 +322,9 @@ async function runAgentLoop({
 
     if (onStep) onStep({ phase: 'observed', results });
 
-    // Cream-of-the-crop: mid-loop reflection for self-correction. Skipped when a result
-    // already tells us the goal isn't achieved yet (for example a browser step's
-    // continuesBrowsing: true) — asking a full extra model call "did we achieve the goal?"
-    // when the action itself already answered "not yet, still working" was a real, silent
-    // ~2-10s cost on every iteration for zero behavioral effect (reflection.nextAction is
-    // logged, never consulted for control flow).
-    // Fire-and-forget, not awaited: nothing downstream branches on `reflection` (it was
-    // already dead for control flow before this change — see comment above), so blocking
-    // the response on it was pure latency with no payoff. Logged whenever it resolves,
-    // even if that's after this turn has already answered the user.
+    // Mid-loop reflection, skipped when a result already says the goal isn't reached yet (a
+    // browser step's continuesBrowsing) — asking again costs an extra model call for an answer
+    // already given. Fire-and-forget: it is logged, never consulted for control flow.
     const stillInProgress = results.some((r) => r.result?.continuesBrowsing === true);
     if (i > 0 && results.length > 0 && !stillInProgress) {
       reflectOnResults(initialMessage, actions, results, modelName, provider)

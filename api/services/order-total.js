@@ -1,19 +1,10 @@
 'use strict';
 
-// Read the amount before asking to spend it.
-//
-// `tryPaymentReady` in browser-task.js is, by its own comment, "the one place every
-// ready_for_payment path funnels through" — and it returned `total: ''`. So the agent reached
-// a real John Lewis payment step and offered "I'll pay with your visa ending 4464, say the
-// word" with the amount appearing nowhere: not in the reply, not in its task steps, not in
-// its events. A yes to an unknown sum is not consent, and a hard budget cannot be honoured
-// by something that never learns the price.
-//
-// Two rules here, both about not making it worse:
-//   - The most SPECIFIC label wins. A checkout page shows a subtotal, a delivery line and the
-//     real figure; taking the first price would report the subtotal and understate the charge.
-//   - No match returns null, never a nearby number. A wrong total shown as "approve this" is
-//     worse than admitting it could not be read.
+// Read the amount before asking to spend it: a yes to an unknown sum is not consent, and a
+// budget can't be honoured by something that never learns the price. Two rules:
+//   - The most specific label wins, or a page's subtotal gets reported as the charge.
+//   - No match returns null, never a nearby number — a wrong total shown as "approve this" is
+//     worse than admitting it couldn't be read.
 
 // Ordered most specific first. The first pattern that matches decides.
 const TOTAL_PATTERNS = [

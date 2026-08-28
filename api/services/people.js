@@ -1,22 +1,12 @@
 'use strict';
 
-// The people layer: who someone is, how to reach them, and the handful of things worth
-// remembering about them — so Millie stops rediscovering "who is Mia?" from scratch every
-// time.
-//
-// Built ON `participants` / `participant_addresses` rather than beside them. Those already
-// were the channel-agnostic person record and the stable-handle index; a parallel `people`
-// table would have produced exactly the fragmented identity this is meant to prevent. See
-// supabase/migrations/supabase-migration-people.sql.
-//
-// Two rules do most of the work here:
-//   1. A handle (email address, phone number) is definitive evidence of identity. A name is
-//      not. So "Alisa", alisa@example.com, and her occasion row converge on one person via
-//      the address index, never via string similarity.
-//   2. When a name is genuinely ambiguous — two people called James — nothing is merged and
-//      nothing is guessed. The caller is handed the candidates and has to ask. Silently
-//      picking one is worse than a question, because the wrong merge is invisible and
-//      permanent.
+// Who someone is, how to reach them, and what is worth remembering about them. Built on
+// `participants`/`participant_addresses` rather than a parallel table, which would produce the
+// fragmented identity this exists to prevent. Two rules carry it:
+//   1. A handle is definitive evidence of identity; a name is not. Records converge through the
+//      address index, never through string similarity.
+//   2. An ambiguous name merges nothing and guesses nothing — the caller gets the candidates
+//      and has to ask, because a wrong merge is invisible and permanent.
 
 const MAX_FACTS_PER_PERSON = 20;
 const MAX_FACT_LENGTH = 300;

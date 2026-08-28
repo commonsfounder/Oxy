@@ -208,16 +208,10 @@ function importedMemoryCandidates(normalised) {
 }
 
 /*
- * Imported automations land in `routines` — always DISABLED.
- *
- * The workflow is still live in Zapier while this runs. Switching the copy on would double
- * every action it performs: two identical emails, two calendar entries, two orders. The user
- * retires the original, then enables it here. Nothing about an import is worth breaking that
- * rule for, so `enabled: false` is set unconditionally rather than derived from
- * activeAtSource.
- *
- * Upserted on (user_id, source, external_id) so re-importing an export updates the routine
- * instead of stacking duplicates.
+ * Imported automations land in `routines` always disabled — the original is still live at the
+ * source while this runs, and switching the copy on doubles every action it performs. So
+ * `enabled: false` unconditionally, never derived from activeAtSource. Upserted on
+ * (user_id, source, external_id) so a re-import updates rather than stacking duplicates.
  */
 async function importWorkflows(supabase, userId, normalised) {
   if (!normalised.workflows.length) return;

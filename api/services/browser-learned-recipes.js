@@ -1,23 +1,14 @@
 'use strict';
-// Self-learning checkout recipes.
+// Self-learning checkout recipes, where browser-recipes.js's per-site steps are hand-authored
+// and browser-fastpaths.js only learns the search URL.
 //
-// The gap this closes: browser-recipes.js's per-site recipes are 100% hand-authored after a
-// dev sits down and diagnoses a site live — the vision loop never learns from its OWN
-// successful runs. browser-fastpaths.js already does learn-once-remember-forever, but only
-// for the "find the product" search-URL step, not the checkout tail.
+// Narrow on purpose: only the "add to basket" click, the step CONVENTION most often guesses
+// wrong on an unknown host. A click followed by the basket count actually incrementing is proof
+// of what works there, remembered as the same text=<...> selector idiom the authored recipes use.
 //
-// Scope (v1, intentionally narrow): learn ONLY the "add to basket/bag/cart" click, the one
-// step CONVENTION already tries to guess generically and most often gets wrong on an
-// unrecipe'd host. When the vision loop clicks something that looks like an add button and
-// the basket count actually increments right after, that click's text is durable proof of
-// what works on this host — remember it as a text=<...> selector, exactly the idiom
-// hand-authored recipes already use (see CONVENTION's own selectorAny lists).
-//
-// Self-heal is NOT reimplemented here — a learned selector is injected into a CONVENTION-
-// shaped recipe's 'add' step and then flows through the existing nextRecipeMove/recipeHealth
-// pipeline in browser-recipes.js exactly like a hand-authored step. If it stops matching
-// (site redesign), recipeHealth's existing disable-after-N-misses logic degrades it back to
-// vision automatically — no new failure-tracking code needed.
+// No self-heal of its own: a learned selector is injected into a CONVENTION-shaped recipe and
+// flows through the existing recipeHealth pipeline, which disables it back to vision if the site
+// changes.
 
 const { CONVENTION } = require('./browser-recipes');
 

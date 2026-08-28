@@ -1,17 +1,10 @@
 'use strict';
 /*
- * Data retention sweep.
+ * Enforces the bounded retention the privacy policy promises. Split into pure planners, which
+ * are unit-testable with no I/O, and a thin runner that turns a plan into deletes.
  *
- * The privacy policy promises bounded retention (conversations kept ~180 days,
- * etc.). Nothing enforced that promise until this module. It is split into:
- *   - pure planners (selectExpiredConversationIds) — fully unit-testable, no I/O
- *   - a thin runner (runRetentionSweep) that turns plans into Supabase deletes
- *
- * Conversation rule mirrors the long-standing comment in
- * supabase-migration-indexes.sql: keep the newest `keepPerUser` messages per
- * user AND additionally delete anything older than `maxAgeDays`. A row is purged
- * only when it is BOTH beyond the per-user keep window AND past the age cutoff,
- * so an active user never loses recent context regardless of age.
+ * A conversation row is purged only when it is BOTH beyond the newest-`keepPerUser` window and
+ * past `maxAgeDays`, so an active user never loses recent context however old it is.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;

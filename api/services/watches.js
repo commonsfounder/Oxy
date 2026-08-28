@@ -1,17 +1,10 @@
 'use strict';
 
-// General natural-language watches, formalised on the scheduler that already exists.
-//
-// The delivery watch proved the shape (a poll task + a condition + a saved last state), but
-// it carried all of that in prose guidance and hand-rolled workspace writes, so nothing else
-// could reuse it and a price or stock watch had no way to tell "unchanged" from "changed".
-// This module is that pattern made first-class and, crucially, DETERMINISTIC: whether a watch
-// fires is decided here from the observation the run actually recorded, not by asking the
-// model to assert that its condition came true. A model can hallucinate "[WATCH_TRIGGERED]";
-// it cannot hallucinate a number being below a threshold once the number is written down.
-//
-// It deliberately does NOT introduce a second scheduler. Cadence, claiming, advancing and
-// expiry all remain scheduled-tasks.js's job.
+// General natural-language watches — a poll task, a condition and a saved last state — on the
+// scheduler that already exists. Whether one fires is decided here from the observation the run
+// recorded, never by asking the model to assert its condition came true: a model can hallucinate
+// "[WATCH_TRIGGERED]", not a number being below a threshold once the number is written down.
+// No second scheduler: cadence, claiming, advancing and expiry stay scheduled-tasks.js's job.
 
 const WATCH_TYPES = ['state_change', 'threshold', 'recurring_check'];
 const NOTIFY_RULES = ['once', 'every_change', 'ongoing'];
@@ -175,12 +168,8 @@ function evaluateObservation(watchState = {}, observation = {}, now = new Date()
   };
 }
 
-// Duplicate avoidance. Asking twice for the same watch should adjust the one that exists, not
-// leave two of them polling the same page — the live database had four separate "Brighton
-// hotel price" watches, all created by re-asking.
-// Light plural stemming, so "hotel prices … drop" and "hotel price drops" are recognised as
-// the same watch. The same missing-stemming failure has bitten this codebase before (a
-// product search matched "towel" but not "towels"), and here it means a duplicate watch.
+// Asking twice for the same watch adjusts the existing one rather than leaving two polling the
+// same page. Light plural stemming, so "hotel prices drop" and "hotel price drops" are one watch.
 function stem(token) {
   return token.length > 3 && token.endsWith('s') && !token.endsWith('ss') ? token.slice(0, -1) : token;
 }
