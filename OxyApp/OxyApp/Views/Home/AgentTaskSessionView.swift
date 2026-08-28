@@ -93,8 +93,8 @@ struct AgentTaskSessionView: View {
                 switch step.ui {
                 case .paymentConfirm(let details):
                     PaymentConfirmStepView(details: details, ink: ink)
-                case .productDetail(let details):
-                    ProductDetailStepView(details: details, ink: ink)
+                case .subjectDetail(let details):
+                    SubjectDetailStepView(details: details, ink: ink)
                 case .rideConfirm(let details):
                     RideConfirmStepView(details: details, ink: ink)
                 case .linkResult(let details):
@@ -123,7 +123,7 @@ struct AgentTaskSessionView: View {
 
     private func isStepThatShowsTrace(_ ui: StepUI) -> Bool {
         switch ui {
-        case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
+        case .paymentConfirm, .subjectDetail, .rideConfirm, .linkResult: return true
         case .workingHero, .assistantAsk: return false
         }
     }

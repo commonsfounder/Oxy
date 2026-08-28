@@ -131,13 +131,11 @@ struct ActionResult: Codable, Identifiable, Equatable {
     let distanceText: String?
     let recoverable: Bool?
     let recoveryAction: BrowserRecoveryAction?
-    /// Product images observed during a browser task.
-    let imageUrls: [String]?
-    /// Product details observed during a browser task.
-    let productName: String?
-    let price: String?
-    let total: String?
-    let colorOptions: [String]?
+    /// What this result is ABOUT, whatever kind of thing it is: an order, a booking, a form,
+    /// a document, an account. Commerce used to have its own first-class fields here
+    /// (productName/price/total/colorOptions), which made every other kind of work a
+    /// second-class citizen of the message model.
+    let subject: ResultSubject?
     /// Completed browser-task identifier.
     let taskId: String?
 
@@ -157,8 +155,10 @@ struct ActionResult: Codable, Identifiable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case action, result, success, outcome, text, error, deepLink, webLink, cardText, actionSummary, risk, confirmation, pending, connectorId, healthStatus
-        case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction, imageUrls
-        case productName, price, total, colorOptions, taskId
+        case headline, itinerary, routeContext, bookingUrl, distanceText, recoverable, recoveryAction
+        case subject, taskId
+        // Older servers sent these at the top level; decoded into `subject` below.
+        case imageUrls, productName, price, total, colorOptions
     }
 
     init(
@@ -183,11 +183,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         distanceText: String? = nil,
         recoverable: Bool? = nil,
         recoveryAction: BrowserRecoveryAction? = nil,
-        imageUrls: [String]? = nil,
-        productName: String? = nil,
-        price: String? = nil,
-        total: String? = nil,
-        colorOptions: [String]? = nil,
+        subject: ResultSubject? = nil,
         taskId: String? = nil
     ) {
         self.action = action
@@ -211,11 +207,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
         self.distanceText = distanceText
         self.recoverable = recoverable
         self.recoveryAction = recoveryAction
-        self.imageUrls = imageUrls
-        self.productName = productName
-        self.price = price
-        self.total = total
-        self.colorOptions = colorOptions
+        self.subject = subject
         self.taskId = taskId
     }
 
@@ -260,11 +252,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             distanceText = try result.decodeIfPresent(String.self, forKey: .distanceText)
             recoverable = try result.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try result.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
-            imageUrls = try result.decodeIfPresent([String].self, forKey: .imageUrls)
-            productName = try result.decodeIfPresent(String.self, forKey: .productName)
-            price = try result.decodeIfPresent(String.self, forKey: .price)
-            total = try result.decodeIfPresent(String.self, forKey: .total)
-            colorOptions = try result.decodeIfPresent([String].self, forKey: .colorOptions)
+            subject = try ResultSubject.decode(from: result)
             taskId = try result.decodeIfPresent(String.self, forKey: .taskId)
         } else {
             success = try container.decodeIfPresent(Bool.self, forKey: .success) ?? false
@@ -287,11 +275,7 @@ struct ActionResult: Codable, Identifiable, Equatable {
             distanceText = try container.decodeIfPresent(String.self, forKey: .distanceText)
             recoverable = try container.decodeIfPresent(Bool.self, forKey: .recoverable)
             recoveryAction = try container.decodeIfPresent(BrowserRecoveryAction.self, forKey: .recoveryAction)
-            imageUrls = try container.decodeIfPresent([String].self, forKey: .imageUrls)
-            productName = try container.decodeIfPresent(String.self, forKey: .productName)
-            price = try container.decodeIfPresent(String.self, forKey: .price)
-            total = try container.decodeIfPresent(String.self, forKey: .total)
-            colorOptions = try container.decodeIfPresent([String].self, forKey: .colorOptions)
+            subject = try ResultSubject.decode(from: container)
             taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
         }
     }
@@ -319,12 +303,65 @@ struct ActionResult: Codable, Identifiable, Equatable {
         try container.encodeIfPresent(distanceText, forKey: .distanceText)
         try container.encodeIfPresent(recoverable, forKey: .recoverable)
         try container.encodeIfPresent(recoveryAction, forKey: .recoveryAction)
-        try container.encodeIfPresent(imageUrls, forKey: .imageUrls)
-        try container.encodeIfPresent(productName, forKey: .productName)
-        try container.encodeIfPresent(price, forKey: .price)
-        try container.encodeIfPresent(total, forKey: .total)
-        try container.encodeIfPresent(colorOptions, forKey: .colorOptions)
+        try container.encodeIfPresent(subject, forKey: .subject)
         try container.encodeIfPresent(taskId, forKey: .taskId)
+    }
+}
+
+/// What a result is ABOUT — an order, a booking, an application, a document, an account.
+///
+/// This replaced four commerce-specific fields on ActionResult (productName, price, total,
+/// colorOptions). They meant a purchase rendered richly while a submitted form or a cancelled
+/// subscription had nowhere to put its own details, which is backwards for a general agent.
+/// Every field stays optional and is only ever populated from something actually observed.
+struct ResultSubject: Codable, Equatable {
+    /// What it is: "Nike Air Max 90", "Tenancy application", "Council tax account".
+    let name: String?
+    /// Money involved, exactly as displayed, when there is any.
+    let amount: String?
+    /// Pictures the page genuinely showed.
+    let imageUrls: [String]?
+    /// Distinct selectable choices the page genuinely offered (sizes, colours, time slots,
+    /// delivery options). Never a fabricated default set.
+    let options: [String]?
+
+    var isEmpty: Bool {
+        name == nil && amount == nil && (imageUrls?.isEmpty ?? true) && (options?.isEmpty ?? true)
+    }
+
+    init(name: String? = nil, amount: String? = nil, imageUrls: [String]? = nil, options: [String]? = nil) {
+        self.name = name
+        self.amount = amount
+        self.imageUrls = imageUrls
+        self.options = options
+    }
+
+    /// Reads the nested `subject` object, falling back to the flat commerce keys an older
+    /// server still sends so an app update does not have to be lockstep with a deploy.
+    static func decode<K: CodingKey>(from container: KeyedDecodingContainer<K>) throws -> ResultSubject? {
+        // `try?` flattens the optional here, so one unwrap is enough.
+        if let key = K(stringValue: "subject"),
+           let nested = try? container.decodeIfPresent(ResultSubject.self, forKey: key),
+           !nested.isEmpty {
+            return nested
+        }
+        func string(_ name: String) -> String? {
+            guard let key = K(stringValue: name),
+                  let value = try? container.decodeIfPresent(String.self, forKey: key) else { return nil }
+            return value
+        }
+        func strings(_ name: String) -> [String]? {
+            guard let key = K(stringValue: name),
+                  let value = try? container.decodeIfPresent([String].self, forKey: key) else { return nil }
+            return value
+        }
+        let legacy = ResultSubject(
+            name: string("productName"),
+            amount: string("total") ?? string("price"),
+            imageUrls: strings("imageUrls"),
+            options: strings("colorOptions")
+        )
+        return legacy.isEmpty ? nil : legacy
     }
 }
 

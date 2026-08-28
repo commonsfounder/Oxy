@@ -303,40 +303,45 @@ final class AgentTaskSession: Identifiable {
     private func handle(result: ActionResult, fallbackText: String) {
         captureLiveTaskId(result.taskId)
         if result.confirmation == "review_required" {
-            let name = result.productName ?? title
+            let subject = result.subject
+            let name = subject?.name ?? title
             title = name
             appendStep(AgentStep(
                 title: name,
-                ui: .productDetail(ProductDetails(
+                ui: .subjectDetail(SubjectDetails(
                     name: name,
-                    subtitle: result.text ?? "Ready to check out",
-                    priceText: result.total,
-                    imageUrls: result.imageUrls ?? [],
-                    colorOptions: result.colorOptions ?? []
+                    subtitle: result.text ?? "Ready for your approval",
+                    amountText: subject?.amount,
+                    imageUrls: subject?.imageUrls ?? [],
+                    options: subject?.options ?? []
                 )),
-                ctaLabel: "Continue to checkout"
+                ctaLabel: "Continue"
             ))
-            appendStep(AgentStep(
-                title: "Confirm",
-                ui: .paymentConfirm(PaymentDetails(
-                    merchant: name,
-                    amount: result.total ?? "At checkout",
-                    detail: result.text ?? "Final price is confirmed before anything is charged."
-                )),
-                ctaLabel: "Review & confirm"
-            ))
+            // An amount only earns a payment card when there actually is one. A review pause
+            // on a form submission or a cancellation is still a review pause.
+            if let amount = subject?.amount {
+                appendStep(AgentStep(
+                    title: "Confirm",
+                    ui: .paymentConfirm(PaymentDetails(
+                        merchant: name,
+                        amount: amount,
+                        detail: result.text ?? "The amount is re-checked before anything is charged."
+                    )),
+                    ctaLabel: "Review & confirm"
+                ))
+            }
             return
         }
-        if result.success, result.productName != nil || result.imageUrls?.isEmpty == false {
-            let name = result.productName ?? title
+        if result.success, let subject = result.subject, !subject.isEmpty {
+            let name = subject.name ?? title
             title = name
             appendStep(AgentStep(
                 title: name,
-                ui: .productDetail(ProductDetails(
+                ui: .subjectDetail(SubjectDetails(
                     name: name,
                     subtitle: result.text ?? "",
-                    priceText: result.price,
-                    imageUrls: result.imageUrls ?? []
+                    amountText: subject.amount,
+                    imageUrls: subject.imageUrls ?? []
                 )),
                 ctaLabel: "Done"
             ))
@@ -439,14 +444,14 @@ final class AgentStep: Identifiable {
     var canAdvance: Bool {
         switch ui {
         case .workingHero, .assistantAsk: return false
-        case .paymentConfirm, .productDetail, .rideConfirm, .linkResult: return true
+        case .paymentConfirm, .subjectDetail, .rideConfirm, .linkResult: return true
         }
     }
 }
 
 enum StepUI {
     case paymentConfirm(PaymentDetails)
-    case productDetail(ProductDetails)
+    case subjectDetail(SubjectDetails)
     case rideConfirm(RideDetails)
     case linkResult(LinkResultDetails)
     /// The agent replied with plain text instead of calling a watched action — most
@@ -483,20 +488,21 @@ struct RideDetails: Equatable {
 /// A product surfaced for a "buy X" job. Everything except `name` is real backend
 /// data or absent — no fabricated prices, photos, or color options attached to a
 /// real product.
-struct ProductDetails: Equatable {
+struct SubjectDetails: Equatable {
     let name: String
     let subtitle: String
-    var priceText: String?
+    /// Money, when the work involves any. A submitted application has none.
+    var amountText: String?
     var imageUrls: [String]
-    /// Only ever populated when the backend genuinely observed distinct selectable
-    /// color/size options on the page — never a fallback/default set.
-    var colorOptions: [String]
+    /// Only ever populated when the backend genuinely observed distinct selectable options
+    /// on the page (sizes, colours, time slots, delivery choices) — never a default set.
+    var options: [String]
 
-    init(name: String, subtitle: String, priceText: String? = nil, imageUrls: [String] = [], colorOptions: [String] = []) {
+    init(name: String, subtitle: String, amountText: String? = nil, imageUrls: [String] = [], options: [String] = []) {
         self.name = name
         self.subtitle = subtitle
-        self.priceText = priceText
+        self.amountText = amountText
         self.imageUrls = imageUrls
-        self.colorOptions = colorOptions
+        self.options = options
     }
 }

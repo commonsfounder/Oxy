@@ -156,24 +156,24 @@ struct LinkResultStepView: View {
     }
 }
 
-// MARK: - Product
+// MARK: - Subject
 
-struct ProductDetailStepView: View {
-    let details: ProductDetails
+struct SubjectDetailStepView: View {
+    let details: SubjectDetails
     var ink: Color
-    @State private var selectedColorIndex: Int?
+    @State private var selectedOptionIndex: Int?
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             StepTitleBlock(title: details.name, subtitle: details.subtitle.isEmpty ? nil : details.subtitle, ink: ink)
 
-            if let priceText = details.priceText {
+            if let amountText = details.amountText {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Price")
+                    Text("Amount")
                         .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
-                    Text(priceText)
+                    Text(amountText)
                         .font(.system(size: 30, weight: .bold))
                         .foregroundStyle(ink)
                 }
@@ -181,15 +181,15 @@ struct ProductDetailStepView: View {
 
             heroImage
 
-            if !details.colorOptions.isEmpty {
+            if !details.options.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Options")
                         .font(.appBody(13, weight: .semibold))
                         .foregroundStyle(ink.opacity(0.45))
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(Array(details.colorOptions.enumerated()), id: \.offset) { index, option in
-                                let isSelected = selectedColorIndex == index
+                            ForEach(Array(details.options.enumerated()), id: \.offset) { index, option in
+                                let isSelected = selectedOptionIndex == index
                                 Text(option)
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(isSelected ? (colorScheme == .dark ? Color.black : Color.white) : ink.opacity(0.75))
@@ -205,7 +205,7 @@ struct ProductDetailStepView: View {
                                     .onTapGesture {
                                         HapticManager.shared.impact(.light)
                                         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                            selectedColorIndex = index
+                                            selectedOptionIndex = index
                                         }
                                     }
                             }
@@ -214,7 +214,7 @@ struct ProductDetailStepView: View {
                 }
             }
 
-            if details.priceText == nil {
+            if details.amountText == nil {
                 HStack(spacing: 6) {
                     AppIcon("shield-check", size: 13)
                     Text("Final price is confirmed at checkout")

@@ -15,7 +15,7 @@ struct MessageBubble: View {
     var onRetryFailedTurn: (() -> Void)? = nil
 
     @State private var showReauthSheet = false
-    @State private var showCheckoutInformationSheet = false
+    @State private var showMissingInformationSheet = false
     @State private var showDisplaySheet = false
 
     private var isUser: Bool { message.role == .user }
@@ -64,11 +64,15 @@ struct MessageBubble: View {
         completedActions.first { $0.isFailure && $0.recoveryAction?.type == "reauth_login" }
     }
 
-    /// A merchant marked ordinary contact/billing fields as required. The browser returns
-    /// only portable field categories, so this native sheet works for any checkout rather
-    /// than encoding a merchant or task type here.
-    private var checkoutInformationAction: ActionResult? {
-        completedActions.first { $0.isFailure && $0.recoveryAction?.type == "checkout_information" }
+    /// A page asked for ordinary facts about the user that Adam does not already hold. Only
+    /// portable field CATEGORIES come back, never merchant DOM, so the same native sheet
+    /// serves a checkout, a tenancy application and a council form alike.
+    private var missingInformationAction: ActionResult? {
+        completedActions.first {
+            $0.isFailure && ($0.recoveryAction?.type == "missing_information"
+                // Older servers called this checkout_information.
+                || $0.recoveryAction?.type == "checkout_information")
+        }
     }
 
     /// A ride booking gets a dedicated native handoff card; suppress the
@@ -77,14 +81,14 @@ struct MessageBubble: View {
         message.actions.first { $0.action == "book_uber" && !$0.needsUser && !$0.isFailure }
     }
 
-    /// Deduped product photos across every completed action in this turn (currently
-    /// only run_browser_task populates these).
-    private var productImageUrls: [String] {
+    /// Deduped photos any completed action in this turn actually observed — a product, a
+    /// property, a seat map, a scanned form. Whatever the work was about.
+    private var subjectImageUrls: [String] {
         guard !isUser else { return [] }
         var seen = Set<String>()
         var out: [String] = []
         for action in completedActions {
-            for url in action.imageUrls ?? [] where seen.insert(url).inserted {
+            for url in action.subject?.imageUrls ?? [] where seen.insert(url).inserted {
                 out.append(url)
             }
         }
@@ -165,8 +169,8 @@ struct MessageBubble: View {
             // Real product photos the browser-task agent found (og:image, or the largest
             // visible <img>) — previously this capability didn't exist, so the agent could
             // only ever describe what it saw in words.
-            if !productImageUrls.isEmpty {
-                ProductImageRow(urls: productImageUrls)
+            if !subjectImageUrls.isEmpty {
+                SubjectImageRow(urls: subjectImageUrls)
                     .padding(.top, message.content.isEmpty ? 0 : 8)
             }
 
@@ -248,11 +252,11 @@ struct MessageBubble: View {
                         }
                     }
 
-                    if let information = checkoutInformationAction,
+                    if let information = missingInformationAction,
                        let fields = information.recoveryAction?.fields,
                        !fields.isEmpty {
                         Button {
-                            showCheckoutInformationSheet = true
+                            showMissingInformationSheet = true
                         } label: {
                             Text(information.recoveryAction?.label ?? "Add details")
                                 .font(.appBody(13, weight: .semibold))
@@ -267,7 +271,7 @@ struct MessageBubble: View {
                                 )
                         }
                         .buttonStyle(.plain)
-                        .sheet(isPresented: $showCheckoutInformationSheet) {
+                        .sheet(isPresented: $showMissingInformationSheet) {
                             CheckoutInformationSheet(fields: fields) {
                                 onActionCommand?("keep going")
                             }
@@ -810,7 +814,7 @@ private struct FailedTurnView: View {
 
 /// Horizontally-scrolling row of product photos the browser-task agent found on the
 /// page it finished on. Thumbnails, not a gallery — tap-to-zoom isn't wired up yet.
-private struct ProductImageRow: View {
+private struct SubjectImageRow: View {
     let urls: [String]
 
     var body: some View {
