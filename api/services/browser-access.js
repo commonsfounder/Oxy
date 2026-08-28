@@ -690,11 +690,13 @@ async function signInWithStoredCredential(userId, { site: requestedSite = null, 
       };
     }
 
-    const credential = await getVaultCredential(getSupabase(), userId, site);
-    if (!credential) return { type: 'error', error: `There is no saved sign-in for ${site}.` };
     if (!(await loginCredentialFieldsPresent(session.page))) {
       return { type: 'error', error: 'I could not find a sign-in form on this page.' };
     }
+    // A real sign-in form with nothing stored for it is not a dead end: the person can type
+    // one into the native sheet, which posts to /browser-task/reauth-login.
+    const credential = await getVaultCredential(getSupabase(), userId, site);
+    if (!credential) return { type: 'no_credential', site };
 
     await fillLoginCredential(session, credential, onProgress);
     await settle(session.page, 800);

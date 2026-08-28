@@ -235,6 +235,25 @@ async function browserSignIn({ userId, params, context }) {
     if (result.type === 'not_authorized') {
       return { success: false, outcome: 'unavailable', error: result.error, site: result.site };
     }
+    // Nothing stored, but a form is on screen — hand the person the sign-in sheet rather than
+    // reporting a dead end. `unavailable` (not awaiting_user) because the client only offers
+    // the sheet on a failed result.
+    if (result.type === 'no_credential') {
+      return {
+        success: false,
+        outcome: 'unavailable',
+        site: result.site,
+        error: `There is no saved sign-in for ${result.site}.`,
+        text: `I need your ${result.site} sign-in to get past this page.`,
+        recoveryAction: {
+          type: 'reauth_login',
+          site: result.site,
+          label: `Sign in to ${result.site}`,
+          message: `${result.site} is asking for a sign-in and there is nothing saved for it.`,
+          autoContinue: false,
+        },
+      };
+    }
     if (result.type === 'error') return { success: false, error: result.error };
     const observation = await browserEnvironment.observe(userId).catch(() => null);
     if (!observation) return { success: true, text: result.text };

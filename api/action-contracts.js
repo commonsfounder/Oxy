@@ -1370,7 +1370,7 @@ const ACTION_CONTRACTS = {
     // Using someone's stored credentials is an authority decision, not a browsing one.
     confirmation: 'review_required',
     executionMode: 'review',
-    guidance: 'Use a credential the user has stored in their vault to sign in to the site currently open. The user is asked before any credential is used, every time. Never type a password the user gave you in chat, and never invent one.'
+    guidance: 'Use a credential the user has stored in their vault to sign in to the site currently open. The user is asked before any credential is used, every time. Still the right call at a sign-in wall when you do not know whether anything is stored — if nothing is, the user is offered a sign-in sheet. Never type a password the user gave you in chat, and never invent one.'
   },
   // ── Transaction ───────────────────────────────────────────────────────────────────────
   // Authorising money is a general capability, not a shopping step. A retail checkout, a
