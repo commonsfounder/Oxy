@@ -8,43 +8,28 @@ const notifications = require('./notifications');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// How long a row may sit in 'sending' before a later sweep is allowed to treat it as
-// abandoned (the worker that claimed it crashed, or the process was recycled) rather than
-// genuinely in flight. Real sends complete in seconds; this is generous on purpose — reclaiming
-// too eagerly is what would cause a real duplicate send.
+// How long a row may sit in 'sending' before a sweep may treat it as abandoned rather than in
+// flight. Real sends take seconds; this is generous, because reclaiming early duplicates a send.
 const CLAIM_STALE_MS = 5 * 60 * 1000;
 
-// Which transport actually carries an email right now.
-//
-// Resend is the dedicated provider and stays first when it is configured — it sends from
-// Millie's own identity. But a connected Google account ALREADY grants gmail.modify, which
-// includes messages.send, so a user with Gmail connected has a working outbound email path
-// with no extra credential at all. Treating that as a real provider is the difference
-// between "proactive delivery works once you sign up for Resend" and "proactive delivery
-// works". Mail sent this way leaves the user's own mailbox, which is why it is only ever
-// used to reach the user themselves — see the destination rules below.
+// Which transport carries an email. Resend goes first when configured, sending from Millie's own
+// identity; otherwise a connected Google account already grants messages.send, so delivery works
+// with no extra credential. That path leaves the user's own mailbox, so it only ever reaches them.
 function resolveEmailProvider({ env = process.env, mailboxCanSend = false } = {}) {
   if (env.RESEND_API_KEY) return 'resend';
   if (mailboxCanSend) return 'gmail';
   return null;
 }
 
-// Where a notification is allowed to land. In precedence order:
-//   1. an address the user explicitly set as their notification destination,
-//   2. their verified account address,
-//   3. the mailbox they connected — an address they demonstrably own, because we are holding
-//      their OAuth grant on it.
-// The third is the one that needs no separate verification step: the verification rule exists
-// to stop us mailing third parties, and delivering to a mailbox the user personally connected
-// is not that.
+// Where a notification may land, in order: an address the user set as their destination, their
+// verified account address, then the mailbox they connected. The third needs no separate
+// verification — that rule exists to stop us mailing third parties, and this is not one.
 function resolveEmailDestination({ prefEmailTo = '', verifiedEmail = '', mailboxAddress = '' } = {}) {
   return String(prefEmailTo || verifiedEmail || mailboxAddress || '').trim();
 }
 
-// Which channels can actually deliver right now. Deliberately checked per-call rather than at
-// boot: adding RESEND_API_KEY (or connecting Google, or authenticating Telegram) should make
-// a channel live without a redeploy of this logic, and a channel with code but no credentials
-// must never be offered as if it worked.
+// Which channels can deliver right now, checked per call rather than at boot so connecting an
+// account makes a channel live without a redeploy.
 function availableChannels({ env = process.env, hasPushDevices = false, emailTo = '', mailboxCanSend = false, telegramCanSend = false } = {}) {
   const available = [];
   if (env.APNS_BUNDLE_ID && env.APNS_KEY_ID && env.APNS_TEAM_ID && env.APNS_PRIVATE_KEY && hasPushDevices) {
@@ -76,10 +61,8 @@ function describeUnavailable({ env = process.env, hasPushDevices = false, emailT
   return reasons;
 }
 
-// Builds the delivery runtime around whatever real primitives the caller injects. Everything
-// injected here is a REAL implementation in production (api/index.js passes the live APNs
-// sender, the live Resend client and the live briefing writer); tests inject fakes that
-// record what they were asked to do.
+// Builds the delivery runtime around the primitives the caller injects — the live senders in
+// production, recording fakes in tests.
 function createDeliveryRuntime({
   supabase,
   sendPush,
@@ -130,12 +113,9 @@ function createDeliveryRuntime({
       .insert({ ...row, status: 'pending' }).select('id').single();
     if (!error) return { ok: true, id: data.id, created: true };
 
-    // The select-then-insert above is a check-then-act race: two concurrent raises for the
-    // SAME real-world event (two overlapping sweeps both noticing the same watch fire) can
-    // both see "no existing row" before either commits, and both attempt to insert. The
-    // table's own unique index on (user_id, dedupe_key) is what actually prevents a second
-    // row — the loser here just needs to recognise that as "already raised", not surface a
-    // raw constraint-violation message for something that behaved correctly.
+    // The select-then-insert above is a check-then-act race; the unique index on
+    // (user_id, dedupe_key) is what actually prevents a second row. The loser reads that as
+    // "already raised" rather than surfacing a constraint violation.
     if (error.code === '23505') {
       const { data: raced } = await supabase.from('notification_events')
         .select('id').eq('user_id', userId).eq('dedupe_key', row.dedupe_key).maybeSingle();
@@ -144,21 +124,13 @@ function createDeliveryRuntime({
     return { ok: false, error: error.message };
   }
 
-  // Atomically takes ownership of a pending/deferred/stale-sending row before anything is
-  // sent. The UPDATE's WHERE clause is the whole mechanism: Postgres serializes concurrent
-  // writers to the same row, so only one of them can flip status out of the claimable set —
-  // a second worker racing on the same event gets 0 rows back and skips it entirely. Without
-  // this, two overlapping sweeps (two Fly machines, a manual call landing mid-schedule)
-  // could both call a provider for the same event and produce two real external messages.
+  // Takes ownership of a claimable row before anything is sent. The UPDATE's WHERE clause is the
+  // mechanism: only one writer can flip the status, and the loser gets 0 rows and skips it —
+  // otherwise two sweeps produce two real external messages for one event.
   async function claim(event, stamp) {
-    // 'sending' is claimable too, but ONLY if it is stale — checked here, in the same
-    // conditional UPDATE, not trusted from the caller. Two calls racing on the same row (two
-    // concurrent deliverPending sweeps, or — the case this exact check exists for — two
-    // deliverOne calls on the same event) must not BOTH see 'sending' as fair game just
-    // because the first one already flipped it a moment ago: a plain `.in('status',
-    // [...,'sending'])` allowed exactly that, since nothing distinguished a row claimed
-    // 1ms ago from one truly abandoned 10 minutes ago. Staleness is what makes reclaiming a
-    // 'sending' row safe, so it has to be part of THIS WHERE clause, not assumed upstream.
+    // 'sending' is claimable only when stale, and staleness is checked in this same UPDATE
+    // rather than trusted from the caller — otherwise a row claimed a millisecond ago looks
+    // exactly like one abandoned ten minutes ago, and both racers claim it.
     const staleBefore = new Date(new Date(stamp).getTime() - CLAIM_STALE_MS).toISOString();
     const { data } = await supabase.from('notification_events')
       .update({ status: 'sending', updated_at: stamp })
@@ -169,13 +141,9 @@ function createDeliveryRuntime({
     return Boolean(data);
   }
 
-  // A send that a provider genuinely accepted must never fall back into the pending/retry
-  // pool — that would mean asking the provider to accept the same message twice. If the
-  // write that records success keeps failing, retrying the WRITE (not the send) a few times
-  // is the safe move; if it still never lands, the row is marked 'failed' — not 'pending' —
-  // with an error that says plainly what happened, so nothing auto-retries a message that
-  // already went. This is deliberately not silent: an operator reading last_error learns the
-  // provider succeeded even though the row's own history looks like a failure.
+  // A send the provider accepted must never return to the retry pool. If recording success
+  // fails, the write is retried, not the send; if it still won't land the row is marked
+  // 'failed' with an error saying the send succeeded, so nothing auto-retries a sent message.
   async function recordDelivered(event, decision, result, stamp) {
     const patch = {
       status: 'delivered',

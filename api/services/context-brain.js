@@ -1,14 +1,6 @@
-// Resolves vague follow-ups ("play it", "book the second one", "same place", "do the failed
-// one") against recent conversation and action history.
-//
-// Structural history (2026-08-06): this used to collapse everything to ONE candidate — highest
-// confidence, else most recent — before ever looking at what the current message actually said.
-// resolveContextualTurn then only fired a hardcoded action for that single candidate if it
-// happened to be media/place/route AND the message contained a matching verb. Anything else
-// (reminders with no stated subject, ordinal selection among options, retrying a failed action,
-// re-dating a route lookup, sending a drafted-but-unsent message) had no path through this file
-// at all. buildResolvedContext is now message-aware: it ranks multiple typed candidates by
-// relevance to what was actually asked, not just recency.
+// Resolves vague follow-ups ("play it", "book the second one", "do the failed one") against
+// recent conversation and action history. buildResolvedContext is message-aware: it ranks typed
+// candidates by relevance to what was actually asked, not by recency alone.
 
 function normalizeText(text) {
   return String(text || '').trim().replace(/\s+/g, ' ');
@@ -19,18 +11,13 @@ function safeParseJSON(value) {
   try { return JSON.parse(value); } catch { return value; }
 }
 
-// Subject-less reminder/schedule requests ("remind me tomorrow") don't contain any of the
-// pronoun/deictic words below, so they need their own clause — otherwise they never enter this
-// pipeline and always fall straight to the model asking "what should I remind you about?", which
-// is fine when there's truly nothing to infer but wrong when a topic was just discussed.
+// Subject-less reminders ("remind me tomorrow") contain none of the pronouns below, so without
+// their own clause they never enter this pipeline and the model always asks what about.
 const BARE_REMINDER_RE = /^(?:can you |could you |please )?remind me\b(?!.*\b(?:to|about|that)\b)/i;
 
-// A bare pronoun ("it", "that", "one"...) appearing ANYWHERE in a sentence used to be enough to
-// trigger contextual resolution — which also caught ordinary grammatical "it" in unrelated
-// questions like "what time is it in Tokyo?". These two patterns require the pronoun to actually
-// be doing referential work: paired with a verb that takes an object ("play it", "send that"), or
-// inside one of a fixed set of known follow-up noun phrases. Plain "it"/"that"/"this" floating
-// alone in a sentence no longer qualifies on its own.
+// The pronoun has to be doing referential work — paired with a verb that takes an object ("play
+// it"), or inside a known follow-up phrase. A bare "it" anywhere in a sentence also catches
+// ordinary grammatical use ("what time is it in Tokyo?").
 const REFERENTIAL_VERB_RE = /\b(play|book|open|send|do|try|watch|read|check|start|stop|cancel|use|pick|choose|order|get|take|make)\s+(it|that|this|one)\b/i;
 const REFERENTIAL_NOUN_RE = /\b(that one|this one|the other one|last one|same (?:place|time|thing|one|spot)|get me there|take me there)\b/i;
 
@@ -102,10 +89,8 @@ function contextFromAction(action, source = 'action_result') {
   const label = actionLabel(action);
   if (!type || action?.status === 'pending') return null;
 
-  // Failed actions get their OWN kind instead of being dropped. This is deliberately separate
-  // from the action's "real" kind (a failed find_place is 'failed_action', not 'place') so
-  // retry-language ("do the failed one") only ever matches failures, and ordinary replay
-  // language ("that place again") never accidentally binds to something that didn't work.
+  // Failed actions keep their own kind rather than the action's real one, so retry language
+  // ("do the failed one") only matches failures and replay language never binds to one.
   if (action?.status === 'failed') {
     return {
       kind: 'failed_action',
@@ -238,10 +223,8 @@ function extractRouteFromText(text) {
   };
 }
 
-// Matches the exact shape appointmentChoicesText() renders ("1. Tue 11 Aug at 6pm\n2. ..."),
-// not arbitrary numbered prose — a genuine structured list the product itself produces, so
-// parsing it is extraction, not free-text NLP. Requires 2+ consecutive numbered lines so a
-// single "1." somewhere in an unrelated reply can't be mistaken for a real option list.
+// Matches the exact shape appointmentChoicesText() renders, not arbitrary numbered prose, so
+// this is extraction rather than NLP. Two consecutive numbered lines minimum.
 function extractOptionListFromText(text) {
   const source = String(text || '');
   const matches = [...source.matchAll(/^(\d+)\.\s+(.+)$/gm)];
@@ -260,13 +243,9 @@ function extractOptionListFromText(text) {
   };
 }
 
-// A message/email the assistant drafted in chat text but never sent. Deliberately scoped to
-// bare pronoun references only ("send it", "send that") — a message naming "email"/"mail"
-// explicitly already goes through the more capable isEmailDraftRequest/buildEmailDraftContext
-// path in index.js, which resolves sender identity and thread context this file has no access
-// to. Keying off "the prior turn asked for a draft and nothing was actually sent" rather than
-// guessing from the text's shape (greeting-like, paragraph length, ...) avoids false positives
-// on ordinary assistant replies that happen to read like prose.
+// A message drafted in chat but never sent. Bare pronoun references only ("send it") — anything
+// naming email goes through index.js's draft path, which has the sender and thread context.
+// Keyed off "the prior turn asked for a draft and nothing was sent", not the text's shape.
 const DRAFT_REQUEST_RE = /\b(draft|write|compose)\b.*\b(message|text|note)\b/i;
 const SEND_ACTION_TYPES = new Set(['send_message', 'send_email', 'send_telegram']);
 
@@ -293,12 +272,9 @@ function extractDraftContext(history = []) {
   return null;
 }
 
-// Only called when the message itself signals a subject-less reminder ("remind me tomorrow").
-// Finds the most recent SUBSTANTIVE thing said — skipping the reminder request itself, skipping
-// pure acknowledgements/fillers, and skipping a turn that just dismissed or cancelled something
-// (dismissing something is a signal there is nothing left to remind about, not a topic).
-// Conservative on purpose: returns null rather than guess when nothing clear stands out, which
-// keeps today's "ask what to remind about" behaviour for exactly the cases where that's correct.
+// Only for a subject-less reminder. Finds the most recent substantive thing said, skipping the
+// request itself, acknowledgements, and anything just dismissed — a dismissal means there is
+// nothing left to remind about. Returns null rather than guess, so the model asks instead.
 const FILLER_RE = /^(ok|okay|kk|cool|nice|great|sure|yep|yes|thanks|thank you|hey|hi|hello|got it|no worries)\.?$/i;
 const DISMISSAL_RE = /\b(never mind|forget it|cancel|drop it|nah|no worries|scrap(?:ped)?|leave it)\b/i;
 const TOPIC_HINT_RE = /\b(appointment|meeting|call|deadline|dentist|doctor|flight|train|reminder|package|delivery|interview|renewal|invoice|payment due|bill)\b/i;
@@ -394,10 +370,8 @@ function parseOrdinalSelector(message) {
   return null;
 }
 
-// What the CURRENT message is actually asking for, expressed as which candidate kinds are
-// eligible — this is the piece that was missing entirely before: kind-relevance filters
-// candidates FIRST, recency only breaks ties within that filtered set. A message with no kind
-// signal at all (bare "do it"/"that") falls back to today's plain-recency behaviour unchanged.
+// Which candidate kinds the current message is asking for. Kind filters first and recency only
+// breaks ties inside that set; a message with no kind signal falls back to plain recency.
 function messageKindHints(message) {
   const text = normalizeText(message).toLowerCase();
   const hints = new Set();
@@ -460,10 +434,8 @@ function buildResolvedContext(message = '', history = [], recentActions = []) {
 
   if (BARE_REMINDER_RE.test(normalizeText(message).toLowerCase())) {
     const topic = extractTopicContext(history);
-    // A low-confidence topic (no topic-keyword hint matched, just "the most recent thing said")
-    // isn't reliable enough to hand the model as grounds for auto-creating a reminder — that's
-    // exactly how a blank/generic "Reminder" gets created when the previous idea was dismissed
-    // or the topic is genuinely unclear. Only a medium/high-confidence topic is used directly.
+    // A low-confidence topic — just "the most recent thing said" — isn't grounds for creating a
+    // reminder; that is how a blank "Reminder" gets made. Medium or high only.
     if (topic && topic.confidence !== 'low') return topic;
     return { kind: 'reminder_needs_topic', label: '', source: 'assistant_answer', confidence: 'low' };
   }
@@ -515,11 +487,9 @@ function resolveContextualTurn({ message = '', history = [], recentActions = [],
 
   if (resolvedContext.kind === 'unknown') return null;
 
-  // A high-confidence structured pick (an ordinal like "the second one"/"the other one" resolved
-  // against a real numbered option list) is authoritative: the choice is built here, directly
-  // from the resolver's own selectedIndex/label, so the model has no opportunity to reconstruct
-  // — and potentially substitute — a different option from prose. The model can still phrase the
-  // final reply (via the action's own execution result), it just can't choose the option.
+  // An ordinal resolved against a real option list is authoritative: the choice is built here
+  // from the resolver's own index, so the model can phrase the reply but cannot substitute a
+  // different option.
   if (resolvedContext.kind === 'option_list_selection' && resolvedContext.confidence === 'high') {
     return {
       reason: 'context_option_selected',

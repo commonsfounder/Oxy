@@ -1,11 +1,6 @@
-// Default identity selection for outbound messaging — not a UI mode, purely which tool the
-// model reaches for. Millie has her own persistent email/phone identity (send_millie_email/
-// send_millie_sms); the user also has their own connected mailbox/device (send_email/
-// send_outlook_email/send_message). Nothing distinguished these before, so the model
-// defaulted to whichever tool it already knew best (send_email), even for messages that were
-// clearly Millie acting as the user's representative to a third party. Live-verified
-// 2026-08-07: explicit steering, not just tool availability, is what actually changes which
-// one gets picked.
+// Which outbound tool the model reaches for — Millie's own identity (send_millie_email/sms) or
+// the user's connected mailbox and device (send_email/send_outlook_email/send_message). Explicit
+// steering, not tool availability, is what decides it.
 const MILLIE_IDENTITY_GUIDANCE = 'Use this by default whenever Millie is contacting a business, support line, restaurant or booking, delivery or vendor service, or any external organization or stranger on the user\'s behalf — this is the normal case for requests like "email/text the restaurant and ask if they can move us to 8." Do not use this for the user\'s own personal correspondence — friends, family, work or school contacts, job applications, or anything where the sender should clearly be the user, not Millie — use the user\'s own connected mailbox/device for that instead. Millie signs as herself; never impersonate the user.';
 const PERSONAL_IDENTITY_GUIDANCE = 'Use this only when the user is personally corresponding as themselves — friends, family, work or school contacts, job applications, or any personal correspondence where the sender should clearly be the user. If the user is contacting a business, support line, restaurant, vendor, delivery service, or any external organization or stranger with Millie acting on their behalf, use send_millie_email instead, unless the user explicitly says to send it from their own account.';
 const PERSONAL_SMS_IDENTITY_GUIDANCE = 'This sends from the user\'s own phone via their device\'s Messages app — always their own identity, never Millie\'s. Fine for personal contacts (friends, family, colleagues). If the user is contacting a business, support line, restaurant, vendor, or any external organization or stranger with Millie acting on their behalf, use send_millie_sms instead so it comes from Millie\'s own number.';
@@ -133,11 +128,9 @@ const ACTION_CONTRACTS = {
       tone: 'optional requested tone such as casual, warm, professional, apologetic, direct',
       thread_id: 'optional Gmail thread ID for replies'
     },
-    // These two travel on the PARAMETER itself, not only the tool-level guidance below: a
-    // function-calling model weighs a per-argument description more heavily when constructing
-    // that argument than prose several fields away, and "terse literal fragment" is the exact
-    // failure mode this guards against (turning "email him saying running late" into a body
-    // that literally reads "running late").
+    // On the parameter itself, not only in the tool-level guidance: a model weighs a
+    // per-argument description more when constructing that argument, and the failure guarded
+    // against is a body that literally reads "running late".
     paramHints: {
       body: 'a polished, complete email draft — never a terse literal fragment of what the user said',
       tone: 'e.g. casual, warm, professional, apologetic, direct'
@@ -204,10 +197,8 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     adapter: { kind: 'connector', id: 'google' }
   },
-  // Real Gmail mutation: archiving removes the INBOX label — the message still exists and
-  // stays searchable, it just isn't in the inbox view. Reversible, low-risk; never trashes
-  // or permanently deletes. No confirmation needed for the same reason "search" doesn't:
-  // the risk is low and the action is exactly what was asked for.
+  // Archiving removes the INBOX label; the message stays searchable and nothing is trashed or
+  // deleted. Reversible and low-risk, so no confirmation, same as search.
   archive_emails: {
     risk: 'low',
     required: ['message_ids'],
@@ -244,11 +235,8 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct',
     adapter: { kind: 'connector', id: 'google' }
   },
-  // The natural-language entry point for "clean my inbox" / "archive this junk" /
-  // "unsubscribe me from X and clear the old emails" — orchestrates a real Gmail search, the
-  // EXISTING shared triage classifier (not a second one), real bulk archive, and real
-  // per-sender unsubscribe attempts in one call, so a 200-email cleanup doesn't need 200
-  // conversational turns.
+  // The entry point for "clean my inbox": a real search, the shared triage classifier, bulk
+  // archive and per-sender unsubscribes in one call, so 200 emails aren't 200 turns.
   clean_inbox: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -283,14 +271,9 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
-  // Real trip planning: a grounded web search feeds itinerary-engine.js's generation, so
-  // opening hours/prices/closures/travel-time claims come from an actual current search, not
-  // model recall. Deliberately does not touch search_flights/search_hotels (see their own
-  // guidance) or itinerary-engine.js's dormant hotels/activities/flights fields — nothing real
-  // populates those today.
-  // Named plan_itinerary, not plan_trip: plan_trip already exists (below, near search_trains)
-  // as a train/route planner between two points — a different, unrelated capability. Do not
-  // rename either without checking both.
+  // A grounded search feeds itinerary-engine.js, so hours, prices and travel times come from a
+  // current search rather than model recall. Touches neither search_flights/search_hotels nor
+  // the engine's dormant fields. Not to be confused with plan_trip below, a route planner.
   plan_itinerary: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -466,10 +449,8 @@ const ACTION_CONTRACTS = {
     confirmation: 'none',
     executionMode: 'direct'
   },
-  // The durable responsibility. Deliberately THREE actions, not a suite: start it, move it
-  // on (including pausing for a decision), and answer a pending decision. Everything else —
-  // documents, correspondence, evidence, browser work — attaches to a workflow through the
-  // primitives that already exist, rather than earning its own verb here.
+  // The durable responsibility, in three actions: start it, move it on (including pausing for
+  // a decision), answer a pending decision. Everything else attaches through existing primitives.
   start_responsibility: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -616,9 +597,8 @@ const ACTION_CONTRACTS = {
     executionMode: 'direct'
   },
   // ── People layer ───────────────────────────────────────────────────────────────────
-  // Durable answers to "who is this person to me, how do I reach them, what matters about
-  // them" — so tone, gift context, recipient selection and "her"/"my manager" stop being
-  // rediscovered from scratch each conversation.
+  // Who someone is, how to reach them and what matters about them, so tone, recipient choice
+  // and "my manager" aren't rediscovered every conversation.
   remember_person: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -1188,10 +1168,8 @@ const ACTION_CONTRACTS = {
   },
   receive_to_concierge_account: {
     adapter: { kind: 'inline' },
-    // Was 'none' — inconsistent with top_up_concierge_account (same effect: inflates the
-    // spendable virtual balance with no real-money verification) which already required
-    // review. An unreviewed action that credits spendable balance is exactly the shape of bug
-    // this pass is fixing elsewhere (fabricated/ungated money entering the ledger).
+    // Reviewed, like top_up_concierge_account: both inflate the spendable balance with no
+    // real-money verification, and an unreviewed credit is ungated money entering the ledger.
     risk: 'medium',
     required: ['amount', 'description'],
     optional: ['source'],
@@ -1263,10 +1241,8 @@ const ACTION_CONTRACTS = {
   },
   get_stock_price: { risk: 'low', required: ['symbol'], inputExample: { symbol: 'AAPL' }, successSummary: 'Stock price', failureSummary: 'Failed', confirmation: 'none', adapter: { kind: 'connector', id: 'stocks' } },
   // ── Browser primitives ────────────────────────────────────────────────────────────────
-  // The browser is an environment the agent acts in, not a black box that decides on its own
-  // when a task is finished. These four compose into shopping, form-filling, account admin,
-  // cancelling a subscription, a government portal — anything a person does in a browser.
-  // Nothing here knows what a product or a basket is.
+  // The browser as an environment the agent acts in, not a black box that decides on its own
+  // when a task is done. These four compose into anything a person does in a browser.
   browser_open: {
     adapter: { kind: 'inline' },
     risk: 'low',
@@ -1427,11 +1403,9 @@ const ACTION_CONTRACTS = {
 function getActionContract(type) {
   const contract = ACTION_CONTRACTS[type];
   if (!contract) return null;
-  // Fail-safe review routing. action-execution gates human review on `executionMode === 'review'`,
-  // but the `confirmation`/`risk` fields are what authors actually set — and it's easy to add a new
-  // spend action with `confirmation: 'review'` while forgetting `executionMode`, which silently ships
-  // it as direct-execute (the concierge/Stripe money actions did exactly this). Derive the gate here
-  // so anything marked for confirmation, or flagged high-risk, can never execute without review.
+  // Fail-safe review routing: action-execution gates on `executionMode`, but authors set
+  // `confirmation`/`risk`, and a spend action can ship direct-execute when the two disagree.
+  // Deriving the gate here means anything marked for confirmation or high-risk is reviewed.
   if (!contract.executionMode) {
     const needsReview = contract.confirmation === 'review'
       || contract.confirmation === 'review_required'
@@ -1534,12 +1508,9 @@ function buildActionRecovery(action, result) {
   const contract = getActionContract(type);
   const error = String(result?.error || '').trim();
   if (result?.success !== false) return {};
-  // A review pause — ready_for_payment, a 3DS wait, any other awaiting_user handoff, or a
-  // browser task that timed out mid-step and can be resumed with "keep going" — sets
-  // success:false (only 'completed' is ever true) but is not a failure. It must not inherit
-  // the action's generic failureSummary cardText, or a paused-for-you state renders
-  // identically to a genuinely broken one ("Order task failed" for a live checkout waiting
-  // on the user's own "yes", or for a slow site the loop is still able to pick back up).
+  // A review pause sets success:false (only 'completed' is true) without being a failure, so it
+  // must not inherit failureSummary's cardText — a checkout waiting on the user's own "yes"
+  // would otherwise render as "Order task failed".
   if (result?.outcome === 'awaiting_user' || result?.pending === true) return {};
   if (result?.outcome === 'incomplete' || result?.incomplete === true || result?.continuesBrowsing === true) return {};
 

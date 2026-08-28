@@ -1,10 +1,7 @@
 'use strict';
 
-// Travel actions, lifted out of the 2,600-line switch in api/index.js.
-//
-// Handlers take one object and return the same shapes they always did. `deps` carries
-// what index.js owns (the database client and the travel service modules) rather than
-// this file re-creating a second Supabase client, so tests can still inject.
+// Travel actions. Handlers take one object and `deps` carries what index.js owns — the database
+// client and the travel modules — rather than this file building a second Supabase client.
 
 const { getLocalDateKey } = require('../lib/time');
 const {
@@ -13,14 +10,9 @@ const {
   itineraryToText
 } = require('../services/itinerary-engine');
 
-// Real trip planning. Named plan_itinerary, not plan_trip: plan_trip already exists
-// elsewhere in this switch as a point-to-point route/train planner, an unrelated
-// capability — do not merge or rename either without checking both. Deliberately does NOT
-// use search_flights/search_hotels (those only build a browser deep-link, never real
-// prices or availability) or itinerary-engine.js's dormant hotels/activities/flights
-// fields (nothing populates them for real) — the only live-facts source here is a real
-// grounded web search, fed into itinerary-engine.js as groundedNotes. Booking is a
-// deliberately separate step (the general browser capabilities handle actual booking).
+// Real trip planning, not to be confused with plan_trip, an unrelated point-to-point route
+// planner. Its only live-facts source is a grounded web search fed to itinerary-engine.js as
+// groundedNotes; booking is a separate step handled by the browser capabilities.
 async function planItinerary({ userId, action, params, context, deps }) {
   const { supabase, agentWorkspace, travelSearch, travelInventory, travelRanking, FAST_MODEL, path, generateBrain, webSearchBrain } = deps;
   const destination = String(params?.destination || '').trim();
@@ -61,12 +53,8 @@ async function planItinerary({ userId, action, params, context, deps }) {
     console.warn('[plan_itinerary] grounded search failed, generating without it:', e.message);
   }
 
-  // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
-  // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
-  // left nothing for visible output once a reasoning model spent its budget on reasoning
-  // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
-  // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
-  // maxOutputTokens unset; raising the cap fixed it.
+  // A multi-day itinerary is a large JSON payload, and this file's default 768-token budget is
+  // spent entirely on reasoning tokens before any visible output, returning empty text.
   const callModel = async (systemPrompt, prompt) => {
     const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
     return res?.text || '';
@@ -94,11 +82,9 @@ async function planItinerary({ userId, action, params, context, deps }) {
   };
 }
 
-// Surgical edit of an existing itinerary (preserves days/sections the instruction doesn't
-// touch) rather than a full regeneration. Accepts the itinerary inline (the model's own
-// context from a recent plan_itinerary call) or a workspace_path to a previously saved one —
-// whichever is fresher wins if both are given, and a workspace-loaded trip is re-saved
-// to the same path after the edit so the saved copy stays in sync.
+// Edits an existing itinerary in place rather than regenerating it. Takes the trip inline or a
+// workspace_path, the fresher winning if both are given, and re-saves a workspace-loaded trip
+// to the same path so the stored copy stays in sync.
 async function modifyItineraryAction({ userId, action, params, context, deps }) {
   const { supabase, agentWorkspace, travelSearch, travelInventory, travelRanking, FAST_MODEL, path, generateBrain, webSearchBrain } = deps;
   const instruction = String(params?.instruction || '').trim();
@@ -132,12 +118,8 @@ async function modifyItineraryAction({ userId, action, params, context, deps }) 
 
   if (!itinerary?.days) return { success: false, error: 'That does not look like a valid itinerary (no days array).' };
 
-  // A full multi-day itinerary (or a modified one) is a large JSON payload — the default
-  // completion budget elsewhere in this file (768 tokens, fine for short replies/judgments)
-  // left nothing for visible output once a reasoning model spent its budget on reasoning
-  // tokens, so generateBrain came back with empty text. Confirmed live 2026-08-08: the
-  // same request against gpt-5.6-luna returned candidates[0].content.parts: [] with
-  // maxOutputTokens unset; raising the cap fixed it.
+  // A multi-day itinerary is a large JSON payload, and this file's default 768-token budget is
+  // spent entirely on reasoning tokens before any visible output, returning empty text.
   const callModel = async (systemPrompt, prompt) => {
     const res = await generateBrain({ model: FAST_MODEL, contents: [{ role: 'user', parts: [{ text: prompt }] }], config: { systemInstruction: systemPrompt, maxOutputTokens: 4000 } });
     return res?.text || '';
@@ -169,11 +151,8 @@ async function modifyItineraryAction({ userId, action, params, context, deps }) 
 }
 
 // ── Real travel search ────────────────────────────────────────────────────────────
-// These two used to build a deep link and report success. They now do a real grounded
-// web search and return what the results actually stated, with prices marked as
-// observed-not-bookable. See api/services/travel-search.js for why this route and not
-// an API or a browser. They are also removed from the connectors registry, so the old
-// link-generator is unreachable rather than merely unused.
+// A grounded web search returning what the results actually stated, with prices marked
+// observed-not-bookable. api/services/travel-search.js says why this route, not an API.
 async function searchTravel({ userId, action, params, context, deps }) {
   const { supabase, agentWorkspace, travelSearch, travelInventory, travelRanking, FAST_MODEL, path, generateBrain, webSearchBrain } = deps;
   const kind = action === 'search_flights' ? 'flights' : 'hotels';
@@ -209,11 +188,9 @@ async function searchTravel({ userId, action, params, context, deps }) {
     return { success: false, error: 'search_hotels needs a location.' };
   }
 
-  // Real inventory first, when a provider is configured. This is the difference between
-  // "a page mentioned £133 for some nearby dates" and "here is a sellable fare for the
-  // dates you asked for". Grounded search below stays as the fallback rather than being
-  // replaced: with no provider key it is still the honest answer, and it is the only
-  // thing that works for routes or properties a single provider does not carry.
+  // Real inventory first when a provider is configured — a sellable fare for the dates asked
+  // for, not a page that mentioned a price. Grounded search stays as the fallback, and is the
+  // only thing that works for routes a provider doesn't carry.
   let inventoryOptions = [];
   let inventoryNote = null;
   if (travelInventory.isConfigured()) {
@@ -247,10 +224,8 @@ async function searchTravel({ userId, action, params, context, deps }) {
     return { success: false, error: 'The web search returned nothing for that route — I have no real options to show you rather than made-up ones.' };
   }
 
-  // Stage two runs WITHOUT the search tool: it may only restructure the text above, so
-  // it cannot introduce an option that was never found. The token budget is explicit —
-  // the default (768, shared with reasoning) silently returns an empty string on an
-  // input this long.
+  // Stage two runs without the search tool, so it can only restructure what stage one found.
+  // The token budget is explicit: the shared default returns an empty string on input this long.
   let options = [];
   try {
     const extracted = await generateBrain({
@@ -295,9 +270,7 @@ async function searchTravel({ userId, action, params, context, deps }) {
   const ranked = kind === 'flights'
     ? travelRanking.rankFlights(shaped, {}, requirements)
     : travelRanking.rankHotels(shaped, {}, requirements);
-  // Date-matched options always outrank indicative ones, whatever the score: a cheaper
-  // price for the wrong week is not a better option, it is a different question.
-  // Exact beats unknown beats adjacent, whatever the score. A cheaper price for the wrong
+  // Exact dates beat unknown beat adjacent, whatever the score: a cheaper price for the wrong
   // week is not a better option, it is an answer to a different question.
   const dateRank = (o) => (o.dateMatch === 'exact' ? 0 : o.dateMatch === 'unknown' ? 1 : 2);
   ranked.sort((a, b) => dateRank(a) - dateRank(b) || (b.score - a.score));

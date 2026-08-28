@@ -1,22 +1,9 @@
 'use strict';
-// Everything Adam knows about acting on a particular host, behind one question.
-//
-// This used to be five independent mechanisms that callers reached into separately:
-//
-//   retailer-sites.js          a name → host + search-URL table, hand-written
-//   browser-fastpaths.js       search-URL templates LEARNED from a successful search
-//   browser-recipes.js         hand-authored step sequences for ~12 hosts
-//   browser-learned-recipes.js "add" selectors LEARNED from a successful click
-//   browser-platform-commerce  runtime detection of a platform with a usable JSON API
-//
-// They answer one question — *what do I already know about this host?* — so a new site could
-// need edits in up to five files, and something learned in one store never helped the others.
-//
-// The learning and the data stay where they are; what changes is that there is now ONE place
-// to ask and ONE place to record how it went. That is what makes site knowledge DATA the
-// runtime consults, rather than execution architecture the runtime is built out of.
-//
-// Nothing here executes anything. It returns facts.
+// Everything known about acting on a particular host, behind one question. The hand-written
+// tables, the learned search URLs and selectors, the curated recipes and the platform detection
+// all still live where they are; this is the one place to ask and the one place to record how it
+// went, which is what makes site knowledge data the runtime consults rather than architecture it
+// is built from. Nothing here executes anything — it returns facts.
 
 const retailers = require('./retailer-sites');
 const recipes = require('./browser-recipes');
@@ -37,9 +24,8 @@ function hostFromUrl(url) {
 }
 
 /**
- * One store, wired to whatever persistence the caller provides. Both learned stores share the
- * same lifecycle (load once at boot, record outcomes as they happen), so they are primed and
- * queried together rather than each having its own entry point.
+ * One store over whatever persistence the caller provides. Both learned stores share a lifecycle
+ * — load at boot, record outcomes as they happen — so they are primed and queried together.
  */
 function createSiteKnowledge({ fastpaths, learnedRecipes } = {}) {
   const fastpathStore = fastpaths || createFastpathStore({});
@@ -98,10 +84,8 @@ function createSiteKnowledge({ fastpaths, learnedRecipes } = {}) {
   }
 
   /**
-   * The curated steps for a host, rendered as plain-language HINTS the reasoning layer can
-   * act on with its ordinary primitives. This is what keeps hand-authored site knowledge
-   * valuable without a separate executor: the agent is told what usually works here, and
-   * still decides for itself, one observed step at a time.
+   * The curated steps for a host as plain-language hints for the reasoning layer to act on with
+   * its ordinary primitives: told what usually works here, still deciding for itself.
    */
   function hintsFor(hostOrUrl) {
     const record = forHost(hostOrUrl);

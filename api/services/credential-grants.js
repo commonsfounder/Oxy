@@ -1,19 +1,13 @@
 'use strict';
 
-// Bounded permission to use a stored site password, plus the record of every use.
+// Bounded permission to use a stored site password, plus the record of every use — the answer to
+// "when may it sign in without asking me first?". A tap per sign-in makes unattended work
+// impossible, and no gate at all leaves the model's own choice of site as the only lock on a
+// password, on an agent that reads pages written by strangers.
 //
-// Why this exists: vault-credentials.js already keeps passwords encrypted and decrypts them
-// only at the point of use, and the model never sees one. What was missing is the answer to
-// "when may it sign in without asking me first?". Requiring a tap per sign-in makes
-// unattended work impossible; allowing any sign-in makes the model's own choice of site the
-// only lock on a password -- and this agent reads pages written by strangers, which are
-// routinely crafted to steer it.
-//
-// So the grant is the authority and the user is the only one who can create it. The model
-// can ask for a narrower set of sites but can never widen one.
-// Grants expire on their own, can be revoked instantly, and can carry a use cap.
-//
-// The decision is a pure function so every refusal path is testable without a database.
+// So the grant is the authority and only the user creates one: the model can narrow a set of
+// sites, never widen it. Grants expire, can be revoked instantly, and can carry a use cap. The
+// decision is pure, so every refusal path is testable without a database.
 
 const { normalizeSite } = require('./vault-credentials');
 
@@ -23,10 +17,8 @@ const DEFAULT_TASK_TTL_MINUTES = 60;
 const MAX_TTL_MINUTES = 60 * 24 * 30; // a grant that never expires is not a grant
 
 /**
- * Decide whether a stored credential may be used right now.
- *
- * Deliberately takes the grant rather than fetching it, so the ordering of checks -- and
- * every reason a sign-in is refused -- is testable directly.
+ * Decide whether a stored credential may be used right now. Takes the grant rather than fetching
+ * it, so every refusal reason is testable directly.
  *
  * @returns {{allowed: boolean, reason: string}}
  */
@@ -120,12 +112,9 @@ async function createGrant(supabase, userId, input) {
   return { ok: true, grant: data };
 }
 
-/** Recent grants for a site, newest first, INCLUDING revoked and expired ones.
- *
- *  Revoked rows are deliberately not filtered out in SQL. If they were, a revoked grant
- *  would be indistinguishable from never having had one, and the audit log would record the
- *  misleading reason 'no_grant' for something the user explicitly revoked. The caller picks
- *  the first grant that actually authorises, so a dead row still cannot shadow a live one. */
+/** Recent grants for a site, newest first, including revoked and expired ones — filtering them
+ *  in SQL would make a revoked grant indistinguishable from never having had one, and log
+ *  'no_grant' for a deliberate revocation. The caller picks the first grant that authorises. */
 async function findGrantsForSite(supabase, userId, site, limit = 5) {
   const normalizedSite = normalizeSite(site);
   if (!normalizedSite) return [];
@@ -198,17 +187,9 @@ async function listUses(supabase, userId, limit = 100) {
 }
 
 /**
- * The one call the browser loop should use: look up the grant, decide, record the outcome,
- * and count the use. Recording happens on both paths so the log is a complete history
- * rather than only a record of successes.
- */
-/**
- * Claim ONE use of a grant, atomically.
- *
- * The increment is a compare-and-set on the use_count that was just read, not a blind
- * write of read+1: two runs signing in at once both read 0, both wrote 1, and a grant
- * capped at one use paid for two sign-ins. `.eq('use_count', current)` means the second
- * writer matches no row and is told so instead of silently overwriting the first.
+ * Claim ONE use of a grant, atomically. The increment is a compare-and-set on the use_count just
+ * read, not a blind read+1: two runs signing in at once both read 0 and both write 1, so a grant
+ * capped at one use pays for two sign-ins.
  *
  * @returns {{ok: true} | {ok: false, raced: true} | {ok: false, error: unknown}}
  */
@@ -223,12 +204,8 @@ async function claimGrantUse(supabase, userId, grant) {
       .eq('use_count', current)
       .select('id')
       .maybeSingle();
-    // The RETURNED error matters as much as a thrown one, and is the case that actually
-    // happens. supabase-js resolves with `{ error }` instead of rejecting -- for an RLS
-    // refusal, a constraint, and even a dead network ("TypeError: fetch failed" arrives as
-    // a value, not an exception) -- so a try/catch alone caught nothing and the cap was
-    // handed out uncounted exactly when the database was least able to enforce it. The
-    // catch stays because a mocked client in a test may well throw.
+    // supabase-js resolves with `{ error }` rather than rejecting — even a dead network arrives
+    // as a value — so a try/catch alone hands out the cap uncounted. The catch stays for mocks.
     if (error) return { ok: false, error };
     // No row matched: the count moved under us. Not an error -- a lost race, which the
     // caller retries against the fresh count rather than refusing outright.

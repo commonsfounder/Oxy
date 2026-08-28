@@ -26,19 +26,12 @@ function looksLikeLocalPlaceRequest(message) {
   return LOCAL_PLACE_TERMS.test(text);
 }
 
-// LOCAL_PLACE_TERMS mixes two different things: genuine locating language ("nearest",
-// "near", "where is") and bare category/brand nouns ("restaurant", "john lewis") that show
-// up in plenty of sentences that have nothing to do with location — "we were shopping in
-// john lewis", "email the restaurant", "text me when you're at the gym". Every collision
-// found so far (restaurant/communication 2026-08-07, john lewis/browser-session 2026-08-26)
-// has had this exact shape: a bare noun with no real locating signal alongside it.
-//
-// looksLikeLocalPlaceRequest alone stays as-is (used with an explicit ride verb at the
-// ride_to_local_place branch above, where a bare noun is already safe — "uber to that john
-// lewis" needs no separate "nearest"). This stricter variant is only for the bare fallback
-// at the bottom of inferDeterministicAction, which has no other verb narrowing it — it must
-// see real locating language, not just a noun, before assuming "find me a place" over
-// whatever else the sentence might actually be asking for.
+// LOCAL_PLACE_TERMS mixes locating language ("nearest", "where is") with bare category and brand
+// nouns that appear in sentences about nothing of the sort ("email the restaurant"). Every
+// collision has that shape: a noun with no locating signal beside it. The plain
+// looksLikeLocalPlaceRequest is safe where an explicit ride verb narrows it; this stricter
+// variant is for the bare fallback at the bottom of inferDeterministicAction, which has nothing
+// else narrowing it and must see real locating language before assuming a place lookup.
 const LOCAL_PLACE_INTENT_TERMS = /\b(nearest|closest|near|nearby|around me|where'?s|where is|opening hours|store location|branch(?:es)?)\b/i;
 
 function looksLikeExplicitPlaceLookup(message) {
@@ -46,11 +39,9 @@ function looksLikeExplicitPlaceLookup(message) {
   return looksLikeLocalPlaceRequest(text) && LOCAL_PLACE_INTENT_TERMS.test(text);
 }
 
-// Retailer names double as LOCAL_PLACE_TERMS ("john lewis"), so "get me pyjamas ON john
-// lewis" wrongly matched a place lookup. A request to BUY/GET a product — especially
-// "<product> on/from/at <retailer>" — is an online-shopping task (→ browser task), never a
-// request to locate a nearby branch. High precision on purpose: "nearest john lewis" has no
-// purchase verb and no on/from/at source, so it stays a place request.
+// Retailer names are also place terms, so a request to buy a product — especially
+// "<product> on/from/at <retailer>" — is a shopping task, never a nearby-branch lookup.
+// High precision: "nearest john lewis" has no purchase verb and stays a place request.
 const { allRetailerAliases } = require('./services/retailer-sites');
 
 
@@ -62,13 +53,9 @@ function looksLikeRideRequest(message) {
   return RIDE_TERMS.test(normalizeText(message));
 }
 
-// "Restaurant"/"gym"/"hotel" etc. sit in LOCAL_PLACE_TERMS, so any sentence that merely
-// mentions one — including a plain request to email/text/contact them about something —
-// used to fall through to the find_local_place fallback and get routed as a nearby-place
-// search before the model ever saw it. A literal email address, or an explicit
-// email/text/message/contact verb, means this is a communication request, not "find me a
-// place" — narrow and high-precision on purpose, same shape as looksLikeShoppingRequest
-// immediately below.
+// Category nouns are also place terms, so a plain request to email or text one would fall
+// through to the place fallback. A literal address or an explicit contact verb makes this a
+// communication request. Narrow on purpose, same shape as looksLikeShoppingRequest below.
 const COMMUNICATION_TERMS = /\b(email|e-mail|text|message|contact|write to)\b/i;
 const EMAIL_ADDRESS_RE = /[^\s<]+@[^\s>]+\.[^\s>]+/;
 
@@ -78,12 +65,9 @@ function looksLikeCommunicationRequest(message) {
   return EMAIL_ADDRESS_RE.test(text) || COMMUNICATION_TERMS.test(text);
 }
 
-// Same collision, different shape: a named retailer ("john lewis") sits in LOCAL_PLACE_TERMS,
-// so a message about resuming an existing browser shopping session and checking the basket —
-// live regression via the Telegram bridge, 2026-08-26 — fell through to find_local_place and
-// got routed as a nearby-place search, with the whole sentence echoed back as a broken query.
-// Narrow and high-precision on purpose, same shape as looksLikeCommunicationRequest above:
-// only an explicit session/basket/cart phrase defers, so "nearest john lewis" is unaffected.
+// The same collision again: a message about resuming a shopping session and checking the basket
+// names a retailer and falls through to the place fallback. Only an explicit session or basket
+// phrase defers, so "nearest john lewis" is unaffected.
 const BROWSER_SESSION_TERMS = /\b(?:that|this|the) session\b|\bsession back\b|\bwhat'?s in (?:the|my) (?:basket|cart|bag)\b/i;
 
 function looksLikeBrowserSessionRequest(message) {
@@ -435,13 +419,9 @@ function inferDeterministicAction(message, options = {}) {
 
   if (looksLikeMemoryWrite(text) || looksLikeContextualPlaceFollowup(text) || looksLikeContextualTravelFollowup(text)) return null;
 
-  // find_appointment_options only ever talks to the sandbox provider (see
-  // getAppointmentBookingService in api/index.js) — there is no real one yet. Routing
-  // straight to it regardless, with no fallback on failure, used to turn every real
-  // "book me a dentist appointment" into a scripted dead end before the model ever got a
-  // turn. Only take this deterministic path when a provider is actually connected
-  // (today: sandbox/test runs); otherwise fall through to the model, which has
-  // the general browser capabilities for a genuine online booking.
+  // find_appointment_options only talks to the sandbox provider; there is no real one yet, so
+  // routing to it regardless makes every "book me a dentist appointment" a dead end. Only take
+  // this path when a provider is connected, otherwise let the model use the browser.
   if (options?.appointmentProviderConnected &&
       /\bappointment\b/i.test(text) && /\b(get|book|find|arrange|schedule|need|want|make)\b/i.test(text)) {
     return {
@@ -499,10 +479,8 @@ function inferDeterministicAction(message, options = {}) {
       return null;
     }
     const destination = fromTo?.destination || headingDestination || cleanDestinationPhrase(text);
-    // A bare directions command ("Get directions", "directions please" — e.g. the app's
-    // starter suggestion chip) has no actual place: cleanDestinationPhrase just echoes the
-    // command back. Never fabricate a destination out of the command itself — defer to the
-    // LLM so it asks "where to?" instead of routing to a garbage location.
+    // A bare "get directions" names no place, and cleanDestinationPhrase just echoes the command
+    // back. Defer to the model so it asks "where to?" rather than routing somewhere invented.
     if (!fromTo && !headingDestination && !hasRealDestination(destination)) {
       return null;
     }
