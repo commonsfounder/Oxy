@@ -226,13 +226,9 @@ test('calendar read-vs-write: the write-only guidance survives, and the read act
   assert.doesNotMatch(decls.get_calendar_events.description, /read-only calendar language/);
 });
 
-// ── Phase 6 (2026-08-07): disambiguation rules moved out of the numbered static prompt onto
-// the tool they actually govern, when the rule was about constructing/choosing THAT tool's call
-// rather than general behaviour. ────────────────────────────────────────────────────────────
-test('trains vs directions: search_trains/station_board/plan_trip defer to grounded search, get_directions covers generic routes', () => {
+test('trains vs directions: search_trains/plan_trip defer to grounded search, get_directions covers generic routes', () => {
   const decls = nativeDescriptions();
-  assert.match(decls.search_trains.description, /Prefer a grounded search answer over this/);
-  assert.match(decls.station_board.description, /Prefer a grounded search answer over this/);
+  assert.match(decls.search_trains.description, /prefer a grounded search answer/i);
   assert.match(decls.plan_trip.description, /Prefer a grounded search answer over this/);
   assert.match(decls.get_directions.description, /generic local directions, walking, driving, and bus questions/);
   assert.match(decls.get_directions.description, /Never pretend a route opened if all you have is a text answer/);

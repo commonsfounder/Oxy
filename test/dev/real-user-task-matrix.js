@@ -63,7 +63,6 @@ const TASKS = [
   { id: 'hotel-search', group: 'public-read', mode: 'safe', expectedAction: 'search_hotels', message: 'Find a well-rated hotel in Bath for two nights under £140 per night.' },
   { id: 'itinerary', group: 'public-read', mode: 'safe', expectedAction: 'plan_itinerary', message: 'Plan a three-day trip to Edinburgh starting 1 October.' },
   { id: 'train-search', group: 'public-read', mode: 'safe', expectedAction: 'search_trains', message: 'Find the first train from Birmingham to London tomorrow morning.' },
-  { id: 'station-board', group: 'public-read', mode: 'safe', expectedAction: 'station_board', message: 'Show departures from Birmingham New Street in the next hour.' },
   { id: 'flight-watch', group: 'public-read', mode: 'safe', expectedAction: 'track_flight', message: 'Track BA flight 142 from London to New York.' },
 
   // Browser tasks. These are never auto-confirmed by this harness. An order is

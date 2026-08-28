@@ -819,20 +819,9 @@ const ACTION_CONTRACTS = {
     required: ['origin', 'destination'],
     aliases: { origin: ['from'], destination: ['to'] },
     inputExample: { origin: 'station name or CRS code', destination: 'station name or CRS code' },
-    guidance: 'Never use this connector to buy or book a ticket. For a ticket purchase, run the browser task against the appropriate direct rail operator and stop for payment review. Prefer a grounded search answer over this for live train times, platforms, or journey options — this connector is not the source of truth for those.',
+    guidance: 'Returns a route summary between two stations, not live times, platforms or fares — prefer a grounded search answer for those. To buy a ticket, use browser_open/browser_act against the rail operator and transaction_authorize only after approval.',
     successSummary: 'Train route checked',
     failureSummary: 'Train search failed',
-    confirmation: 'none',
-    adapter: { kind: 'connector', id: 'trainline' }
-  },
-  station_board: {
-    risk: 'low',
-    required: ['station'],
-    aliases: { station: ['origin', 'from'] },
-    inputExample: { station: 'station name or CRS code' },
-    guidance: 'Prefer a grounded search answer over this for live departures, arrivals, or platforms — this connector is not the source of truth for that. Use it only when the user explicitly wants a live station board.',
-    successSummary: 'Station board ready',
-    failureSummary: 'Station board failed',
     confirmation: 'none',
     adapter: { kind: 'connector', id: 'trainline' }
   },

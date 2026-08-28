@@ -505,11 +505,7 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
     });
 
     const openConversations = await findOpenConversationsForParticipant(supabase, participant.id);
-    // More than one open conversation with the same participant: do not guess which
-    // one this reply belongs to. Attach to the most recently active one and rely on
-    // the surfaced update carrying enough context for the user to notice if it's
-    // wrong — a stronger disambiguation (asking the user which thread) is future
-    // work, not silently picking without any signal at all.
+    // Attach to the most recently active conversation rather than guessing between several.
     const conversation = openConversations.length
       ? openConversations.sort((a, b) => new Date(b.last_activity_at) - new Date(a.last_activity_at))[0]
       : (await getOrCreateConversation(supabase, {
@@ -644,11 +640,7 @@ app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.url
   }
 });
 
-// A real Telegram Bot (BotFather/Bot API) — Millie's own identity, so messaging it is a real
-// two-way conversation with Millie, unlike connectors/telegram.js which sends as the user's
-// own account. Every text message is bridged into the SAME /chat pipeline the iOS app uses
-// (loopback HTTP call on this instance, see bridgeToChatPipeline below) so it is one unified
-// conversation, memory, and action set — not a second brain to keep in sync.
+// Millie's own bot identity. Messages bridge into the same /chat pipeline the iOS app uses.
 app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   const expectedSecret = process.env.TELEGRAM_BOT_WEBHOOK_SECRET;
   if (expectedSecret && req.get('X-Telegram-Bot-Api-Secret-Token') !== expectedSecret) {
@@ -669,14 +661,8 @@ app.post('/webhooks/telegram-bot', express.json(), async (req, res) => {
   }
 });
 
-// Mints a real session token for the linked user and calls this very instance's own /chat
-// route over loopback HTTP. This reuses 100% of the existing chat brain, memory, and
-// review-gated action handling untouched, instead of re-implementing any of it for a second
-// channel. Prefers process.env.PORT (what server.js itself binds to — Fly injects this to
-// match internal_port, so it's guaranteed correct in production) and falls back to
-// req.socket.localPort for tests, which listen on an OS-assigned ephemeral port with no PORT
-// env var set. req.socket.localPort alone is NOT reliable in production — behind Fly's proxy
-// it came back undefined, which is what silently broke every bridged message at first.
+// Calls this instance's own /chat over loopback. PORT is required in production — behind
+// Fly's proxy req.socket.localPort is undefined, so it is only a test fallback.
 async function bridgeToChatPipeline(userId, message, req) {
   const { data: userRow } = await supabase.from('users').select('token_version').eq('user_id', userId).maybeSingle();
   const sessionToken = createSessionToken(userId, userRow?.token_version || 1);
@@ -690,12 +676,8 @@ async function bridgeToChatPipeline(userId, message, req) {
   return chatRes.json();
 }
 
-// A pending review-gated action (buildPendingReviewResult in pending-review.js) is exactly
-// what the iOS ConfirmCard renders as tap-to-approve — here it becomes Telegram's native
-// inline-keyboard equivalent. Tapping either button synthesizes the same "yes"/"cancel" text
-// the app sends when a user taps Confirm/Cancel, reusing the existing natural-language
-// approval parser (getPendingAction/isPendingConfirmMessage) instead of a second resolution
-// path keyed on an approval id.
+// Renders a pending review-gated action as Telegram inline buttons; a tap synthesizes the
+// same yes/cancel text the app sends, so there is one approval parser rather than two.
 async function sendChatResultToTelegram(chatId, result) {
   const pendingEntry = telegramBot.findPendingAction(result?.actions || []);
   if (pendingEntry) {
@@ -767,11 +749,8 @@ async function handleTelegramBotCallback(callbackQuery, req) {
   await sendChatResultToTelegram(chatId, result);
 }
 
-// Only the continuity endpoints take a whole vendor export. Raising the limit globally to
-// suit them would hand every other route — /chat included — a 40x larger body to absorb.
-// The global parser must SKIP those paths rather than run first: body-parser marks the
-// request as read, so a default-limit parser in front would 413 the upload before the
-// larger one ever saw it.
+// Only continuity endpoints take a large body. The global parser must skip those paths:
+// whichever parser runs first marks the request read, so a default limit in front 413s.
 const continuityBodyParser = express.json({ limit: '12mb' });
 const defaultBodyParser = express.json();
 app.use((req, res, next) => {
@@ -1003,12 +982,8 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/London';
-// Chat runs on OpenAI (gpt-5.6-luna) as of 2026-08-04 — smarter and cheaper than the
-// Gemini tier it replaced, and Google billing dunning had denied the Gemini project
-// outright, taking chat down. Provider is selected by OXY_BRAIN_PROVIDER in
-// brain-provider.js; these ids must belong to whichever provider that names.
-// The GEMINI_MODEL/GEMINI_FAST_MODEL overrides are gone on purpose: leaving them would
-// let a stale env var post a Gemini model id to OpenAI's endpoint and 404 at runtime.
+// These ids must belong to whichever provider OXY_BRAIN_PROVIDER names. No per-vendor env
+// overrides: a stale one would post another vendor's model id and 404 at runtime.
 const DEFAULT_CHAT_PROVIDER = resolveModelRoute({}).provider;
 const PRIMARY_CHAT_MODEL = defaultModelForProvider(DEFAULT_CHAT_PROVIDER, 'reasoning');
 const FAST_MODEL = defaultModelForProvider(DEFAULT_CHAT_PROVIDER, 'fast');
@@ -1144,13 +1119,8 @@ async function createBriefing(userId, { kind, title, body, source = 'proactive',
   return data;
 }
 
-// Refreshes an already-created briefing/nudge row's dashboard-facing data (emails,
-// incoming deliveries/reservations) in place, independent of the once-per-day throttle
-// that gates generating NEW narrative text/pushes for that kind. Silent — no chat
-// message, no push — this exists purely so the Home cards reflect the current inbox
-// instead of a frozen snapshot from whenever the narrative last fired. If a bug in the
-// extraction logic gets fixed mid-day, the very next open picks up the correction here
-// rather than waiting for tomorrow's window.
+// Refreshes an existing briefing row's email/delivery data in place, outside the
+// once-per-day narrative throttle. Silent: no chat message, no push.
 async function refreshBriefingEmailData(userId, kind, todayKey, emailContext) {
   try {
     const { data, error } = await supabase
@@ -1262,13 +1232,7 @@ function inferCompoundReadOnlyTurn(message = '') {
     hits.push({ index: calendarMatch.index ?? 0, kind: 'calendar', label: 'calendar' });
   }
   const orderedHits = hits.sort((a, b) => a.index - b.index);
-  // Split on ", then"/"then" clause connectors so each domain's segment keeps
-  // qualifiers ("important", "today") that precede its own trigger keyword
-  // within the same clause, without bleeding into the other clause's
-  // date/priority words (slicing purely by keyword index either dropped
-  // leading qualifiers or let a date word from one clause leak into the
-  // other). Falls back to keyword-index slicing when there's no explicit
-  // connector to split the clauses on.
+  // Split on "then" so each clause keeps its own qualifiers; falls back to keyword slicing.
   const clauseBreaks = [...text.matchAll(/,?\s*\bthen\b\s*/gi)].map(m => m.index + m[0].length);
   const boundaries = [0, ...clauseBreaks, text.length];
   const clauseFor = (idx) => {
@@ -1430,11 +1394,7 @@ function getWavDurationMs(buffer) {
     const sampleRate = buffer.readUInt32LE(24);
     const byteRate = buffer.readUInt32LE(28);
     const declaredDataSize = buffer.readUInt32LE(40);
-    // Streamed WAVs are written before the length is known, so the data-chunk size is the
-    // 0xFFFFFFFF "unknown" placeholder (OpenAI's TTS does this). Taken literally that is a
-    // ~24-hour clip, which drives words-per-second to ~0 and makes isImplausibleTranscript
-    // accept anything — the hallucination guard fails open instead of firing. Trust the
-    // bytes actually present over the header's claim.
+    // Streamed WAVs carry a 0xFFFFFFFF placeholder size, so trust the bytes actually present.
     const actualDataSize = Math.max(buffer.length - 44, 0);
     const dataSize = Math.min(declaredDataSize || actualDataSize, actualDataSize);
     if (!sampleRate || !byteRate || !dataSize) return null;
@@ -1629,11 +1589,7 @@ function extractShoppingContextHints(history = []) {
   return hints;
 }
 
-// Thin wrapper over buildSystemPrompt's 'chat' surface, kept with its original positional
-// signature — test/smoke/preference-context-hygiene.test.js and prompt-safety.test.js call this
-// directly. The public-figures-grounding and search-staleness lines that used to live in this
-// function's own RESPONSE RULES tail now live once, universally, in TRUTHFULNESS_SAFETY_SECTION
-// (api/prompts.js) — every surface gets them, not just chat.
+// Positional signature kept because preference-context-hygiene and prompt-safety call it directly.
 function buildDynamicSystemPrompt(memory, preferences, availableActions, userContext, statedContext = [], autonomyContext = {}) {
   return buildSystemPrompt({
     surface: 'chat',
@@ -1945,16 +1901,7 @@ function isPlainWorldQuestion(message = '') {
   return true;
 }
 
-// Which turns get the full think/act/observe loop.
-//
-// This used to be an ALLOWLIST of English verbs (book|order|buy|send|call|email|...), which
-// meant an ordinary request whose verb was not on the list — "cancel my subscription",
-// "renew my passport", "dispute this fine", "turn off my morning briefing" — never reached a
-// loop that could act at all, and got a single-shot chat reply instead. Whether Adam is
-// allowed to reason is not something a verb list should decide.
-//
-// It is now an exclusion: everything gets the loop except the few kinds of turn that
-// genuinely do not want one.
+// Every turn gets the think/act/observe loop except the few kinds that do not want one.
 function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, autonomyLevel = 'Active', pendingAction = null } = {}) {
   if (quickTurn || pendingAction || autonomyLevel === 'Quiet') return false;
   if (isPureContentGenerationTurn(message)) return false;  // long prose streams better
@@ -1962,12 +1909,7 @@ function shouldUseAgenticLoopForMessage({ message = '', quickTurn = false, auton
   return Boolean(String(message || '').trim());
 }
 
-// Actions authored by the cheap streaming model were unreliable enough to discard while
-// FAST_MODEL was a genuinely weaker tier (gemini-3.1-flash-lite). The guard is about that
-// downgrade, not about model identity: once FAST_MODEL and PRIMARY_CHAT_MODEL are the same
-// id — as they are on the OpenAI path — an identity-only check matches the MAIN chat model
-// and silently discards every action the text path parses. Gate on the tiers actually
-// differing so the guard re-arms by itself if a cheaper fast tier is configured again.
+// Discard fast-tier actions only when that tier is genuinely a weaker model than the main one.
 function shouldIgnoreModelAuthoredActions(modelName = '') {
   if (FAST_MODEL === PRIMARY_CHAT_MODEL) return false;
   return String(modelName || '') === FAST_MODEL;
@@ -2989,15 +2931,8 @@ function looksLikeMessageAddress(value) {
   return /^\+?[0-9][0-9\s().-]{5,}$/.test(text) || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text);
 }
 
-// DB-backed daily send cap for Millie's own identity — not the existing in-memory
-// createRateLimiter, whose Map doesn't survive a restart and isn't shared across
-// Fly machines if the service scales beyond one. This counts real rows
-// instead. Millie's identity has no human tap-to-send safety net the way
-// send_message's device-level deep link does, so this is a real abuse guard, not
-// a formality.
-// Testable without hitting Supabase: __testOverride lets tests inject the count
-// function directly, matching this file's existing convention of exposing a narrow
-// test seam rather than mocking the module's own `supabase` client.
+// DB-backed daily send cap for Millie's own identity; unlike createRateLimiter it survives
+// restarts and multiple machines. __testOverride injects the count so tests need no Supabase.
 async function countMillieSendsToday(userId, channelType) {
   const since = new Date();
   since.setUTCHours(0, 0, 0, 0);
@@ -5772,8 +5707,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   };
 }
 
-const DATA_ACTIONS = new Set(['search_trains', 'station_board', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
-const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains', 'station_board']);
+const DATA_ACTIONS = new Set(['search_trains', 'get_emails', 'get_calendar_events', 'search_emails', 'get_telegram_contacts']);
+const DIRECT_SUMMARY_ACTIONS = new Set(['search_trains']);
 
 async function buildMorningBriefing(userId, now = new Date()) {
   const [memory, history] = await Promise.all([

@@ -24,7 +24,6 @@ const ACTION_NAMES = Object.freeze({
   book_uber: 'Ride',
   book_lyft: 'Ride',
   search_trains: 'Train times',
-  station_board: 'Train times',
   play_music: 'Music',
   add_to_music_playlist: 'Music',
   web_search: 'Search',

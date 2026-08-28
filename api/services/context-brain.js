@@ -128,7 +128,7 @@ function contextFromAction(action, source = 'action_result') {
       input
     };
   }
-  if (['get_directions', 'plan_trip', 'search_trains', 'station_board'].includes(type)) {
+  if (['get_directions', 'plan_trip', 'search_trains'].includes(type)) {
     const result = action?.result || {};
     return {
       kind: 'route',

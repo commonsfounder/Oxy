@@ -77,7 +77,6 @@ test('Core actions (incl. new agentic) have contracts for reliability work', () 
     'create_calendar_event',
     'get_calendar_events',
     'search_trains',
-    'station_board',
     'play_music',
     'web_browse',
     'calculate',
