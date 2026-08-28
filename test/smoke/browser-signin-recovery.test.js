@@ -7,10 +7,6 @@ const { handlers } = require('../../api/actions/browser');
 const browserAccess = require('../../api/services/browser-access');
 const { normalizeActionOutcome } = require('../../api/services/action-outcome');
 
-// A login wall on a site with nothing in the vault used to be a dead end: browser_sign_in can
-// only use a STORED credential, and nothing told the client to offer the sign-in sheet that
-// POST /browser-task/reauth-login already implements.
-
 const MESSAGE_SWIFT = path.join(__dirname, '..', '..', 'OxyApp', 'OxyApp', 'Views', 'Chat', 'MessageBubble.swift');
 
 function stubSignIn(t, result) {
@@ -37,8 +33,7 @@ test('a refused credential grant is reported, never routed around with a sheet',
   assert.equal(result.recoveryAction, undefined, 'a refusal must not offer a way around itself');
 });
 
-// iOS gates the sheet on `isFailure`, which is FALSE for awaiting_user. An outcome that reads
-// as more truthful would silently render nothing.
+// iOS gates the sheet on isFailure, which is false for awaiting_user.
 test('the outcome is one the iOS client treats as a failure, so the sheet actually shows', async (t) => {
   stubSignIn(t, { type: 'no_credential', site: 'johnlewis.com' });
 
@@ -46,7 +41,6 @@ test('the outcome is one the iOS client treats as a failure, so the sheet actual
     await handlers.browser_sign_in({ userId: 'u1', params: { site: 'johnlewis.com' }, context: {} })
   );
 
-  // Mirrors ActionResult.isFailure in OxyApp/OxyApp/Models/Message.swift.
   const failureOutcomes = new Set(['failed', 'unavailable']);
   assert.ok(
     failureOutcomes.has(result.outcome),

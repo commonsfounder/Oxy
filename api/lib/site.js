@@ -1,17 +1,7 @@
 'use strict';
 
-// Collapse a hostname to the site a session should be filed under.
-//
-// The first real shared session went in as `account.johnlewis.com`, because that is the page
-// the user was on when they clicked share. The ordering loop looks sessions up by the site it
-// derives from the shopping URL — `johnlewis.com` — so the session it had just been handed
-// was invisible to it. The account page is exactly where someone goes to confirm they are
-// signed in, so that is the likely case, not the edge case.
-//
-// A note kept deliberately short: this is not a full public-suffix implementation. Bringing
-// in the real list would be a dependency for one function, so the multi-part suffixes that
-// matter for a UK-first shopping agent are listed instead. Collapsing to the last two labels
-// alone would file every British site under `co.uk`.
+// Collapse a hostname to the site a session is filed under. Not a full public-suffix
+// implementation — the multi-part suffixes that matter are listed below.
 
 // Second-level suffixes where the registrable name is the THIRD label from the right.
 const MULTI_PART_SUFFIXES = new Set([

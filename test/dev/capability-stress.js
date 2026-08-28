@@ -1,19 +1,5 @@
 'use strict';
 
-// Capability stress run: throw the real-user corpus at a live deployment, concurrently, and
-// score three things separately — how FAST it answers, whether it REACHED the right capability,
-// and what the capability actually returned. The task matrix scores the last one only, one turn
-// at a time, so it cannot show latency or what happens under parallel load.
-//
-// Usage:
-//   node test/dev/capability-stress.js                          # 42 read-only tasks, 4 in flight
-//   node test/dev/capability-stress.js --concurrency=8
-//   node test/dev/capability-stress.js --group=public-read --limit=10
-//   BASE_URL=http://localhost:3000 node test/dev/capability-stress.js
-//
-// Read-only by default. Modes that write to the account or reach a send boundary need an
-// explicit --allow-writes, because this points at a real deployment and a real user row.
-
 require('dotenv').config();
 const path = require('path');
 const { createSessionToken } = require(path.join(__dirname, '..', '..', 'auth'));
@@ -22,13 +8,20 @@ const { TASKS, selectTasks, classify } = require('./real-user-task-matrix');
 const BASE = (process.env.BASE_URL || process.env.OXY_STRESS_API_URL || 'https://milgrain-live-2026.fly.dev').replace(/\/+$/, '');
 const USER = process.env.OXY_STRESS_USER || process.env.SMOKE_USER || 'user123';
 const TURN_TIMEOUT_MS = Number(process.env.OXY_STRESS_TURN_TIMEOUT_MS || 120000);
-// /chat allows 30 turns per minute per user. Exceeding it measures the limiter, not the agent,
-// so the runner paces itself under the cap and retries a 429 rather than scoring it.
+// /chat caps a user at 30/min; staying under it measures the agent rather than the limiter.
 const DEFAULT_RATE_PER_MIN = Number(process.env.OXY_STRESS_RATE_PER_MIN || 25);
 
-// A status that means the runtime did its job. `setup_blocked` is a truthful "this account has
-// no such connector", which is a correct answer, not a capability failure.
+// Statuses where the runtime answered truthfully; a missing connector is an answer, not a failure.
 const HEALTHY = new Set(['completed', 'setup_blocked', 'handoff_required', 'approval_boundary', 'browser_boundary', 'setup_or_handoff']);
+
+const USAGE = `capability-stress — run the read-only task corpus against a live deployment
+
+  node test/dev/capability-stress.js [--group=g] [--mode=m] [--id=a,b] [--limit=n]
+                                     [--concurrency=n] [--rate=perMinute] [--allow-writes]
+
+  BASE_URL   deployment to hit (default ${BASE})
+  --rate     requests/min, kept under the server cap (default ${DEFAULT_RATE_PER_MIN})
+  Read-only unless --allow-writes.`;
 
 function parseArgs(argv = process.argv.slice(2)) {
   const options = { groups: [], modes: [], ids: [], limit: 0, concurrency: 4, allowWrites: false, ratePerMin: DEFAULT_RATE_PER_MIN };
@@ -41,12 +34,12 @@ function parseArgs(argv = process.argv.slice(2)) {
     if (key === '--concurrency') options.concurrency = Math.max(1, Number(value) || 1);
     if (key === '--rate') options.ratePerMin = Math.max(1, Number(value) || DEFAULT_RATE_PER_MIN);
     if (arg === '--allow-writes') options.allowWrites = true;
+    if (arg === '--help' || arg === '-h') { console.log(USAGE); process.exit(0); }
   }
   if (!options.modes.length && !options.ids.length) options.modes = ['safe'];
   return options;
 }
 
-// Spaces request STARTS so throughput stays under the server's per-minute cap.
 function createPacer(ratePerMin) {
   const gapMs = Math.ceil(60000 / ratePerMin);
   let nextAt = 0;
@@ -93,7 +86,6 @@ async function runTask(token, task) {
   }
 }
 
-// Fixed-size worker pool: every worker pulls the next task, so a slow turn does not idle the rest.
 async function runPool(token, tasks, concurrency, ratePerMin = DEFAULT_RATE_PER_MIN) {
   const queue = [...tasks];
   const results = [];
@@ -102,7 +94,6 @@ async function runPool(token, tasks, concurrency, ratePerMin = DEFAULT_RATE_PER_
     for (let task = queue.shift(); task; task = queue.shift()) {
       await pace();
       let result = await runTask(token, task);
-      // A 429 is the limiter, not an answer. Wait out the window once and ask again.
       if (result.status === 'rate_limited') {
         await new Promise((resolve) => setTimeout(resolve, Number(process.env.OXY_STRESS_RETRY_MS || 62000)));
         await pace();

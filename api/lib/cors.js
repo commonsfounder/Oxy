@@ -1,19 +1,7 @@
 'use strict';
 
-// Which origins may call this API.
-//
-// The Chrome session-share extension calls from `chrome-extension://<id>`. That is not a
-// website, was never in the allowlist, and so every request from it was rejected — surfacing
-// to the user as an unexplained HTTP 500 with nothing in the response to say why.
-//
-// Allowing extension origins is safe *here specifically* because this API authenticates on
-// headers only: Bearer or X-Session-Token, never cookies (see auth.js's
-// getProvidedSessionToken). CORS exists to stop a hostile page spending the browser's
-// ambient credentials on the user's behalf; with no cookie auth there are none to spend, so
-// an extension origin still has to present a real token like anything else.
-//
-// **If cookie-based auth is ever added, this reasoning collapses and extension origins must
-// be pinned to known ids** — which OXY_ALLOWED_EXTENSION_IDS already supports.
+// Extension origins are allowed only because auth is header-only, never cookies.
+// If cookie auth is ever added, pin them to known ids via OXY_ALLOWED_EXTENSION_IDS.
 
 // Chrome extension ids are exactly 32 characters drawn from a–p.
 const EXTENSION_ORIGIN_RE = /^chrome-extension:\/\/([a-p]{32})$/;

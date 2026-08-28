@@ -1,13 +1,7 @@
 'use strict';
 
-// Small string/parsing helpers shared across routes, actions and services.
-//
-// The two parsers are deliberately different and are not interchangeable:
-//   safeParseJSON  - returns the ORIGINAL value when it will not parse. For database
-//                    columns that may hold either JSON or a plain string.
-//   parseLooseJson - returns null when it will not parse, and first strips the ```json
-//                    fences a model wraps its output in. For model output only.
-// Using the forgiving one on model output hides real parse failures, so keep them apart.
+// safeParseJSON returns the original value on failure (for db columns); parseLooseJson
+// returns null and strips code fences (for model output). Not interchangeable.
 
 function escapeHtml(str) {
   return String(str)

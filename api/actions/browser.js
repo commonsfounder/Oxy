@@ -1,14 +1,7 @@
 'use strict';
 
-// Browser and transaction capabilities.
-//
-// These are PRIMITIVES the main agent loop composes, not a task. There is no ordering loop
-// here and no notion of a product: the loop opens a page, looks at it, takes one step, sees
-// what changed, and decides again — for a purchase, a cancellation, an application, a
-// council portal or anything else a person does in a browser.
-//
-// The model boundary (generateBrain/webSearchBrain) arrives through deps because the
-// orchestration tests mock it by intercepting index.js's require of brain-provider.
+// Browser and transaction primitives the agent loop composes; there is no task loop here.
+// The model boundary arrives through deps so orchestration tests can intercept it.
 
 const axios = require('axios');
 const { getLocalDateKey } = require('../lib/time');

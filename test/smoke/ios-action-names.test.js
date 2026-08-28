@@ -5,16 +5,11 @@ const path = require('path');
 
 const { ACTION_CONTRACTS } = require('../../api/action-contracts');
 
-// The iOS client picks its UI off action NAMES. Deleting a capability is a silent iOS break:
-// the watch never matches and the card never renders, while the Swift still compiles and every
-// backend test stays green. That is exactly how run_browser_task rotted in the client after the
-// 2026-08-28 runtime refactor.
+// iOS picks its UI off action names, so deleting a capability breaks the client silently.
 
 const APP_ROOT = path.join(__dirname, '..', '..', 'OxyApp', 'OxyApp');
 
-// Names iOS compares against that the backend does not declare AND the client does not build
-// itself. Must stay empty in normal operation — restore the capability or delete the branch
-// rather than adding to it.
+// Must stay empty: restore the capability or delete the branch instead of adding to this.
 const KNOWN_DEAD = new Set([]);
 
 const SNAKE_LITERAL = /"([a-z][a-z0-9]*(?:_[a-z0-9]+)+)"/g;
@@ -28,9 +23,7 @@ function swiftFiles(dir, out = []) {
   return out;
 }
 
-// Reads the Swift for two things at once: which action names it COMPARES against (those must
-// exist somewhere), and which it CONSTRUCTS on-device (those never need a backend contract —
-// open_app and the other native local results are real, not rot).
+// Returns names the Swift compares against, and names it builds on-device (which need no contract).
 function scanSwift() {
   const compared = new Map();
   const clientLocal = new Set();
@@ -54,7 +47,6 @@ function scanSwift() {
         }
       }
 
-      // `recoveryAction?.type` is a different namespace and deliberately does not match here.
       const inContext = /\.action\b|watchedAction/.test(line) || switchIndent !== null || setIndent !== null;
       if (inContext) {
         for (const match of line.matchAll(SNAKE_LITERAL)) {
@@ -84,8 +76,6 @@ test('every action name the iOS client watches still exists somewhere', () => {
 
 test('the extractor still sees the switch and Set forms, not just == comparisons', () => {
   const { compared } = scanSwift();
-  // isRichAction is a `switch action.action` and autoOpenActions is a Set<String>. Both once
-  // hid dead names from a line-by-line scan.
   assert.ok(compared.has('search_flights'), 'lost sight of names inside `switch action.action`');
   assert.ok(compared.has('make_call'), 'lost sight of names inside an action Set literal');
 });
@@ -98,7 +88,6 @@ test('the known-dead list does not outlive the capabilities it describes', () =>
   }
 });
 
-// The money step is the one iOS drives its whole task surface off, so name it explicitly.
 test('the action AgentTaskSession watches is the gated money step', () => {
   const source = fs.readFileSync(path.join(APP_ROOT, 'Models', 'AgentTaskSession.swift'), 'utf8');
   const match = source.match(/watchedAction = kind == \.ride \? "([a-z_]+)" : "([a-z_]+)"/);
