@@ -5,14 +5,14 @@ import Foundation
 // A generated multi-step "job" surface: working/searching animation -> a
 // real-data result step -> confirm. Steps are appended as real data arrives
 // from the exact same backend pipeline chat already uses
-// (ChatService.sendMessage -> SSE -> agentic loop -> run_browser_task /
-// book_uber), not scripted up front — see
+// (ChatService.sendMessage -> SSE -> agentic loop -> browser primitives ->
+// transaction_authorize / book_uber), not scripted up front — see
 // docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
 //
 // Three job kinds share this shell today:
-//  - .shopping: "buy X" and "order food" both drive run_browser_task (the
-//    same Playwright-driven checkout pipeline — food delivery just lands on
-//    an Uber Eats/Deliveroo-style DELIVERY recipe instead of a retailer one).
+//  - .shopping: "buy X" and "order food" both run the same general browser
+//    primitives and land on transaction_authorize — the money step is the only
+//    gated one, and it is the same gate whatever the site is.
 //  - .ride: "get me an uber" drives the real book_uber action — a deep-link
 //    handoff into the Uber app with a best-effort fare estimate, not an
 //    in-app booking.
@@ -21,14 +21,14 @@ import Foundation
 //    it") — so the concierge acts on context it already has instead of
 //    re-opening chat and re-prompting for the same email. When constructed
 //    with `emailAction` set (every inbox-card call site does this), `start()`
-//    NEVER touches run_browser_task/the hidden chat pipeline at all — a bank
-//    or card-issuer site can't be safely logged into by a bot (2FA, aggressive
+//    NEVER touches the hidden chat pipeline at all — a bank or card-issuer
+//    site can't be safely logged into by a bot (2FA, aggressive
 //    anti-automation), so that path is deliberately not even attempted. Instead
 //    it calls /emails/action-plan directly, which mines the ORIGINAL email for
 //    real links the provider already sent and writes manual steps — see
 //    buildEmailActionPlan in api/index.js. Without `emailAction` (not used by
 //    any call site today, kept for a future non-email "go handle this" job) it
-//    falls back to the same run_browser_task watch .shopping uses.
+//    falls back to the same transaction_authorize watch .shopping uses.
 // Restaurant reservations ("book a table") have no real backend yet, so that
 // intent isn't matched here at all — it falls through to real chat.
 
@@ -174,7 +174,7 @@ final class AgentTaskSession: Identifiable {
 
     /// "Review & confirm" — sends the same affirmative reply a person would type in
     /// chat through the same hidden pipeline, letting the agent call the existing
-    /// confirm_browser_payment action itself. No new payment code path; every
+    /// transaction_authorize action itself. No new payment code path; every
     /// safety gate that action already honours (spend cap, card note) is unchanged.
     /// If the agent comes back with something other than that action (rare — e.g. it
     /// wants to double-check a detail first), that's the same conversational case as
@@ -198,7 +198,7 @@ final class AgentTaskSession: Identifiable {
             case .replace(let replacement):
                 assistantText = replacement
             case .actions(let results):
-                guard let result = results.first(where: { $0.action == "confirm_browser_payment" }) else { continue }
+                guard let result = results.first(where: { $0.action == "transaction_authorize" }) else { continue }
                 if result.success {
                     complete()
                 } else {
@@ -222,7 +222,7 @@ final class AgentTaskSession: Identifiable {
         isWorking = true
         defer { isWorking = false }
 
-        let watchedAction = kind == .ride ? "book_uber" : "run_browser_task"
+        let watchedAction = kind == .ride ? "book_uber" : "transaction_authorize"
         let stream = chatService.sendMessage(userId: userId, message: message, location: location)
         var sawWatchedAction = false
         var assistantText = ""
@@ -267,7 +267,7 @@ final class AgentTaskSession: Identifiable {
         }
     }
 
-    /// Never touches run_browser_task or the hidden chat pipeline — calls
+    /// Never touches the browser pipeline or the hidden chat pipeline — calls
     /// /emails/action-plan directly, which mines the ORIGINAL email for real links the
     /// provider already sent and writes manual steps. It doesn't attempt to log into
     /// anything, so there's nothing to retry conversationally if it comes back empty —

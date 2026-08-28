@@ -86,7 +86,9 @@ Connectors live in `connectors/` and each exports `SUPPORTED_ACTIONS` + `execute
 
 ### Browser-Automation Agent
 
-`api/services/browser-task.js` is the main ordering/checkout loop, backed by:
+`api/services/browser-environment.js` + `browser-session.js` expose the browser as an
+environment (open, observe, click, type, select, scroll, back, navigate, upload, download,
+close); `api/services/transaction.js` handles any page that asks for money. Backed by:
 - `browser-recipes.js` / `browser-learned-recipes.js` — deterministic + learned step registries per site
 - `browser-fastpaths.js` — cached fast paths for known flows
 - `browser-platform-commerce.js` / `browser-platform-woocommerce.js` — platform-API tiers used before falling back to raw browser control
@@ -171,7 +173,7 @@ curl -s https://milgrain-live-2026.fly.dev/health
 - `GET /health`, `GET /version`
 - register/login, `POST /chat`
 - a Google connector OAuth round-trip
-- a live browser-automation order (`test/dev/jl-order-e2e.js`)
+- a live browser-automation order (`test/dev/real-user-task-matrix.js`, browser group)
 
 ## Testing
 

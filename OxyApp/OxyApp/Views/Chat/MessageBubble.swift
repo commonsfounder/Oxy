@@ -34,11 +34,7 @@ struct MessageBubble: View {
     /// prose can't carry). Everything else folds into the one-line turn receipt.
     private static func isRichAction(_ action: ActionResult) -> Bool {
         switch action.action {
-        case "book_uber",
-             "search_flights", "get_flight_prices",
-             "search_hotels", "check_hotel_availability",
-             "search_activities", "get_activity_details",
-             "save_trip":
+        case "book_uber", "search_flights", "search_hotels":
             return true
         case "get_directions", "plan_trip":
             return !action.isFailure && (action.deepLink != nil || action.webLink != nil)
@@ -181,14 +177,10 @@ struct MessageBubble: View {
                     ForEach(richActions) { action in
                         if action.action == "book_uber" {
                             UberHandoffCard(action: action) { onOpenAction?(action) }
-                        } else if ["search_flights", "get_flight_prices"].contains(action.action) {
+                        } else if action.action == "search_flights" {
                             TravelResultCard(action: action, kind: .flights)
-                        } else if ["search_hotels", "check_hotel_availability"].contains(action.action) {
+                        } else if action.action == "search_hotels" {
                             TravelResultCard(action: action, kind: .hotels)
-                        } else if ["search_activities", "get_activity_details"].contains(action.action) {
-                            TravelResultCard(action: action, kind: .activities)
-                        } else if action.action == "save_trip" {
-                            TravelResultCard(action: action, kind: .trip)
                         } else if ["get_directions", "plan_trip"].contains(action.action) {
                             DirectionsResultCard(action: action)
                         }
@@ -1252,26 +1244,22 @@ struct UberHandoffCard: View {
 // MARK: - Travel Result Card
 
 struct TravelResultCard: View {
-    enum Kind { case flights, hotels, activities, trip }
+    enum Kind { case flights, hotels }
 
     let action: ActionResult
     let kind: Kind
 
     private var eyebrow: String {
         switch kind {
-        case .flights:    return "FLIGHTS"
-        case .hotels:     return "HOTELS"
-        case .activities: return "ACTIVITIES"
-        case .trip:       return "TRIP SAVED"
+        case .flights: return "FLIGHTS"
+        case .hotels:  return "HOTELS"
         }
     }
 
     private var icon: String {
         switch kind {
-        case .flights:    return "airplane"
-        case .hotels:     return "bed.double"
-        case .activities: return "ticket"
-        case .trip:       return "suitcase"
+        case .flights: return "airplane"
+        case .hotels:  return "bed.double"
         }
     }
 

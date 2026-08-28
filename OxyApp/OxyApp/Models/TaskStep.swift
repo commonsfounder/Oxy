@@ -1,8 +1,8 @@
 import Foundation
 
-/// One recorded step of a completed browser-automation task (see `run_browser_task`
-/// in api/index.js). This is a POST-HOC transcript — by the time iOS learns a
-/// `taskId` (only delivered on the FINAL action result of a chat turn), the
+/// One recorded step of a completed browser-automation task (see the browser
+/// primitives in api/actions/browser.js). This is a POST-HOC transcript — by the
+/// time iOS learns a `taskId` (only delivered on the FINAL action result of a chat turn), the
 /// browser task itself has already finished. It is never a live, in-progress
 /// feed — see `AgentTaskSession.fetchLiveSteps()`.
 struct TaskStep: Codable, Identifiable, Equatable {

@@ -29,10 +29,14 @@ abstraction is wrong — see the architecture rule below.
     scroll, back, navigate, upload, download, close)
   - `api/services/playbooks.js` — optional domain guidance, never domain machinery
   - `api/services/money-guard.js`, `pending-review.js`, `credential-grants.js` — deterministic authority
-  - `api/services/browser-task.js` — legacy purchase-specific loop, still used by
-    `run_browser_task`; being retired in favour of the primitives above
+  - `api/services/transaction.js` — prepare → authorize → verify, for any page asking for
+    money. `transaction_authorize` is the one review-gated step, and the iOS task surface
+    watches it by name
   - `test/smoke/general-agency.test.js` — the capability tests this architecture exists to pass
-  - `test/dev/jl-order-e2e.js` — live e2e runner (accepts goal, turns, url as args)
+  - `test/smoke/ios-action-names.test.js` — guards the backend↔iOS action-name contract:
+    deleting a capability the client watches is otherwise a silent UI break
+  - `test/dev/real-user-task-matrix.js` — live acceptance corpus (safe/read-only by default)
+  - `test/dev/release-smoke-test.js` — post-deploy check against a real BASE_URL
 
 ## Architecture rule — hardcode capabilities and safety boundaries, not human tasks
 
@@ -68,7 +72,7 @@ Deploy the committed checkout to Fly.io with `node scripts/deploy-fly.js`. **Com
 - Never say "done", "fixed", or "working" without having run the thing and seen the output. Quote the actual command output when reporting success.
 - Report failures plainly. If tests fail, say so and show the failure — do not hedge, do not claim partial success.
 - Lead with the outcome when reporting back: what happened first, reasoning after.
-- For backend changes, exercising the real flow (e.g. `test/dev/jl-order-e2e.js` or a live `/chat` call) beats unit tests alone. For iOS, trust `xcodebuild` output over SourceKit/IDE inline diagnostics — the live diagnostics produce noise (e.g. spurious "No such module" errors).
+- For backend changes, exercising the real flow (e.g. `test/dev/release-smoke-test.js`, `test/dev/real-user-task-matrix.js`, or a live `/chat` call) beats unit tests alone. For iOS, trust `xcodebuild` output over SourceKit/IDE inline diagnostics — the live diagnostics produce noise (e.g. spurious "No such module" errors).
 - Bugs can mask each other: fixing an early-path crash un-gates later code with its own break. Re-test end-to-end after each fix, not just once at the end.
 
 ## Tests
