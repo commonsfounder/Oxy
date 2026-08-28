@@ -2,35 +2,13 @@ import Foundation
 
 // MARK: - Agent Task Session (real-data native job flows)
 //
-// A generated multi-step "job" surface: working/searching animation -> a
-// real-data result step -> confirm. Steps are appended as real data arrives
-// from the exact same backend pipeline chat already uses
-// (ChatService.sendMessage -> SSE -> agentic loop -> browser primitives ->
-// transaction_authorize / book_uber), not scripted up front — see
-// docs/superpowers/specs/2026-07-18-real-buy-flow-design.md.
-//
-// Three job kinds share this shell today:
-//  - .shopping: "buy X" and "order food" both run the same general browser
-//    primitives and land on transaction_authorize — the money step is the only
-//    gated one, and it is the same gate whatever the site is.
-//  - .ride: "get me an uber" drives the real book_uber action — a deep-link
-//    handoff into the Uber app with a best-effort fare estimate, not an
-//    in-app booking.
-//  - .task: a "go handle this" job kicked off from somewhere other than typed
-//    text — e.g. tapping a Home inbox card's judged action ("Pay it", "Sort
-//    it") — so the concierge acts on context it already has instead of
-//    re-opening chat and re-prompting for the same email. When constructed
-//    with `emailAction` set (every inbox-card call site does this), `start()`
-//    NEVER touches the hidden chat pipeline at all — a bank or card-issuer
-//    site can't be safely logged into by a bot (2FA, aggressive
-//    anti-automation), so that path is deliberately not even attempted. Instead
-//    it calls /emails/action-plan directly, which mines the ORIGINAL email for
-//    real links the provider already sent and writes manual steps — see
-//    buildEmailActionPlan in api/index.js. Without `emailAction` (not used by
-//    any call site today, kept for a future non-email "go handle this" job) it
-//    falls back to the same transaction_authorize watch .shopping uses.
-// Restaurant reservations ("book a table") have no real backend yet, so that
-// intent isn't matched here at all — it falls through to real chat.
+// A multi-step job surface — working animation, real-data result, confirm — whose steps are
+// appended as results arrive from the same backend pipeline chat uses, never scripted up front.
+// Three job kinds share the shell: .shopping (browser primitives ending at transaction_authorize,
+// the one gated step), .ride (a book_uber deep-link handoff with an estimated fare), and .task
+// ("go handle this" from a Home inbox card). A .task with `emailAction` set calls
+// /emails/action-plan directly and never touches the chat pipeline, since a bank site can't be
+// safely driven by a bot; without it, it watches transaction_authorize like .shopping.
 
 enum AgentJobKind: Equatable {
     case shopping
@@ -61,10 +39,8 @@ final class AgentTaskSession: Identifiable {
     private let location: [String: Double]?
     private let emailAction: EmailActionContext?
 
-    /// Identifies the exact email /emails/action-plan should mine — the provider message
-    /// id, not the from+subject identity BriefingEmail.id uses (fragile/ambiguous across
-    /// similar subjects), plus which connector to route to since Gmail/Outlook use
-    /// different message ids and different backend actions.
+    /// Identifies the exact email /emails/action-plan should mine: the provider message id
+    /// rather than BriefingEmail's from+subject identity, plus which connector it belongs to.
     struct EmailActionContext {
         let provider: String?
         let messageId: String
@@ -125,13 +101,9 @@ final class AgentTaskSession: Identifiable {
         steps[currentIndex].status = .active
     }
 
-    /// Kicks off the job through the real hidden pipeline, mutating `steps` as
-    /// genuine backend results arrive. Never hands off to chat — when the agent
-    /// replies with plain text instead of a watched action (a clarifying question,
-    /// most often), that text becomes an `.assistantAsk` step with a reply field
-    /// right in this shell; `sendReply` continues the same conversation. The only
-    /// remaining honest escape hatch is the dock's explicit "Tap to chat" button,
-    /// a deliberate user choice, not an automatic redirect.
+    /// Kicks off the job through the hidden pipeline, mutating `steps` as results arrive.
+    /// Never hands off to chat: plain text back from the agent becomes an `.assistantAsk` step
+    /// answered in this shell, and only the dock's "Tap to chat" leaves it.
     @MainActor
     func start() async {
         guard isWorking == false else { return }
@@ -144,10 +116,8 @@ final class AgentTaskSession: Identifiable {
         await runTurn(message: originalPrompt)
     }
 
-    /// Continues the job with the user's answer to an `.assistantAsk` step — same
-    /// hidden pipeline, same conversation (the server keys history by user, not by
-    /// a job-specific session id), so this is exactly what typing the reply in real
-    /// chat would do, just without leaving this shell.
+    /// Continues the job with the user's answer to an `.assistantAsk` step. The server keys
+    /// history by user, so this is what typing the reply in chat would do, without leaving here.
     @MainActor
     func sendReply(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,13 +142,9 @@ final class AgentTaskSession: Identifiable {
         await runTurn(message: originalPrompt)
     }
 
-    /// "Review & confirm" — sends the same affirmative reply a person would type in
-    /// chat through the same hidden pipeline, letting the agent call the existing
-    /// transaction_authorize action itself. No new payment code path; every
-    /// safety gate that action already honours (spend cap, card note) is unchanged.
-    /// If the agent comes back with something other than that action (rare — e.g. it
-    /// wants to double-check a detail first), that's the same conversational case as
-    /// everywhere else: an `.assistantAsk` step, not a silent handoff.
+    /// "Review & confirm" sends the affirmative reply a person would type, so the agent calls
+    /// transaction_authorize itself and every gate that action honours is unchanged. Anything
+    /// else back from the agent becomes an `.assistantAsk` step, not a silent handoff.
     @MainActor
     func confirmPayment() async {
         guard isWorking == false else { return }
@@ -267,11 +233,9 @@ final class AgentTaskSession: Identifiable {
         }
     }
 
-    /// Never touches the browser pipeline or the hidden chat pipeline — calls
-    /// /emails/action-plan directly, which mines the ORIGINAL email for real links the
-    /// provider already sent and writes manual steps. It doesn't attempt to log into
-    /// anything, so there's nothing to retry conversationally if it comes back empty —
-    /// that's a real dead end, surfaced as an inline error.
+    /// Calls /emails/action-plan directly — no browser, no chat pipeline — which mines the
+    /// original email for real links and writes manual steps. Nothing to retry if it comes
+    /// back empty, so that is surfaced as an inline error.
     private func runEmailAction(_ context: EmailActionContext) async {
         do {
             let plan = try await chatService.emailActionPlan(
@@ -347,17 +311,13 @@ final class AgentTaskSession: Identifiable {
             ))
             return
         }
-        // The watched action fired but didn't come back as a product/review card —
-        // most likely a clarifying question attached to the action result itself
-        // rather than the plain stream text. Same honest treatment as any other
-        // conversational reply: a step you can answer, not a silent redirect.
+        // The watched action fired without a product/review card, most likely a clarifying
+        // question on the action result. Treated like any reply: a step you can answer.
         finishWithAssistantText(result.text ?? fallbackText)
     }
 
-    /// book_uber is a synchronous deep-link handoff (executionMode: 'direct',
-    /// confirmation: 'none') — no review step, no second network round trip.
-    /// `cardText`'s fare/ETA is Oxy's own estimate (Google Routes based), not a
-    /// live Uber quote, so RideConfirmStepView labels it honestly as an estimate.
+    /// book_uber is a synchronous deep-link handoff: no review step, no second round trip.
+    /// The fare and ETA are our own Routes-based estimate, which the view labels as one.
     private func handleRide(result: ActionResult) {
         captureLiveTaskId(result.taskId)
         guard result.success else {
@@ -389,16 +349,9 @@ final class AgentTaskSession: Identifiable {
         Task { await fetchLiveSteps() }
     }
 
-    /// Fetches the recorded step trace for `liveTaskId` — always a POST-HOC transcript
-    /// of a browser-automation run that has already finished by the time this session
-    /// learns its id (the backend only attaches `taskId` to the FINAL action result of
-    /// a chat turn). This is never a live, in-progress feed; a true live feed would
-    /// require restructuring the SSE pipeline to stream step events mid-turn, which is
-    /// out of scope here. A short bounded retry (up to 3 attempts, a second apart)
-    /// covers any trailing async writes still landing right after the turn ends — it
-    /// does not poll indefinitely, since there is nothing further to observe once the
-    /// task is done. Failures are swallowed: this is a best-effort UI nicety, never
-    /// something worth surfacing as a user-facing error.
+    /// Fetches the step trace for `liveTaskId` — a post-hoc transcript, never a live feed:
+    /// the backend only attaches `taskId` to a turn's final action result. Retries up to 3
+    /// times for trailing writes, then gives up silently; it is a UI nicety, not an error.
     @MainActor
     func fetchLiveSteps() async {
         guard let taskId = liveTaskId else { return }
@@ -454,10 +407,8 @@ enum StepUI {
     case subjectDetail(SubjectDetails)
     case rideConfirm(RideDetails)
     case linkResult(LinkResultDetails)
-    /// The agent replied with plain text instead of calling a watched action — most
-    /// often a clarifying question. Rendered with an inline reply field; answering
-    /// calls `AgentTaskSession.sendReply` to continue the same conversation, never a
-    /// handoff to chat.
+    /// The agent replied with plain text instead of a watched action, usually a clarifying
+    /// question. Rendered with an inline reply field that continues the same conversation.
     case assistantAsk(String)
     case workingHero(status: String)
 }

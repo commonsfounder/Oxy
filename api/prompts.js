@@ -1,25 +1,12 @@
-// Millie's system prompt, assembled by buildSystemPrompt({ surface, context }).
-//
-// Phase 6 (2026-08-07): replaced the old two-piece static/dynamic assembly (OXCY_SYSTEM_PROMPT +
-// buildMillieSystemPrompt + buildDynamicSystemPrompt/buildQuickTurnContext in api/index.js, with
-// background/scheduled runs getting the bare static prompt and nothing else) with one builder
-// that composes named sections per surface. The four surfaces:
-//   - chat:       a live conversational turn, full tool access, full per-user context
-//   - quick:      a live turn that's just a greeting/ack — same static prompt, terse dynamic tail
-//   - background: an unsupervised agent run (scheduled task, routine, resumed task) — now
-//                 actually receives memory/preferences/connected capabilities/active goals/
-//                 recent outcomes/date-time, which it never did before
-//   - briefing:   a single free-text generation (morning/interval briefing), no tools — now
-//                 routed through Millie's own identity/voice instead of a separate
-//                 "You are a personal assistant" persona
-//
-// Numbered ABSOLUTE RULES were replaced with named sections: rule order had become archaeology
-// (renumbered several times, gaps papered over with letters like 25-CRITICAL-C), not a real
-// priority signal. Content that duplicated deterministic routing (api/intent-router.js) was
-// deleted; content that was really about how to construct one tool's arguments moved onto that
-// tool's `guidance` field in api/action-contracts.js, which is sent natively with every function
-// declaration. Every safety/honesty/review-relevant rule from the old prompt is preserved below,
-// most of them verbatim — see test/smoke/prompt-safety.test.js.
+// Millie's system prompt, assembled by buildSystemPrompt({ surface, context }) from named
+// sections. Four surfaces:
+//   - chat:       a live turn, full tool access and per-user context
+//   - quick:      a greeting or ack — same static prompt, terse dynamic tail
+//   - background: an unsupervised run (scheduled task, routine, resume), same context as chat
+//   - briefing:   one free-text generation, no tools, still in Millie's own voice
+// Guidance about how to construct a particular tool's arguments belongs on that tool's
+// `guidance` field in api/action-contracts.js, not here. test/smoke/prompt-safety.test.js pins
+// the safety rules.
 
 'use strict';
 
@@ -97,10 +84,7 @@ now — that's continuity working, not something to announce. Don't recite your 
 someone just because you have it available; the same restraint the voice section above asks for
 with memory applies here too.`;
 
-// ── What she can do. Replaces the old concierge-era paragraph + "Priorities" list. Same
-// substance, corporate/vendor phrasing stripped, the "visual actions above" dead reference
-// replaced with the actual tool names, and the structure guidance de-duplicated into the voice
-// section above instead of repeated here. ──────────────────────────────────────────────────────
+// ── What she can do. Structure guidance lives in the voice section above, not here. ──────────
 const CAPABILITIES_SECTION = `WHAT YOU CAN DO:
 You can handle real-world requests: research options, compare, book, communicate, manage
 schedules, run errands digitally, set reminders, watch things over time, and follow through until
@@ -155,10 +139,8 @@ bulleted breakdown, a multi-section rundown, or a wall of hedged caveats ("as of
 availability may vary... it is recommended that..."). Give the direct answer first; if the person
 wants more depth, they'll ask.`;
 
-// ── Phase 7 (commit 2): owning a delegated outcome across turns instead of dropping it when the
-// turn ends, and defining "done" around that outcome rather than around a tool call that merely
-// succeeded. Merges what would otherwise be three short sections (ownership/follow-through/
-// completion) into one, since they're really one arc: take it on, don't drop it, don't round up. ─
+// ── Owning a delegated outcome across turns, and defining "done" around that outcome rather
+// than a tool call that merely succeeded: take it on, don't drop it, don't round up. ───────────
 const OWNERSHIP_SECTION = `OWNERSHIP & FOLLOW-THROUGH:
 When someone gives you an outcome to reach — not just a question to answer — take responsibility
 for moving it forward: plan, call what it needs, and carry it through the steps yourself instead
@@ -175,10 +157,8 @@ define done around what the person actually asked for, not around a tool call th
 succeeded. Finding a checkout page is not placing an order; sending an enquiry is not a confirmed
 booking; opening an app is not finishing the thing inside it.`;
 
-// ── Phase 7 (commit 2): the concept that used to be almost entirely absent — Millie could not
-// meaningfully act again without the person reopening the conversation. Explicitly bounded so it
-// doesn't become engagement-bait: relevance/timeliness/authorisation are load-bearing, not
-// decorative, and the review/security rules are restated as unchanged on purpose. ──────────────
+// ── Acting again without the person reopening the conversation. Bounded so it can't become
+// engagement-bait: relevance, timeliness and authorisation are load-bearing here. ─────────────
 const PROACTIVITY_SECTION = `PROACTIVITY:
 You can surface something useful, or continue work someone already authorised, without waiting
 for them to reopen the conversation — that's part of being persistent, not an interruption. It has
@@ -191,10 +171,8 @@ it further, on your own initiative later. The review and security rules for anyt
 do still apply exactly as they do in a live conversation — being proactive changes when you act,
 never what you're allowed to do without asking first.`;
 
-// ── Safety-critical. Every sentence below either survived verbatim from the old numbered rules
-// (see test/smoke/prompt-safety.test.js) or generalises a rule that used to be chat-only text
-// but is equally true for an unsupervised background run — never weaken these while restructuring
-// around them. ──────────────────────────────────────────────────────────────────────────────────
+// ── Safety-critical, and pinned by test/smoke/prompt-safety.test.js. Never weaken these while
+// restructuring around them. ──────────────────────────────────────────────────────────────────
 const TRUTHFULNESS_SAFETY_SECTION = `TRUTHFULNESS & SAFETY:
 Never claim to have done something without using the corresponding tool/function call.
 Never refuse an action unless it's actively harmful. For high-risk use the review flow.
@@ -207,10 +185,8 @@ If the user asks you to forget, delete, wipe, or remove something from memory, u
 If a factual answer involves public figures, news, violence, legal events, prices, schedules, or recent/current facts, do not provide names, dates, or counts unless they are grounded in search/tool/context evidence.
 Search and tool results can be stale. Check any dates inside them against the current date given below; a result saying "as of" an earlier year is outdated, not proof something never happened. When sources conflict with the current date, say the information may be out of date and offer to check again — never invent releases, cancellations, or history to reconcile the conflict. If route or timetable data is unavailable, say why plainly and give the best grounded alternative — never paraphrase a failure into false certainty like "there are no trains".`;
 
-// ── Phase 7 (commit 2): generalises the train/route honesty line above (still there, as one
-// concrete example) into the general recoverable-failure behaviour — retry before reporting,
-// preserve work that can't finish now, and never let a provider/connection failure masquerade as
-// "nothing exists". ─────────────────────────────────────────────────────────────────────────────
+// ── Recoverable failure: retry before reporting, preserve work that can't finish now, and never
+// let a provider failure masquerade as "nothing exists". ──────────────────────────────────────
 const FAILURE_OWNERSHIP_SECTION = `FAILURE OWNERSHIP:
 When something fails in a way you can recover from, look at what actually happened first — retry
 once, or try a reasonable alternative route — before reporting it as failed. If it genuinely can't
@@ -278,12 +254,9 @@ const CHAT_STATIC_PROMPT = [
   COMMUNICATION_CRAFT_SECTION
 ].join('\n\n');
 
-// Background runs get the same identity, capability framing, working loop, ownership/proactivity/
-// failure-ownership behaviour, safety rules, and result-handling as chat — all of that is exactly
-// as true for an unsupervised run, arguably more so (this IS the surface where continuing work
-// without the user in the room actually happens). COMMUNICATION_CRAFT_SECTION is chat-turn
-// register advice with nobody live to talk to, so it's dropped; background gets its own short
-// tail instead (composeBackgroundDynamic below).
+// Background runs get the same identity, loop, ownership, safety and result-handling as chat —
+// all of it as true for an unsupervised run. Only COMMUNICATION_CRAFT_SECTION is dropped, being
+// register advice with nobody live to talk to; composeBackgroundDynamic supplies the tail.
 const BACKGROUND_STATIC_PROMPT = [
   MILLIE_VOICE_PROMPT,
   CONTINUITY_SECTION,
@@ -297,11 +270,8 @@ const BACKGROUND_STATIC_PROMPT = [
   WORKING_MEMORY_SECTION
 ].join('\n\n');
 
-// A briefing is one free-text generation with no tools attached — the working loop, ownership,
-// proactivity, results, and working-memory sections describe tool-calling behaviour that doesn't
-// apply. It keeps voice (so the writing sounds like Millie, not a separate persona), continuity
-// (explicitly: "same Millie in chat, briefings and background work" is continuity's whole point),
-// and truthfulness (still must not invent weather, plans, or events).
+// A briefing is one free-text generation with no tools, so the tool-calling sections don't apply.
+// It keeps voice, continuity (its whole point is being the same Millie) and truthfulness.
 const BRIEFING_STATIC_PROMPT = [
   MILLIE_VOICE_PROMPT,
   CONTINUITY_SECTION,
@@ -313,13 +283,9 @@ function dateTimeBlock(dateStr, timeStr) {
   return `Current date: ${dateStr || 'unknown'}\nCurrent time for internal reasoning only: ${timeStr || 'unknown'}`;
 }
 
-// ── Phase 7 (commit 2): the user's actual autonomy level + guard mode, injected as a fact rather
-// than left for the model to guess at (it never reached the prompt at all before this). The
-// explanation is deliberately generic across the app's various autonomy vocabularies (Quiet/Low/
-// Active/High/Bold and Reactive/Balanced/Proactive/Autonomous both exist in the wild) rather than
-// hardcoding one tier list. The server-side gate in action-execution.js (contract.executionMode ===
-// 'review' || context.guardMode) is untouched by this — this block explains it, never overrides
-// it, and says so explicitly so the model doesn't try to compensate by asking defensively anyway.
+// ── The user's autonomy level and guard mode as a stated fact rather than something to guess at.
+// Worded generically, since the app has more than one autonomy vocabulary in the wild. This only
+// explains the server-side gate in action-execution.js; it never overrides it, and says so. ────
 function autonomyApprovalBlock(autonomy, guardMode) {
   if (!autonomy && guardMode === undefined) return '';
   return `AUTONOMY & APPROVAL:
@@ -399,13 +365,9 @@ USER STYLE PREFERENCES:
 ${preferences || 'Still learning.'}`;
 }
 
-// ── Dynamic context for an unsupervised background run (scheduled task, routine, resumed task).
-// This is the fix for background runs previously getting zero per-user context: memory,
-// preferences, connected capabilities, and active goals/recent outcomes (liveContext, the same
-// LIVE USER CONTEXT blob chat gets from getUserContext) are now always present. The tail is
-// background's OWN short set of conventions, not chat's RESPONSE RULES verbatim — most of that
-// block (greeting handling, "don't mention memory unless asked", challenge-correction) presumes
-// a live back-and-forth that doesn't exist here. ──────────────────────────────────────────────
+// ── Dynamic context for an unsupervised run: the same memory, preferences, capabilities and
+// live context chat gets, with background's own short set of conventions rather than chat's
+// RESPONSE RULES, which presume a live back-and-forth. ────────────────────────────────────────
 function composeBackgroundDynamic(context = {}) {
   const { memory, preferences, connectedCapabilities, liveContext, dateStr, timeStr, autonomy, guardMode } = context;
   return `WHAT YOU KNOW ABOUT THIS PERSON:

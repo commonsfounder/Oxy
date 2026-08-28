@@ -1,23 +1,12 @@
 'use strict';
-// Platform-API commerce tier: most of "millions of sites" isn't millions of bespoke stacks —
-// it's a handful of e-commerce platforms (Shopify, WooCommerce, ...) that expose a real,
-// public JSON API for search + cart. Detecting the platform once and talking to that API
-// directly replaces the search→click-size→click-add portion of the loop (the part that
-// dominates flakiness and vision cost) with two HTTP calls and zero clicking, zero
-// screenshots, zero bot-wall exposure. This does NOT touch checkout/payment — it hands off
-// to the existing browser session (recipe/vision loop, checkout-profile autofill, payment
-// guardrail) once the cart is populated, by navigating the same Playwright context to the
-// cart URL so the platform's own cart cookie carries over.
-//
-// Shopify only for v1 — it's the single largest platform by independent-store count and has
-// a stable, unauthenticated storefront API (`/products.json`, `/cart/add.js`) that's been
-// public and unchanged for years. WooCommerce/Magento/BigCommerce are natural follow-ups but
-// need different detection + auth shapes; not built here.
+// Platform-API commerce tier: a handful of e-commerce platforms expose a public JSON API for
+// search and cart, so the search → pick size → add portion of the loop becomes two HTTP calls
+// with no clicking, screenshots or bot-wall exposure. Checkout is untouched — once the cart is
+// populated the same Playwright context navigates to the cart URL and the cart cookie carries
+// over. Shopify only: WooCommerce and the rest need different detection and auth shapes.
 
-// Shopify's admin/theme footprint is consistent across storefronts regardless of theme:
-// the `Shopify` global, the CDN asset host, and (most reliably) a working `/products.json`
-// endpoint — themes can strip the JS global but can't disable the storefront API without
-// losing normal site function.
+// Consistent across themes: the `Shopify` global, the CDN asset host, and most reliably a
+// working `/products.json` — a theme can strip the global but not disable the storefront API.
 async function detectShopify(requestCtx, origin) {
   try {
     const res = await requestCtx.get(`${origin}/products.json?limit=1`, { timeout: 8000 });
@@ -72,10 +61,8 @@ function pickVariant(product, goalContext) {
     return { v, score };
   }).sort((a, b) => b.score - a.score);
 
-  // Size is the hard requirement when given — color is only a tiebreaker bonus, never
-  // required on its own, because color is frequently baked into the PRODUCT (already
-  // matched by search/title scoring) rather than exposed as a separate variant option
-  // (e.g. a single-option "Size" variant axis with color folded into the product title).
+  // Size is the hard requirement; color is only a tiebreaker, since it is often folded into the
+  // product title (and already scored there) rather than exposed as a variant option.
   const need = wantSize ? 2 : 0;
   return scored[0] && scored[0].score >= need ? scored[0].v : null;
 }
@@ -139,56 +126,33 @@ async function resolveAndAddToCart(requestCtx, origin, goal, goalContext, scoreF
 
 
 // ── Product matching ────────────────────────────────────────────────────────────────────
-// Scoring a catalogue result against what was actually asked for. This is DOMAIN KNOWLEDGE,
-// not execution architecture: a table of qualifier words and a scoring rule, with no control
-// flow of its own. It lives next to its only caller rather than in a shared loop, and the
-// platform-API tier takes it as a parameter so there is one scoring policy, not two.
+// Domain knowledge, not architecture: a table of qualifier words and a scoring rule with no
+// control flow. The platform-API tier takes it as a parameter so there is only one policy.
 
-// Score a product name against the goal for candidate ranking.
-// Rewards goal words present in name; penalises differentiator words in name that aren't
-// in the goal (e.g. "Pro Max" in name but not goal → negative score).
-// wholesale/bulk added after a live WooCommerce catch (2026-07-11): "Wholesale Issue 60" and
-// "Issue 60" share every goal word for "buy issue 60 magazine" (neither was in the original
-// gadget-tier list), so they tied and the bulk/trade listing won on list order — a shopper
-// asking for one issue never means a case. Kept to single words only: this function tests
-// each NAME WORD individually after splitting on \W+, so a phrase like "case of" could never
-// actually match here (each half is tested alone) — don't add multi-word phrases without
-// accounting for that, and avoid words too generic to safely penalize alone (e.g. "case",
-// "pack" are legitimate parts of many real product names).
+// Score a product name against the goal: goal words in the name score, differentiator words
+// not in the goal ("Pro Max", "Wholesale") penalise. Single words only — each name word is
+// tested alone after splitting on \W+, so a phrase like "case of" can never match — and never
+// words too generic to punish on their own ("case", "pack" are ordinary product words).
 const PRODUCT_DIFFERENTIATORS = /\b(pro\s*max|pro|max|ultra|plus|lite|mini|se|air|junior|premium|deluxe|standard|classic|base|wholesale|bulk)\b/i;
 
-// A bare number or number+unit (256gb, 128gb, 5g, 65in) is too generic to prove two
-// products are related — a Nintendo Switch and an iPhone can both be "256GB". Only an
-// alphabetic word match (a shared brand/product noun like "iphone") counts as proof the
-// candidate is actually the same kind of thing.
+// A bare number or number+unit (256gb, 65in) proves nothing — two unrelated products can both
+// be "256GB". Only a shared alphabetic word counts as evidence they are the same thing.
 const GENERIC_SPEC_WORD = /^\d+[a-z]*$/i;
 
-// A model number with a single-letter suffix (16e, 17e — Apple's cheaper tier, fused to
-// the digits so it never equals the plain "17" token) is a different variant, exactly like
-// "Pro"/"Max" being separate words. Regression: a live run's fastpath landed on "iPhone
-// 17e, 256GB" for a goal that said plain "iPhone 17 256GB" — since "17e" !== "17" as a
-// token, neither the match bonus nor PRODUCT_DIFFERENTIATORS caught it, so it slipped
-// through with a positive score and nothing to out-rank it.
+// A model number with a letter fused to it ("17e") is a different variant, just like "Pro" or
+// "Max" — but as a token it equals neither "17" nor any differentiator word, so without this
+// it scores positive against a goal asking for the plain model.
 const SUFFIXED_MODEL_WORD = /^(\d{1,3})([a-z])$/i;
 
-// Footwear/apparel base-vs-variant model qualifiers, the PRODUCT_DIFFERENTIATORS analogue
-// for clothing. Regression (2026-07-13 allbirds trace): "order the Wool Runner shoes"
-// tied the plain "Men's Wool Runner" against "Women's Wool Runner NZ Mid Waterproof" at
-// score 4 — both share only "wool"+"runner", and the extra NZ/Mid/Waterproof qualifiers
-// were invisible to the scorer, so platform-add could silently cart the wrong shoe. A goal
-// asking for the base line never means the NZ/Mid/Mizzle/waterproof/trail variant; if the
-// goal DOES name one of these it lands in goalWords and matches (scored, not penalized)
-// before this branch is reached. Kept to distinctive model words only — "up" (Runner-up),
-// "high", "low" are deliberately excluded, too common as ordinary product words to penalize
-// blind, exactly like the "case"/"pack" caveat on PRODUCT_DIFFERENTIATORS above.
+// The apparel analogue of PRODUCT_DIFFERENTIATORS: a goal naming the base line never means the
+// waterproof/mid/trail variant, whose extra qualifiers are otherwise invisible to the scorer.
+// A goal that does name one matches through goalWords before this branch. Distinctive model
+// words only — "high", "low", "up" are ordinary product words, same caveat as above.
 const MODEL_QUALIFIERS = /^(nz|mid|mizzle|waterproof|weatherproof|trail)$/i;
 
-// Gender is a product axis like tier: "Men's Wool Runner" and "Women's Wool Runner" are
-// different products. Penalize a name whose gender contradicts the goal's, but ONLY when
-// the goal actually specifies one — a gender-neutral goal ("the Wool Runner shoes") must
-// not punish either gender. Note \bmen\b does not match inside "women" (no word boundary
-// before the 'm'), so the two regexes are independent; a name with both words (rare) or
-// neither yields null and never triggers a penalty.
+// Gender is a product axis like tier, but only penalised when the goal actually specifies one.
+// \bmen\b doesn't match inside "women", so the two regexes are independent and a name with
+// both or neither yields null.
 function detectGender(s) {
   const t = String(s || '').toLowerCase();
   const female = /\b(women|womens|woman|womans|female|ladies|girls?)\b/.test(t);
@@ -198,11 +162,8 @@ function detectGender(s) {
   return null;
 }
 
-// Regression: John Lewis search for "plain white bath towel" picked "...Bath Mat" over the
-// actual "...Towels" listing — "towel" (goal, singular) never matched "towels" (name, plural)
-// with a bare word-set comparison, while "mat" tied on the shared generic word "bath". Cheap
-// trailing-s stemming (not a real morphological analyzer) closes that gap; "ss" endings
-// (glass/class) are left alone so they don't get mangled into "glas"/"clas".
+// Trailing-s stemming, so a singular goal ("towel") matches a plural listing ("towels") instead
+// of tying with something sharing only a generic word. "ss" endings are left alone.
 function stemWord(w) {
   return w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
 }
@@ -233,14 +194,9 @@ function scoreProductNameVsGoal(name, goal) {
   const goalGender = detectGender(goal);
   const nameGender = detectGender(name);
   if (goalGender && nameGender && goalGender !== nameGender) hasUnrequestedVariant = true;
-  // Regression: "Nintendo Switch 2, 256GB Console" scored positively against "iPhone 17
-  // 256GB" purely on the shared "256gb" token and got treated as a valid candidate.
-  // Without any non-generic word in common, this can't be the same product.
-  // Second regression: a candidate carrying an unrequested tier word ("Pro"/"Max"/"17e")
-  // can still rack up enough generic-word overlap (brand + capacity) to net positive even
-  // after a flat penalty, and — when it's the ONLY candidate fetched that run — nothing
-  // else was around to out-rank it. Either case must force the score below the
-  // pickFallbackCandidate/orderable relevance floor (score > 0), not just discourage it.
+  // Both cases must land below the relevance floor rather than merely be discouraged: nothing
+  // non-generic in common cannot be the same product, and an unrequested tier word can still
+  // net positive on brand-plus-capacity overlap when it is the only candidate fetched.
   if (!hasCoreMatch || hasUnrequestedVariant) return Math.min(score, -1);
   return score;
 }

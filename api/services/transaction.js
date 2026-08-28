@@ -1,19 +1,11 @@
 'use strict';
-// Authorising and completing a transaction on a real web page.
-//
-// This is deliberately NOT a shopping concept. "Reach a step that costs money, read what it
-// costs, let a human authorise it, commit it, then find out what actually happened" is the
-// same problem for a retail checkout, a train ticket, a booking deposit, a council tax
-// payment, a visa fee or a donation. None of the code below knows what a basket is.
-//
-// The three phases are separate on purpose, because authority lives between them:
-//   prepare() — get the page ready and READ the amount. Never commits.
-//   commit()  — press the control that charges. Only ever reached through the deterministic
-//               review gate in action-execution.js, and it re-reads the amount first.
-//   watch()   — find out what really happened: confirmed, declined, or waiting on the bank.
-//
-// classifyOutcome is the general answer to "did this actually work", not a payment special
-// case: it reads the page rather than assuming the click succeeded.
+// Authorising and completing a transaction on a real web page — a checkout, a ticket, a fee or
+// a donation alike; nothing here knows what a basket is. The three phases are separate because
+// authority lives between them:
+//   prepare() — ready the page and read the amount. Never commits.
+//   commit()  — press the control that charges, reached only through action-execution.js's
+//               review gate, and re-reading the amount first.
+//   watch()   — what actually happened: confirmed, declined, or waiting on the bank.
 
 const { readOrderTotal } = require('./order-total');
 const {
@@ -131,11 +123,9 @@ function formatCardValue(field, card, profile) {
   }
 }
 
-// Enumerate fillable inputs/selects in ONE frame with enough surrounding text to
-// classify them. Runs per-frame because PSP card fields (Stripe Elements, Adyen,
-// Braintree, Checkout.com Frames) each live in their own cross-origin iframe — the
-// generic hint sources below (name/id/placeholder/aria-label/autocomplete/label) cover
-// all of them without any PSP-specific branches.
+// Fillable inputs in one frame, with enough surrounding text to classify them. Per-frame
+// because PSP card fields each live in their own cross-origin iframe; the generic hint sources
+// below cover all of them without PSP-specific branches.
 async function enumeratePaymentInputs(frame) {
   return safeFrameEvaluate(frame, () => {
     const out = [];
@@ -259,13 +249,10 @@ async function fillPaymentCard(session, card, onProgress = () => {}) {
   return done.size;
 }
 
-// Post-click page classification. Checked in this order — a confirmation page can
-// mention "payment" freely, so confirmed wins; declined beats 3DS because decline
-// banners often sit on the same page as the (now dismissed) challenge.
-// Deliberately past-tense/definite phrasings only: checkout pages freely say things like
-// "we'll send you a confirmation email" or "order summary" BEFORE payment, and a false
-// "confirmed" here closes the session without paying (or skips the pay click entirely on
-// the re-confirm guard).
+// Post-click classification, in this order: a confirmation page mentions "payment" freely so
+// confirmed wins, and decline banners sit on the same page as a dismissed challenge so declined
+// beats 3DS. Past-tense phrasings only — a checkout says "we'll send you a confirmation email"
+// before payment, and a false confirmed closes the session without paying.
 const ORDER_CONFIRMED_PATTERN = /order\s+(?:number|reference)\s*[:#]|thank you for your (?:order|purchase|booking)|booking (?:confirmed|reference:|complete)|payment (?:successful|was successful|complete)|your (?:order|booking) (?:is|has been) (?:confirmed|placed|received)|we(?:'|’)?ve (?:got|received) your order|order (?:is )?confirmed/i;
 const PAYMENT_DECLINED_PATTERN = /\bdeclined\b|payment (?:failed|unsuccessful|was not successful|error)|invalid (?:card|security code|cv[cv])|check your card|could ?n(?:o|’|')t (?:be )?process|there was a problem (?:processing|with) your payment|card details (?:are|were) (?:incorrect|invalid)/i;
 const THREEDS_CHALLENGE_PATTERN = /3-?d\s*secure|verify (?:your |a )?(?:payment|identity|purchase)|authentication (?:required|needed|in progress)|approve (?:this|the) (?:payment|purchase)|one[- ]?time (?:pass)?code|confirm (?:it(?:'|’)?s|this is) you|check your (?:phone|banking app)|open your banking app|waiting for (?:you|approval)|tap to verify/i;
@@ -539,18 +526,11 @@ function chargedAmount(session) {
   return { total: amount, currency };
 }
 
-// Record a completed transaction. General bookkeeping: a purchase, a ticket, a fee, a
-// deposit. Never turns a successful payment into a failure — recording is best effort.
-// A purchase Millie actually placed is recorded the moment the confirmation page is seen —
-// not left to be rediscovered from a receipt email later, which may never arrive, may go to
-// a mailbox that isn't connected, and in any case makes Millie unable to answer "what did
-// that order cost?" about something it did itself.
-//
-// Everything stored is observed, never assumed: the total is the one the user actually
-// reviewed before confirming (falling back to a labelled total on the confirmation page),
-// the order id is read from that page, and the merchant is the site the session was on. If
-// no total can be read, the row is still written with a null amount — a real order with an
-// unknown total is the truth; a guessed number would not be.
+// Record a completed transaction the moment the confirmation page is seen, rather than waiting
+// on a receipt email that may never arrive. Best effort: recording never turns a successful
+// payment into a failure. Everything stored is observed — the total the user reviewed, the order
+// id read off the page, the site the session was on — and an unreadable total is written as
+// null, since a real order with an unknown total is the truth and a guess would not be.
 async function recordConfirmedPurchase(userId, session, confirmationText = '') {
   try {
     const merchantHost = String(session?.site || '').replace(/^www\./, '');

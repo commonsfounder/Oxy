@@ -1,22 +1,13 @@
 'use strict';
 
-// Accepting a login that already exists in the user's own browser.
+// Accepting a login that already exists in the user's own browser, so the agent arrives aged
+// and signed in rather than as the brand-new visitor bot detection is built to catch — and
+// without ever learning the password, since it never signs in.
 //
-// The agent currently arrives at every site as a stranger: a brand-new browser with no
-// history, which is exactly the shape bot detection is built to catch. Handing it a real,
-// aged, already-signed-in session removes the login wall, the 2FA step, and the password
-// from the picture entirely -- Oxy never learns the password because it never signs in.
-//
-// This is also the most dangerous input the system takes. A live session cookie is stronger
-// than a password, and the payload arrives from a browser extension that can see every
-// cookie the browser holds, not only the one site the user meant to share. Two rules follow:
-//
-//   1. Everything is filtered down to the site actually being imported. A dump containing
-//      the user's bank must not become a stored banking session because the extension was
-//      careless or the page that triggered it was hostile.
-//   2. Some sites are refused outright rather than merely permissioned. A replayed banking
-//      or identity-provider session is account takeover, and a permission granted in a hurry
-//      is not a good enough gate for that.
+// It is also the most dangerous input here: a live session cookie beats a password, and the
+// payload comes from an extension that can see every cookie the browser holds. So everything
+// is filtered down to the one site being imported, and banking and identity providers are
+// refused outright — a replayed session there is account takeover, not a permission decision.
 
 const { registrableSite } = require('../lib/site');
 
@@ -56,18 +47,12 @@ const SENSITIVE_SITE_PATTERNS = Object.freeze([
   /(^|\.)duosecurity\.com$/i
 ]);
 
-// Identity logins that sit UNDER an otherwise-ordinary parent domain. These need a list of
-// their own rather than another pattern, because the patterns above are matched against the
-// site being imported while cookie filtering deliberately keeps subdomains. Importing the
-// parent (`google.com`) matched nothing here and then swept in the identity session on the
-// child (`accounts.google.com`) -- and Google's own SSO cookies sit on `.google.com`
-// itself, so that import was the whole account. Containment is therefore checked in BOTH
-// directions: a sensitive host under the requested site is as disqualifying as the
-// requested site sitting under a sensitive host.
-//
-// amazon.com is deliberately absent even though signin.aws.amazon.com is an identity host:
-// shopping sites are the entire point of this feature, and refusing the biggest one to
-// protect an AWS console nobody is importing would trade the product for nothing.
+// Identity logins sitting under an otherwise-ordinary parent domain. They need their own list
+// because the patterns above match the site being imported while cookie filtering keeps
+// subdomains — importing `google.com` matches no pattern and sweeps in `accounts.google.com`.
+// So containment is checked both ways: a sensitive host under the requested site disqualifies
+// it as much as the requested site sitting under one. amazon.com is deliberately absent;
+// shopping sites are the point of this feature.
 const SENSITIVE_HOSTS = Object.freeze([
   'accounts.google.com',
   'login.microsoftonline.com',
@@ -76,10 +61,8 @@ const SENSITIVE_HOSTS = Object.freeze([
   'appleid.apple.com'
 ]);
 
-// Collapse to the registrable domain, not just strip www. The ordering loop looks a session
-// up by the site it derives from the shopping URL, so a share made from `account.<site>` --
-// the page where people check they are signed in -- would otherwise be filed where nothing
-// looks for it. Normalising here means it holds whatever the client sends.
+// Collapse to the registrable domain, not just strip www: a session shared from `account.<site>`
+// would otherwise be filed where the lookup by site never looks.
 function normalizeSite(site) {
   return registrableSite(site);
 }
@@ -97,13 +80,9 @@ function bareHost(value) {
 }
 
 /**
- * Screening deliberately does NOT collapse to the registrable domain.
- *
- * Filing a session collapses `account.johnlewis.com` to `johnlewis.com` so the ordering loop
- * can find it. Screening must not: collapsing `hsbc.example.com` to `example.com` throws away
- * the very label that identifies it as a bank, and a stowaway bank cookie riding under an
- * ordinary site would pass. So the full host is checked, and the registrable form as well so
- * that a parent like `google.com` is still caught by its identity child.
+ * Screening deliberately does NOT collapse to the registrable domain — that would throw away
+ * the label identifying `hsbc.example.com` as a bank. The full host is checked, and the
+ * registrable form too, so a parent is still caught by its identity child.
  */
 function isSensitiveSite(site) {
   const host = bareHost(site);
@@ -186,11 +165,9 @@ function prepareImportedSession({ site, cookies, origins = [], now = new Date() 
     return { ok: false, error: `No cookies for ${normalizedSite} were found in what was sent.` };
   }
 
-  // Second gate, on what actually survived the filter rather than on what was asked for.
-  // The site cleared the door, but cookie filtering keeps subdomains, so a sensitive host
-  // beneath a perfectly ordinary parent can still be sitting in `kept`. Refuse the whole
-  // import rather than quietly dropping the offending cookie: a partial session is a
-  // logged-out browser wearing a success message.
+  // Second gate, on what survived the filter rather than what was asked for: subdomains are
+  // kept, so a sensitive host can still be in `kept`. Refuse the whole import — a partial
+  // session is a logged-out browser wearing a success message.
   const smuggled = kept.find(cookie => isSensitiveSite(cookie.domain.replace(/^\./, '')));
   if (smuggled) {
     return {

@@ -1,15 +1,7 @@
 'use strict';
-// The browser as a general ENVIRONMENT the agent acts in.
-//
-// Perception (what is on the page) and the primitive actions (open, click, type, select,
-// scroll, back, upload, download, read) live here and know nothing about any task. Shopping,
-// form-filling, account admin and everything else are all just sequences of these, chosen by
-// the main agent loop rather than by a private loop of their own.
-//
-// The one deliberate exception is the perception heuristics below, which name common control
-// labels ("search", "basket", "sign in", "continue", "submit") purely to rank what the model
-// sees first on a cluttered page. Those are page furniture, not task knowledge — nothing here
-// branches on what the goal is, and no code in this file knows what a purchase is.
+// The browser as a general environment: perception and the primitive actions, knowing nothing
+// about any task. The perception heuristics below name common control labels only to rank what
+// the model sees first on a cluttered page; nothing here branches on what the goal is.
 
 const {
   VIEWPORT, envInt, withTimeout, acquireBrowser, createSession, getSession, touchSession,
@@ -35,12 +27,9 @@ function safeFrameEvaluate(frame, pageFunction, arg, fallback) {
     .catch(() => fallback);
 }
 
-// Anti-automation interstitials: a datacenter IP (Fly.io) trips these on many sites.
-// The page LOADS with real bytes — so the empty-shell size guard misses it — but every real
-// control is replaced by an "Access Denied" / Cloudflare / "verify you're human" challenge.
-// Left undetected, the loop clicks around the dead page for its whole step budget, returns
-// awaiting_more, and the client AUTO-CONTINUES — a bot-walled Just Eat ran 6 turns / ~13min
-// before this landed. Detecting the copy lets us bail on the first step that shows it.
+// Anti-automation interstitials, which a datacenter IP trips on many sites. The page loads with
+// real bytes, so the empty-shell guard misses it, and the loop then spends its whole budget
+// clicking a dead page. Matching the copy lets it bail on the first step instead.
 const BLOCK_WALL_PATTERN = /access denied|you (?:don'?t|do not) have permission to access|unusual traffic|verify (?:you(?:'?re| are)|that you are) (?:a )?human|are you a human|checking your browser before|pardon our interruption|press (?:&|and) hold to|enable javascript and cookies to continue|request (?:has been )?blocked|bot(?:s)? (?:detected|protection)|automated access|disable any browser extensions|hcaptcha|recaptcha challenge|cf-challenge/i;
 
 // Pure so it's unit-testable. A wall page is SMALL (a challenge, not a shop) AND contains the
@@ -77,10 +66,8 @@ async function detectBlockWall(page) {
   }
 }
 
-// [dropdown] carries its options inline so the model can pick a "select" value it has
-// actually seen — the alternative (a bare [dropdown] tag with options listed nowhere)
-// would just make the model guess text, which the exact-match-first selectOption call
-// (see the "select" action branch) would then fail on.
+// [dropdown] carries its options inline so the model picks a value it has actually seen —
+// guessed text fails the exact-match-first selectOption call.
 function renderElementLine(el) {
   const tag = el.isSelect
     ? ` [dropdown, options: ${(el.options || []).map((o) => `"${o}"`).join(', ')}]`
@@ -88,25 +75,15 @@ function renderElementLine(el) {
   return `#${el.id}${tag} "${el.text}"`;
 }
 
-// Include ARIA-role interactives, not just native controls: address-autocomplete
-// suggestions, menu items, size/option radios etc. are often role-based divs/li that
-// the loop must be able to see and click (e.g. committing a delivery address).
-// `label` is here for styled radio/checkbox chips (M&S/Nike sizes: a <label> fronting a
-// visually-hidden input) — extraction only keeps labels whose control is hidden, so plain
-// form labels don't double every field.
-// `select` is here for native dropdown pickers (e.g. ASOS's size selector: a real
-// <select id="variantSelector"> with 25 <option>s, no role="combobox" — confirmed via a
-// live DOM probe 2026-08-04, correcting an earlier session's guess that it was a bare
-// non-semantic div). It needs the dedicated "select" action, not click/fill — see
-// extractClickableElements's isSelect/options handling and the "select" action branch below.
+// ARIA-role interactives too, not just native controls: autocomplete suggestions, menu items
+// and size radios are often role-based divs. `label` covers styled radio/checkbox chips (only
+// where the real control is hidden, so plain form labels don't double every field), and
+// `select` covers native dropdowns, which need the "select" action rather than click/fill.
 const CLICKABLE_SELECTOR = 'button, a, input, textarea, label, select, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="link"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"]';
 
 async function extractClickableElements(page) {
-  // One round-trip, not ~6 per element. The old per-element loop (isVisible + innerText +
-  // 3 getAttribute + boundingBox, each a separate CDP call) cost ~0.8s on a 40-element page;
-  // doing it all inside a single page.evaluate brings that to tens of ms. `locatorIndex` is
-  // the index into querySelectorAll(CLICKABLE_SELECTOR), which matches Playwright's
-  // locator(...).nth(i) order, so the downstream click/fill via .nth(locatorIndex) is unchanged.
+  // One page.evaluate rather than ~6 CDP calls per element, which costs ~0.8s on a 40-element
+  // page. `locatorIndex` is the querySelectorAll index, matching Playwright's .nth(i) order.
   return page.evaluate(({ selector, max }) => {
     const visible = (el) => {
       const s = window.getComputedStyle(el);
@@ -128,12 +105,9 @@ async function extractClickableElements(page) {
       .filter((d) => d.area > vw * 0.15) // ignore small popovers/tooltips that are also role=dialog
       .sort((a, b) => b.area - a.area)[0];
     if (!dialog) {
-      // Obstruction fallback: some interstitials (Nike's Klarna "click continue to proceed"
-      // overlay) are plain fixed divs with no dialog role, so badges land on the inert page
-      // behind them and the model can never find the Continue/close control. Ask the DOM
-      // what's physically on top at the viewport centre; if its fixed ancestor blankets the
-      // viewport and holds only a handful of controls (an overlay card, not an app shell),
-      // scope perception to it.
+      // Some interstitials are plain fixed divs with no dialog role, so badges land on the inert
+      // page behind them. Ask what is physically on top at the viewport centre, and scope
+      // perception to it when that turns out to be an overlay card rather than the app shell.
       let n = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
       while (n && n !== document.body && n !== document.documentElement) {
         const cs = getComputedStyle(n);
@@ -150,12 +124,9 @@ async function extractClickableElements(page) {
     }
     let scope = dialog ? Array.from(dialog.el.querySelectorAll(selector)) : allNodes;
     if (dialog && scope.length === 0) scope = allNodes; // never let scoping blind the model entirely
-    // Commercial pages front-load 20-40 header/nav controls in DOM order, which used to
-    // consume the whole element budget before the first product tile — the model could only
-    // ever see site chrome (2026-07-02 Currys screenshots: every badge in the header, zero
-    // on products or the consent dialog, so it clicked "Search" forever). Re-order the
-    // candidates: in-viewport CONTENT first, then chrome controls that matter to the goal
-    // (search, basket, consent), then the rest of the chrome, then off-viewport elements.
+    // Commercial pages front-load 20-40 nav controls in DOM order, which eats the element budget
+    // before the first product tile. Order: in-viewport content, then chrome that matters
+    // (search, basket, consent), then the rest of the chrome, then anything off-viewport.
     if (!dialog) {
       const inViewport = (el) => {
         const r = el.getBoundingClientRect();
@@ -164,10 +135,8 @@ async function extractClickableElements(page) {
       const inChrome = (el) => !!el.closest('header,nav,footer,aside,[role="banner"],[role="navigation"],[role="contentinfo"]');
       const KEY_CHROME = /search|basket|\bbag\b|cart|checkout|allow|accept|sign\s?in|log\s?in|account|settings|my\s|continue|next|submit|apply|manage/i;
       const labelOf = (el) => ((el.innerText || '') || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').slice(0, 80);
-      // Off-screen CONTENT outranks on-screen plain chrome: on a PDP the buy box (size
-      // chips, Add to bag) is routinely below the fold while ~20 header nav links are on
-      // screen — the nav links used to consume the budget and the model couldn't buy
-      // (M&S 2026-07-02). Key chrome (search/basket/consent) keeps its priority.
+      // Off-screen content outranks on-screen plain chrome: a product page's buy box is often
+      // below the fold with 20 nav links above it. Key chrome keeps its priority.
       const content = [], keyChrome = [], chrome = [], offContent = [], offChrome = [];
       for (const el of scope) {
         const chromeEl = inChrome(el);
@@ -201,11 +170,8 @@ async function extractClickableElements(page) {
         const lab = (el.labels && el.labels[0]) || el.closest('label');
         if (lab && visible(lab) && softHidden(el)) continue;
       }
-      // A native <select>'s innerText concatenates EVERY option's text (verified: a 3-option
-      // select's innerText is "Please select\nW24 L30 - UK 4\nW25 L30 - UK 6" — the whole
-      // option list, not the visible/selected one), so it needs its own text source: the
-      // currently-selected option only, plus a separate capped options list the model can
-      // pick an exact value from via the "select" action.
+      // A native <select>'s innerText is every option concatenated, not the selected one, so it
+      // needs its own text: the selected option, plus a capped list to pick an exact value from.
       const isSelect = el.tagName === 'SELECT';
       let options = null;
       if (isSelect) {
@@ -231,11 +197,8 @@ async function extractClickableElements(page) {
       const locatorIndex = allNodes.indexOf(el); // index in full-document order = Playwright nth()
       if (locatorIndex === -1) continue;
       const r = el.getBoundingClientRect();
-      // Real typeable field vs. a link/button that merely has compelling text — with only a
-      // label to go on, the model has picked a promo banner ("Save £70 on... Shop now") over
-      // the actual search box before, since nothing distinguished them. A promo link and a
-      // search input can both have prominent, relevant-sounding text; only the DOM knows which
-      // one accepts typed input.
+      // A promo banner and a search box can carry equally relevant-sounding text, and on labels
+      // alone the model picks the banner. Only the DOM knows which one accepts typed input.
       const inputTarget = proxyCtl || el;
       const NON_TEXT_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color']);
       const isInput = (inputTarget.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has((inputTarget.type || 'text').toLowerCase()))
@@ -283,23 +246,17 @@ async function captureMarkedScreenshot(page, elements) {
   }
 }
 
-// Let the page catch up before we perceive it — without the old 'networkidle' trap.
-// Analytics/websocket-heavy SPAs (john lewis, uber eats, …) NEVER reach networkidle, so
-// waitForLoadState('networkidle') always ran its FULL timeout achieving nothing — 2.5s
-// of dead waiting on every step, ~69% of each step's wall time. Instead: ensure the DOM
-// is parsed (fast, usually already done) then take one short fixed hydration beat. Pages
-// that are still visibly loading are handled by the model's "wait" action, not by us
-// blocking the whole loop. Never throws — best-effort.
+// Let the page catch up before perceiving it. Never 'networkidle': analytics-heavy SPAs never
+// reach it, so that always burns its full timeout. Parse the DOM, take one short hydration
+// beat, and leave a still-loading page to the model's "wait" action. Best-effort, never throws.
 async function settle(page, pauseMs = 600) {
   await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(Math.max(0, pauseMs)).catch(() => {});
 }
 
-// Cookie/consent walls are the first thing a commercial site shows, and they cover the
-// real page — so the model's first screenshot is all banner junk and it picks garbage.
-// Best-effort dismiss: click the first visible accept/agree control we recognise. Tries
-// the common consent frameworks (OneTrust, Cookiebot) by id, then a text match. Never
-// throws and never waits long — if there's no banner, it's a couple of cheap no-ops.
+// A consent wall covers the real page, so the first screenshot is all banner. Clicks the first
+// accept control it recognises — the common frameworks by id, then by text. Cheap and
+// best-effort: with no banner present it is a couple of no-ops.
 const CONSENT_SELECTORS = [
   '#onetrust-accept-btn-handler',
   '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
@@ -328,10 +285,8 @@ async function dismissConsentOnce(page) {
       return true;
     }
   }
-  // Role+name search the WHOLE accessibility tree, not a position-capped slice — the old
-  // "first 40 buttons" scan missed john lewis's "Allow all" because the header has dozens
-  // of links/buttons ahead of it in DOM order. Check the main frame and any iframes
-  // (some managers render the banner inside one).
+  // The whole accessibility tree, not a capped slice — a header carries dozens of controls
+  // ahead of the banner in DOM order. Main frame and iframes, since some managers use one.
   for (const root of page.frames()) { // page.frames() includes the main frame
     for (const name of CONSENT_NAMES) {
       const btn = root.getByRole('button', { name }).first();
@@ -341,12 +296,9 @@ async function dismissConsentOnce(page) {
       }
     }
   }
-  // Shadow-DOM fallback: TrustArc (screwfix.com and others) renders its consent widget
-  // inside an OPEN shadow root. Chromium's computed accessibility tree doesn't surface that
-  // shadow content the way it does regular DOM, so both the role-based scan above and
-  // Playwright's own getByRole miss it — the banner silently sits on top of the page,
-  // swallowing every click meant for the real "Add to basket" button underneath. Walk
-  // shadow roots directly and click by innerText instead of relying on accessible role/name.
+  // Shadow-DOM fallback: some consent widgets live in an open shadow root, which the computed
+  // accessibility tree doesn't surface, so the scan above and getByRole both miss the banner
+  // while it swallows every click. Walk shadow roots directly and match on innerText.
   const shadowClicked = await page.evaluate((patterns) => {
     const regexes = patterns.map((p) => new RegExp(p, 'i'));
     const walk = (root) => {
@@ -369,14 +321,9 @@ async function dismissConsentOnce(page) {
   return shadowClicked;
 }
 
-// Regression: a live John Lewis run showed the consent banner ("Personalise your shopping
-// experience") still covering the page when the recipe's very first "Add to basket" click
-// fired — the button was there but visually disabled under the modal, and every add from
-// then on silently failed with JL's own "there was a problem with your request" error.
-// JL's consent manager injects the banner a beat after domcontentloaded, so a single
-// ~120ms-per-selector pass right after page load can lose that race. One retry after a
-// real wait catches it without slowing down the common case (banner absent → both passes
-// return fast; banner present on the first pass → no second pass needed at all).
+// Some consent managers inject the banner a beat after domcontentloaded, so a single pass right
+// after load loses the race and every later click lands under the modal. One retry after a real
+// wait catches that, and costs nothing when the banner is absent or already dismissed.
 async function dismissConsent(page) {
   if (await dismissConsentOnce(page)) return true;
   await page.waitForTimeout(700).catch(() => {});
@@ -392,10 +339,8 @@ async function readPageText(page) {
   return texts.join('\n');
 }
 // ── Primitive actions ───────────────────────────────────────────────────────────────────
-//
-// Each returns a fresh observation so the caller always acts on what the page actually shows
-// rather than on what it expected to happen. This is what makes verification a normal step
-// instead of a special case: "did the state change?" is answerable from two observations.
+// Each returns a fresh observation, so the caller acts on what the page shows rather than what
+// it expected, and "did the state change?" is answerable from any two observations.
 
 const OBSERVATION_TEXT_LIMIT = 4000;
 
@@ -599,12 +544,9 @@ module.exports = {
 };
 
 // ── Known details ───────────────────────────────────────────────────────────────────────
-//
-// Filling a form with facts the user has already given is not a checkout feature. A tenancy
-// application, a council form, a claim, a registration and a checkout all ask for the same
-// portable categories: name, email, phone, address. This fills whatever the page asks for
-// that is already known, and reports what genuinely is not — so the agent asks the person
-// once, for the real gaps, instead of guessing or asking for everything.
+// A tenancy application, a claim and a checkout all ask for the same portable facts. This fills
+// whatever the page asks for that is already known and reports the genuine gaps, so the agent
+// asks the person once rather than guessing or asking for everything.
 
 const IDENTITY_FIELD_SELECTOR = 'input, select, textarea';
 
