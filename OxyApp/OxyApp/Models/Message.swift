@@ -308,12 +308,9 @@ struct ActionResult: Codable, Identifiable, Equatable {
     }
 }
 
-/// What a result is ABOUT — an order, a booking, an application, a document, an account.
-///
-/// This replaced four commerce-specific fields on ActionResult (productName, price, total,
-/// colorOptions). They meant a purchase rendered richly while a submitted form or a cancelled
-/// subscription had nowhere to put its own details, which is backwards for a general agent.
-/// Every field stays optional and is only ever populated from something actually observed.
+/// What a result is about — an order, a booking, an application, a document, an account. General
+/// rather than commerce-specific, so a submitted form has somewhere to put its details too. Every
+/// field is optional and only ever populated from something observed.
 struct ResultSubject: Codable, Equatable {
     /// What it is: "Nike Air Max 90", "Tenancy application", "Council tax account".
     let name: String?
@@ -410,11 +407,9 @@ struct RouteContext: Codable, Equatable {
 }
 
 extension Array where Element == ActionResult {
-    /// Folds a new batch of `.actions` SSE results into the existing list instead of
-    /// replacing it outright. A turn can fire several distinct tool calls (e.g. two
-    /// separate email searches); overwriting the array on every event silently dropped
-    /// every result but the last one, so the visible receipt could show a completely
-    /// different tool call than the one the assistant's own text just narrated.
+    /// Folds a new batch of `.actions` results into the existing list rather than replacing it.
+    /// A turn can fire several tool calls, and overwriting keeps only the last — leaving the
+    /// visible receipt showing a different call than the assistant's text just narrated.
     mutating func merging(_ incoming: [ActionResult]) {
         for result in incoming {
             if let idx = firstIndex(where: { $0.pending && $0.action == result.action }) {

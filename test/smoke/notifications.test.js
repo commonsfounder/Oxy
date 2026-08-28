@@ -394,11 +394,9 @@ test('with no digest pending, everything is judged on its own merits', () => {
 });
 
 test('two concurrent sweeps for one user: digest + the per-item it covers produce exactly one external send', async () => {
-  // The scenario this pass was asked to stress: a digest and a per-item notification about
-  // something the digest already names, both pending, delivered by two OVERLAPPING sweep
-  // calls (two Fly machines, or a manual /proactive/sweep landing mid-schedule).
-  // collapseRelated suppresses the per-item on BOTH workers' local view before either claims
-  // anything; the claim step then ensures only one of them actually sends the digest itself.
+  // A digest and a per-item notification it already names, both pending, delivered by two
+  // overlapping sweeps. collapseRelated suppresses the per-item on both workers' local view
+  // before either claims anything, and the claim then leaves only one sending the digest.
   const { runtime, calls } = runtimeWith({ env: {}, telegram: { canSend: true }, prefs: { [PREF.channel]: 'telegram' } });
   await runtime.raise('u1', {
     category: 'digest', title: 'One thing needs you today', body: 'Send Mia the case study.',
@@ -663,11 +661,9 @@ test('a notification without a title, body or dedupe key is refused', async () =
 
 // ── Reliability: concurrency, ambiguous outcomes, backoff ───────────────────────────────
 test('raise() treats a unique-constraint race as "already raised", not a raw DB error', async () => {
-  // The select-then-insert in raise() is a check-then-act race: two concurrent raises for
-  // the same real-world event can both see "no existing row" before either commits. The
-  // table's unique index on (user_id, dedupe_key) is what actually stops a second row; the
-  // loser here must recognise that as a duplicate, not surface a constraint-violation message
-  // for something that behaved correctly.
+  // raise()'s select-then-insert is a check-then-act race, so the unique index on
+  // (user_id, dedupe_key) is what stops a second row. The loser must read that as a duplicate,
+  // not surface a constraint violation for something that behaved correctly.
   const winner = { id: 'winner', user_id: 'u1', dedupe_key: 'k1', status: 'pending' };
   // Ordered exactly as raise() calls .from(): (1) the pre-insert existence check, from this
   // process's point of view before the winner committed — sees nothing; (2) the insert

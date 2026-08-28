@@ -120,13 +120,9 @@ test('a vaguely-related reply on the same thread is NOT evidence', () => {
 });
 
 test('restating the SAME promise in future tense is not evidence it was kept', () => {
-  // This used to be asserted true here, on the theory that "the model still decides, this
-  // only gates it" — but nothing downstream reviews a match before auto-resolving; this
-  // function's result IS the decision. A bare future-tense mention ("I will send the
-  // documents tomorrow") is a re-statement or a reschedule, not completion — and, found
-  // live, the SAME substring check let a brand-new SECOND promise on a thread ("I will also
-  // send the board deck tomorrow") falsely resolve a different, already-open FIRST promise
-  // ("send the board pack") purely because both contain the bare word "send".
+  // Nothing downstream reviews a match before auto-resolving, so this function's result is the
+  // decision. A bare future-tense mention is a restatement or a reschedule, not completion —
+  // and a substring check on the verb lets a second promise resolve a different first one.
   assert.equal(matchesSentEvidence(SEND_DOCS, {
     threadId: 'thr-1', subject: 'Re: Documents', body: 'I will send the documents tomorrow'
   }), false, 'a future promise, however specific, is not evidence anything was actually sent');
@@ -207,12 +203,9 @@ test('an already-resolved commitment cannot be re-resolved by evidence', () => {
 });
 
 // ── Identity hardening ──────────────────────────────────────────────────────────────────
-// The live scenario almost closed "send Mia the board deck" from an unrelated email, because
-// evidence used to be matched on raw strings — a substring of a display name, a recipient
-// address — rather than stable identity. matchesSentEvidence now resolves an explicit
-// identity tier first (thread > participant id > exact address > none) and only THEN checks
-// whether the message is about the right thing; these are the adversarial cases that tier
-// exists for.
+// matchesSentEvidence resolves an explicit identity tier first — thread, participant id, exact
+// address, none — and only then checks whether the message is about the right thing. Matching on
+// raw strings instead closes a commitment from an unrelated email; these are those cases.
 test('evidenceIdentity ranks a real participant id above a raw address, and both above nothing', () => {
   const commitment = { thread_id: 'thr-1', participant_id: 'p-mia', person_name: 'mia@example.com' };
   assert.equal(evidenceIdentity(commitment, { threadId: 'thr-1' }), 'thread');
@@ -303,10 +296,8 @@ test('reconcileCommitmentsForSentEmail is wired to exactly one trigger', () => {
 });
 
 // ── Adversarial matrix: commitments × evidence ──────────────────────────────────────────
-// The commitment system has produced two live false positives already. This is the
-// deliberate attack pass promised after fixing the second one: every combination the spec
-// named, run against the current identity+specificity rules, to find where they still
-// over-resolve or under-resolve rather than assuming the fixes so far cover everything.
+// Every combination the spec named, run against the current identity and specificity rules, to
+// find where they over- or under-resolve rather than assuming the known fixes cover everything.
 
 function commitment(id, what, opts = {}) {
   return { id, status: 'open', what, ...opts };
@@ -331,12 +322,8 @@ test('two similarly-named documents open on the SAME thread: the live bug this p
 });
 
 test('a static subject line carried forward by every reply cannot disambiguate — the live bug the final integrated run found', () => {
-  // Gmail (and most clients) prefixes the THREAD's original subject unedited onto every reply
-  // ("Re: board deck and board pack"). If that subject line ever named both siblings — because
-  // the original ask mentioned both — every later reply on the thread would carry BOTH
-  // disambiguating words forever, regardless of what the reply's body actually says. Found live:
-  // a reply that only fulfilled the deck, with that two-item subject still attached by Gmail's
-  // own convention, falsely resolved the pack too.
+  // A reply carries the thread's original subject unedited, so a subject naming both siblings
+  // gives every later reply both disambiguating words forever, whatever its body says.
   const pack = commitment('c-pack', 'send Mia the board pack', { thread_id: 'thr-1' });
   const deck = commitment('c-deck', 'send Mia the board deck', { thread_id: 'thr-1' });
   const siblings = [pack, deck];

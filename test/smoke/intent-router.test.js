@@ -52,10 +52,8 @@ test('clear outbound requests reach the review-gated action with bounded inputs'
 });
 
 // ── Question-opener filler stripped from place/directions queries ─────────────────────────
-// Regression, 2026-08-07 live verification: "is there a gym near Old Street" reached
-// find_place with the opener still attached, feeding a non-address sentence to strict
-// geocoding once Places match failed. See the matching geocoding.test.js suite for the
-// downstream token-matching half of this fix.
+// "is there a gym near Old Street" reaching find_place with its opener attached feeds a
+// non-address sentence to strict geocoding. geocoding.test.js covers the downstream half.
 test('cleanDestinationPhrase strips "is there a" / "are there any" / "do you know if there\'s" openers', () => {
   assert.equal(cleanDestinationPhrase('is there a gym near Old Street'), 'gym near Old Street');
   assert.equal(cleanDestinationPhrase('are there any decent gyms around here'), 'decent gyms around here');
@@ -75,11 +73,8 @@ test('find a gym near Old Street: still resolves via the deterministic local-pla
 });
 
 // ── A place-keyword collision must not eat a communication request ────────────────────────
-// Regression, 2026-08-07 live verification: "restaurant" sits in LOCAL_PLACE_TERMS, so any
-// sentence mentioning one — even a plain request to email/text/contact them about something —
-// fell through to the find_local_place fallback and was routed as a nearby-place search before
-// the model ever saw it. Narrow fix, mirrors the existing looksLikeShoppingRequest guard
-// immediately above the same fallback in api/intent-router.js.
+// "restaurant" is a place term, so a plain request to email one falls through to the place
+// fallback. Narrow guard, mirroring looksLikeShoppingRequest above the same fallback.
 test('a request to email a restaurant about a booking does not become a nearby-place search', () => {
   assert.equal(
     inferDeterministicAction('Send an email to test-business@example.com asking if they can move our 7pm restaurant booking to 8pm tonight.').actions[0].type,
@@ -112,11 +107,8 @@ test('"nearest restaurant" (no email/text/contact wording) is unaffected by the 
 });
 
 // ── A place-keyword collision must not eat a browser-session-resume request ────────────────
-// Live regression via the Telegram bridge, 2026-08-26: "john lewis" sits in LOCAL_PLACE_TERMS
-// (as a retailer name), so a message about resuming a browser shopping session and checking
-// the basket fell through to the find_local_place fallback and was routed as a nearby-place
-// search, echoing the whole message back as a broken "query". Narrow fix, same shape as the
-// communication-request guard above.
+// A retailer name is also a place term, so a message about resuming a shopping session and
+// checking the basket falls through to the place fallback. Same shape as the guard above.
 test('resuming a browser shopping session and asking about the basket does not become a nearby-place search', () => {
   assert.equal(
     inferDeterministicAction("okay anyways , recently we were shopping in john lewis can you pick that session back up as well as tell me what's in the basket"),
@@ -133,13 +125,10 @@ test('"nearest john lewis" and "buy from john lewis" are unaffected by the sessi
   assert.equal(inferDeterministicAction('is there a john lewis near me').actions[0].type, 'find_place');
 });
 
-// ── The structural fix: a bare category/brand noun is never enough on its own for the final
-// find_place fallback — it needs real locating language ("nearest", "near", "where is") too.
-// This is what makes the restaurant/communication and john lewis/browser-session collisions
-// above just two examples of ONE bug, not two separate ones — and proves it: none of these
-// three sentences match any of the specific exclusion lists above (no email/text/session/
-// basket wording at all), yet they still defer correctly, because they never say where they
-// want something located.
+// ── The structural fix: a bare category or brand noun is never enough for the final place
+// fallback, which needs real locating language too. That makes the two collisions above one bug
+// rather than two — these sentences match no exclusion list, yet still defer, because none of
+// them says where it wants something located.
 test('a bare place-category mention with no locating language defers, with no exclusion list needed', () => {
   assert.equal(inferDeterministicAction('the gym was busy today so I went for a run instead'), null);
   assert.equal(inferDeterministicAction('john lewis called about a delayed delivery'), null);
@@ -197,11 +186,9 @@ test('an appointment request starts the appointment flow when a real provider is
   }]);
 });
 
-// Regression: find_appointment_options only ever talks to the sandbox provider (see
-// getAppointmentBookingService in api/index.js) — there's no real one, and production never
-// sets appointmentProviderConnected. Routing straight to it anyway used to turn every real
-// "book me a dentist appointment" into a scripted dead end ("I need an appointment booking
-// connection...") with the model never getting a turn to try run_browser_task instead.
+// find_appointment_options only talks to the sandbox provider, and production never sets
+// appointmentProviderConnected — routing to it regardless turns every real booking request into
+// a scripted dead end without the model getting a turn.
 test('an appointment request falls through to the model when no provider is connected (no options passed at all)', () => {
   const routed = inferDeterministicAction('Millie, get me a dentist appointment next week after work');
   assert.equal(routed, null);
@@ -372,11 +359,9 @@ test('contextual travel follow-ups defer to conversation context', () => {
 });
 
 // ── The router no longer classifies tasks by domain ───────────────────────────────────────
-// A regex that spotted a "shopping verb" plus a retailer name used to hand the whole request
-// to the ordering loop with the canned line "I'll open the retailer and take this as far as I
-// can." It was wrong in both directions: it swallowed account-admin requests that merely
-// mention a retailer, and it existed at all only because the agent loop could not be trusted
-// to pick run_browser_task for itself. Both are now the loop's job.
+// A regex matching a shopping verb plus a retailer name is wrong in both directions: it swallows
+// account-admin requests that merely mention a retailer, and it only exists because the loop was
+// not trusted to choose for itself. Both are the loop's job.
 test('account admin at a retailer is not classified as shopping', () => {
   for (const message of [
     'Change my delivery address on my Amazon order',
