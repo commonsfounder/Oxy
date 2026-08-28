@@ -1,6 +1,9 @@
 const LOCAL_PLACE_TERMS = /\b(nearest|closest|near me|nearby|around me|coffee|cafe|restaurant|gym|mcdonald'?s|john lewis|supermarket|shop|store|pharmacy|station|cinema|bank|atm|hospital|hotel)\b/i;
 const RIDE_TERMS = /\b(uber|ride|taxi|cab|car|take me|pick me up|drive me)\b/i;
 const DIRECTIONS_TERMS = /\b(directions|navigate|route|walk|walking|drive|driving|how do i get|when should i leave|latest.*leave|get there by|be there by|bus|buses|public transport|transit|what bus|which bus|what train|which train|train can i take|train to|first train|next train|need to be at|heading to)\b/i;
+// Only these actually ASK for a route. Bare mode words (drive/walk/route/bus) appear all over
+// ordinary requests, so they must not pre-empt the loop on their own.
+const DIRECTIONS_INTENT = /\b(directions|navigate|how do i get|how do we get|when should i leave|latest.*leave|get there by|be there by|need to be at|heading to|what bus|which bus|public transport|what train|which train|train can i take|first train|next train|train to)\b/i;
 const TRANSIT_TERMS = /\b(bus|buses|public transport|transit|what bus|which bus|train|trains|rail|tube|tram)\b/i;
 const RAIL_TRIP_TERMS = /\b(what train|which train|train can i take|train to|trains to|first train|rail|heading to|travelling to|traveling to)\b/i;
 const LIVE_RAIL_TERMS = /\b(live departures?|departures?|arrival board|station board|platforms?|what platform|next train|first train)\b/i;
@@ -188,7 +191,7 @@ function inferOutboundCommunicationAction(message) {
 }
 
 function looksLikeDirectionsRequest(message) {
-  return DIRECTIONS_TERMS.test(normalizeText(message));
+  return DIRECTIONS_INTENT.test(normalizeText(message));
 }
 
 // True only when a phrase names an actual place — i.e. something survives after stripping
