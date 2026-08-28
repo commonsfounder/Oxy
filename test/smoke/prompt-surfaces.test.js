@@ -1,15 +1,8 @@
-// Phase 6 (2026-08-07): buildSystemPrompt({ surface, context }) is the one path that composes
-// Millie's system prompt for all four surfaces. Before this, background runs (scheduled tasks,
-// routines, resumed tasks) received ONLY the bare static prompt — no memory, no preferences, no
-// connected capabilities, no active goals, no date/time — because buildMillieSystemPrompt's
-// dedup guard collapsed `dynamicSystemPrompt: OXCY_SYSTEM_PROMPT` right back down to nothing
-// extra. Briefings were generated under a completely separate "You are a personal assistant"
-// persona instead of Millie's own voice.
-//
-// These tests pin: each surface receives the context it's supposed to; background/briefing do
-// NOT receive chat-only instructions that make no sense outside a live turn (greeting handling,
-// "the user leads the conversation", FAST TURN MODE); and the background/briefing call sites in
-// api/index.js were actually rewired, not just capable of being rewired.
+// buildSystemPrompt({ surface, context }) is the one path composing the prompt for all four
+// surfaces. These pin that each surface gets the context it should, that background and briefing
+// do not receive chat-only instructions that make no sense outside a live turn (greeting
+// handling, "the user leads the conversation", FAST TURN MODE), and that api/index.js's
+// background and briefing call sites actually go through it.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

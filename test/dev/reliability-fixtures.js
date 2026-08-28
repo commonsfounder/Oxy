@@ -1,20 +1,14 @@
 'use strict';
-// The reliability basket: a representative spread of UK sites the assistant is actually
-// asked to shop on, across categories that stress DIFFERENT parts of the loop (search,
-// hydration, consent, bot-walling). This is the denominator for "X% of sites work".
+// The reliability basket — the denominator for "X% of sites work": a spread of UK sites across
+// categories that stress different parts of the loop (search, hydration, consent, bot-walling).
 //
-// Goals are chosen to be SAFE and DETERMINISTICALLY SCORABLE:
-//  - `expect: 'answer'`  → a pure price/info lookup; success is a `done` with a summary.
-//    No user data (address/size) needed, so a failure is a LOOP failure, not missing input.
-//  - `expect: 'cart'`    → build a basket up to the pay guardrail; success is
-//    `ready_for_payment` (or `done`). Needs a size in the goal so the loop never has to ask.
+// Goals are safe and deterministically scorable. `expect: 'answer'` is a price lookup needing no
+// user data, so a failure is a loop failure. `expect: 'cart'` builds a basket up to the payment
+// guardrail, which stops at the pay button — no real payment is ever reached — and carries a size
+// in the goal so the loop never has to ask.
 //
-// Deliberately NO real payment is ever reached — the payment guardrail stops the loop at
-// the pay button, which is exactly the success state for a `cart` case.
-//
-// `tags`: freeform, for slicing the scorecard (e.g. only `grocery`, only `known-botwall`).
-// `known-botwall` marks sites we already expect a datacenter IP to be blocked on, so the
-// scorecard can separate "loop can't do it" from "infra (IP) can't reach it".
+// `tags` slice the scorecard; `known-botwall` separates "the loop can't do it" from "this IP
+// can't reach it".
 
 module.exports = [
   // --- Department / fashion ---

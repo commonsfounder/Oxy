@@ -1,16 +1,11 @@
-// Phase 6 (2026-08-07): the old numbered ABSOLUTE RULES list (1..29, with lettered sub-rules
-// like 9a/14b/25-CRITICAL-C) was replaced with named sections composed by buildSystemPrompt —
-// see api/prompts.js. Rule order had become archaeology from repeated renumbering, not a real
-// priority signal, so this file no longer pins numbering or letter suffixes. What it still pins,
-// unconditionally:
-//   - every safety-, honesty-, and review-relevant rule survives, verbatim, in the core prompt
-//     (used by every surface: chat, quick, background, briefing)
-//   - the named sections exist and carry the behavioural content they're supposed to
-//   - buildDynamicSystemPrompt's actual output (the chat-turn RESPONSE RULES tail) still carries
-//     its memory-suppression and blocker-phrasing behaviour
-// Tool-specific disambiguation that used to live here (trains vs directions, calendar vs music,
-// email tone, messaging register, forget_memory scope, etc.) moved onto the relevant tool's
-// `guidance` field in api/action-contracts.js — see test/smoke/native-tool-guidance.test.js.
+// The prompt is named sections composed by buildSystemPrompt, not a numbered rule list, so
+// nothing here pins rule numbers. What it does pin, unconditionally:
+//   - every safety, honesty and review-relevant rule survives verbatim in the core prompt, which
+//     every surface uses
+//   - the named sections exist and carry the behaviour they're supposed to
+//   - the chat-turn RESPONSE RULES tail still carries its memory-suppression and blocker phrasing
+// Tool-specific disambiguation lives on each tool's `guidance` field instead — see
+// test/smoke/native-tool-guidance.test.js.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

@@ -1,15 +1,8 @@
-// A purchase, executed with nothing but the general runtime.
-//
-// This is the test the whole refactor exists to pass. "Buy this product" runs as:
-//
-//     main agent loop → browser primitives → optional shopping playbook
-//                     → deterministic transaction approval → verification
-//
-// and NOT as: main agent → run_browser_task → a second shopping agent loop.
-//
-// The same primitives, in a different order, are then shown completing a cancellation and a
-// form submission — because if a purchase needed anything the others do not, it would still
-// be a special case wearing general clothes.
+// A purchase executed with nothing but the general runtime: main agent loop → browser primitives
+// → optional shopping playbook → deterministic transaction approval → verification, never a
+// second shopping agent loop underneath. The same primitives in a different order then complete
+// a cancellation and a form submission — a purchase needing anything they don't would make it a
+// special case wearing general clothes.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

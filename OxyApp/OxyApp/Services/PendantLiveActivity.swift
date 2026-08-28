@@ -3,15 +3,9 @@ import Foundation
 import ActivityKit
 #endif
 
-/// Shared shape of the pendant Live Activity. Lives in the main app so both the
-/// app (which starts/updates/ends the activity) and a future Widget Extension
-/// (which renders the Lock Screen / Dynamic Island UI) can reference the same
-/// attributes.
-///
-/// NOTE: the visible Lock Screen / Dynamic Island surface requires adding a
-/// Widget Extension target in Xcode that renders `PendantActivityAttributes`.
-/// Until that target exists this manager is a safe no-op-on-failure: it requests
-/// the activity (ignored if unsupported) and never crashes the app.
+/// Shared shape of the pendant Live Activity, in the main app so both it and a future Widget
+/// Extension reference the same attributes. The visible Lock Screen surface needs that extension
+/// target to exist; until then this requests the activity and no-ops when it isn't supported.
 #if canImport(ActivityKit)
 @available(iOS 16.1, *)
 struct PendantActivityAttributes: ActivityAttributes {

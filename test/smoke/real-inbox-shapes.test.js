@@ -1,20 +1,14 @@
-// Regression tests built from a REAL Gmail mailbox, not from imagined email shapes.
-//
-// Every case below is a message that actually arrived in a live inbox, reproduced with its
-// real structure — the HTML entity encoding, the exact sender domain, the exact wording of
-// the total line — and with personal details reduced to what the classifier actually reads.
-// Each one caught a bug that the previous mock-shaped fixtures did not, because the mocks
-// were written the way a receipt "should" look rather than the way real senders send them.
-//
-// The bugs these lock in:
-//   1. HTML-only receipts encode currency as `&pound;`, so no £ ever reached the extractor.
-//   2. "The open invoice amount of € 1.44" is a real total phrasing that was not a label.
+// Regression tests built from messages that really arrived in a live mailbox, reproduced with
+// their real structure — entity encoding, sender domain, the exact wording of the total line —
+// rather than the way a receipt "should" look. What they lock in:
+//   1. HTML-only receipts encode currency as `&pound;`, so no £ reaches the extractor.
+//   2. "The open invoice amount of € 1.44" is a real total phrasing that is not a label.
 //   3. "invoice 089001095497" is a real reference with no separator at all.
-//   4. A "Notice of Sums in Arrears" was classified archivable.
-//   5. A no-reply sender whose text says it is waiting for the user was dropped pre-judgment.
-//   6. Abandoned-cart marketing with a List-Unsubscribe header survived cleanup.
-//   7. Automated job alerts — the largest junk class in a real inbox — were never archived.
-//   8. Payment reminders/failures look exactly like receipts and were becoming "spending".
+//   4. A "Notice of Sums in Arrears" classified archivable.
+//   5. A no-reply sender whose own text says it is waiting on the user, dropped pre-judgment.
+//   6. Abandoned-cart marketing with a List-Unsubscribe header surviving cleanup.
+//   7. Automated job alerts — the largest junk class in a real inbox — never archived.
+//   8. Payment reminders and failures look like receipts and were counted as spending.
 
 require('dotenv').config();
 

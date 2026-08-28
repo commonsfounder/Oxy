@@ -1,18 +1,10 @@
 'use strict';
 
-// Which name a shared session gets filed under.
-//
-// The first real share went in under `account.johnlewis.com`, because that is the page the
-// user happened to be on when they clicked. The ordering loop looks sessions up by the site
-// it derives from the shopping URL -- `johnlewis.com` -- so the session it had just been
-// given was invisible to it. Sharing from the account page, which is exactly where someone
-// checks they are signed in, filed it somewhere nothing would ever look.
-//
-// It also narrowed what got captured: Chrome's cookie filter matches a domain and its
-// SUBdomains, so asking for account.johnlewis.com skips the cookies on .johnlewis.com --
-// usually the session itself.
-//
-// So both sides collapse a hostname to its registrable domain first.
+// Which name a shared session gets filed under. A share from `account.<site>` — the page where
+// someone checks they are signed in — must file under `<site>`, or the lookup never finds it.
+// It also narrows the capture: Chrome's filter matches a domain and its subdomains, so asking
+// for the account host skips the cookies holding the session. Both sides collapse to the
+// registrable domain first.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -54,13 +46,9 @@ test('input that is not a site returns empty rather than a guess', () => {
   assert.equal(registrableSite('co.uk'), 'co.uk');
 });
 
-// Regression guard for a hole I opened while fixing where sessions get filed.
-//
-// Collapsing a hostname to its registrable domain is right for FILING a session -- the
-// ordering loop looks up johnlewis.com, so a share from account.johnlewis.com must land
-// there. It is wrong for SCREENING one: collapsing hsbc.example.com to example.com throws
-// away the label that identifies it as a bank, so a stowaway bank cookie riding under an
-// ordinary site sailed through a check that had been catching it.
+// Collapsing to the registrable domain is right for filing a session and wrong for screening
+// one: it throws away the label identifying hsbc.example.com as a bank, letting a stowaway bank
+// cookie under an ordinary site through a check that was catching it.
 test('screening a host keeps the labels that identify it, even though filing drops them', () => {
   const { isSensitiveSite } = require('../../api/services/session-import');
 

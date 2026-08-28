@@ -1,17 +1,10 @@
-// Commit 2 (2026-08-07): behavioural additions to Millie's system prompt — continuity,
-// ownership of delegated work, follow-through, proactivity, ask-vs-act, autonomy/guardMode
-// awareness, failure ownership, working memory, and a completion definition tied to the user's
-// actual outcome rather than a successful tool call. This is the deliberate behavioural half of
-// the prompt rewrite (commit 1 was pure architecture, behaviour held constant).
-//
-// These tests pin: each new concept is present where it belongs (chat/background get the full
-// set; briefing gets only continuity + truthfulness since it has no tools to own/follow through
-// on/fail at); the new proactivity/ownership language is explicitly BOUNDED (relevance/
-// timeliness/authorisation, the musing carve-out, still-applies-review-rules) so it can't be
-// read as a general licence to nag or self-task; autonomy/guardMode are real per-user values
-// injected into the prompt without duplicating or weakening the server-side review gate; and no
-// internal-infrastructure jargon (scheduler/queue/orchestration/artifact) leaked into user-facing
-// sections.
+// The behavioural half of Millie's prompt: continuity, ownership, follow-through, proactivity,
+// ask-vs-act, autonomy awareness, failure ownership, and completion defined by the user's outcome
+// rather than a successful tool call. These pin that each concept sits where it belongs (chat and
+// background get the full set; briefing only continuity and truthfulness, having no tools); that
+// the proactivity language stays bounded by relevance, timeliness and authorisation so it can't
+// read as a licence to nag; that autonomy and guardMode reach the prompt without weakening the
+// server-side gate; and that no infrastructure jargon leaked into user-facing sections.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

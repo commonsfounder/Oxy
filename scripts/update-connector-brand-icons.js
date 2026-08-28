@@ -1,11 +1,7 @@
-// Pulls the real, full-colour App Store product icons for each connector and writes
-// them into the asset catalog as single-scale PNG imagesets. The asset name MUST match
-// the connector's `icon` slug in api/index.js CONNECTORS so the Apps row finds it.
-//
-// Source is the public iTunes Search API (artworkUrl512) — the genuine product icons,
-// not the single-colour simple-icons glyphs we used before. The app clips each square
-// artwork to the iOS superellipse itself (see ConnectorIcon), so we store full-bleed
-// squares here. Any slug without a store app falls back to a monogram tile in-app.
+// Writes each connector's real App Store product icon (iTunes Search artworkUrl512) into the
+// asset catalog as a single-scale PNG imageset. The asset name must match the connector's `icon`
+// slug in CONNECTORS. Stored full-bleed — the app clips to the iOS superellipse itself — and a
+// slug with no store app falls back to a monogram tile.
 //
 // Run:  node scripts/update-connector-brand-icons.js
 const fs = require('fs');

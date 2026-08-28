@@ -1,12 +1,7 @@
-// Phase 2/3: actionPromptBlock() — 82 tool contracts re-serialised as JSON inside the system
-// prompt, ~29KB on top of everything else there — is no longer part of the live prompt.
-// Native function declarations are now the SOLE model-facing capability definitions.
-//
-// Before removing it, the genuinely useful fields (risk, the 18 guidance strings, a handful of
-// format/enum parameter hints) were confirmed already present — or newly added — in
-// actionToFunctionDeclaration()'s native output. These tests prove three things: the dead text
-// is gone from the live prompt, the useful guidance survived the move, and nothing that governs
-// real safety (review gating) was ever sourced from the prompt text in the first place.
+// Native function declarations are the sole model-facing capability definitions —
+// actionPromptBlock(), which re-serialised every contract as ~29KB of JSON inside the system
+// prompt, is not in the live prompt. These prove that text is gone, that the guidance which
+// mattered survived into the native output, and that review gating never came from prompt text.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -71,39 +66,9 @@ test('confirmation is never copied into a native tool description — nothing re
 });
 
 // ── Guidance survives, natively, verbatim ──────────────────────────────────────────────────
-// (39 contracts carry a `guidance` field in total — 22 from earlier phases, plus 10 added
-// 2026-08-07 (commit 1) when the prompt restructure moved tool-specific disambiguation rules —
-// trains vs directions, music vs calendar, place vs shopping, messaging register, email tone,
-// forget_memory scope — out of the numbered static prompt and onto the tool they actually
-// govern, plus 1 more added 2026-08-07 (commit 2) on create_agent_task, the ownership mechanism,
-// plus 1 more added 2026-08-08 on find_appointment_options — steering the model to
-// run_browser_task instead of retrying a tool that only ever talks to the sandbox provider,
-// plus 4 more added 2026-08-08 for real inbox cleanup: archive_emails, label_emails,
-// unsubscribe_email, clean_inbox, plus 1 more added 2026-08-08 for find_reply_needed
-// ("who's waiting on me?"). create_scheduled_task and run_browser_task's EXISTING guidance
-// were also extended the same day for delivery-tracking watches, but that's the same contract
-// gaining more text, not a new one, so it doesn't change this count. Plus 4 more added
-// 2026-08-08 for real trip planning: plan_itinerary, modify_itinerary, and guidance newly added to
-// the previously-bare search_flights/search_hotels steering the model away from treating their
-// deep-link output as real prices or availability. plan_itinerary is a distinct key from the
-// pre-existing plan_trip (a point-to-point route/train planner) — they briefly collided under
-// the same name during development, which silently discarded plan_itinerary's contract entirely
-// until the rename fixed it; the count here is the tripwire that would have caught that. Plus
-// 2 more added 2026-08-08 for the birthday/gift assistant: save_occasion, find_occasions.
-// Plus 1 more for the morning digest: daily_digest, and 3 for the people layer:
-// remember_person, find_people, forget_person_detail, and 1 for spend awareness: find_spend.
-// Plus 3 for general watches: update_scheduled_task, record_watch_observation, and guidance
-// newly added to the previously-bare list_scheduled_tasks. Plus 1 for proactive outbound
-// delivery: set_notification_preference. Plus 3 for commitment tracking: track_commitment,
-// find_commitments, resolve_commitment. Plus 3 for the calendar: find_free_time,
-// schedule_block, move_calendar_event. Plus 1 for calendar cancellation: cancel_calendar_event.
-// Plus 3 for the durable responsibility: start_responsibility, update_responsibility,
-// list_responsibilities. Plus 2 for authorised nearby displays: list_paired_displays and
-// render_to_display. Plus 1 for the full read-only capability sweep: capability_sweep,
-// and 2 for the current-weather versus forecast distinction.)
 // The invariant is that guidance reaches the model verbatim, not that some exact number of
-// contracts carry it — an exact count only ever fails when a capability is added, which is
-// noise rather than a regression. The floor still catches guidance being dropped wholesale.
+// contracts carry it — an exact count only fails when a capability is added, which is noise.
+// The floor still catches guidance being dropped wholesale.
 test('every contract that defines guidance has it appear verbatim in its native description', () => {
   const withGuidance = Object.entries(ACTION_CONTRACTS).filter(([, c]) => c.guidance);
   assert.ok(withGuidance.length >= 60, `guidance collapsed to ${withGuidance.length} contracts`);

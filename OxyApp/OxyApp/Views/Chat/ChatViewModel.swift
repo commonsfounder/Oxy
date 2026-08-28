@@ -761,13 +761,9 @@ final class ChatViewModel {
         }
     }
 
-    // Resume the current session only if it's still "live" by the same rule the
-    // server uses to group sessions (`buildConversationSessions`): less than 45
-    // minutes since the last activity AND the same calendar day. Otherwise start
-    // a fresh session. This keeps the client's notion of the active chat aligned
-    // with the sidebar's session list — reopening the app the next day (or after
-    // a long idle) no longer feeds yesterday's messages into the current context.
-    // Must match the server's buildConversationSessions grouping.
+    // Resume the current session only while it is still live by the server's own rule in
+    // buildConversationSessions — under 45 minutes idle and the same calendar day — so the
+    // client's active chat matches the sidebar's session list. Must stay in step with it.
     static let sessionReuseWindow: TimeInterval = 45 * 60
     static func canReuseSession(lastActivity: Date, now: Date) -> Bool {
         now.timeIntervalSince(lastActivity) < sessionReuseWindow

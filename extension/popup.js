@@ -1,17 +1,10 @@
 'use strict';
 
-// Share one site's signed-in session with Oxy.
-//
-// This exists because macOS fences off Chrome's cookie file: a script cannot read it without
-// being granted Full Disk Access, which is a far broader permission than "let me share one
-// shop". Chrome's own cookies API has no such problem, and asking for host access one site
-// at a time is the least privilege that does the job.
-//
-// Signing in happens here rather than by fetching a token from a terminal. A feature that
-// needs a command line before it works is a feature nobody uses.
-//
-// The site is always the tab you are looking at. It is never typed, so there is no way to
-// mistype a domain and share the wrong site's cookies.
+// Share one site's signed-in session with Oxy, from the extension rather than a script:
+// reading Chrome's cookie file needs Full Disk Access, where the cookies API plus per-site host
+// access is the least privilege that does the job. Signing in happens here too, since a feature
+// that needs a terminal first is one nobody uses. The site is always the current tab, never
+// typed, so the wrong site's cookies cannot be shared by a mistyped domain.
 
 const API = 'https://milgrain-live-2026.fly.dev';
 
@@ -52,11 +45,9 @@ const MULTI_PART_SUFFIXES = new Set([
 ]);
 
 /**
- * The site a session should be filed under, not the exact page host.
- *
- * Sharing from account.johnlewis.com must file under johnlewis.com: that is what the
- * ordering loop looks up, and Chrome's cookie filter matches a domain and its SUBdomains,
- * so asking for the account host would skip the .johnlewis.com cookies holding the session.
+ * The site a session is filed under, not the exact page host: sharing from account.<site> must
+ * file under <site>, since that is what the lookup uses and Chrome's filter matches a domain
+ * plus its subdomains, so the account host would skip the cookies holding the session.
  */
 function siteFromUrl(url) {
   let host;

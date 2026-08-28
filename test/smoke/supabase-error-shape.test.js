@@ -1,18 +1,11 @@
 'use strict';
 
-// supabase-js does not reject. It RESOLVES with `{ data, error }`.
+// supabase-js does not reject — it resolves with `{ data, error }`, for an RLS refusal, a
+// constraint violation, a missing column, and even a dead host. So a try/catch around a query
+// catches nothing that actually happens while reading as a safety net.
 //
-// That is true for an RLS refusal, a constraint violation, a missing column, and even a
-// dead host — "TypeError: fetch failed" arrives in the `error` field, not as an exception.
-// So `try { await supabase.from(...)... } catch { ... }` catches nothing that actually
-// happens, and the code inside reads as a safety net while being unreachable.
-//
-// This has now bitten this repo three separate times: notification-delivery.js documents
-// the `.catch()`-on-a-query-builder version, credential-grants.js handed out an uncounted
-// credential when the use-count write failed, and /health reported `db: ok` for every
-// database failure it exists to detect. These are source-level tripwires rather than
-// behavioural tests on purpose — asserting the real behaviour would mean requiring the
-// database to be DOWN, which is not a state a test suite should depend on.
+// Source-level tripwires on purpose: asserting the real behaviour would mean requiring the
+// database to be down, which is not a state a test suite should depend on.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');

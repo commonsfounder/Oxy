@@ -1,15 +1,9 @@
 #!/usr/bin/env node
 /**
- * Agentic Migration Runner for Oxy
- * Loads the SQL from supabase/migrations/supabase-migration-agentic.sql and provides instructions + attempts basic verification.
- * 
- * Because Supabase client doesn't support arbitrary DDL, this script:
- * 1. Prints the full SQL for you to paste into the Supabase SQL Editor (recommended).
- * 2. Tries to connect with your keys and checks if the new tables exist.
- * 3. If not, reminds you to run the SQL.
+ * Prints supabase-migration-agentic.sql for pasting into the SQL Editor, then checks whether the
+ * new tables exist — the client cannot run arbitrary DDL itself.
  *
- * Usage: node scripts/apply-agentic-migration.js
- * Make sure your .env or Documents/Oxy/.env has SUPABASE_URL and SUPABASE_KEY (service key recommended for schema)
+ * Usage: node scripts/apply-agentic-migration.js  (needs SUPABASE_URL and a service SUPABASE_KEY)
  */
 
 const fs = require('fs');

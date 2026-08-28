@@ -1,12 +1,8 @@
 'use strict';
 
-// The authorisation decision for using a stored password.
-//
-// The rule that matters: the GRANT is the authority, and it comes from the user. The model
-// picks which sites to request (run_browser_task's credentialSites param), and this agent
-// reads web pages written by strangers, so a model-chosen site must never be able to widen
-// what the user allowed -- it can only narrow it. Every other check here exists so an
-// unattended grant cannot quietly become a permanent one.
+// The authorisation decision for using a stored password. The grant is the authority and comes
+// from the user: a model-chosen site can only narrow what the user allowed, never widen it, on
+// an agent that reads pages written by strangers. The rest keeps a grant from becoming permanent.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
@@ -186,13 +182,9 @@ test('a grant that did not come from the user is never honoured', () => {
   assert.equal(decision.reason, 'not_user_granted');
 });
 
-// Regression guard for a silent no-op.
-//
-// The use counter was originally advanced with `await query.catch?.(fn)`. The PostgREST
-// query builder has no .catch method, so that expression short-circuited to
-// `await undefined` -- and because these builders only execute when awaited, the update
-// never ran. The cap silently did nothing, and only a live run against the real database
-// exposed it. This asserts the write is actually issued.
+// Asserts the use counter's write is actually issued. A PostgREST builder has no .catch, so
+// `await query.catch?.(fn)` short-circuits to `await undefined` and never executes the update —
+// a cap that silently does nothing.
 test('using a grant actually advances the counter, so a use cap cannot silently do nothing', async () => {
   const { authorizeCredentialUse } = require('../../api/services/credential-grants');
   const updates = [];
@@ -250,13 +242,9 @@ test('using a grant actually advances the counter, so a use cap cannot silently 
   assert.equal(logged.row.site, 'johnlewis.com');
 });
 
-// Source-level tripwire, same style as the commitments one.
-//
-// The credential log is only honest if it covers BOTH ways the agent gets into an account.
-// It shipped covering password sign-ins only, while browser-task.js quietly reused stored
-// session cookies -- which that file itself notes are "often stronger than a password, since
-// a live session cookie skips login and 2FA entirely". Reusing a session is the common case,
-// so omitting it made the log misleading rather than merely incomplete.
+// Source-level tripwire: the credential log is only honest if it covers both ways into an
+// account. A reused session cookie is stronger than a password and is the common case, so
+// logging password sign-ins alone makes the log misleading rather than merely incomplete.
 test('reusing a stored browser session is recorded as a credential use', () => {
   const fs = require('node:fs');
   // Opening a page with a stored session happens in the general browser environment now,
@@ -274,19 +262,11 @@ test('reusing a stored browser session is recorded as a credential use', () => {
 });
 
 
-// The use cap is only a cap if a failed counter stops the sign-in.
-//
-// authorizeCredentialUse increments use_count BEFORE handing the credential over, and
-// guarded that write with a try/catch. supabase-js does not reject -- it RESOLVES with
-// `{ error }`, for an RLS refusal, a constraint, and even a dead host ("TypeError: fetch
-// failed" arrives in that field, not as an exception). So the catch never ran, and a grant
-// capped at one use was handed out uncounted precisely when the database was least able to
-// enforce the cap. Both failure shapes are asserted, because a returned error is the one
-// that actually happens in production.
-// A chainable stand-in for the PostgREST builder: every filter returns the builder and the
-// builder itself is the thenable, which is what makes `.update().eq().eq()` await correctly.
-// A stub that returned a bare Promise from update() would blow up on the first `.eq` and
-// make these tests pass for entirely the wrong reason.
+// The use cap is only a cap if a failed counter stops the sign-in. supabase-js resolves with
+// `{ error }` rather than rejecting, even for a dead host, so a try/catch around the increment
+// never runs. Both failure shapes are asserted; the returned error is the one that happens.
+// The stand-in below is chainable and thenable, so `.update().eq().eq()` awaits correctly — a
+// stub returning a bare Promise would throw on the first `.eq` and pass for the wrong reason.
 function query(settle) {
   const builder = {
     select: () => builder,
@@ -362,16 +342,10 @@ test('a counted use is still authorised, so the guard has not simply broken sign
 });
 
 
-// A task-scoped grant is the BOUNDED permission -- "sign in for this one job" -- and it is
-// the DEFAULT scope in validateGrantInput. It authorised nothing at all.
-//
-// authorizeCredentialUse was called with `session.pendingCredentialTaskId`, which is only
-// assigned AFTER an offer has already been made, so at the moment of the decision it was
-// always null and decideCredentialUse always answered 'wrong_task'. Worse, the only id
-// available to bind a grant to was runOrderingTurnImpl's taskId -- a fresh randomUUID() on
-// every turn -- so even a correctly-created task grant could never match a later turn. The
-// net effect was that the only grant that worked was `standing`, the broader one: the
-// bounded option silently failed and pushed the user to the permanent permission.
+// A task-scoped grant is the bounded permission — "sign in for this one job" — and the default
+// scope, so it has to actually authorise. When the task id at the decision point is null, or is
+// freshly generated per turn, every task grant answers 'wrong_task' and the only workable
+// option left is the broader standing grant.
 test('a task-scoped grant authorises the run it was bound to', () => {
   const runId = 'run-abc';
   const decision = decideCredentialUse({

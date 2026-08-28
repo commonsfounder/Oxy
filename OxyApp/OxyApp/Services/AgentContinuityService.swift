@@ -27,13 +27,9 @@ enum AgentContinuityService {
         return try JSONDecoder().decode(AgentContinuityImportResult.self, from: response)
     }
 
-    /// A vendor export is a ZIP; its loose `conversations.json` is only one file out of
-    /// several. The ZIP carries the instructions and memory too, so it is always the better
-    /// upload — send it whole and let the server unpack it, rather than asking someone to
-    /// unzip and guess which file matters.
-    ///
-    /// No `source` is sent: the server identifies the export by its layout, and a client
-    /// label would only override that with a worse guess.
+    /// Send the ZIP whole and let the server unpack it: a loose `conversations.json` is one file
+    /// out of several, and the ZIP carries the instructions and memory too. No `source` — the
+    /// server identifies the export by its layout, and a client label is a worse guess.
     private static func payload(from fileData: Data) throws -> [String: Any] {
         if isZip(fileData) {
             return ["zipBase64": fileData.base64EncodedString()]

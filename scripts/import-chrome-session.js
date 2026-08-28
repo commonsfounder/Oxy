@@ -1,21 +1,14 @@
 #!/usr/bin/env node
 
-// Hand Oxy the login you already have in Chrome, for ONE site.
+// Hand Oxy the login you already have in Chrome, for ONE site, so the agent arrives signed in
+// instead of as the brand-new visitor bot detection is built to catch — without ever learning
+// the password, since it never signs in.
 //
 //   node scripts/import-chrome-session.js <site> [--api <url>] [--dry-run]
-//   node scripts/import-chrome-session.js johnlewis.com --dry-run
 //
-// Why this exists: the agent currently arrives at every site as a brand-new browser with no
-// history, which is exactly what bot detection is built to catch, and it then has to get
-// past a login wall and 2FA. Arriving already signed in removes all three. Oxy never learns
-// the password, because it never signs in.
-//
-// This runs entirely on your machine. It reads Chrome's cookie store, keeps only the
-// cookies for the one site you named, and posts them to your own server. It never prints a
-// cookie value, and --dry-run posts nothing at all.
-//
-// Requires OXY_API_TOKEN (from /auth/login) and, on macOS, permission to read the
-// "Chrome Safe Storage" key from your Keychain -- macOS will prompt you for that.
+// Runs entirely on your machine: reads Chrome's cookie store, keeps only the named site's
+// cookies, posts them to your own server. Never prints a cookie value; --dry-run posts nothing.
+// Requires OXY_API_TOKEN and, on macOS, Keychain access to the "Chrome Safe Storage" key.
 
 const crypto = require('crypto');
 const fs = require('fs');

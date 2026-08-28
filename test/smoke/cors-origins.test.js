@@ -1,17 +1,11 @@
 'use strict';
 
-// Which origins may call the API.
+// Which origins may call the API, including `chrome-extension://<id>`, which is not a website.
 //
-// The Chrome extension calls from `chrome-extension://<id>`, which is not a website and was
-// never in the allowlist, so every request from it was rejected as a CORS failure and
-// surfaced to the user as an unexplained HTTP 500.
-//
-// Letting extension origins through is safe *here* specifically because this API
-// authenticates on headers only -- Bearer or X-Session-Token, never cookies (see auth.js's
-// getProvidedSessionToken). CORS exists to stop a hostile page spending the browser's
-// ambient credentials; with no cookie auth there are none to spend, so an extension origin
-// still has to present a real token. That reasoning would not hold if cookie auth were ever
-// added, which is why it is written down rather than assumed.
+// Allowing extension origins is safe here specifically because this API authenticates on headers
+// only, never cookies. CORS exists to stop a hostile page spending the browser's ambient
+// credentials; with no cookie auth there are none to spend, so an extension origin still has to
+// present a real token. That reasoning would not survive adding cookie auth.
 
 const assert = require('node:assert/strict');
 const test = require('node:test');

@@ -1,23 +1,13 @@
 'use strict';
 /*
- * Latency baseline harness.
+ * Latency baseline harness: spawns the real server, fires a fixed set of /chat messages, and
+ * records client TTFT plus the server's own [trace:...] marks — preamble_ms (serial pending-state
+ * reads), context_ms (parallel context load), ttft_ms, and the model time left over.
  *
- * Spawns the real server, fires a fixed set of /chat messages through it with a
- * self-minted session token, and records two things per request:
- *   - client TTFT  : wall time until the first `text` SSE chunk arrives
- *   - server marks : parsed from the existing [trace:...] stdout —
- *       preamble_ms  = time from request start to BEGIN buildChatContext
- *                      (the serial pending-state DB reads we want to cut)
- *       context_ms   = buildChatContext duration (parallel context load)
- *       ttft_ms      = gemini.first_token timestamp (server-side TTFT)
- *       model_ttft   = ttft_ms - (preamble_ms + context_ms)  ≈ the part we DON'T control
+ * Run:  node test/bench/latency.js   (needs the same .env vars server.js requires)
  *
- * Run:  node test/bench/latency.js
- * Needs a .env at repo root with SUPABASE_URL, SUPABASE_KEY, GEMINI_API_KEY,
- * OXY_SESSION_SECRET (the same vars server.js requires).
- *
- * Writes test/bench/baseline-<timestamp>.json and prints a table. Run it before
- * and after a change; compare the medians. Fixed inputs => the delta is real.
+ * Writes test/bench/baseline-<timestamp>.json and prints a table. Fixed inputs, so comparing
+ * medians before and after a change gives a real delta.
  */
 
 const path = require('path');

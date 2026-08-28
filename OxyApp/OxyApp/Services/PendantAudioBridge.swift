@@ -1,14 +1,9 @@
 import Foundation
 import Observation
 
-/// Bridges continuous pendant BLE audio to the chat pipeline.
-///
-/// Audio flow: pendant PDM (16 kHz Int16) → BLE chunks → onset VAD →
-/// WAV encode → /pendant/transcribe (Gemini) → onTranscript → sendMessage().
-///
-/// Using server-side Gemini transcription instead of SFSpeechRecognizer
-/// eliminates the on-device ASR hallucination problem ("No" from distorted
-/// or quiet audio) and is far more accurate for real speech.
+/// Bridges continuous pendant BLE audio to the chat pipeline: PDM (16 kHz Int16) → BLE chunks →
+/// onset VAD → WAV → /pendant/transcribe → onTranscript → sendMessage(). Server-side
+/// transcription rather than SFSpeechRecognizer, which hallucinates on quiet or distorted audio.
 @Observable
 @MainActor
 final class PendantAudioBridge {

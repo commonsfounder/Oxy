@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 
-// Proves the live database actually matches the user-data manifest.
-//
-// `npm test` only ever compares the manifest to the SQL files on disk, so it cannot
-// tell whether those files were ever applied.  On 2026-08-24 the files and the manifest
-// agreed while production was missing six of the declared tables: account deletion
-// returned a 500 for every user and the suite was green the whole time.  Run this
-// against the real database instead of trusting the files.
+// Proves the live database matches the user-data manifest. `npm test` only compares the manifest
+// to the SQL files on disk, so it cannot tell whether those files were ever applied — a green
+// suite is compatible with production missing declared tables entirely.
 //
 //   node scripts/check-live-schema.js
 

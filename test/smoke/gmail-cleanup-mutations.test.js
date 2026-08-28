@@ -1,16 +1,11 @@
-// Real Gmail mutation primitives for inbox cleanup: archive_emails, label_emails,
-// unsubscribe_email (connectors/google.js). These are tested against a FAKE MAILBOX that
-// implements real Gmail API semantics (batchModify actually changes labelIds; a re-fetch
-// after the mutation reflects the change; one-click POSTs go to the real configured URL;
-// mailto unsubscribes actually call messages/send) rather than a static {data:{}} stub — the
-// point is to prove the mutation + verification logic is correct, not just that a call was
-// made.
+// The Gmail mutation primitives for inbox cleanup, tested against a fake mailbox that implements
+// real API semantics — batchModify changes labelIds, a re-fetch reflects it, one-click POSTs go
+// to the configured URL — so this proves the mutation and verification logic, not just that a
+// call was made.
 //
-// A fake is still only as good as its fidelity to the real API. The label tests below exist
-// because this fake used to accept any string as a labelId, so "add the label Receipts"
-// passed here for months while failing every single time against real Gmail, which only
-// accepts opaque ids (Label_1) for user labels. The fake now rejects unknown ids the way
-// Gmail does. These primitives have since been exercised against the live account.
+// A fake is only as good as its fidelity: it rejects unknown label ids the way Gmail does, since
+// Gmail only accepts opaque ids (Label_1) for user labels and a lenient fake passes a name that
+// fails every time live.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
