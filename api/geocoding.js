@@ -130,14 +130,10 @@ function placeMatchesQuery(place, query) {
 }
 
 /**
- * @param {boolean} sortByDistance - When true (category/"nearest X" searches), the
- *   closest matching candidate to the user wins — that's the actual ask. When false
- *   (a named-place lookup like "King's Cross" or "Selfridges"), Google's own text-search
- *   relevance order is preserved instead: `placeMatchesQuery` is a loose "every token
- *   appears somewhere in the name/address" substring test, so re-sorting matches by raw
- *   distance-to-user can promote an unrelated business that merely shares an address
- *   fragment (e.g. something on "King's Cross Road") over the actual landmark Google
- *   already ranked first, producing a wrong — sometimes drastically distant — result.
+ * @param {boolean} sortByDistance - True for "nearest X" searches, where the closest match is
+ *   the ask. False for a named-place lookup, which keeps Google's relevance order:
+ *   `placeMatchesQuery` is a loose token-substring test, so sorting by distance can promote a
+ *   business that merely shares an address fragment over the landmark itself.
  */
 function rankedGooglePlaceCandidates(places, location, query = '', sortByDistance = true) {
   const normalizedLocation = normalizeLocation(location);
@@ -158,12 +154,9 @@ function rankedGooglePlaceCandidates(places, location, query = '', sortByDistanc
       return a.googleRank - b.googleRank;
     });
   const matched = candidates.filter(place => place.queryMatch);
-  // When the query carries a real name (meaningful tokens) and NOTHING matches it,
-  // return the empty match list rather than the nearest unrelated place. Otherwise a
-  // search for "John Lewis" with no John Lewis nearby would confidently hand back the
-  // closest building (e.g. a Tesco) as if it were the answer. With empty tokens (a
-  // generic category search like "supermarket") every candidate matches, so this still
-  // returns the full distance-ranked list.
+  // A named query that matches nothing returns nothing, rather than the nearest unrelated
+  // building. A generic category search has no meaningful tokens, so every candidate matches
+  // and the full distance-ranked list still comes back.
   if (matched.length) return matched;
   return meaningfulPlaceTokens(query).length ? [] : candidates;
 }

@@ -1,22 +1,13 @@
-// Shared daily-rolling-total spend guard for every path that can move concierge money OUT,
-// wherever that path lives. Regression: api/index.js had its own local guardConciergeSpend
-// (applying both the per-transaction AND rolling daily cap), but connectors/stripe.js — which
-// handles spend_from_concierge_via_stripe and stripe_payout_to_user — only ever called
-// checkSpendLimit with no spentToday, so those two actions enforced the per-transaction cap
-// but NOT the daily one. Extracted here so every spend action shares one real guard instead
-// of each call site reimplementing (or forgetting) the daily half.
+// The one spend guard for every path that moves concierge money out, applying both the
+// per-transaction and the rolling daily cap — call sites that reimplement it forget the daily half.
 const { checkSpendLimit, capCurrency, convertAmount } = require('./money-guard');
 
 const SPEND_DAY_KEY = 'concierge_account.spend_day';
 
-// `currency` is the currency `amount` is expressed in (e.g. a UK checkout total is GBP). It is
-// normalized to the cap currency BEFORE the cap math and BEFORE it lands in the rolling tally,
-// so the daily total is always single-currency and repeated foreign spends accumulate correctly.
-// Omitting it preserves the old behaviour: the amount is treated as already in the cap currency
-// (the concierge account itself is USD-denominated).
-// `record: false` checks the cap without consuming budget. Reaching a payment step is not
-// spending: every failed attempt used to permanently eat its own amount, and ten aborted
-// tries could exhaust a daily cap without a penny leaving the account.
+// `currency` is what `amount` is expressed in, normalized to the cap currency before the cap
+// math and before the rolling tally, so the daily total stays single-currency. Omitted, the
+// amount is treated as already in the cap currency. `record: false` checks without consuming
+// budget — reaching a payment step is not spending, and aborted attempts must not eat the cap.
 async function guardConciergeSpend(supabase, userId, amount, currency = null, { record = true } = {}) {
   const capCur = capCurrency();
   const normalized = convertAmount(amount, currency || capCur, capCur);

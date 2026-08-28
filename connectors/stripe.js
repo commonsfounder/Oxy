@@ -8,14 +8,9 @@ const { resolveCurrencyForLocation } = require('../api/services/currency-from-lo
 
 const supabase = createSupabaseServiceClient();
 
-// Actions on this connector that move money OUT and must respect the hard per-transaction AND
-// rolling-daily caps, even when reached post-approval (bypassReview). Receiving money (payment
-// links) is exempt. Regression: this used to call checkSpendLimit directly with no spentToday,
-// so these enforced the per-transaction cap but silently skipped the daily one — a repeat spend
-// action here could blow straight past OXY_MAX_SPEND_PER_DAY. guardConciergeSpend (shared with
-// api/index.js) applies both.
-// stripe_charge is handled inline in api/index.js, ahead of dispatch — it never reaches this
-// file, so there is no branch for it here.
+// Actions here that move money out, which must respect both the per-transaction and the rolling
+// daily cap even post-approval — guardConciergeSpend applies both. Receiving money is exempt.
+// stripe_charge is handled inline in api/index.js ahead of dispatch and never reaches this file.
 const SPEND_ACTIONS = new Set(['spend_from_concierge_via_stripe', 'stripe_payout_to_user']);
 
 async function getStripeKey(userId) {
@@ -92,18 +87,9 @@ async function execute(userId, action, params) {
     if (action === 'spend_from_concierge_via_stripe') {
       const amountCents = Math.round((params.amount || 10) * 100);
       const desc = params.description || 'Concierge spend';
-      // dispatch()/execute() (connectors/index.js:60) has no request-identity or
-      // pendingAction context to build a stable per-approval idempotency key from
-      // (unlike api/index.js's own pendingKey at line 5656) — threading that through
-      // would mean changing every connector's execute(userId, action, params)
-      // signature, out of scope here. A fresh random key per call is still correct:
-      // it only needs to keep this process's own Stripe calls from colliding (e.g.
-      // two separate $10 "coffee" spends on the same day must NOT reuse a key, or
-      // Stripe would silently replay the first charge's result for the second). The
-      // thing that actually prevents one *approval* from executing twice — including
-      // across two Fly machines racing the same confirm request — is the
-      // atomic claimPendingAction compare-and-delete upstream (api/index.js:3021),
-      // which already guarantees at most one call reaches this function per approval.
+      // A fresh random idempotency key per call: execute() has no per-approval context to build
+      // a stable one from, and this only needs to keep two genuinely separate spends from
+      // sharing a key. What stops one approval executing twice is claimPendingAction upstream.
       const idempotencyKey = crypto.randomUUID();
 
       const stripeSdk = require('stripe')(key);

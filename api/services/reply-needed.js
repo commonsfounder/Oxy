@@ -1,26 +1,16 @@
 'use strict';
 
-// "Who's waiting on me?" — thread-level classification of whether a Gmail thread currently
-// needs something FROM the user (a reply, or a small concrete action like signing something),
-// as opposed to message-level triage (is THIS message promotional/urgent), which
-// emailTriageSignals in api/index.js already answers. Genuinely a different question — no
-// existing classifier answers "does this THREAD's current state require the user to do
-// something" — so this is a new, thread-scoped layer, not a duplicate of the message-level one.
-// The cheap pre-filter below deliberately reuses the SAME signal emailTriageSignals is built
-// on (List-Unsubscribe / bulk wording / automated-sender shape) so obviously-noise threads
-// never reach the more expensive LLM judgment call.
+// "Who's waiting on me?" — whether a thread's current state needs something from the user,
+// which is a different question from emailTriageSignals' message-level "is this one promotional
+// or urgent". The cheap pre-filter reuses that module's signal so obvious noise never reaches
+// the more expensive judgment call.
 
 const MAX_THREAD_TEXT = 6000;
 
-// Content that says, in so many words, that something is waiting on the user. Real platforms
-// send exactly this from no-reply addresses — a Y Combinator "co-founder matching invite is
-// still waiting for your response" was being dropped before it ever reached judgment purely
-// because of its sending address. The pre-filter is a cheap screen for obvious noise; it must
-// not silently discard a message whose own text says the user is the blocker.
-// "Please confirm" is deliberately NOT here: real marketing uses it constantly ("Please
-// Confirm: Your £19.99 Offer!"), and including it pulled a Temu promo out of the noise filter
-// during real-inbox testing. Every phrase below is about a RESPONSE being awaited, not about
-// clicking something.
+// Text saying outright that something is waiting on the user, which real platforms send from
+// no-reply addresses — the noise filter must not drop a message whose own words say the user is
+// the blocker. "Please confirm" is deliberately absent: marketing uses it constantly. Every
+// phrase here is about a response being awaited, not about clicking something.
 const EXPLICITLY_AWAITING_USER = /\b(waiting for your (?:response|reply|answer)|awaiting your (?:response|reply|approval)|your response is (?:needed|required)|needs your (?:approval|response|attention)|respond by|reply by|please (?:respond|reply)|invitation .{0,40}waiting|still waiting for)\b/i;
 
 function looksExplicitlyAwaitingUser(latestMessage = {}) {

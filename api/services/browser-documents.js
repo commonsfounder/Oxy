@@ -1,17 +1,11 @@
 'use strict';
 const { storeDocument, getDocument, getDocumentBytes } = require('./documents');
 
-// The two directions that turn the browser from a thing that reads pages into a thing that
-// can do paperwork: files off a website into the document store, and files out of the store
-// into a website's upload field.
-//
-// This lives outside browser-task.js on purpose. That file is 6,000 lines of order loop, and
-// these operations have nothing to do with ordering — they are equally the machinery of
-// applying for a job, downloading a policy, or claiming a refund. Keeping them here also
-// means they can be tested without launching a browser.
-//
-// The discipline from email attachments carries over unchanged: uploads are resolved by
-// DOCUMENT ID, never by filename, and a document belonging to another workflow is refused.
+// The two directions that let the browser do paperwork: files off a website into the document
+// store, and files out of the store into an upload field. Kept separate from the browser
+// primitives so they can be tested without launching one. The email-attachment discipline
+// carries over: uploads resolve by document id, never filename, and a document belonging to
+// another workflow is refused.
 
 // Downloads are usually a click away, not an instant response; a slow gov.uk PDF render can
 // take a while, but waiting forever would hang the whole task.

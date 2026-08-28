@@ -1,13 +1,8 @@
 'use strict';
 
-// Milestone 1 has exactly two tiers: 'ask' (the reply implies a decision — a
-// different time, a price, a question back — Millie must check with the user
-// before anything else happens) and 'surface' (purely informational, nothing to
-// decide). There is deliberately no 'auto-reply' tier yet — see the plan's Global
-// Constraints this file was built from.
-//
-// Conservative on purpose: anything that isn't confidently a plain confirmation or
-// a plain statement of fact defaults to 'ask', never silently 'surface'.
+// Two tiers: 'ask' (the reply implies a decision, so check with the user first) and 'surface'
+// (informational, nothing to decide). No auto-reply tier. Conservative on purpose — anything
+// not confidently a plain confirmation or statement of fact defaults to 'ask'.
 
 const ALTERNATIVE_OFFER_RE = /\b(instead|how about|we can do|can do|works for you|would.+work|available at)\b/i;
 const QUESTION_BACK_RE = /\?\s*$/;

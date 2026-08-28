@@ -133,14 +133,9 @@ async function clearPaymentActionRequired(supabase, userId) {
   await supabase.from('preferences').delete().eq('user_id', userId).eq('key', PAYMENT_ACTION_REQUIRED_KEY);
 }
 
-// Atomically claims a pending payment_action_required record for a given
-// PaymentIntent id, so a webhook event that is redelivered (Stripe uses
-// at-least-once delivery) cannot resolve the same SCA charge twice. Reads the
-// raw stored row, then deletes it only if the value column still matches
-// exactly what was read (compare-and-delete) — mirroring claimPendingAction
-// in api/index.js. Only the caller whose delete actually removed a row (i.e.
-// data.length > 0) "wins" the claim; a redelivered/concurrent event that
-// arrives after the row is already gone gets false and must not deduct.
+// Claims a pending payment_action_required record so an at-least-once webhook redelivery can't
+// resolve the same SCA charge twice. Compare-and-delete on the value read, like
+// claimPendingAction in api/index.js: only the caller that removed a row wins and may deduct.
 async function claimPaymentActionRequired(supabase, userId, paymentIntentId) {
   const { data: row } = await supabase
     .from('preferences')

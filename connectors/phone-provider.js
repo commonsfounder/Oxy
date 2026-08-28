@@ -1,21 +1,13 @@
 'use strict';
 
-// The provider seam for Millie's phone identity.
+// The provider seam for Millie's phone identity, so the telecom vendor is one registration away
+// from being swapped. Twilio is the current default, being the only one confirmed to sell UK
+// mobile numbers without UK proof-of-address.
 //
-// Every call site that used to `require('./millie-sms-twilio')` directly goes through
-// here instead, so the choice of telecom vendor is one registration away from being
-// swapped. That choice is not settled: Twilio is where we provision first because it is
-// the only provider confirmed to sell UK *mobile* (+447) numbers to an individual with
-// no UK proof-of-address, but it is also the most expensive per number, and Telnyx is a
-// live candidate pending written confirmation of UK mobile inventory. See
-// docs/superpowers/specs/2026-08-10-capability-classes-and-communication-identity-audit.md.
-//
-// The important asymmetry this file encodes: PROVISIONING follows the currently-active
-// provider, but SENDING follows the provider that issued the number being sent from.
-// A number bought on Twilio keeps being driven by Twilio even after MILLIE_PHONE_PROVIDER
-// flips to something else — otherwise switching vendors would silently orphan every
-// number already in the field. That is why millie_identity_handles.provider is written
-// from the provisioning result rather than hardcoded, and read back on every send.
+// The asymmetry that matters: provisioning follows the active provider, sending follows the
+// provider that issued the number being sent from. Otherwise switching vendors orphans every
+// number already in the field — which is why the handle's provider is written from the
+// provisioning result and read back on every send.
 
 const providers = new Map();
 

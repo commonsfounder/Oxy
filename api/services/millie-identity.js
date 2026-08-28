@@ -1,15 +1,9 @@
 'use strict';
 
-// Millie's own persistent communication identity. One row per user in
-// millie_identities; one row per channel in millie_identity_handles. Provisioning
-// is idempotent and safe to call repeatedly — ensureMillieIdentity always returns
-// the existing identity/handles if they're already there, never duplicates them.
-//
-// Phone provisioning can fail (no provider configured, no numbers available in the
-// user's region, etc.) without blocking email provisioning or user signup — each
-// channel is attempted and recorded independently. The phone vendor is not baked in
-// here: provisioning is injected, and the resulting handle records which provider
-// issued the number (see connectors/phone-provider.js).
+// Millie's own persistent communication identity: one row per user, one per channel.
+// Provisioning is idempotent, and each channel is attempted and recorded independently, so a
+// failed phone number never blocks email or signup. The phone vendor is injected, not baked in,
+// and the handle records which provider issued the number.
 
 function normalizeUserIdForAddress(userId) {
   return String(userId || '')

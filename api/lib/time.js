@@ -1,12 +1,8 @@
 'use strict';
 
-// Local-time helpers. Everything user-facing in this product is expressed in the user's
-// wall-clock day, not UTC: "today's digest", "is this due today", "which briefing window
-// are we in". Doing that with raw Date arithmetic silently breaks across BST/GMT, so the
-// formatting goes through Intl with an explicit zone every time.
-//
-// These lived inside api/index.js while several services grew their own copy of the same
-// `process.env.TIMEZONE || 'Europe/London'` default. One definition now.
+// Local-time helpers, and the one definition of the timezone default. Everything user-facing is
+// expressed in the user's wall-clock day, which raw Date arithmetic silently breaks across
+// BST/GMT — so formatting goes through Intl with an explicit zone every time.
 
 const DEFAULT_TIMEZONE = 'Europe/London';
 

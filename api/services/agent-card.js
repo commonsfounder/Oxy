@@ -1,12 +1,9 @@
 'use strict';
 
-// Stored payment card for browser-checkout ordering — the card the agent types into a
-// merchant's own payment form after the user explicitly confirms a ready_for_payment gate.
-// Distinct from stripe-cards.js: that card is a Stripe token for charging the user via
-// Stripe; this one has to be the real PAN because merchant checkouts want a form filled,
-// not an API call. Stored encrypted (token-crypto AES-256-GCM) in the connectors table,
-// same envelope as every other connector secret. It is only ever decrypted server-side
-// inside confirmPayment — nothing returns the full number to a client or a model prompt.
+// The card the agent types into a merchant's own payment form after a confirmed payment gate.
+// Unlike stripe-cards.js's token, this has to be the real PAN, because a checkout wants a form
+// filled. Encrypted in the connectors table and only decrypted inside confirmPayment; the full
+// number never reaches a client or a prompt.
 
 const { encryptTokens, decryptTokens } = require('./token-crypto');
 

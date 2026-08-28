@@ -1,14 +1,9 @@
 'use strict';
 const axios = require('axios');
 
-// Millie's phone number and SMS, via Twilio's plain REST API (Basic Auth,
-// application/x-www-form-urlencoded) — no twilio npm SDK, matching this
-// codebase's existing pattern of calling provider REST APIs directly with axios
-// (see connectors/google.js). US numbers require A2P 10DLC brand+campaign
-// registration with Twilio before carriers reliably deliver SMS — that is an
-// account-level, non-code prerequisite; provisioning still creates and persists
-// the number without it, but delivery may be filtered until registration
-// completes. This file does not attempt to detect or manage that registration.
+// Millie's phone number and SMS over Twilio's plain REST API, no SDK, like the other connectors
+// here. US numbers need A2P 10DLC registration before carriers deliver reliably — an
+// account-level prerequisite this file neither detects nor manages; provisioning works without it.
 
 const MILLIE_SMS_SIGNATURE_LINE = '- Millie (assistant)';
 

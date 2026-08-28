@@ -1,27 +1,16 @@
 'use strict';
 
-// Is a shared browser session still signed in?
-//
-// A session shared from the user's own browser can stop working for reasons none of which
-// announce themselves: it expires, the site invalidates it, or the site refuses it when it
-// arrives from a server in a different place to the browser that minted it. The agent then
-// quietly behaves like a logged-out visitor, and the user has no way to know that is what
-// happened — they just see worse results.
-//
-// This reads a page's own signals. It is deliberately willing to answer "not clear": a
-// confident wrong answer here is worse than an honest unknown, because the whole point is
-// to tell the user something they cannot otherwise see.
+// Is a shared browser session still signed in? A session can stop working without announcing
+// it — expired, invalidated, or refused for arriving from a server — leaving the agent behaving
+// like a logged-out visitor with the user seeing only worse results. This reads the page's own
+// signals and is willing to answer "not clear", since a confident wrong answer defeats the point.
 
 // Being asked for a password is the one signal the signed-in state cannot explain.
 const LOGIN_URL_RE = /\/(login|signin|sign-in|auth|authorize)\b/i;
 
-// Present only when signed in. "Sign out" is the strongest: a logged-out page has nothing
-// to sign out of.
-// Calibrated against a real signed-in John Lewis account page, which said none of "sign
-// out", "your orders" or "my orders" — it said "View all orders" and "Update your personal
-// details". The first version read that page as inconclusive while the control was cleanly
-// detected, which is the worst way to be wrong: confident about failure, silent about
-// success. These are phrases a logged-out page has no reason to render.
+// Phrases a logged-out page has no reason to render. "Sign out" is the strongest — there is
+// nothing to sign out of — but a real account page may say only "View all orders" or "Update
+// your personal details", so those count too.
 const SIGNED_IN_RE = new RegExp([
   'sign out', 'log ?out',
   'view all orders', 'order history', '\\b(your|my) orders\\b',

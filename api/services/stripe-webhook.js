@@ -1,15 +1,9 @@
 const { getPaymentActionRequired, clearPaymentActionRequired, claimPaymentActionRequired } = require('./stripe-cards');
 
-// The webhook only settles the pending SCA checkpoint. Stripe receipts and payment
-// intent ids are authoritative; there is no local concierge balance to maintain.
-//
-// Stripe delivers webhooks at-least-once, so the same payment_intent.succeeded
-// event can arrive twice (redelivery, slow 2xx, etc). claimPaymentActionRequired
-// does an atomic compare-and-delete on the pending record: only the delivery that
-// actually removes the row "wins" the claim and deducts the balance. A second,
-// racing delivery for the same PaymentIntent finds the row already gone and
-// reports deducted: false — indistinguishable here from "nothing was pending",
-// which is the correct behavior either way (don't deduct).
+// The webhook only settles the pending SCA checkpoint; Stripe's own receipts and intent ids are
+// authoritative. Delivery is at-least-once, so claimPaymentActionRequired compare-and-deletes
+// the pending record: only the delivery that removes the row deducts. A racing second delivery
+// sees it gone and reports deducted:false, the same as "nothing was pending" — correct either way.
 async function handleStripeWebhookEvent(supabase, event) {
   const type = event?.type;
   const pi = event?.data?.object || {};

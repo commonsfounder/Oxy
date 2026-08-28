@@ -1,14 +1,8 @@
 'use strict';
 
-// Inbox actions, lifted out of the switch in api/index.js.
-//
-// googleConnector, watches, commitments, scheduledTasks and the approval runtime are
-// required as objects and called as properties, never destructured: several orchestration
-// tests monkey-patch methods on the shared module object (googleConnector.getThreadContext
-// among them), which only lands while the call site resolves the property at call time.
-//
-// dailyDigestAction carries the Action suffix so it cannot shadow the dailyDigest service
-// its body calls.
+// Inbox actions. The service modules are called as properties, never destructured, so the
+// orchestration tests can monkey-patch them on the shared module object. dailyDigestAction
+// carries its suffix so it can't shadow the dailyDigest service its body calls.
 
 const googleConnector = require('../../connectors/google');
 const agentApprovals = require('../services/agent-approval-runtime');
@@ -100,12 +94,8 @@ async function cleanInbox({ userId, action, params, enrichedParams, context, dep
   };
 }
 
-// "Who's waiting on me?" — a THREAD-level judgment (does this thread's current state need
-// something from the user), genuinely different from emailTriageSignals' message-level
-// "is this urgent/promotional" question, so it gets its own classifier
-// (api/services/reply-needed.js) rather than overloading the existing one. The cheap
-// pre-filter reuses the same signal shape (List-Unsubscribe, automated-sender wording,
-// receipt/order language) so obvious noise never reaches the LLM judgment call.
+// "Who's waiting on me?" — a thread-level judgment, distinct from emailTriageSignals'
+// message-level one, so it has its own classifier in api/services/reply-needed.js.
 async function findReplyNeeded({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, FAST_MODEL, dispatch, generateBrain, emailTriageSignals, gatherCalendarContext, reconcileCommitmentsForSentEmail, executeAction } = deps;
   const maxThreads = Math.max(1, Math.min(Number(params?.max_threads) || 20, 40));

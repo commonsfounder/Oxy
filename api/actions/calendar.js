@@ -155,16 +155,10 @@ async function moveCalendarEvent({ userId, action, params, enrichedParams, conte
   };
 }
 
-// Cancels a REAL event. This was a confirmed product gap: schedule_block/create_
-// calendar_event/move_calendar_event existed and there was no way to undo any of them
-// short of opening Google Calendar directly — cleaning up test events during the
-// 2026-08-09 proving pass had to go around the product entirely.
-//
-// "Cancel my meeting tomorrow" resolves against the real calendar the same way
-// move_calendar_event does (id, then title, restricted by date/attendee when given); an
-// ambiguous match is refused rather than guessed, and a recurring occurrence with no
-// stated scope stops for clarification rather than picking a scope on the user's behalf —
-// deleting the wrong scope of a recurring series is not a reversible mistake.
+// Cancels a real event, resolving it the same way move_calendar_event does: id, then title,
+// restricted by date or attendee when given. An ambiguous match is refused rather than guessed,
+// and a recurring occurrence with no stated scope asks — deleting the wrong scope of a series
+// is not reversible.
 async function cancelCalendarEvent({ userId, action, params, enrichedParams, context, deps, helpers }) {
   const { supabase, dispatch } = deps;
   const eventId = String(params?.event_id || '').trim();

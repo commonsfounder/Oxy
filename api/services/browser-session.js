@@ -1,11 +1,7 @@
 'use strict';
-// Browser process and session ownership. No task knowledge of any kind lives here — this
-// module launches Chromium, hands out sessions keyed by user, and closes them again.
-//
-// Extracted from browser-task.js so that the browser is an ENVIRONMENT the agent can act in
-// rather than a private resource owned by one ordering loop. browser-environment.js (the
-// primitives) and browser-task.js (the legacy ordering loop) both sit on top of this and
-// share the same live session, so a goal can move between them without reopening the page.
+// Browser process and session ownership: launches Chromium, hands out sessions keyed by user,
+// closes them again. No task knowledge of any kind — the browser is an environment the agent
+// acts in, not a resource owned by one loop. browser-environment.js sits on top of this.
 
 const { chromium } = require('playwright-extra');
 const stealth = require('puppeteer-extra-plugin-stealth')();

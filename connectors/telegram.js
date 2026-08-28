@@ -123,12 +123,9 @@ async function verify2FA(userId, password) {
   }
 }
 
-// Telegram's own convention for "the account's own chat with itself" — every client (the
-// official apps included) surfaces this as "Saved Messages". gramJS resolves the string 'me'
-// to InputPeerSelf() without a contacts lookup, so it needs no destination resolution beyond
-// having an authenticated session — there is no name to fuzzy-match and no chance of picking
-// the wrong contact. This is deliberately the ONLY destination proactive notifications ever
-// use: nothing here sends to an entry from the user's own contact list.
+// 'me' is the account's own chat with itself, which clients show as "Saved Messages". gramJS
+// resolves it without a contacts lookup, so there is no name to fuzzy-match and no wrong contact
+// to pick. It is the only destination proactive notifications ever use.
 const SELF_DESTINATION = 'me';
 
 // Is this session genuinely authenticated right now, and who does it belong to? Calling
@@ -213,13 +210,9 @@ async function execute(userId, action, params) {
   }
 }
 
-// Telegram tells us exactly how long to back off for a flood — gramJS's FloodWaitError (and
-// SlowModeWaitError, the per-chat variant) carries a real `.seconds`. Hammering retries
-// immediately after one of these is what CAUSES the next one; the caller (notification-
-// delivery.js) uses retryAfterSeconds to actually wait instead of re-trying on its normal
-// cadence. Session-revocation is the other case worth naming distinctly: retrying a dead
-// session cannot ever succeed, so a caller can tell "wait" from "reconnect" apart from a
-// generic failure.
+// A flood error carries a real `.seconds`, surfaced as retryAfterSeconds so the caller waits
+// that long instead of retrying on its own cadence and causing the next one. Session revocation
+// is named separately, since retrying a dead session can never succeed.
 function classifyTelegramError(err) {
   if (Number.isFinite(err?.seconds)) {
     return { errorKind: 'flood_wait', retryAfterSeconds: err.seconds };

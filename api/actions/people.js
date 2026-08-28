@@ -1,11 +1,7 @@
 'use strict';
 
-// People, commitments and occasions actions, lifted out of the switch in api/index.js.
-//
-// The service modules are required as objects and called as properties, not destructured
-// at require time. That is deliberate: the orchestration tests monkey-patch methods on the
-// shared module object (scheduledTasks.createScheduledTask = ...), which only works while
-// the call site resolves the property at call time.
+// People, commitments and occasions actions. The service modules are called as properties,
+// never destructured, so the orchestration tests can monkey-patch them at call time.
 
 const { escapeIlikePattern } = require('../lib/text');
 const {
@@ -19,12 +15,9 @@ const people = require('../services/people');
 const commitments = require('../services/commitments');
 const scheduledTasks = require('../services/scheduled-tasks');
 
-// Durable birthday/occasion capture. Deliberately its own table (occasions), not the
-// free-text memories table — "whose birthday is coming up?" needs a real date to sort on,
-// not prose to re-parse on every request. select-then-insert-or-update rather than a DB
-// upsert: the unique index is on lower(person_name), an expression PostgREST's on_conflict
-// param can't target reliably, and birthdays are input rarely enough that the tiny race
-// window is not worth the complexity.
+// Birthdays live in their own table, not free-text memories: "whose birthday is coming up?"
+// needs a real date to sort on. Select-then-insert rather than an upsert, because the unique
+// index is on lower(person_name), which on_conflict can't target reliably.
 async function saveOccasion({ userId, action, params, enrichedParams, context, deps }) {
   const { supabase } = deps;
   const personName = String(params?.person_name || '').trim();
@@ -173,14 +166,9 @@ async function trackCommitment({ userId, action, params, enrichedParams, context
     updated_at: new Date().toISOString()
   };
 
-  // Re-stating the same promise updates it (a new date) rather than creating a second
-  // obligation. But "send the report" to Mia and "send the report" to Ben are two real,
-  // separate obligations that happen to share wording — matching on `what` alone (as this
-  // used to) found Mia's open row on the second call and silently overwrote her
-  // commitment with Ben's, losing it entirely. Matched now on exactly the same key the
-  // table's own unique index declares (what + person_name, including "neither has one" as
-  // its own bucket) — the DB constraint was already the correct invariant; the app-level
-  // pre-check just wasn't consistent with it.
+  // Re-stating a promise updates it rather than making a second one — but "send the report" to
+  // Mia and to Ben are two obligations sharing wording, so the match is on the same key the
+  // table's unique index declares (what + person_name), not on `what` alone.
   let existingQuery = supabase.from('commitments')
     .select('id').eq('user_id', userId).eq('status', 'open')
     .ilike('what', escapeIlikePattern(what));

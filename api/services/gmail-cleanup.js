@@ -30,16 +30,10 @@ function buildCleanupQuery({ sender, since, before, query } = {}) {
   return parts.join(' ');
 }
 
-// The actual cleanup decision, given one email and its ALREADY-COMPUTED triage signal
-// (emailTriageSignals' output) — never re-classifies from scratch. Deliberately narrow:
-// - isPrimary (looks like it needs a reply/action) -> never archived, regardless of sender.
-// - category 'bulk updates' (the SAME bucket the dashboard already uses for low-priority
-//   material) -> archive-eligible, and unsubscribe-eligible only if this specific message
-//   actually carries a List-Unsubscribe header.
-// - anything else (receipts, settled notifications, ordinary read mail with a neutral score)
-//   -> preserved by default. "If uncertain, preserve" — this is the uncertain case.
-// Per-message, not per-sender, on purpose: the same sender can have both junk and a genuine
-// receipt, and only the individual message's own signal decides its fate.
+// The cleanup decision, from an already-computed triage signal — never a second classification.
+// isPrimary is never archived whatever the sender; 'bulk updates' is archive-eligible, and
+// unsubscribe-eligible only with a List-Unsubscribe header; everything else is preserved,
+// because that is the uncertain case. Per-message, since one sender sends both junk and receipts.
 function classifyForCleanup(email, triageSignal) {
   if (!triageSignal) return { archive: false, unsubscribeCandidate: false, reason: 'could not be classified' };
   if (triageSignal.isPrimary) {

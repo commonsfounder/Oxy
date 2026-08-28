@@ -1,12 +1,6 @@
-// book_flight was removed: it had no action contract (unreachable via normal tool-calling)
-// and did nothing different from search_flights — same search-link generator under a name
-// that implied a real booking capability that doesn't exist here.
-//
-// search_flights was removed for the same reason, 2026-08-08: it built a Google Flights URL
-// and returned success without ever having seen a price. It is now a real grounded search in
-// api/index.js's executeAction, which reaches its own case before any connector dispatch —
-// leaving the old branch here would have been dead code that still LOOKED like a flight
-// search.
+// Neither book_flight nor search_flights lives here: both only ever built a search URL and
+// returned success without seeing a price. search_flights is now a real grounded search in
+// executeAction, which reaches its own case before any connector dispatch.
 async function execute(userId, action, params) {
   const from = params.from || 'origin';
   const to = params.to || params.destination || 'destination';

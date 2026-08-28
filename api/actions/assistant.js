@@ -1,13 +1,8 @@
 'use strict';
 
-// The remaining general-assistant actions, lifted out of the switch in api/index.js.
-//
-// These do not form one domain -- reminders, health, smart home, delegation, notification
-// settings -- but they are each small and self-contained, and leaving them behind would
-// have kept the switch alive for the sake of a few dozen lines.
-//
-// Connector and service modules are required as objects and called as properties, never
-// destructured, so tests that monkey-patch the shared module object keep working.
+// The remaining general-assistant actions — reminders, health, smart home, delegation,
+// notification settings. Not one domain, but each small and self-contained. Connector and
+// service modules are called as properties, never destructured, so tests can monkey-patch them.
 
 const { dispatch: dispatchConnector } = require('../../connectors');
 const googleConnector = require('../../connectors/google');

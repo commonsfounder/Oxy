@@ -165,14 +165,9 @@ const DEFAULT_POLL_MINUTES = 30;
 const DEFAULT_POLL_EXPIRY_DAYS = 30;
 const CLAIM_LEASE_MINUTES = 10;
 
-// Whether a recurrence value is a genuine repeating cadence — as opposed to 'once' (a
-// single occurrence) or 'poll' (handled separately, always driven by a condition). Used to
-// decide what a due_date is allowed to do: pin the first occurrence's timing, never silently
-// cancel a real recurrence. "starting today, check my calendar every morning" legitimately
-// combines recurrence:'daily' with a due_date for today's first run — a due_date must not
-// downgrade that to a one-shot, because advanceScheduledTask branches on task.recurrence and
-// would deactivate the task after its first run instead of rescheduling it, so a "daily"
-// watch would fire exactly once and never again.
+// Whether a recurrence is a genuine repeating cadence, as opposed to 'once' or condition-driven
+// 'poll'. A due_date may pin the first occurrence's timing but must never downgrade a recurrence
+// to a one-shot — advanceScheduledTask branches on this, and would fire a "daily" task once.
 function isRecurringCadence(recurrence) {
   return recurrence === 'daily' || recurrence === 'weekly';
 }

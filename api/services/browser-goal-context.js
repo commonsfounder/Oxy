@@ -1,12 +1,6 @@
 'use strict';
-// Structured goal context for the browser task.
-// Pure + unit-testable. Goal: make the loop actually "understand" the user's intent
-// (size, color, deal preferences, budget) instead of hoping the vision model reads it
-// from a screenshot + raw goal string every time.
-//
-// This reduces hallucinations, lets deterministic recipes work better, and lets us
-// produce actually helpful conversational summaries ("found the navy M for £45, plus
-// there's a BOGO and code SUMMER20 for another 15%").
+// Structured goal context — size, colour, deal preferences, budget — so the loop works from the
+// user's stated intent rather than re-reading it off a screenshot each step. Pure and testable.
 
 const SIZE_RE = /\b(?:size\s+)?((?:uk|eu)\s+)?([a-z0-9]{1,4})\b/i;
 const STANDALONE_SIZE = /\b(xxs|xs|s|m|l|xl|xxl|uk\s*\d{1,2}|eu\s*\d{1,2})\b/i;

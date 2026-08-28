@@ -1,12 +1,9 @@
 'use strict';
 
 /*
- * The durable delegated-run state machine.
- *
- * agent_tasks is the authority. Runtime sessions are an optional projection of
- * that row and are deliberately written second: Supabase does not give these
- * two tables a transaction boundary here, so a projection failure is reported
- * as partial persistence instead of being hidden.
+ * The durable delegated-run state machine. agent_tasks is the authority and runtime sessions are
+ * an optional projection written second — with no transaction boundary between the two, a
+ * projection failure is reported as partial persistence rather than hidden.
  */
 
 const CANONICAL_STATES = Object.freeze([
