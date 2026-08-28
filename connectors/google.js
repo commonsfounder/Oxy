@@ -5,16 +5,11 @@ const { decryptTokens, encryptTokens } = require('../api/services/token-crypto')
 const supabase = createSupabaseServiceClient();
 logMissingRuntimeEnvOnce('google connector bootstrap');
 
-// Comfortably under Gmail's own 1000-ids-per-batchModify-call cap — chunking this small
-// means one bad id in a huge request doesn't force re-doing thousands of already-valid
-// ones, and keeps the per-chunk verification pass below to a reasonable number of extra
-// API calls.
+// Well under Gmail's 1000-ids-per-call cap, so one bad id doesn't force redoing thousands of
+// valid ones and the verification pass below stays cheap.
 const BATCH_CHUNK_SIZE = 250;
-// How many ids per chunk to re-fetch afterward and check the mutation actually landed —
-// batchModify returns 204 with no body, so a 2xx response alone is not proof of anything;
-// Google's own docs note some ids in a batch can silently fail to apply. Sampling is a
-// deliberate cost/confidence tradeoff: full verification of a 1000-message chunk would be
-// 1000 extra GET calls for one cleanup request.
+// How many ids per chunk to re-fetch and confirm the change landed. batchModify returns 204
+// with no per-id detail and some ids can silently fail, so a sample beats trusting the 2xx.
 const VERIFY_SAMPLE_SIZE = 5;
 
 function chunk(list, size) {
@@ -38,16 +33,9 @@ const SYSTEM_LABEL_IDS = new Set([
 // Gmail refuses to add or remove these itself — they describe where a message came from.
 const UNSETTABLE_LABEL_IDS = new Set(['SENT', 'DRAFT']);
 
-// Turns whatever the caller said into real Gmail label ids.
-//
-// This is the difference between "label these Receipts" working and failing silently: the
-// previous behaviour uppercased every name and handed it over as an id, so a system label
-// happened to work and a user label could never work at all — batchModify just 400s and the
-// whole chunk is reported as failed.
-//
-// `create` is on for labels being ADDED (asking to file mail under a label that doesn't exist
-// yet plainly means create it) and off for labels being REMOVED (removing a label that was
-// never there is a no-op, not a reason to make one).
+// Turns whatever the caller said into real Gmail label ids — an uppercased name works only by
+// accident for system labels and 400s for user ones. `create` is on for labels being added
+// (filing under a label that doesn't exist means make it) and off for labels being removed.
 async function resolveLabelIds(headers, names, { create = false, cache = {} } = {}) {
   const wanted = normalizeMessageIds(names);
   if (!wanted.length) return { ids: [], unresolved: [], created: [], refused: [] };
@@ -97,11 +85,8 @@ async function resolveLabelIds(headers, names, { create = false, cache = {} } = 
   };
 }
 
-// Bulk-modifies message labels (archive is removeLabelIds:['INBOX']; mark read/unread and
-// custom labels are add/removeLabelIds too) in chunks, then VERIFIES a sample of the
-// successful chunk actually changed state by re-fetching those ids — batchModify returns 204
-// with no per-id detail, and Google's own docs note some ids in a batch can silently fail to
-// apply, so a 2xx alone is not proof.
+// Bulk label changes in chunks (archive is removeLabelIds:['INBOX']), then re-fetches a sample
+// to confirm the change landed, since a 204 carries no per-id detail.
 async function bulkModifyMessages(headers, ids, { addLabelIds = [], removeLabelIds = [] }, { expectPresent = [], expectAbsent = [] } = {}) {
   const chunks = chunk(ids, BATCH_CHUNK_SIZE);
   const succeededIds = [];
@@ -162,12 +147,9 @@ async function getTokens(userId) {
     console.error('[getTokens] DB error:', err.message);
   }
 
-  // Fall back to env vars (single-user setup). Deliberately NOT written to the connectors row
-  // here: this used to save-and-enable on sight, so a bad env value (the deployed
-  // GMAIL_REFRESH_TOKEN is truncated to 39 chars and Google answers invalid_grant) turned
-  // "not connected" into a row that claims to be connected and fails forever. getAccessToken
-  // persists these only once a refresh has actually succeeded, so what lands in the database
-  // is always a credential that worked at least once.
+  // Env-var fallback for the single-user setup, deliberately not written to the connectors row
+  // here — a bad value would mark the account connected forever. getAccessToken persists these
+  // only after a refresh has actually succeeded.
   const envToken = String(process.env.GMAIL_REFRESH_TOKEN || '').replace(/^﻿/, '').trim();
   if (envToken && !disconnectedOnPurpose) {
     return {
@@ -253,15 +235,9 @@ async function getAccessToken(userId) {
   return updated.access_token;
 }
 
-// Mail headers are ASCII. A subject with a £ in it has to be encoded (RFC 2047) or the
-// receiving client guesses an 8-bit charset and renders mojibake — the first real proactive
-// notification this account sent arrived as "Brighton room dropped below Ã‚Â£80". The BODY
-// was fine, because that part declares charset=utf-8; only the header was raw.
-//
-// An encoded-word is capped at 75 characters including the ~12 characters of wrapper, so a
-// long subject becomes several words on continuation lines. Chunking is done on code points,
-// never mid-character, since a split multi-byte sequence would corrupt exactly what this is
-// here to protect.
+// Mail headers are ASCII, so a subject with a £ needs RFC 2047 encoding or the client guesses
+// a charset and renders mojibake. Encoded-words cap at 75 characters including wrapper, so a
+// long subject becomes several continuation lines, split on code points and never mid-character.
 const ENCODED_WORD_PAYLOAD_BYTES = 45; // multiple of 3, so each chunk base64s without padding
 
 function encodeMimeHeader(value) {
@@ -326,11 +302,8 @@ function stripHtml(html = '') {
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
-    // Currency entities, and numeric entities generally. Found against a real mailbox: a
-    // Travelzoo receipt renders its total as `<b>&pound;1</b>`, so without this the body
-    // reaching the receipt extractor contains "Total &pound;1" — no £ character anywhere,
-    // and a genuine receipt is silently worth nothing. HTML-only mail is the common case for
-    // receipts, not the exception.
+    // Currency and numeric entities. HTML-only receipts render totals as `&pound;1`, which
+    // reaches the extractor with no £ in it at all and reads as worth nothing.
     .replace(/&pound;/gi, '£')
     .replace(/&euro;/gi, '€')
     .replace(/&yen;/gi, '¥')
@@ -389,10 +362,8 @@ function collectBodyParts(part, out = { plain: [], html: [] }) {
   return out;
 }
 
-// stripHtml above discards every tag including <a href> — fine for the readable body,
-// useless for finding a real actionable link (e.g. Revolut's own "Add money" link in
-// their balance-negative email). This walks the RAW (unstripped) HTML parts so hrefs
-// survive, for the one caller that actually needs them.
+// stripHtml discards every tag including <a href>, which is fine for a readable body and
+// useless for finding an actionable link. This walks the raw HTML parts so hrefs survive.
 function collectRawHtmlParts(part, out = []) {
   if (!part) return out;
   const mimeType = String(part.mimeType || '').toLowerCase();
@@ -473,10 +444,8 @@ function messageToEmail(message = {}) {
     // Presence of a List-Unsubscribe header marks bulk/mailing-list mail (newsletters,
     // marketing). Personal 1:1 mail doesn't carry it — used to filter the dashboard feed.
     listUnsubscribe: getHeader(headers, 'List-Unsubscribe'),
-    // RFC 8058 one-click unsubscribe: when a sender declares this alongside a List-Unsubscribe
-    // URL, POSTing 'List-Unsubscribe=One-Click' to that URL is a real, provider-acknowledged
-    // unsubscribe — no page visit needed. Its absence means the URL (if any) is just a normal
-    // link that needs a real browser to complete.
+    // RFC 8058 one-click unsubscribe: with this header, POSTing to the List-Unsubscribe URL is
+    // a real acknowledged unsubscribe. Without it, that URL is just a link needing a browser.
     listUnsubscribePost: getHeader(headers, 'List-Unsubscribe-Post'),
     body: extractMessageBody(message.payload)
   };
@@ -503,15 +472,9 @@ function formatThreadText(messages = []) {
   }).join('\n\n---\n\n').trim();
 }
 
-// Which mailbox are we actually authorized on, and can we send from it?
-//
-// This exists so proactive delivery has a destination it can trust without a separate
-// verification step: the address of the mailbox the user themselves connected is, by
-// construction, an address they own. Any OTHER address still has to be verified before we
-// mail it — that rule is about not mailing third parties, and it is untouched here.
-//
-// Cached briefly because the delivery sweep asks once per user per run and the answer only
-// changes when the connector is reconnected.
+// Which mailbox we are authorized on, and whether we can send from it. The address of a
+// mailbox the user connected is one they own, so proactive delivery can trust it without a
+// separate verification; every other address still has to be verified. Cached briefly.
 const MAILBOX_TTL_MS = 10 * 60 * 1000;
 const mailboxCache = new Map();
 
@@ -630,10 +593,8 @@ function calendarWindow(params = {}) {
     : when === 'today' ? today
       : null;
   if (!ymd) {
-    // No explicit day was requested. Still cap how far out we look — otherwise
-    // singleEvents expansion of an annually-recurring event (e.g. a birthday) returns
-    // one instance per future year, and those can crowd out real near-term events in
-    // a maxResults-limited, startTime-ordered query.
+    // No explicit day, but still capped: singleEvents expansion of an annual event returns one
+    // instance per future year, which crowds out near-term events in a maxResults query.
     return {
       timeMin: new Date().toISOString(),
       timeMax: `${addDaysYMD(today, 30)}T23:59:59Z`,
@@ -641,10 +602,8 @@ function calendarWindow(params = {}) {
     };
   }
   return {
-    // Query a small UTC buffer around the London day, then the backend applies
-    // an exact London-calendar-day filter before synthesis. This avoids missing
-    // just-after-midnight BST events while still preventing open-ended future
-    // results from leaking into "tomorrow".
+    // A small UTC buffer around the London day; the backend then filters to the exact London
+    // day. Catches just-after-midnight BST events without leaking later ones into "tomorrow".
     timeMin: `${addDaysYMD(ymd, -1)}T00:00:00Z`,
     timeMax: `${addDaysYMD(ymd, 1)}T23:59:59Z`,
     ymd
@@ -653,24 +612,10 @@ function calendarWindow(params = {}) {
 
 const HAS_UTC_OFFSET = /(?:Z|[+-]\d{2}:\d{2})$/;
 
-// Google takes a time in one of two forms, and they mean different things:
-//   - an ABSOLUTE instant, where dateTime carries Z or an offset ("2026-08-10T13:00:00Z");
-//   - a LOCAL wall-clock time, where dateTime carries no offset and timeZone says how to
-//     read it ("2026-08-10T14:00:00" + Europe/London).
-//
-// What is never valid is taking an absolute instant, deleting its offset, and relabelling the
-// remaining digits as local. That is what this code used to do to every value it was given,
-// and it silently moved events by the zone's offset: schedule_block computes a real instant
-// and passes start.toISOString(), so booking "tomorrow at 14:00" during BST wrote 13:00 to
-// the calendar while the confirmation text still said 14:00. In winter, with London on UTC,
-// the same code is correct — which is why it survived.
-//
-// So: keep an offset when there is one, and only attach timeZone to a bare wall-clock time.
-// timeZone rides along in both cases, but it means different things. With an offset present
-// Google takes the instant from the offset and uses timeZone only as the event's DISPLAY
-// zone — which matters, because an event stored without one is labelled UTC and the
-// invitation email then reads "5pm UTC" to a London guest instead of 6pm. With no offset,
-// timeZone is what makes the wall-clock time mean anything at all.
+// Google takes either an absolute instant (dateTime carries Z or an offset) or a wall-clock
+// time (no offset, read through timeZone). Stripping an offset and relabelling the digits as
+// local moves the event by the zone's offset, so any offset present is kept. timeZone rides
+// along either way: the display zone for an instant, the meaning itself for a wall-clock time.
 function calendarTime(value, timezone) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
@@ -707,10 +652,8 @@ async function fetchCalendarEvent(headers, eventId) {
   return resp.data;
 }
 
-// RFC 5545 requires UNTIL's value type to match DTSTART's — a date-only (all-day) series
-// takes a bare YYYYMMDD, a timed one takes a full UTC datetime. Getting this wrong is a
-// silent 400 from Google, not a wrong result, so it is derived from the master event's own
-// start rather than assumed.
+// RFC 5545 requires UNTIL's value type to match DTSTART's: bare YYYYMMDD for an all-day series,
+// a full UTC datetime for a timed one. Derived from the master event rather than assumed.
 function formatUntilUTC(date, allDay) {
   const pad = (n, len = 2) => String(n).padStart(len, '0');
   if (allDay) return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`;
@@ -718,11 +661,9 @@ function formatUntilUTC(date, allDay) {
     `${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
 }
 
-// Ends a recurring series after `untilDate` by adding/replacing UNTIL on its RRULE line —
-// this is how Google Calendar itself implements "this and following events" when a user
-// edits a series in the UI, so a client reading the result sees the same thing a human
-// cancellation would have produced. COUNT is dropped because RFC 5545 forbids UNTIL and
-// COUNT on the same rule. Lines that are not an RRULE (EXDATE, RDATE) pass through untouched.
+// Ends a series after `untilDate` by setting UNTIL on its RRULE — the same thing Google
+// Calendar's own "this and following events" produces. COUNT is dropped (RFC 5545 forbids both
+// on one rule); EXDATE/RDATE lines pass through untouched.
 function trimRecurrenceUntil(recurrence = [], untilDate, allDay) {
   const untilStr = formatUntilUTC(untilDate, allDay);
   let touched = false;
@@ -844,10 +785,8 @@ async function execute(userId, action, params) {
         return { success: true, body: email.body, links: extractLinksFromHtml(rawHtml) };
       }
 
-      // Real Gmail mutation: archiving = removing the INBOX label. Gmail has no separate
-      // "archive" concept — the message still exists, is still searchable, just isn't in the
-      // inbox view. This is the low-risk, reversible removal mechanism; nothing here ever
-      // calls the trash or permanent-delete endpoints.
+      // Archiving is removing the INBOX label — Gmail has no separate archive, and the message
+      // stays searchable. Nothing here ever calls trash or permanent-delete.
       case 'archive_emails': {
         const ids = normalizeMessageIds(params?.message_ids ?? params?.messageIds ?? params?.message_id);
         if (!ids.length) return { success: false, error: 'archive_emails requires message_ids' };
@@ -907,13 +846,9 @@ async function execute(userId, action, params) {
         };
       }
 
-      // Tiered real unsubscribe. Never reports success for merely finding a link — only for
-      // an action that actually completed: a real one-click POST acknowledged by the
-      // provider's own endpoint, or a real email genuinely sent to a mailto: unsubscribe
-      // address. Anything that needs a real page visit (no one-click support, or no
-      // List-Unsubscribe header at all but a body link exists) is reported as such rather
-      // than attempted with brittle in-process HTML parsing — that's what run_browser_task
-      // is for.
+      // Reports success only for an unsubscribe that completed: an acknowledged one-click POST,
+      // or a mail actually sent to a mailto: address. Anything needing a page visit is reported
+      // as such, for the browser to handle, rather than parsed in process.
       case 'unsubscribe_email': {
         const messageId = params?.message_id || params?.messageId;
         if (!messageId) return { success: false, error: 'unsubscribe_email requires message_id' };
@@ -1089,11 +1024,8 @@ async function execute(userId, action, params) {
         return { success: true, events, when: params.when || null, text: summarizeCalendarEvents(events) };
       }
 
-      // Cancels a REAL event — an instance, a whole non-recurring event, or (via event_id
-      // being the master) an entire series. Never a "hide in Millie": nothing about this
-      // event exists outside Google Calendar, so there is nothing else to hide it from.
-      // Attendee notification follows Google's own semantics rather than a guess: sendUpdates
-      // only fires when there is actually someone other than the organizer to tell.
+      // Cancels the real event — an instance, a one-off, or a whole series when event_id is the
+      // master. sendUpdates only fires when there is someone other than the organizer to tell.
       case 'delete_calendar_event': {
         const eventId = String(params?.event_id || '').trim();
         if (!eventId) return { success: false, error: 'delete_calendar_event requires event_id' };
@@ -1132,10 +1064,8 @@ async function execute(userId, action, params) {
         };
       }
 
-      // Ends a recurring series after a given occurrence — "this and future" cancellation.
-      // event_id must be the SERIES id (an occurrence's recurringEventId, not the occurrence's
-      // own id); from_date is the first occurrence that should stop happening. Everything
-      // before from_date is left alone.
+      // "This and future" cancellation. event_id must be the series id (an occurrence's
+      // recurringEventId), and from_date is the first occurrence that should stop happening.
       case 'end_recurring_series': {
         const eventId = String(params?.event_id || '').trim();
         const fromDate = params?.from_date;

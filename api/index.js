@@ -526,10 +526,8 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
       rawProviderPayload: parsedPayload
     });
 
-    // Files on the email become documents in their own right, carrying which conversation
-    // and which participant they arrived from — so "the policy schedule they sent me" is
-    // answerable later. Deliberately after appendEvent: a failure to store an attachment
-    // must never cost us the record that the message itself arrived.
+    // Attachments become documents carrying the conversation and sender they arrived from.
+    // After appendEvent, so a failed attachment can't cost us the record of the message.
     let storedAttachments = [];
     try {
       const { ingestEmailAttachments } = require('./services/document-attachments');
@@ -561,10 +559,8 @@ app.post('/webhooks/millie-email', express.raw({ type: 'application/json' }), as
   }
 });
 
-// The optional :provider segment exists for migrations. Numbers already in the field keep
-// posting to whichever URL they were provisioned with, so during a vendor switch the old
-// provider's numbers can be pointed at /webhooks/millie-sms/twilio while new ones use the
-// bare path. With one provider configured, the bare path is all that's used.
+// The optional :provider segment is for vendor switches: numbers already provisioned keep
+// posting to the URL they were given. With one provider, only the bare path is used.
 app.post(['/webhooks/millie-sms', '/webhooks/millie-sms/:provider'], express.urlencoded({ extended: false }), async (req, res) => {
   const { parseInboundSms, inboundAck } = require('../connectors/phone-provider');
   const providerName = req.params?.provider || undefined;
@@ -1430,10 +1426,8 @@ async function transcribeAudio(buffer) {
   }
   const audioBase64Input = buffer.toString('base64');
   const audioPart = { inlineData: { mimeType: 'audio/wav', data: audioBase64Input } };
-  // Still Gemini: transcription feeds raw audio to a multimodal model, which the chat
-  // brain's text/vision seam does not cover. Pinned to an explicit Gemini id rather than
-  // FAST_MODEL — FAST_MODEL is an OpenAI model now, and posting that id to the Gemini SDK
-  // would fail with a confusing "model not found" instead of a clear config error.
+  // Still Gemini: the chat brain's seam is text/vision only. Pinned to an explicit Gemini id,
+  // since FAST_MODEL is an OpenAI id the Gemini SDK would reject as "model not found".
   const transcribeModel = genAI.getGenerativeModel({ model: GEMINI_AUDIO_MODEL });
   const durationMs = getWavDurationMs(buffer);
 
@@ -1915,10 +1909,8 @@ function shouldIgnoreModelAuthoredActions(modelName = '') {
   return String(modelName || '') === FAST_MODEL;
 }
 
-// Native tool calls become internal actions and LEAD the list the legacy <action> text path
-// produces, so every downstream guard, review gate, status event and result handler applies to
-// them unchanged. Kept as one function because three routes (streaming chat, non-streaming
-// chat, voice) must agree on the shape exactly.
+// Native tool calls become internal actions and lead the list the <action> text path produces,
+// so every guard and gate applies unchanged. One function so all three chat routes agree.
 function mergeNativeToolCalls(toolCalls = [], textActions = []) {
   if (!toolCalls?.length) return textActions;
   return [
@@ -3002,21 +2994,14 @@ function resolveNativeMessageContact(contact, nativeHints) {
   };
 }
 
-// Files a genuinely-sent email against the user's open commitments: records the promise it
-// contains, and closes any promise it discharges.
-//
-// The evidence rules live in api/services/commitments.js and are deliberately strict. What
-// this function adds is the part that cannot be pure: resolving the recipient to a real
-// person, and writing the result down. It is only ever called after Gmail accepted the send.
+// Files a sent email against the user's open commitments: records the promise it contains,
+// closes any it discharges. Only called once Gmail has accepted the send.
 async function reconcileCommitmentsForSentEmail(userId, sent) {
   const { data: open } = await supabase.from('commitments')
     .select('*').eq('user_id', userId).eq('status', 'open');
 
-  // Resolve the recipient to a stable person identity ONCE, through the real people layer —
-  // used both to judge which open commitment this message discharges (a real id, not a
-  // string guess about who "Mia" is) and, if it also makes a new promise, to link that
-  // promise the same way. Resolving here rather than inside two separate lookups means a
-  // failed/ambiguous resolution can't quietly disagree with itself between the two.
+  // Resolve the recipient to a person id once, so discharging an old commitment and linking a
+  // new promise can't disagree about who this is.
   let participantId = null;
   let personDisplayName = null;
   const recipient = String(sent.to || '').trim();
@@ -3183,10 +3168,8 @@ const notificationDelivery = createDeliveryRuntime({
   }
 });
 
-// Inbound replies are already recorded in the external conversation store. This second
-// step turns the record into something the user can actually notice from the phone: the
-// normal configured notification route (Telegram/email/in-app today, push when APNs is
-// configured). It never replies or advances the external conversation on its own.
+// The reply is already recorded; this raises it on the user's configured notification route.
+// It never replies or advances the external conversation itself.
 async function surfaceInboundExternalReply({
   userId,
   channelType,
@@ -3723,22 +3706,8 @@ async function saveMessage(userId, role, content, trace = null) {
   invalidateUserContextCache(userId);
 }
 
-// Phase 4 (2026-08-06) — the `preferences` table is a general key/value store shared by
-// operational bookkeeping and the handful of rows that describe how someone likes to be
-// talked to, and nothing used to separate those before they reached the model. Rendered live
-// for a real user, the "HOW THE USER LIKES THINGS" block this fed was 12.7KB: ~90
-// `_stitle_<uuid>` rows (every past conversation's title), ~40 `proactive.briefing.*`/dedup
-// markers, a concierge balance, pending-action JSON, a travel-workflow blob — and, buried in
-// all of it, three real style rows written by the old postResponseTasks style-cue matcher as
-// `User said "<raw message>" — adapt accordingly`. That writer turned one-off phrasing (a
-// demo asking for headings/bullets/bold; a garbled voice transcript) into a standing
-// instruction that silently reshaped every later reply. Full detail in the Millie voice
-// audit (2026-08-06).
-//
-// ALLOWLISTED_STYLE_PREFERENCE_KEYS is the only gate between that table and the prompt now.
-// It is deliberately empty: the writer that populated it is disabled below (see
-// postResponseTasks), and a real typed/decaying style layer (verbosity, formality, emoji,
-// …) is future work, not this phase. An honestly empty style block beats a corrupted one.
+// The only gate between the general-purpose `preferences` table and the style block in the
+// prompt. Empty on purpose: the writer that filled it is disabled in postResponseTasks.
 const ALLOWLISTED_STYLE_PREFERENCE_KEYS = new Set([
   // intentionally empty — see comment above
 ]);
@@ -3756,10 +3725,8 @@ async function getPreferences(userId, trace = null) {
     ? await trace.run('supabase.preferences.fetch', fetchPreferences)
     : await fetchPreferences();
   if (error || !data) return '';
-  // Filtered for the MODEL-FACING string only. getPreferenceEntries/getPreferenceMap below
-  // are untouched and still return every row — routing (resolveModelRoute), the concierge
-  // account, pending-action state, and proactive dedup all read the table directly through
-  // those and must keep seeing every key.
+  // Filters the model-facing string only. getPreferenceEntries/getPreferenceMap still return
+  // every row, which routing, the concierge account and proactive dedup all depend on.
   return filterStylePreferenceRows(data).map(p => `${p.key}: ${p.value}`).join('\n');
 }
 
@@ -3777,11 +3744,8 @@ async function getPreferenceMap(userId) {
   return Object.fromEntries(entries.map(entry => [entry.key, entry.value]));
 }
 
-// Deterministic spend cap for concierge money movements — enforced regardless of what the
-// model asked for. Callers MUST honour a false `ok` and abort the spend before touching
-// balance or any real payment API. Shared with connectors/stripe.js (spend_from_concierge_via_stripe,
-// stripe_payout_to_user) via concierge-spend-guard.js so every money-out path gets the same
-// per-txn + rolling-daily cap, not just the ones originally written with it in mind.
+// Deterministic spend cap for concierge money movements. Callers must abort on a false `ok`
+// before touching balance or a payment API; shared with connectors/stripe.js via concierge-spend-guard.js.
 async function guardConciergeSpend(userId, amount, currency = null, options = {}) {
   return sharedGuardConciergeSpend(supabase, userId, amount, currency, options);
 }
@@ -3912,16 +3876,8 @@ function settleApprovalEntry(pendingAction, actionResults) {
   };
 }
 
-/*
- * Continue the background run that was waiting on this approval.
- *
- * A review-gated action inside an agent run used to be terminal: the loop stopped, the user
- * confirmed, the action ran on its own, and the goal it belonged to was never picked back
- * up. The run is parked with its checkpoint instead, and this restarts it from there.
- *
- * Best-effort by design — the approval itself has already succeeded by the time this runs,
- * so a resume failure must not turn a completed action into an error for the user.
- */
+// Restarts the parked background run from its checkpoint. Best-effort: the approval has
+// already succeeded, so a failed resume must not surface as an error.
 async function resumeRunAfterApproval(userId, pendingAction, actionResults, trace = null) {
   const taskId = pendingAction?.taskId;
   if (!taskId) return { resumed: false };
@@ -4063,12 +4019,8 @@ async function clearPendingAction(userId, pendingAction = null) {
     .eq('key', PENDING_ACTION_PREF);
 }
 
-// Atomically deletes the pending action only if it still matches exactly what
-// the caller read, and reports whether it won the claim. The in-memory
-// pendingActionConfirmLocks Set only protects against a double-tap landing on
-// the same Fly machine; this DB-level compare-and-delete is what
-// actually prevents two requests (on two different instances) from both
-// executing the same review-gated action after the user says "yes".
+// Compare-and-delete claim on the pending action. pendingActionConfirmLocks only covers one
+// machine; this is what stops two instances both running the same approved action.
 async function claimPendingAction(userId, pendingAction) {
   if (pendingAction?.storage === 'runtime' && pendingAction.approvalId) {
     return agentApprovals.claimApproval(supabase, userId, pendingAction.approvalId).catch(() => false);
@@ -5080,12 +5032,8 @@ app.get('/action-contracts', requireSessionAuth, (req, res) => {
   res.json({ actions: buildPublicActionCatalog() });
 });
 
-// `kind` distinguishes a genuine external-account connection (OAuth or a personal token the
-// user authorizes — something to actually "connect") from a functionality (a capability that
-// works via a server-side API key, a deep-link handoff, or in-app plumbing, with no per-user
-// account to link). Confirmed per-item by grepping connectors/*.js for real oauth/access_token
-// handling. The Connections screen only lists `kind: 'connection'` items — a functionality
-// isn't something to browse/toggle, it just works when invoked from chat.
+// `kind: 'connection'` means a real per-user account link (OAuth or a personal token);
+// 'functionality' works off a server-side key with nothing to link. Connections lists only the former.
 const CONNECTORS = [
   { id: 'google',    name: 'Gmail & Calendar', icon: 'google', category: 'Productivity', type: 'api', kind: 'connection' },
   // icon 'outlook' (not 'microsoft') — that's the actual bundled asset name; id stays
@@ -5352,11 +5300,8 @@ app.post('/briefings/:id/read', async (req, res) => {
   }
 });
 
-// Dashboard "go handle it" path for an inbox card — deliberately a plain REST call, not
-// a chat/agent-loop turn. Routing this through the general model's tool-calling would let
-// it decide for itself whether to try browser primitives on a bank site; calling
-// buildEmailActionPlan directly means that's never even on the table. See its own comment
-// for what it actually does (mines the real email for real links, never attempts a login).
+// The dashboard's "go handle it" for an inbox card: a plain REST call, not an agent turn, so
+// the model never gets the option of driving a browser at a bank site.
 app.post('/emails/action-plan', async (req, res) => {
   try {
     const { userId, provider, messageId } = req.body || {};
@@ -5587,11 +5532,8 @@ app.get('/history/:userId/date', async (req, res) => {
   }
 });
 
-// Builds the 'background' surface system prompt for an unsupervised agent run (scheduled task,
-// routine, or manual task resume/run) — the fix for background runs previously receiving only
-// the bare static prompt (see api/prompts.js header comment). Reuses the exact same helpers the
-// chat path uses, so background gets the same memory/preferences/connected-capabilities/active-
-// goals-and-outcomes a live chat turn would.
+// The 'background' surface system prompt for an unsupervised run, built from the same helpers
+// as the chat path so a background run sees the same context a live turn would.
 async function buildBackgroundSystemPrompt(userId) {
   const [memory, preferences, enabledConnectors, liveContext, chatSettings, nativeContext] = await Promise.all([
     getMemory(userId, null, ''),
@@ -5644,12 +5586,8 @@ async function buildChatContext(userId, message, trace = null, modelName = STREA
   // extractShoppingContextHints is a genuinely derived hint (retailer/domain inferred from the
   // conversation), not a repeat of anything sent verbatim elsewhere, so it's kept on both paths.
   const shoppingContext = extractShoppingContextHints(history);
-  // extractAlreadyStatedContext re-pastes recent ASSISTANT SENTENCES into the prompt. On the
-  // full path below, `history` (unsliced) is also sent as contents[] via baseHistory, so those
-  // same sentences would appear twice in one request. It is kept ONLY for quickTurn, whose
-  // returned `history` is trimmed to the last 2 turns (see the return statement) — there the
-  // recap is the only way the model sees what it said 3+ turns back, a real dependency rather
-  // than incidental duplication. Phase 4, 2026-08-06.
+  // quickTurn only: it trims history to the last 2 turns, so this recap is the only way the
+  // model sees older replies. The full path already sends unsliced history and would duplicate it.
   const statedContext = quickTurn
     ? [...extractAlreadyStatedContext(history), ...shoppingContext]
     : shoppingContext;
@@ -5778,12 +5716,8 @@ async function getLatestNativeContext(userId) {
   return data || null;
 }
 
-// Outlook's Graph API shape (from connectors/microsoft.js's summarizeMessage: id, subject,
-// from, senderName, receivedAt, preview, isRead) doesn't match Gmail's (from, subject,
-// snippet, date, labelIds, listUnsubscribe) — normalize to the common shape everything
-// downstream (isPromotionalOrBulk, summarizeEmails, extractIncoming, BriefingEmail on the
-// client) already reads, and tag `provider` so the dashboard can show which inbox an item
-// came from once a user has more than one connected.
+// Outlook's Graph shape differs from Gmail's; normalize both to the shape everything
+// downstream reads, tagging `provider` so the dashboard can say which inbox an item came from.
 function normalizeOutlookEmail(m = {}) {
   return {
     from: m.senderName ? `${m.senderName} <${m.from || ''}>` : (m.from || ''),
@@ -5798,12 +5732,8 @@ function normalizeOutlookEmail(m = {}) {
   };
 }
 
-// Regression: the Today dashboard's Inbox/Incoming cards read metadata.emails/metadata.incoming
-// off the freshest briefing (OxyApp/Models/Message.swift), but a prior refactor
-// (commit 454d17b) never carried real email data into any briefing's metadata — those cards
-// were permanently empty for every user regardless of connection state. Shared here so both
-// the interval briefing (runs on a schedule, regardless of urgency) and the email-nudge check
-// (only fires when something looks urgent) populate the same real data the same way.
+// The Today Inbox/Incoming cards read metadata.emails/metadata.incoming off the freshest
+// briefing, so the interval briefing and the email nudge both populate it from here.
 async function gatherEmailContext(userId) {
   try {
     const enabled = await getEnabledConnectors(userId);
@@ -5821,11 +5751,8 @@ async function gatherEmailContext(userId) {
     const googleEmails = (googleResult?.success && Array.isArray(googleResult.emails))
       ? googleResult.emails.map(e => ({ ...e, provider: 'gmail', messageId: e.id || '' }))
       : [];
-    // Outlook has no CATEGORY_PROMOTIONS/List-Unsubscribe-header equivalent surfaced here,
-    // so isPromotionalOrBulk (which reads those Gmail-specific fields) is a no-op for it —
-    // summarizeEmails' content-based llmPromotional judgment below is the only filter that
-    // actually applies to Outlook mail, same as it already is for Gmail mail that slips
-    // past Gmail's own labels.
+    // isPromotionalOrBulk reads Gmail-specific fields and is a no-op on Outlook mail, which
+    // leaves summarizeEmails' content-based judgment as its only filter.
     const outlookEmails = (outlookResult?.success && Array.isArray(outlookResult.emails))
       ? outlookResult.emails.map(normalizeOutlookEmail)
       : [];
@@ -5836,11 +5763,8 @@ async function gatherEmailContext(userId) {
     // next to real notifications, which the label/header check above can't separate).
     const candidates = real.slice(0, 15);
     const summarized = await summarizeEmails(candidates);
-    // Explicit field picker rather than a blanket `...rest` spread — Gmail's fetchFullMessage
-    // result carries the entire email body plus headers (threadId, labelIds, references,
-    // etc.), none of which the dashboard card needs; storing all of it in briefing.metadata
-    // on every refresh was pure bloat. messageId is the one addition worth keeping — it's
-    // how buildEmailActionPlan re-fetches this exact email later.
+    // Explicit picker, not a spread: fetchFullMessage carries the whole body and headers, none
+    // of which the card needs. messageId stays — buildEmailActionPlan re-fetches by it.
     const emails = summarized
       .filter(e => !e.llmPromotional)
       .map(e => ({
@@ -5863,10 +5787,8 @@ async function gatherEmailContext(userId) {
   }
 }
 
-// The dashboard's Inbox cards frame each email as "needs you / draft reply", so marketing
-// blasts, social notifications, and mailing-list mail don't belong there. Gmail already
-// sorts these into its Promotions/Social/Forums tabs (the CATEGORY_* labels); we trust
-// that first, then fall back to the List-Unsubscribe header for accounts with tabs off.
+// Inbox cards mean "needs you", so bulk mail doesn't belong. Trusts Gmail's CATEGORY_* labels
+// first, then the List-Unsubscribe header for accounts with tabs off.
 const PROMOTIONAL_LABELS = new Set(['CATEGORY_PROMOTIONS', 'CATEGORY_SOCIAL', 'CATEGORY_FORUMS']);
 function isPromotionalOrBulk(email = {}) {
   const labels = email.labelIds || [];
@@ -5877,20 +5799,9 @@ function isPromotionalOrBulk(email = {}) {
   return false;
 }
 
-// Stakes-first triage per email for the Today Inbox card — this used to just dump the raw
-// subject line verbatim, then (one pass later) a neutral "what this is" restatement. Neither
-// tells you at a glance whether you need to actually do something about it. The bar now is
-// Poke's texting voice: what happened, what it actually costs you if you ignore it, and by
-// when — the way a sharp assistant would text a friend, not the way you'd file an email.
-// Single batched call (not one per email) to keep this cheap — runs on the FAST_MODEL helper
-// tier, on a background schedule so the extra latency doesn't block any user-facing request.
-// Also judges promotional-ness by content, not just Gmail's label — the label/
-// List-Unsubscribe check in isPromotionalOrBulk only catches CATEGORY_PROMOTIONS/SOCIAL/
-// FORUMS plus a header that turns out to be unreliable in practice. Gmail files plenty of
-// real marketing (product newsletters, paid-study recruitment) under CATEGORY_UPDATES
-// alongside genuine notifications (bill reminders, build failures), and a label alone
-// can't tell those apart — this reuses the same batched call already paying for an LLM
-// read of each email, just asking it two more things.
+// Stakes-first triage for the Today Inbox card: what happened, what ignoring it costs, by when.
+// One batched call on the helper tier, which also judges promotional-ness by content — Gmail's
+// labels file real marketing under CATEGORY_UPDATES next to genuine notifications.
 async function summarizeEmails(emails) {
   if (!emails.length) return emails;
   try {
@@ -5952,14 +5863,8 @@ Respond with ONLY a JSON array, one object per email, same order as input, shape
   }
 }
 
-// Deliberately never routed through the general agent/tool-calling loop, and
-// get_email_action_links is deliberately not registered in action-contracts.js — a bank
-// or card-issuer site can't be safely logged into by a bot (2FA, aggressive anti-automation),
-// so the model is never even given the option to try browser actions on one of these. This
-// mines the ORIGINAL email for real links the provider already sent (e.g. Revolut's own
-// "Add money" link) and asks the model only to write short manual steps and pick which of
-// those real links matter — it selects and labels existing links, it never gets to invent a
-// URL. Called directly from the /emails/action-plan REST route below, not from chat.
+// Not an action and not reachable from the agent loop: banks can't be safely driven by a bot.
+// The model only picks and labels links the email already contained; it never invents a URL.
 async function buildEmailActionPlan(userId, { provider, messageId }) {
   if (!messageId) return { success: false, error: 'No message to look up.' };
   const action = provider === 'outlook' ? 'get_outlook_email_action_links' : 'get_email_action_links';
@@ -6104,10 +6009,8 @@ async function maybeCreateIntervalBriefing(userId, now = new Date()) {
   const key = `proactive.briefing.${window.id}.${todayKey}`;
   const prefs = await getPreferenceMap(userId);
   if (prefs[key] === 'sent') {
-    // The once-per-window narrative already fired today, but the dashboard's email/
-    // incoming cards shouldn't go stale for the rest of the day because of that — every
-    // runProactiveCheck call (fires on every Home open) refreshes the existing row's raw
-    // data in place. Silent: no new narrative, no chat message, no push.
+    // The narrative already fired today, but the cards shouldn't go stale until tomorrow.
+    // Refreshes the existing row's raw data in place: no new narrative, message or push.
     const emailContext = await gatherEmailContext(userId);
     await refreshBriefingEmailData(userId, `${window.id}_briefing`, todayKey, emailContext);
     return null;
@@ -6383,11 +6286,8 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
     if (emailNudges) summary.briefings += emailNudges.count || 0;
     if (calendarNudges) summary.briefings += calendarNudges.count || 0;
 
-    // The digest is the one proactive message that is genuinely worth sending unprompted, and
-    // it was the one thing never raised as a notification — it existed only as a card the
-    // user had to open the app to find. Raised once per LOCAL day (the dedupe key carries the
-    // date), so re-running the sweep all morning re-words it rather than re-sending it, and
-    // it declares what it covers so a separate alert about the same commitment folds into it.
+    // Raised once per local day (the date is in the dedupe key), so re-running the sweep
+    // re-words it rather than re-sending. Declares what it covers so other alerts fold in.
     try {
       const digest = await executeAction(userId, 'daily_digest', {});
       const shaped = digest?.success ? dailyDigest.formatDigestNotification(digest) : null;
@@ -6474,27 +6374,15 @@ async function runProactiveForUser(userId, logger = console, now = new Date()) {
   return summary;
 }
 
-// A condition watch that checked and found nothing new is not news — it's the poll doing
-// its job. Surfacing it anyway is exactly the "notify on every poll" noise a background
-// watch should avoid: a 30-minute price watch would otherwise post a fresh Home card and
-// chat message every single cycle, most of them saying nothing happened. Every other
-// outcome (a genuine trigger, a failure worth knowing about, or something that needs
-// approval) is real news, and so is a plain non-condition scheduled task — it has no
-// "checked, nothing yet" state at all, every run of it IS the deliverable.
+// A condition watch that found nothing is the poll working, not news — surfacing it would
+// post a card every cycle. Everything else, including any plain scheduled task, is reportable.
 function isScheduledRunNoteworthy(task, { conditionTriggered, failed, waiting }) {
   if (!task?.condition) return true;
   return Boolean(conditionTriggered || failed || waiting);
 }
 
-// Run a saved goal in the background — one path, whatever caused the run.
-//
-// A scheduled task and a user's saved routine are different things to a person (one is
-// "watch this for me", the other is "here is a routine I keep re-running"), but running one
-// is the same job both times: give it a durable identity so it shows up in the work
-// surfaces, claim it, route it to a model, open a runtime session, and drive the ordinary
-// agent loop. That was written out twice, and the routine copy had drifted — no persisted
-// task, no runtime session, no model routing — so a routine run was invisible in the UI and
-// always used the default model. Callers keep their own bookkeeping; only the running is shared.
+// Run a saved goal in the background — one path for scheduled tasks and routines alike:
+// persist an identity, claim it, route a model, open a session, drive the agent loop.
 async function runSavedGoal(userId, {
   title,
   instruction,
@@ -6589,10 +6477,8 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
       if (failed) {
         await scheduledTasks.deferScheduledTask(claimed, now);
       } else if (conditionTriggered) {
-        // A watch the user asked about once ("tell me when it drops below £500") is done when
-        // it fires. An ongoing or every-change watch ("keep me updated") must keep running —
-        // it used to depend on the model remembering to re-create itself, which lost the
-        // watch's baseline and history every time.
+        // A one-shot watch ("tell me when it drops below £500") is done once it fires; an
+        // ongoing one keeps its baseline and history and carries on.
         const evaluation = afterRun?.watch_state?.lastEvaluation;
         if (evaluation && evaluation.terminal === false) await scheduledTasks.advanceScheduledTask(claimed, now);
         else await scheduledTasks.completeScheduledTask(claimed, now);
@@ -7107,26 +6993,18 @@ function emailTriageSignals(email = {}, message = '') {
   if (/\?|\b(can you|could you|please|let me know|reply|respond|confirm|approve|send me|need you to)\b/i.test(haystack)) add(3, 'asks for a response');
   if (/\b(today|tomorrow|tonight|asap|urgent|deadline|due|expires?|by \d|before \d|appointment|meeting|interview)\b/i.test(haystack)) add(2, 'time-sensitive');
   if (/\b(security|sign-?in|login|password|verification|suspicious|fraud|payment failed|failed payment|declined|overdue|disruption|cancelled|delayed|problem with your order|action required)\b/i.test(haystack)) add(4, 'needs attention');
-  // Debt/arrears wording, added after a REAL Capital One "Notice of Sums in Arrears" scored
-  // -2 and came out archivable: none of the words above appear in it, while its sending
-  // domain (notification.capitalone.co.uk) collected the automated-sender penalty. Archiving
-  // a genuine arrears notice is the worst thing inbox cleanup could do.
+  // Debt/arrears wording. A real arrears notice matches none of the words above and collects
+  // the automated-sender penalty from its domain — archiving one is the worst outcome here.
   if (/\b(arrears|sums in arrears|missed (?:a )?payments?|missed two or more|final notice|default notice|debt|collections|repossess|payment is (?:now )?overdue|late fees? (?:now )?apply|settle the invoice|please settle)\b/i.test(haystack)) add(5, 'money you owe');
   if (/\b(school|teacher|university|work|manager|client|invoice|contract|doctor|dentist|gp|travel|flight|train|hotel)\b/i.test(haystack)) add(2, 'personal/work signal');
-  // Transactional mail (receipts, order/shipping/booking confirmations, refunds) is very
-  // often sent from an automated-looking address (order-confirm@, noreply@, tracking@) —
-  // without this, a genuine receipt would collect only the automated-sender penalty below
-  // and read identically to a marketing newsletter. This is content-based, not sender-based,
-  // so it can't be spoofed by simply not looking like a "no-reply" address either way.
+  // Transactional mail usually comes from an automated-looking address, so without a
+  // content-based signal a genuine receipt scores the same as a newsletter.
   if (/\b(receipt|invoice|order confirm(?:ed|ation)?|order number|order #\d|tracking number|has shipped|out for delivery|been delivered|refund|return label|booking confirm(?:ed|ation)?|confirmation number|e-ticket|boarding pass|itinerary)\b/i.test(haystack)) add(3, 'receipt or confirmation');
 
   const automatedSender = /\b(no-?reply|noreply|donotreply|mailer-daemon|notification|notifications|alerts?|digest|newsletter|marketing)\b/i.test(sender);
   if (automatedSender) low(2, 'automated sender');
-  // A List-Unsubscribe header is what actually makes something mailing-list mail. Real
-  // promotional mail (an abandoned-cart nudge saying "complete your order") often carries no
-  // marketing WORDS at all, so content alone left it unclassified and uncleaned. Recorded as
-  // a signal here; whether it counts as bulk is decided below, so a receipt that happens to
-  // come from a list-sending domain is not reclassified as junk.
+  // A List-Unsubscribe header is what makes mail list mail; plenty of promotional mail carries
+  // no marketing words at all. Recorded as a signal only — bulk is decided below.
   const mailingList = Boolean(email.listUnsubscribe);
   if (mailingList) low(1, 'mailing list header');
   if (/\b(newsletter|digest|roundup|recommended|recommendations|promotion|sale|offer|unsubscribe|manage preferences|marketing)\b/i.test(haystack)) low(3, 'bulk or promotional');
@@ -7136,11 +7014,8 @@ function emailTriageSignals(email = {}, message = '') {
   }
   if (/^(re:|fwd:)/i.test(subject) && !automatedSender) add(1, 'conversation thread');
 
-  // "Automated sender" alone must not be treated the same as genuinely bulk/promotional
-  // content — a delivery-tracking or booking-confirmation email is just as automated as a
-  // newsletter, but it isn't junk. Only fold the sender-shape signal into 'bulk updates' when
-  // nothing else redeems the message (no positive signal fired at all); real bulk/promotional
-  // CONTENT (newsletter/offer/unsubscribe wording) always counts on its own.
+  // A tracking email is as automated as a newsletter without being junk, so sender shape only
+  // counts as bulk when nothing else redeemed the message. Bulk content always counts.
   const hasBulkContent = lowSignals.includes('bulk or promotional');
   const hasOnlyAutomatedSenderPenalty = lowSignals.includes('automated sender') && signals.length === 0;
   // Same rule for the list header as for the sender shape: it only makes something bulk when
@@ -7412,14 +7287,8 @@ function postResponseTasks(userId, message, extra = {}) {
       }
     }).catch(() => {});
   }
-  // Style-preference learning is disabled (Phase 4, 2026-08-06). This used to regex-match a
-  // message and write `User said "<raw message>" — adapt accordingly` into `preferences` on
-  // one occurrence, permanently — see the comment on ALLOWLISTED_STYLE_PREFERENCE_KEYS above
-  // for what that produced live. filterStylePreferenceRows() also blocks any such rows
-  // already in the table from reaching the prompt, so removing this write is a genuine
-  // no-op today, not just a stop to future corruption. A typed, corroborated, decaying
-  // replacement is future work, not this phase.
-  // (agent trace episodes are no longer written to user memories — see Memory trust plan)
+  // Style-preference learning is disabled: it turned one-off phrasing into a permanent
+  // instruction. filterStylePreferenceRows() also blocks any rows already written.
 }
 
 async function respondWithResult({ res, streaming, wantsTTS, settings, trace, userId, message, spoken, actionResults = [] }) {
@@ -7596,11 +7465,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       }
       pendingActionConfirmLocks.add(pendingKey);
       try {
-        // The in-memory Set above only catches a double-tap landing on this
-        // same process. Fly.io can run several instances concurrently, so
-        // the real guard against double-executing a confirmed action is this
-        // atomic compare-and-delete: only the request that actually removes
-        // the stored pending action gets to run it.
+        // The Set above only covers this process, and Fly runs several. The real guard is the
+        // compare-and-delete: only the request that removes the pending action runs it.
         const claimed = await claimPendingAction(userId, pendingAction);
         if (!claimed) {
           await respondWithResult({
@@ -7655,10 +7521,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
             actionResults
           });
         } catch (e) {
-          // Execution itself blew up (not just an action-level failure, which
-          // executeActions already turns into a result rather than a throw).
-          // Restore the claimed action so the user can retry by saying "yes"
-          // again instead of losing the pending confirmation entirely.
+          // Execution itself threw, rather than returning an action-level failure. Restore the
+          // claimed action so "yes" can be retried instead of losing the confirmation.
           await setPendingAction(userId, pendingAction.action, {
             userMessage: pendingAction.userMessage,
             location: pendingAction.location,
@@ -7767,11 +7631,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       settings,
       appointmentProviderConnected: Boolean(getAppointmentBookingService())
     });
-    // Instrumentation for the entity-recall bare-pronoun path: how often it's attempted, how
-    // often it resolves, and whether a resolved reference was clear enough to route directly
-    // vs falling through to the model (a proxy for "still needed clarification", not a
-    // guarantee — the model path can also succeed without asking anything). Only fires when a
-    // referential phrase was actually detected this turn, so this doesn't log every message.
+    // Instrumentation for the bare-pronoun path: attempted, resolved, and routed directly vs
+    // fell through to the model. Only fires when a referential phrase was detected.
     const entityReferenceKind = extractReferentialPhrase(message) ? 'named' : (hasBareEntityReference(message) ? 'bare' : null);
     if (entityReferenceKind) {
       logEntityReference({
@@ -7913,10 +7774,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       cachedContentName,
       baseHistory,
       userContent: { role: 'user', parts: [{ text: message }] },
-      // Native function declarations travel with every plain-chat turn. They were disabled
-      // here in 78823773 (2026-07-07) to cut TTFT while the <action> TEXT fallback still
-      // worked on Gemini; on gpt-5.6-luna that fallback emits nothing, so the classic path
-      // was left claiming actions it never performed ("Playing Steve Lacy." with no music).
+      // Native function declarations travel with every plain-chat turn. Without them the
+      // model claims actions it never performed, since it emits no <action> text to fall back on.
       useAgentTools: true
     });
 
@@ -7940,10 +7799,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
       let matchedTask = null;
       let runtimeStartError = null;
 
-      // Create the execution identity before the first model turn. This is what makes an
-      // ambient request a durable delegated goal rather than a chat response that happens
-      // to call tools. If the optional runtime migration is not present yet, retain the
-      // existing task-loop behaviour and surface the failure in the trace.
+      // The execution identity is created before the first model turn: it is what makes this a
+      // durable delegated goal rather than a chat reply that calls tools.
       try {
         const identity = await startChatExecutionIdentity({
           userId,
@@ -7992,11 +7849,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         if (!runtimeStartError) runtimeStartError = 'The work session could not be started. Nothing was run.';
       }
 
-      // Open the SSE stream BEFORE the loop runs, not after — the loop internally
-      // already calls onStep at each think/execute/observe phase (agent-orchestrator.js),
-      // it was just wired to null here, so a multi-step turn (e.g. "order me some
-      // jeans") sat on a single generic "Preparing result" for its entire duration
-      // with no real progress reaching the client.
+      // The stream opens before the loop runs, so the orchestrator's per-phase onStep calls
+      // have somewhere to go and a multi-step turn reports real progress.
       if (streaming) {
         try {
           res.setHeader('Content-Type', 'text/event-stream');
@@ -8022,13 +7876,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
         return;
       }
 
-      // The client's send watchdog extends itself on every status event it receives (see
-      // ChatViewModel.startSendWatchdog) — but a single slow step inside the agent loop
-      // (a page load, a third-party redirect) can legitimately go longer than the
-      // watchdog's window with no real onStep event to send. Without a heartbeat, the
-      // client times out a task that's still genuinely working. This fires on a fixed
-      // interval regardless of what the loop is doing internally, so the client always
-      // hears something well within its window.
+      // The client's send watchdog extends on every status event, and one slow step can outlast
+      // its window with nothing to report. This ticks regardless of what the loop is doing.
       let heartbeat = null;
       if (agenticSendStatus) {
         heartbeat = setInterval(() => agenticSendStatus('agent_thinking', 'Working on it'), 15000);
@@ -8107,10 +7956,8 @@ app.post('/chat', chatRateLimiter, async (req, res) => {
           } catch (planErr) {}
         }
 
-        // Reflection for verification — fire-and-forget, not awaited: it only feeds a
-        // trace log line, nothing downstream branches on it, so blocking the response on
-        // a full extra Gemini call here was pure latency for zero payoff (same class of
-        // fix as agent-orchestrator.js's mid-loop reflection).
+        // Fire-and-forget: this only feeds a trace line, so the response never waits on an
+        // extra model call for it.
         reflectOnResults(message, actionResults, actionResults, chatModel, chatProvider)
           .then((reflection) => {
             if (reflection && !reflection.achieved && reflection.nextAction) {
@@ -8694,9 +8541,8 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 // ── Microsoft OAuth ───────────────────────────────────────────────────────────
-// connectors/microsoft.js already has real Graph API calls + token refresh (saveTokens/
-// getTokens) but no way to acquire the first token — there was no start/callback route at
-// all, so Outlook could never actually be connected despite the connector being fully built.
+// Acquires the first token for connectors/microsoft.js, which handles everything after
+// (Graph calls, refresh) but cannot get a user connected on its own.
 
 const MS_SCOPES = [
   'offline_access', 'Mail.Read', 'Mail.Send', 'Calendars.ReadWrite', 'User.Read'
@@ -8829,11 +8675,8 @@ app.get('/health', async (_req, res) => {
   const brainRoute = resolveModelRoute({});
   const brainStatus = providerConfiguration(brainRoute.provider, brainRoute.model);
 
-  // Configuration presence only — never a live call to Gmail, Calendar or Telegram. A health
-  // check that depends on a third party's uptime turns their outage into an unnecessary
-  // restart/autoscale signal for this service; what belongs here is "did boot-time
-  // configuration succeed", which is exactly what was missing after the 2026-08-09 pass kept
-  // finding real capability gaps that a green test suite alone never surfaced.
+  // Configuration presence only, never a live third-party call: their outage must not read as
+  // this service being unhealthy.
   const googleConfigured = Boolean(process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET);
   const telegramConfigured = Boolean(process.env.TELEGRAM_API_ID && process.env.TELEGRAM_API_HASH);
   const notifyChannels = availableChannels({
@@ -8859,10 +8702,8 @@ app.get('/health', async (_req, res) => {
       travel: { configured: Boolean(process.env.DUFFEL_ACCESS_TOKEN) }
     },
     notifications: {
-      // Configured, not "will deliver right now" — per-user destination (a verified email,
-      // an authenticated Telegram session) is still resolved per call, exactly as
-      // notification-delivery.js already does; this says whether the underlying providers
-      // that per-user resolution depends on are even present.
+      // Reports whether the providers are present, not that a given user is reachable — the
+      // per-user destination is still resolved per call by notification-delivery.js.
       channelsConfigured: notifyChannels.filter(c => c !== 'in_app'),
       unavailable: notifyUnavailable
     },
@@ -9366,10 +9207,8 @@ app.get('/agent/browser', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    // last_url and goal are NOT columns. Commit 97742f7a moved the resume state inside the
-    // encrypted storage_state value because the live table only has user_id/site/
-    // storage_state/updated_at, but this route kept selecting the old columns and so had
-    // been returning 500 ever since. Read them back out of the blob instead.
+    // last_url and goal are not columns — the live table is user_id/site/storage_state/
+    // updated_at only, and the resume state lives inside the encrypted blob.
     const { data, error } = await supabase.from('browser_sessions')
       .select('site, storage_state, updated_at')
       .eq('user_id', userId)
@@ -9715,11 +9554,8 @@ app.delete('/connectors/stripe/card', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Agent payment card — the card browser checkout fills into merchant payment forms
-// after the user confirms a ready_for_payment gate (api/services/agent-card.js).
-// Stored encrypted; GET only ever returns the masked summary, never the number/CVC.
-// Card entry happens over these authed routes (iOS Payments screen / curl), NEVER via
-// chat — checkout-profile.js's PAYMENT_ASK_PATTERN keeps PANs out of transcripts.
+// Agent payment card, filled into merchant forms after a confirmed payment gate. Stored
+// encrypted, GET returns only the masked summary, and entry is over these authed routes never chat.
 app.post('/connectors/agent-card', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9772,11 +9608,8 @@ app.post('/checkout-profile', requireSessionAuth, async (req, res) => {
   }
 });
 
-// General-purpose credential vault — Phase 2 of the aside-parity roadmap. Any site
-// credential (not just payment cards); stored encrypted, one per (user, site), decrypted
-// only inside the browser-task engine at point of use (confirmCredentialUse in
-// api/services/browser-task.js). GET never returns the password. Credential entry
-// happens over these authed routes (iOS Vault screen), NEVER via chat.
+// Site credential vault: encrypted, one per (user, site), decrypted only at point of use.
+// GET never returns the password, and entry is over these authed routes never chat.
 app.post('/vault/credentials', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9802,13 +9635,8 @@ app.get('/vault/credentials', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Hand Oxy a login that already exists in the user's own browser, so the agent arrives at
-// a site already signed in instead of facing a login wall and 2FA as a brand-new visitor.
-// Oxy never learns the password, because it never signs in.
-//
-// The payload comes from a browser extension that can see every cookie the browser holds,
-// so session-import.js filters it down to the one site being imported and refuses finance
-// and identity sites outright. See that file for why both rules exist.
+// Import a login that already exists in the user's browser, so the agent arrives signed in
+// without ever learning the password. session-import.js filters the payload to one site.
 app.post('/vault/browser-session', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9891,14 +9719,8 @@ app.delete('/vault/grants/:id', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Every attempt to use a stored credential, allowed or refused. Refusals are the more
-// telling entries: they show a page trying to steer the agent at a site never granted.
-// Is a shared session still signed in?
-//
-// A session shared from the user's browser stops working silently: it expires, the site
-// invalidates it, or the site refuses it arriving from a server rather than the browser that
-// minted it. The agent then behaves like a logged-out visitor and the user sees only worse
-// results, with nothing saying why. This opens the site read-only and reports what it finds.
+// Is a shared session still signed in? An imported session expires or gets refused silently,
+// leaving the agent a logged-out visitor. This opens the site read-only and reports what it sees.
 app.get('/vault/browser-session/:site/check', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9971,10 +9793,8 @@ app.delete('/vault/credentials/:id', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Fills a username/password the user just typed directly into the live browser-task page's
-// login form, for a `reauth` outcome — same rule as the vault routes above: credentials are
-// NEVER accepted over chat, only here, over an authed route, straight into the DOM. Never
-// logged, never in a model prompt. See browser-task.js's fillReauthLogin for the fill logic.
+// Fills a just-typed username/password straight into the live page's login form for a
+// `reauth` outcome. Never logged, never in a prompt, never accepted over chat.
 app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -9987,12 +9807,8 @@ app.post('/browser-task/reauth-login', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Recently touched entities (Phase 3 of the aside-parity roadmap) — a light "what did the
-// agent last work on" surface, not a search UI. Reuses task_entities written by
-// api/services/browser-task.js's runOrderingTurnImpl.
-// Chat settings (Phase 4 of the aside-parity roadmap) — effort is stored/exposed as a
-// preference only (no model-selection wiring). Guard mode is enforced server-side, see
-// api/services/action-execution.js's executionMode gate.
+// Effort is stored as a preference only; guard mode is enforced server-side by
+// action-execution.js's executionMode gate.
 app.get('/chat-settings', requireSessionAuth, async (req, res) => {
   const userId = getAuthenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Unauthorized' });
@@ -10162,11 +9978,8 @@ app.get('/documents', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Routines — a user-saved name + prompt they can re-run later (api/services/routines.js).
-// A recurring routine re-runs the full agentic loop (real model + tool calls) on every
-// firing with no per-user spend cap yet (tracked separately), so the one guard that belongs
-// here is a floor on how often that can happen. Hourly matches the cadence the rest of the
-// product already treats as "recurring" (watches, digests) rather than "real-time".
+// Routines — a saved name + prompt the user can re-run. Each firing runs the full agent loop,
+// so the floor on frequency is hourly, matching watches and digests.
 const ROUTINE_MIN_INTERVAL_MINUTES = 60;
 
 app.post('/routines', requireSessionAuth, async (req, res) => {
@@ -10225,14 +10038,8 @@ app.get('/concierge/balance', requireSessionAuth, async (req, res) => {
   }
 });
 
-// Built here, at the bottom of the module, rather than beside executeActionRaw: several
-// of these are `const`s declared further down the file (startDelegatedTaskExecution among
-// them). Evaluating this object earlier would touch them before initialisation and throw
-// at startup. executeActionRaw only reads it when an action actually runs, long after the
-// module has finished loading.
-// What the extracted action modules are allowed to reach into. Passing these explicitly
-// keeps handlers from building a second Supabase client of their own and keeps every
-// dependency of a handler visible in one place.
+// What the extracted action modules may reach into. Built at the bottom of the module
+// because several entries are `const`s declared further down and would throw at startup.
 const actionDeps = {
   supabase,
   agentWorkspace,

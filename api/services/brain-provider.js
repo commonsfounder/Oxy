@@ -1,45 +1,12 @@
 'use strict';
-/*
- * Brain provider seam.
- *
- * Wraps the chat brain's model calls so the provider can change WITHOUT touching
- * the consumer: streamBrain() yields chunks shaped exactly like the @google/genai
- * stream ({ text, candidates }), so the `for await` loop in index.js works
- * unchanged regardless of provider. generateBrain() mirrors the non-streaming
- * generateContent() shape ({ text }).
- *
- *   OXY_BRAIN_PROVIDER = openai (default) | anthropic | gemini | groq | local
- *   OXY_CHAT_REASONING_EFFORT = low (default) | medium | high
- *   OPENAI_API_KEY     = required for the default path
- *   GEMINI_API_KEY     = required only when provider=gemini
- *   GROQ_API_KEY       = required only when provider=groq
- *   ANTHROPIC_API_KEY  = required only when provider=anthropic
- *   OXY_LOCAL_MODEL_BASE_URL = required only when provider=local (OpenAI-compatible)
- *
- * OpenAI became the default on 2026-08-04, after Google billing dunning denied the
- * Gemini project outright and took chat down. There is deliberately NO automatic
- * cross-provider fallback: a silent downgrade to a different brain mid-conversation
- * is worse than a clear error. `gemini`/`groq` remain as MANUAL escape hatches.
- *
- * Search grounding differs by provider and is NOT apples-to-apples: Gemini uses the
- * native googleSearch tool inline, while OpenAI grounds through a separate
- * Responses-API call (see webSearchBrain). Anthropic/Groq/local have no grounding of
- * their own and borrow Gemini for that ONE lookup — never for the conversation itself.
- *
- * No dispatcher falls through to another vendor. openai/groq/local share the OpenAI
- * /chat/completions transport (different base URL, key, and request fields); anthropic and
- * gemini have their own. An unrecognised provider throws rather than quietly landing on
- * whichever client happens to be last in the chain.
- */
+// Provider seam for the chat brain: streamBrain/generateBrain return @google/genai-shaped
+// results whatever OXY_BRAIN_PROVIDER is set to. No cross-provider fallback; unknown throws.
 
 const { GoogleGenAI } = require('@google/genai');
 const { defaultModelForProvider, modelMatchesProvider } = require('./model-routing');
 
-// Reasoning-tier models (gpt-5.x) bill reasoning tokens against max_completion_tokens
-// BEFORE any visible text. The chat path sets maxOutputTokens=32 for quick turns, which
-// on a reasoning model is consumed entirely by reasoning and returns an EMPTY string.
-// Floor the cap so a visible answer always has room. Confirmed live: a 32-token cap on
-// gpt-5.6-luna returns finish_reason=length with content:''.
+// Reasoning models bill reasoning tokens against max_completion_tokens before any visible
+// text, so a low cap returns an empty string. Floor it.
 const OPENAI_MIN_COMPLETION_TOKENS = 768;
 
 let _gemini = null;
@@ -63,10 +30,8 @@ function resolveBrainModel(provider, model, role = 'reasoning') {
     : defaultModelForProvider(provider, role);
 }
 
-// Gemini contents (role/parts) + systemInstruction -> OpenAI-style messages.
-// Text-only turns keep `content` as a plain string (what every provider accepts);
-// only turns carrying an image use the array form, since /chat-with-image sends
-// Gemini inlineData parts that OpenAI expects as image_url data URIs.
+// Gemini contents + systemInstruction -> OpenAI messages. Text-only turns keep `content`
+// as a string; only image turns use the array form (inlineData -> image_url data URI).
 function toOpenAIMessages(contents, systemInstruction) {
   const messages = [];
   if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
@@ -93,23 +58,8 @@ function toOpenAIMessages(contents, systemInstruction) {
   return messages;
 }
 
-// Gemini config -> OpenAI request fields. Reasoning-tier models reject `temperature`
-// (any non-default value errors) and renamed max_tokens -> max_completion_tokens, so
-// Gemini's temperature/topP/topK do not carry over.
-//
-// Tool declarations DO carry over. They used to be dropped here on the theory that the chat
-// path parses actions out of the model's TEXT (<action> blocks) — but that fallback stopped
-// working when the provider moved to OpenAI: gpt-5.6-luna does not emit <action> markup, so
-// the plain-chat path had no working action mechanism at all and answered "I can't set
-// reminders directly here" for tools the user has connected.
-//
-// reasoning_effort MUST be 'none' whenever tools are attached. Verified live on 2026-08-06:
-// tools + effort 'low' AND tools + effort omitted entirely both return
-//   400 "Function tools with reasoning_effort are not supported for gpt-5.6-luna in
-//        /v1/chat/completions. To use function tools, use /v1/responses or set
-//        reasoning_effort to 'none'."
-// so the field has to be set explicitly rather than left off. Same workaround, same reason,
-// as the agent loop's tool path in callToolsBrain below.
+// Gemini config -> OpenAI request fields. Reasoning models reject `temperature` and renamed
+// max_tokens; reasoning_effort must be 'none' whenever tools are attached or the call 400s.
 function openAIRequestFromConfig(config = {}) {
   const body = {
     max_completion_tokens: Math.max(config.maxOutputTokens || 0, OPENAI_MIN_COMPLETION_TOKENS),
@@ -145,16 +95,8 @@ async function* groqStream({ model, contents, config }) {
   yield* streamChatCompletionSSE(res);
 }
 
-// Shared OpenAI-style SSE reader (OpenAI proper, Groq, and any OpenAI-compatible host).
-// Yields Gemini-shaped chunks so the consumer's `for await` loop never changes.
-//
-// Tool calls arrive fragmented and interleaved with content: each frame carries a
-// delta.tool_calls array whose entries are identified by `index`, the function NAME is
-// usually whole on the first frame for an index but is appended defensively, and the JSON
-// `arguments` string almost never arrives in one piece. They are accumulated per index and
-// emitted as ONE final Gemini-shaped chunk after the stream ends, so a consumer sees a
-// complete call rather than a dozen partial ones. Before this, delta.tool_calls was never
-// read at all — a tool call would be requested by the model and silently discarded here.
+// Shared OpenAI-style SSE reader, yielding Gemini-shaped chunks. Tool calls arrive
+// fragmented across frames, so they are accumulated by `index` and emitted as one final chunk.
 async function* streamChatCompletionSSE(res) {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -309,10 +251,8 @@ async function compatibleGenerate({ provider, model, contents, config }) {
   });
   if (!res.ok) throw new Error(`${provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const json = await res.json();
-  // Returns the full Gemini shape, not just { text }: once tools can be attached here, a
-  // reply carrying tool_calls has EMPTY content, and returning only the text would discard
-  // the call silently — the exact failure this phase exists to remove. `.text` is unchanged
-  // for the many callers that only read it.
+  // Full Gemini shape, not just { text }: a reply carrying tool_calls has empty content, so
+  // text-only would drop the call. `.text` still works for callers that only read it.
   return openAIResponseToGeminiShape(json);
 }
 
@@ -422,11 +362,8 @@ async function anthropicGenerate({ model, contents, config, tools = [] }) {
   return anthropicResponseToGeminiShape(await res.json());
 }
 
-/*
- * Returns an async iterable of { text, candidates } chunks.
- * On the Groq path `model` is ignored in favour of OXY_GROQ_MODEL. Awaitable for
- * every provider (Gemini returns a promise; the others are async generators).
- */
+// Async iterable of { text, candidates } chunks. Awaitable for every provider; the Groq
+// path ignores `model` in favour of OXY_GROQ_MODEL.
 function streamBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
   const resolvedModel = resolveBrainModel(p, model);
@@ -437,10 +374,7 @@ function streamBrain({ provider, model, contents, config }) {
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
-/*
- * Non-streaming counterpart, shaped like @google/genai's generateContent result
- * ({ text }). Used by /chat-with-image and the short helper prompts.
- */
+// Non-streaming counterpart, shaped like generateContent's { text } result.
 async function generateBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
   const resolvedModel = resolveBrainModel(p, model);
@@ -453,14 +387,8 @@ async function generateBrain({ provider, model, contents, config }) {
   throw new Error(`Unknown brain provider: ${p}`);
 }
 
-/*
- * Web-grounded answer for the `web_search` action.
- *
- * Gemini grounds inline via the googleSearch tool; OpenAI has no inline equivalent on
- * chat/completions, so grounding goes through the Responses API's web_search tool as a
- * separate call. Returns plain text, or '' when the provider gave nothing usable —
- * callers surface their own "no results" error so the wording stays consistent.
- */
+// Web-grounded answer for `web_search`: inline googleSearch on Gemini, a separate
+// Responses-API call on OpenAI. Returns '' when nothing usable came back.
 async function webSearchBrain({ model, prompt, provider }) {
   const p = provider || getBrainProvider();
   if (p === 'openai') {
@@ -487,12 +415,8 @@ async function webSearchBrain({ model, prompt, provider }) {
       .trim();
     return text;
   }
-  // Only OpenAI and Gemini ground natively. An Anthropic/Groq/local route has no grounding
-  // of its own, so search falls to Gemini AS A TOOL — deliberate and narrow (one lookup,
-  // never the conversational brain). This branch used to be reached by fallthrough and
-  // forwarded the *other* provider's model id to Gemini, which 404s every time; pick a real
-  // Gemini model instead, and return '' when there is no Gemini key to fall back to so the
-  // caller surfaces its own "no results" wording.
+  // Anthropic/Groq/local cannot ground, so this one lookup borrows Gemini — with a real
+  // Gemini model id, never the calling provider's, which 404s.
   if (!geminiConfigured()) return '';
   const groundingModel = p === 'gemini' ? model : (process.env.OXY_GEMINI_MODEL || 'gemini-2.5-flash');
   const res = await geminiClient().models.generateContent({
@@ -545,16 +469,8 @@ function toolCallId(name, idx) {
   return `call_${String(name || 'fn').slice(0, 32)}_${idx}`;
 }
 
-/*
- * Tool-calling contents -> OpenAI messages.
- *
- * The agent loop replays each turn as Gemini shapes it: a 'model' turn whose parts carry
- * functionCall entries, followed by 'function' turns carrying functionResponse entries.
- * OpenAI instead wants an assistant message with a tool_calls array, then one 'tool'
- * message per call carrying the matching tool_call_id. Ids are synthesised per assistant
- * turn and consumed in order by the responses that follow, which is safe because the loop
- * always emits responses in the same order as the calls that produced them.
- */
+// Tool-calling contents -> OpenAI messages: Gemini functionCall/functionResponse turns become
+// an assistant tool_calls message plus one 'tool' message each. Ids are synthesised in order.
 function toOpenAIToolMessages(contents, systemInstruction) {
   const messages = [];
   if (systemInstruction) messages.push({ role: 'system', content: systemInstruction });
@@ -621,10 +537,7 @@ function openAIResponseToGeminiShape(json) {
   };
 }
 
-/*
- * Tool-calling generate for the ReAct agent loop. Returns a Gemini-shaped response
- * regardless of provider.
- */
+// Tool-calling generate for the agent loop; Gemini-shaped whatever the provider.
 async function callToolsBrain({ provider, model, contents, config }) {
   const p = provider || getBrainProvider();
   const resolvedModel = resolveBrainModel(p, model);
@@ -653,12 +566,8 @@ async function callToolsBrain({ provider, model, contents, config }) {
   if (tools.length) {
     body.tools = tools;
     body.tool_choice = 'auto';
-    // Verbatim from the API on 2026-08-04: "Function tools with reasoning_effort are not
-    // supported for gpt-5.6-luna in /v1/chat/completions. To use function tools, use
-    // /v1/responses or set reasoning_effort to 'none'." Taking the 'none' branch keeps this
-    // one request shape for every call; moving tool turns to /v1/responses would mean a
-    // second, differently-shaped transport for no behavioural gain in a loop already tuned
-    // for latency. Only the reasoning tier needs it; Groq/local reject the field.
+    // chat/completions rejects function tools unless reasoning_effort is 'none'. Only the
+    // reasoning tier takes the field at all; Groq/local reject it.
     if (p === 'openai') body.reasoning_effort = 'none';
   }
   const res = await fetch(`${compatibleBaseURL(p)}/chat/completions`, {

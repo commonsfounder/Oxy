@@ -1,20 +1,7 @@
 'use strict';
-// Getting past the things a website puts in the way, and telling whether a step worked.
-//
-// None of this is a shopping concern, even though a checkout is where it was first needed:
-//
-//   ACCESS      — a sign-in wall, an "or continue as a guest" fork, a consent checkbox, an
-//                 address autocomplete that will not accept typed text. Every one of these
-//                 sits between a person and a form, whether the form is a basket, a tenancy
-//                 application, a council payment or a support ticket.
-//
-//   VERIFICATION — did the page actually move? A click that changed nothing is the single
-//                 most common failure in browser automation, and "I clicked it" is not
-//                 evidence. computeProgressSignature/assessProgress detect a loop going
-//                 nowhere; pageStepAdvanced answers "did this specific step advance".
-//
-// Names ending in "checkout" are kept where an exported symbol is already depended on
-// elsewhere; the behaviour is general and the comments say so.
+// Getting past what a site puts in the way (sign-in walls, guest forks, consent, address
+// widgets), and telling whether a step actually moved the page. General, not shopping-specific;
+// some exported names still end in "checkout" because callers depend on them.
 
 const {
   settle, readPageText, extractClickableElements, CLICKABLE_SELECTOR, dismissConsent,
@@ -31,23 +18,16 @@ const frameInputs = () => require('./transaction');
 // at call time keeps the module graph acyclic.
 const isPaymentUrl = (url) => require('./transaction').isCheckoutPaymentUrl(url);
 
-// Regression: a live John Lewis run completed guest checkout successfully and landed on
-// Auth0's own redirect — checkout.johnlewis.com/callback/login/guest?email=... — which the
-// old check misread as "the site wants a login" purely because the word "login" appears in
-// that callback path. It's the OPPOSITE: a callback/redirect URL is guest auth completing,
-// not a wall blocking it. Exclude /callback/ paths so this only fires on an actual sign-in
-// page shown to the user.
+// /callback/ paths are excluded: an auth callback carrying "login" in its path is guest auth
+// completing, not a wall.
 function isCheckoutLoginWallUrl(url) {
   const u = String(url || '');
   if (/\/callback\b/i.test(u)) return false;
   return /\/(?:login|signin|sign-in|account\/login|users\/login)(?:\b|\/|\?)/i.test(u);
 }
 
-// Re-auth detection. A stored login (storageState) eventually expires — the merchant
-// invalidates the cookie (days/weeks, or on a new IP / 2FA challenge). When that happens
-// the agent lands on a sign-in wall and, blind to it, burns its whole step budget trying
-// to "order" behind the login before returning a vague "I got stuck". Detecting the wall
-// lets us stop immediately and ask the user to reconnect — a clean handoff, not a flail.
+// Re-auth detection: a stored session eventually expires and drops the agent on a sign-in
+// wall. Spotting it means handing back to the user instead of burning the step budget.
 const LOGIN_URL_PATTERN = /\/(login|log-?in|signin|sign-?in|auth|authenticate|account\/(login|signin))(\b|\/|\?|$)/i;
 
 // Copy that, TOGETHER with a password field, marks a page as a login wall (not a header
@@ -60,11 +40,8 @@ const LOGIN_BASKET_PATTERN = /\b(sign in|log in|sign-in|log-in|create an account
 
 const PASSWORD_FIELD_SELECTOR = 'input[type="password"]';
 
-// Pure so it's unit-testable without a live page. A wall is either (a) the URL is a login
-// route, or (b) there's a real password field AND login copy on the page. A password field
-// alone (inline "create account" upsell) or login copy alone (a "Sign in" nav link) is not
-// enough — both together, or a login URL, are.
-// Also (c) a strong "sign in to see basket/checkout" soft gate (no pw field yet) — helps M&S etc.
+// A wall is a login URL, a password field plus login copy (either alone is just an upsell or
+// a nav link), or a strong "sign in to see your basket" soft gate. Pure, so it's testable.
 function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
   const u = String(url || '');
   if (LOGIN_URL_PATTERN.test(u)) return true;
@@ -74,11 +51,8 @@ function looksLikeLoginWall({ url, bodyText, hasPasswordField, goal } = {}) {
   return false;
 }
 
-// The chat surface can show real photos of what the agent found — previously it could
-// only ever describe them in words. og:image is the single canonical product shot on
-// almost every storefront (set specifically for link previews, so it's reliably the
-// right image even when the page has dozens of unrelated thumbnails/icons); the
-// largest visible <img> is the fallback for sites that don't set it.
+// A real photo of what the agent found. og:image is the canonical shot on almost every
+// storefront; the largest visible <img> is the fallback for sites that don't set it.
 async function extractProductImageUrls(page) {
   try {
     return await page.evaluate(() => {
@@ -105,20 +79,14 @@ async function extractProductImageUrls(page) {
   }
 }
 
-// A genuine login wall sometimes still offers a guest path right there — M&S's CIAM login
-// page ("Sign in" + a separate "Guest Checkout" link) and Wickes' checkout "login-or-guest"
-// page both do. Clicking past it avoids asking the human to sign in for an order that never
-// needed an account — most one-off shopping tasks don't care about having a Toolstation
-// login. Pure so it's unit-testable; the live wrapper reuses the loop's already-extracted
-// clickable elements (same locatorIndex space the loop's own clicks use).
+// A login wall often still offers a guest path on the same page; taking it avoids asking the
+// user to sign in for something that never needed an account.
 const GUEST_CHECKOUT_PATTERN = /\b(guest checkout|continue as (?:a )?guest|checkout as (?:a )?guest|continue without (?:an )?account|shop as (?:a )?guest|guest order|order as (?:a )?guest|pay as (?:a )?guest|checkout without (?:signing in|an account)|continue without signing in|continue without logging in|shop without an account|skip sign[- ]?in|checkout without registering|order without (?:an )?account)\b/i;
 
 const GUEST_FORK_URL_PATTERN = /login-or-guest|guest[-_]checkout|checkout\/guest|\/ciam\/|checkout\/login|checkout\/signin/i;
 
-// `checkouts?` (optional plural) so Shopify's /checkouts/cn/<token> checkout URL counts as
-// checkout-ish. Without it, the whole generic checkout pipeline (tryGenericCheckoutProgress:
-// guest → email → autofill → advance → payment-ready) was skipped on every Shopify store — the
-// same plural bug that hid the recipe checkout phase. See browser-recipes CONVENTION.checkout.
+// `checkouts?` is plural-optional so Shopify's /checkouts/cn/<token> counts as checkout-ish;
+// without it the whole generic checkout pipeline is skipped on every Shopify store.
 const CHECKOUTISH_URL_PATTERN = /\/(?:checkouts?|basket|cart|bag|trolley|order)(?:\/|$|\?)/i;
 
 function isGuestCheckoutUrl(url) {
@@ -146,22 +114,14 @@ function isCheckoutishUrl(url) {
   }
 }
 
-// Postcode-lookup address widgets ("Find address" + a suggestion list, or "Enter address
-// manually" to fall back to plain inputs) are a common UK checkout pattern our line1/city/
-// postcode selectors can't drive directly — there's no lookup box to type a postcode into
-// and no way to pick a suggestion. "Enter address manually" swaps in the plain form our
-// existing autoFillCheckoutDetails selectors already handle, so prefer it over the lookup.
+// Postcode-lookup widgets can't be driven by the plain line1/city/postcode selectors, so
+// prefer any "Enter address manually" control, which swaps in a form that can be.
 const MANUAL_ADDRESS_PATTERN = /enter\s+(?:your\s+|the\s+)?address\s+manually|enter\s+manually|manual(?:ly)?\s+enter\s+address|type\s+(?:your\s+)?address/i;
 
 async function tryManualAddressEntryClick(page, session, steps, onProgress) {
   if (session.manualAddressEntryDone) return false;
-  // Regression: our own CLICKABLE_SELECTOR + document.querySelectorAll extraction reliably
-  // MISSED this control on Currys even though extractClickableElements's separate pass
-  // (same page, same tick) reported its text — ruled out timing, disabled-state, and shadow
-  // DOM via direct checks. Root cause undetermined, but Playwright's own getByText locator
-  // (a different, framework-tested text-matching path, not our hand-rolled DOM walk) is the
-  // right tool for "find this rendered text and click it" regardless of what's going on
-  // underneath, so use it here instead of extending the custom extraction further.
+  // Playwright's getByText rather than the hand-rolled DOM walk: the custom extraction misses
+  // this control on some sites for reasons that never resolved.
   const locator = page.getByText(MANUAL_ADDRESS_PATTERN).first();
   const visible = await locator.isVisible({ timeout: 2000 }).catch(() => false);
   if (!visible) return false;
@@ -176,10 +136,8 @@ async function tryManualAddressEntryClick(page, session, steps, onProgress) {
   return true;
 }
 
-// DOM-based guest click — does not rely on extractClickableElements (Wickes login-or-guest
-// often yields only 2–3 extracted nodes while the guest CTA is still in the DOM).
-// Already past the account fork and on the "enter your email" step: clicking a guest control
-// again would bounce back a step.
+// DOM-based guest click, since extraction can yield only a couple of nodes while the guest
+// CTA is still in the DOM. Skipped past the account fork, where clicking again goes backwards.
 async function isGuestEmailSubmitStep(page) {
   const emailVisible = await page.locator('input[type="email"]:visible, input[name*="email" i]:visible')
     .first().isVisible({ timeout: 400 }).catch(() => false);
@@ -191,13 +149,8 @@ async function isGuestEmailSubmitStep(page) {
 async function tryGuestCheckoutClick(page, session, steps, onProgress) {
   if (session.guestCheckoutDone) return false;
   if (await isGuestEmailSubmitStep(page)) return false;
-  // Regression (found live, 2026-07-22): this call used the old multi-positional-arg
-  // page.evaluate(fn, a, b, c) form, which the installed Playwright version (1.61) rejects
-  // outright with "Too many arguments" — every call silently threw and was swallowed by the
-  // .catch(() => null) below, so this function has been returning false unconditionally for
-  // as long as that mismatch existed. That's the actual reason Selfridges, M&S, and any other
-  // site's "Continue as guest" / "Guest Checkout" link never got clicked and the loop fell
-  // back to asking the user to sign in. Single object-arg form fixes it.
+  // Single object arg: Playwright rejects the multi-positional page.evaluate(fn, a, b, c) form,
+  // and the .catch below would swallow the throw and return false forever.
   const hit = await page.evaluate(({ sel, patSource, patFlags }) => {
     const pat = new RegExp(patSource, patFlags);
     const all = [...document.querySelectorAll(sel)];
@@ -216,12 +169,8 @@ async function tryGuestCheckoutClick(page, session, steps, onProgress) {
       const idx = all.indexOf(node);
       if (idx >= 0) return { idx, text: t.replace(/\s+/g, ' ').slice(0, 80) };
     }
-    // Regression: Selfridges' sign-in page has a "Continue as guest" HEADING (plain text,
-    // not clickable) next to a generically-labelled "Checkout now" button — the pattern
-    // above only matches a clickable element's own text, so it misses this layout entirely.
-    // Fall back to finding any heading/paragraph whose text matches, then use the nearest
-    // clickable descendant within the same section (the guest column's own CTA, not the
-    // sign-in form's "Sign in" button).
+    // Some sites label the guest path as a heading next to a generic button, which the pattern
+    // above can't match. Match the heading, then click the nearest CTA inside its own section.
     const headingHit = [...document.querySelectorAll('h1,h2,h3,h4,legend')].find((h) => pat.test((h.innerText || '').trim()));
     if (headingHit) {
       let section = headingHit.closest('section,div,fieldset') || headingHit.parentElement;
@@ -360,16 +309,9 @@ async function detectLoginWall(page, goal) {
   }
 }
 
-// Unified no-progress detector inputs. Returns { sig, stateKey, itemCount }:
-//  - sig: exact fingerprint (URL + cart count + dialogs + DOM sample) — equality across steps
-//    means the page is literally frozen (wait-loops, dead clicks).
-//  - stateKey: coarse page identity (host+path + cart + open-dialog count + titles, NO query/
-//    sample churn) — fed into a per-session seen-set so we can tell "a page we've already
-//    visited" (cycling/wandering) from "a new page" (forward progress). Normal shopping flows
-//    produce a NEW stateKey nearly every step; spins revisit old ones.
-// Both persisted on session so they survive auto-continue turns (like lastActionSig).
-// Dialog count/title are included so an item modal (Deliveroo/Uber Eats) counts as a state
-// change even when the URL and main <h1> don't move.
+// No-progress detector inputs. `sig` is an exact fingerprint — repeats mean a frozen page;
+// `stateKey` is coarse page identity, and revisiting one means cycling rather than advancing.
+// Dialogs count towards both, so an item modal registers even when the URL doesn't move.
 async function computeProgressSignature(page) {
   const fallback = (u) => ({ sig: u, stateKey: u, itemCount: 0, hasProducts: 0 });
   try {
@@ -426,20 +368,13 @@ async function computeProgressSignature(page) {
   }
 }
 
-// Pure verdict over the persisted no-progress counters — exported for unit tests
-// (test/smoke/browser-progress-detector.test.js pins these thresholds).
-//  - stepsSinceProgress: consecutive steps with an IDENTICAL exact sig → frozen page /
-//    wait-loop. Nudge at 4, stuck at 7.
-//  - stepsSinceNewState: steps since we last saw a stateKey NOT already visited this
-//    session → catches cycles ([click→wait×5→click back], modal open/close churn, category
-//    ping-pong) WITHOUT punishing long-but-forward flows where each step is a new page.
-//    Nudge at 5, stuck at 9.
-//  - stepsSinceCartProgress: order-only slow backstop for "browsing forever, never adding".
-//    A normal flow legitimately needs 7-12 empty-cart steps (search→results→PDP→size→add) —
-//    this was the premature-STUCK bug: bailing at 7 killed M&S/Currys/Wickes/Nike/Deliveroo
-//    mid-normal-browse. Now it only nudges ("commit to an item") at 8 and only hard-bails at
-//    16, and is disabled once the basket has EVER been non-empty (cart badges often vanish
-//    on checkout pages, which would otherwise re-arm it against a healthy flow).
+// Pure verdict over the persisted counters; the thresholds are pinned by
+// test/smoke/browser-progress-detector.test.js.
+//  - stepsSinceProgress: identical sig repeating → a frozen page. Nudge at 4, stuck at 7.
+//  - stepsSinceNewState: no unvisited stateKey → cycling. Nudge at 5, stuck at 9.
+//  - stepsSinceCartProgress: order-only backstop for browsing without ever adding. A normal
+//    flow needs 7-12 empty-cart steps, so it nudges at 8, bails at 16, and switches off once
+//    the basket has ever been non-empty.
 function assessProgress(counters, { isOrder = false, cartEverNonzero = false } = {}) {
   // No recipe exemption: recipe steps that genuinely advance reset the counters at the
   // execution site, so a recipe site only accumulates stall when its recipe is spinning
@@ -569,17 +504,12 @@ async function tryAcceptCheckoutCheckboxes(page) {
   return n > 0;
 }
 // ── Signing in with a stored credential ─────────────────────────────────────────────────
-// The other way past an access wall. The GRANT is the authority and it comes from the user:
-// authorizeCredentialUse is consulted every time, and a refusal is reported rather than
-// worked around.
+// The other way past an access wall. The grant is the authority: authorizeCredentialUse is
+// consulted every time and a refusal is reported, never worked around.
 
-// Real sign-in flows often live on a dedicated subdomain (signin.delta.com,
-// accounts.google.com) that will never match a granted domain (delta.com) under exact
-// equality. Treat a site as in scope if it equals a granted entry, or is a subdomain of one
-// (ends with "." + entry) — the literal dot requires a genuine label boundary, so
-// "evildelta.com" does NOT match a grant for "delta.com" (naive .endsWith(allowed) would
-// wrongly allow that). Only used for the scope CHECK; the credential lookup itself still
-// keys off the exact granted domain that matched, not whatever subdomain the browser is on.
+// Sign-in often lives on a subdomain of the granted domain, so a grant covers an exact match
+// or a "." + entry suffix — the dot forces a label boundary, keeping "evildelta.com" out.
+// Scope check only; the credential lookup still keys off the granted domain that matched.
 function siteInScope(currentSite, allowedSites) {
   return (allowedSites || []).some((allowed) => currentSite === allowed || currentSite.endsWith(`.${allowed}`));
 }
@@ -654,11 +584,8 @@ async function findAndClickSignInButton(page) {
 
 const CREDENTIAL_WATCH_BUDGET_MS = envInt('OXY_BROWSER_CREDENTIAL_WATCH_MS', 20000);
 
-// Sign in to the page that is currently open, using a credential the user has stored.
-//
-// The GRANT is the authority and it comes from the user: authorizeCredentialUse is consulted
-// every time, and a refusal is reported rather than worked around. This used to live inside
-// the ordering loop, which meant signing in was something only a shopping run could do.
+// Sign in to the currently open page with a stored credential. authorizeCredentialUse decides
+// whether that is allowed, every time.
 async function signInWithStoredCredential(userId, { site: requestedSite = null, onProgress = () => {} } = {}) {
   const session = getSession(userId);
   if (!session) return { type: 'error', error: 'No page is open.' };
@@ -789,12 +716,8 @@ async function fillReauthLogin(userId, { username, password, saveToVault = false
 }
 
 /**
- * Open a site with the user's stored session and report what the page shows.
- *
- * A shared session stops working silently — it expires, the site invalidates it, or the site
- * refuses it because it arrives from a server rather than the browser that minted it. This is
- * the only way to find out which, short of watching a task fail. Read-only: it navigates and
- * reads, and never clicks, fills or submits.
+ * Open a site with the user's stored session and report what the page shows, to find out
+ * whether it still works. Read-only: navigates and reads, never clicks, fills or submits.
  */
 async function inspectStoredSession(userId, site, path = '/', { useStoredSession = true } = {}) {
   const storageState = await loadStorageState(userId, site);
