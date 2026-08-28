@@ -138,7 +138,7 @@ test('quick surface still gets the full chat static prompt plus the FAST TURN MO
 // ── Wiring: the background call sites in api/index.js actually use buildBackgroundSystemPrompt,
 // not a bare static prompt — the exact bug this phase fixes. Source-pattern check, matching the
 // convention already used by test/smoke/preference-context-hygiene.test.js for source wiring. ──
-test('runScheduledTasksForUser, the routine sweep, and the manual task-run endpoint all build a real background prompt', () => {
+test('every background run builds a real per-user prompt, because they all share one runner', () => {
   const src = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
   assert.doesNotMatch(src, /dynamicSystemPrompt:\s*CORE_SYSTEM_PROMPT/, 'a call site still passes the bare static prompt with no per-user context');
   assert.doesNotMatch(src, /dynamicSystemPrompt:\s*OXCY_SYSTEM_PROMPT/, 'the old export name should not still be referenced');
@@ -152,10 +152,23 @@ test('runScheduledTasksForUser, the routine sweep, and the manual task-run endpo
   assert.match(body, /getUserContext\(/);
   assert.match(body, /surface:\s*'background'/);
 
-  const callSites = [...src.matchAll(/buildBackgroundSystemPrompt\(/g)];
+  // This used to be a count of call sites (>= 3), which is what a duplicated dispatch looks
+  // like. Scheduled tasks and routines now share runSavedGoal, so the guarantee is
+  // structural instead of repeated: there is ONE background runner, it builds the per-user
+  // prompt, and every scheduled surface goes through it.
+  const runnerStart = src.indexOf('async function runSavedGoal(');
+  assert.ok(runnerStart >= 0, 'the shared background runner must exist');
+  const runner = src.slice(runnerStart, src.indexOf('\n}\n', runnerStart));
+  assert.match(runner, /dynamicSystemPrompt: await buildBackgroundSystemPrompt\(userId\)/);
+  assert.match(runner, /persistTask: true/, 'a background run must have a durable identity');
+  assert.match(runner, /runtimeSessionId: runtimeSession\.id/, 'and a runtime session, so it is visible in the work surfaces');
+  assert.match(runner, /modelName: route\.model/, 'and the user\'s own model routing');
+
+  const callers = [...src.matchAll(/await runSavedGoal\(/g)];
+  assert.ok(callers.length >= 2, `expected the scheduler and the routine sweep to share the runner, found ${callers.length} callers`);
+
   const starterSrc = fs.readFileSync(require.resolve('../../api/services/delegated-run-starter.js'), 'utf8');
   assert.match(starterSrc, /buildSystemPrompt\(userId\)/, 'the shared durable-run starter must build the injected background prompt before launching');
-  assert.ok(callSites.length >= 3, `expected buildBackgroundSystemPrompt to be defined once and called at least twice in index.js, found ${callSites.length} occurrences total`);
 });
 
 test('the briefing builders call buildSystemPrompt with surface briefing, not a hand-rolled persona string', () => {

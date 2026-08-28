@@ -260,6 +260,26 @@ test('signing in with a stored credential is gated by a user grant, every time',
   assert.match(body, /if \(!siteInScope\(pageSite, \[site\]\)\)/);
 });
 
+// ── One execution path for background work ────────────────────────────────────────────────
+
+test('a scheduled task and a saved routine run through the same background machinery', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../../api/index.js'), 'utf8');
+
+  // Two user-facing concepts ("watch this for me", "here is a routine I re-run"), one way of
+  // actually running them. The routine copy had drifted: no durable task, no runtime session,
+  // no model routing — so a routine run was invisible in the work surfaces and always used
+  // the default model.
+  const callers = [...src.matchAll(/await runSavedGoal\(/g)];
+  assert.ok(callers.length >= 2, 'the scheduler and the routine sweep must share one runner');
+
+  // And nothing may quietly grow a second dispatch: runAgenticLoop is called from the shared
+  // runner and the request-scoped surfaces, never from a new background sweep of its own.
+  const runnerStart = src.indexOf('async function runSavedGoal(');
+  const runner = src.slice(runnerStart, src.indexOf('\n}\n', runnerStart));
+  assert.match(runner, /runAgenticLoop\(/, 'the shared runner is the one that drives the loop');
+});
+
 // ── Adam can act on itself ────────────────────────────────────────────────────────────────
 
 test('Adam has capabilities for inspecting and changing its own state', () => {

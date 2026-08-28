@@ -6551,6 +6551,71 @@ function isScheduledRunNoteworthy(task, { conditionTriggered, failed, waiting })
   return Boolean(conditionTriggered || failed || waiting);
 }
 
+// Run a saved goal in the background — one path, whatever caused the run.
+//
+// A scheduled task and a user's saved routine are different things to a person (one is
+// "watch this for me", the other is "here is a routine I keep re-running"), but running one
+// is the same job both times: give it a durable identity so it shows up in the work
+// surfaces, claim it, route it to a model, open a runtime session, and drive the ordinary
+// agent loop. That was written out twice, and the routine copy had drifted — no persisted
+// task, no runtime session, no model routing — so a routine run was invisible in the UI and
+// always used the default model. Callers keep their own bookkeeping; only the running is shared.
+async function runSavedGoal(userId, {
+  title,
+  instruction,
+  metadata = {},
+  maxIterations = 6,
+  now = new Date(),
+  deviceType = 'ambient_home',
+} = {}) {
+  const persistedTask = await delegatedRunLifecycle.create(userId, title, { autonomy: 'Active', metadata });
+  const claimedTask = await delegatedRunLifecycle.claimStart(userId, persistedTask.id, {
+    now,
+    runtime: { deviceType, kind: 'task' },
+  });
+  if (!claimedTask) throw new Error('The background run could not be claimed.');
+
+  const route = await resolveAgentTaskRoute(userId, claimedTask);
+  await delegatedRunLifecycle.updateControls(userId, claimedTask.id, { metadata: { modelRoute: route } });
+  claimedTask.metadata = { ...(claimedTask.metadata || {}), modelRoute: route };
+
+  const runtimeSession = await agentRuntime.ensureSession(supabase, userId, {
+    taskId: claimedTask.id,
+    deviceType,
+    kind: 'task',
+    title,
+    state: 'running',
+  });
+
+  const result = await runAgenticLoop({
+    userId,
+    initialMessage: instruction,
+    dynamicSystemPrompt: await buildBackgroundSystemPrompt(userId),
+    provider: route.provider,
+    modelName: route.model,
+    maxIterations,
+    context: {
+      autonomy: 'Active',
+      modelRoute: route,
+      runtimeSessionId: runtimeSession.id,
+      taskMetadata: claimedTask.metadata,
+    },
+    executeActionsFn: executeActions,
+    persistTask: true,
+    existingTaskId: claimedTask.id,
+  });
+
+  const status = result.agentTrace?.status;
+  return {
+    result,
+    persistedTask: claimedTask,
+    runtimeSession,
+    waiting: status === 'awaiting_approval',
+    failed: status === 'error',
+    completed: status === 'completed',
+  };
+}
+
 async function runScheduledTasksForUser(userId, logger = console, now = new Date()) {
   let runs = 0;
   let dueTasks = [];
@@ -6568,55 +6633,19 @@ async function runScheduledTasksForUser(userId, logger = console, now = new Date
     let persistedTask = null;
     let runtimeSession = null;
     try {
-      persistedTask = await delegatedRunLifecycle.create(userId, claimed.title, {
-        autonomy: 'Active',
+      const run = await runSavedGoal(userId, {
+        title: claimed.title,
+        instruction: scheduledTasks.buildScheduledRunInstruction(claimed),
         metadata: {
           scheduledTaskId: claimed.id,
           scheduledRecurrence: claimed.recurrence,
           scheduledCondition: claimed.condition || null
-        }
-      });
-      const claimedTask = await delegatedRunLifecycle.claimStart(userId, persistedTask.id, {
-        now,
-        runtime: { deviceType: 'ambient_home', kind: 'task' }
-      });
-      if (!claimedTask) throw new Error('The scheduled run could not be claimed.');
-      persistedTask = claimedTask;
-
-      const route = await resolveAgentTaskRoute(userId, persistedTask);
-      await delegatedRunLifecycle.updateControls(userId, persistedTask.id, {
-        metadata: { modelRoute: route }
-      });
-      persistedTask.metadata = { ...(persistedTask.metadata || {}), modelRoute: route };
-
-      runtimeSession = await agentRuntime.ensureSession(supabase, userId, {
-        taskId: persistedTask.id,
-        deviceType: 'ambient_home',
-        kind: 'task',
-        title: claimed.title,
-        state: 'running'
-      });
-
-      const result = await runAgenticLoop({
-        userId,
-        initialMessage: scheduledTasks.buildScheduledRunInstruction(claimed),
-        dynamicSystemPrompt: await buildBackgroundSystemPrompt(userId),
-        provider: route.provider,
-        modelName: route.model,
-        maxIterations: 6,
-        context: {
-          autonomy: 'Active',
-          modelRoute: route,
-          runtimeSessionId: runtimeSession.id,
-          taskMetadata: persistedTask.metadata
         },
-        executeActionsFn: executeActions,
-        persistTask: true,
-        existingTaskId: persistedTask.id
+        now
       });
-
-      const waiting = result.agentTrace?.status === 'awaiting_approval';
-      const failed = result.agentTrace?.status === 'error';
+      const { result, waiting, failed } = run;
+      persistedTask = run.persistedTask;
+      runtimeSession = run.runtimeSession;
       // Re-read the row: the run may have written a real observation, and that recorded
       // verdict outranks whatever marker the model put in its answer.
       const { data: afterRun } = await supabase.from('scheduled_tasks')
@@ -6770,17 +6799,15 @@ async function runProactiveSweep(logger = console) {
     // exception here. Both cases must record a failed run; only 'completed' counts as one.
     let outcome = { success: true };
     try {
-      const result = await runAgenticLoop({
-        userId: routine.user_id,
-        initialMessage: routine.prompt,
-        dynamicSystemPrompt: await buildBackgroundSystemPrompt(routine.user_id),
-        maxIterations: 6,
-        context: { autonomy: 'Active' },
-        executeActionsFn: executeActions,
-        persistTask: false
+      // Same background runner the scheduler uses, so a routine run now gets a durable task,
+      // a runtime session and the user's model routing rather than running invisibly.
+      const { result, completed } = await runSavedGoal(routine.user_id, {
+        title: routine.name || 'Routine',
+        instruction: routine.prompt,
+        metadata: { routineId: routine.id, routineName: routine.name || null }
       });
       const status = result?.agentTrace?.status;
-      outcome = status === 'completed'
+      outcome = completed
         ? { success: true }
         : { success: false, error: result?.agentTrace?.lastError || result?.spoken || `Routine stopped (${status || 'unknown'}) before finishing.` };
     } catch (err) {
